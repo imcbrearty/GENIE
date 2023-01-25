@@ -1,6 +1,6 @@
 ## Pick files ##
 
-P (picks): \\
+P (picks):
 first column is time index from start of day (assuming 100 Hz sampling). \\
 second column is station index (corresponding to indices of stations in the NC_EHZ_network.npz file). \\
 third column is phase type (P waves, 0; S waves, 1), labeled by PhaseNet (these phase labels are not used by GENIE by default). \\
