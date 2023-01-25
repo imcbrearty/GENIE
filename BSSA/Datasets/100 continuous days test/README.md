@@ -51,7 +51,7 @@ locs_use: set of station locations used on this day.
 
 ind_use: set of station indices used on this day (corresponding to indices of stations in the NC_EHZ_network.npz file).  
 
-Picks/<n>_Picks_P: subset of picks associated to event 0...(N - 1) for each event index <n>, declared as P waves, where N = len(srcs).  
+Picks/n_Picks_P: subset of picks associated to event 0...(N - 1) for each event index n, declared as P waves, where N = len(srcs).  
 first column is time of pick (s).  
 second column is index of pick (corresponding to indices of stations in the NC_EHZ_network.npz file).  
 third column is maximum peak ground velocity of pick from 1 s before to 2.5 s after each pick time.  
@@ -59,7 +59,7 @@ fourth column is pick likelihood value output by PhaseNet.
 fifth column is phase type assigned by GENIE (P waves, 0; S waves, 1).  
 sixth column is source index in srcs.  
 
-Picks/<n>_Picks_S: subset of picks associated to event 0...(N - 1) for each event index <n>, declared as S waves, where N = len(srcs).  
+Picks/n_Picks_S: subset of picks associated to event 0...(N - 1) for each event index n, declared as S waves, where N = len(srcs).  
 first column is time of pick (s).  
 second column is index of pick (corresponding to indices of stations in the NC_EHZ_network.npz file).  
 third column is maximum peak ground velocity of pick from 1 s before to 2.5 s after each pick time.  
@@ -67,6 +67,12 @@ fourth column is pick likelihood value output by PhaseNet.
 fifth column is phase type assigned by GENIE (P waves, 0; S waves, 1).  
 sixth column is source index in srcs.  
 
-Picks/<n>_Picks_P_perm: same as Picks/<n>_Picks_P, with the indices in second column corresponding to station index in locs_use, instead of the absolute set of indices in the NC_EHZ_network.npz file.  
+Picks/n_Picks_P_perm: same as Picks/n_Picks_P, with the indices in second column corresponding to station index in locs_use, instead of the absolute set of indices in the NC_EHZ_network.npz file.  
 
-Picks/<n>_Picks_S_perm: same as Picks/<n>_Picks_S, with the indices in second column corresponding to station index in locs_use, instead of the absolute set of indices in the NC_EHZ_network.npz file.  
+Picks/n_Picks_S_perm: same as Picks/n_Picks_S, with the indices in second column corresponding to station index in locs_use, instead of the absolute set of indices in the NC_EHZ_network.npz file.  
+
+cnt_p: the number of associated P waves for each source in srcs (or srcs_trv).  
+
+cnt_s: the number of associated S waves for each source in srcs (or srcs_trv).  
+
+date: the date of the file processed.  
