@@ -70,3 +70,9 @@ sixth column is source index in srcs.
 Picks/<n>_Picks_P_perm: same as Picks/<n>_Picks_P, with the indices in second column corresponding to station index in locs_use, instead of the absolute set of indices in the NC_EHZ_network.npz file.  
 
 Picks/<n>_Picks_S_perm: same as Picks/<n>_Picks_S, with the indices in second column corresponding to station index in locs_use, instead of the absolute set of indices in the NC_EHZ_network.npz file.  
+
+cnt_p: the number of associated P waves for each source in srcs (or srcs_trv).  
+
+cnt_s: the number of associated S waves for each source in srcs (or srcs_trv).  
+
+date: the date of the file processed.  
