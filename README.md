@@ -1,6 +1,6 @@
 # GENIE : Graph Earthquake Neural Interpretation Engine
 
-A Graph Neural Network (GNN) based earthquake phase associator and spatio-temporal source localization model. To be released in February, 2023.
+A Graph Neural Network (GNN) based earthquake phase associator and spatio-temporal source localization model. To be released tentatively in March, 2023.
 
 The paper associated with this work is given at https://pubs.geoscienceworld.org/ssa/bssa/article/doi/10.1785/0120220182/619845/Earthquake-Phase-Association-with-Graph-Neural. 
 
