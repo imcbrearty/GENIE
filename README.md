@@ -4,7 +4,7 @@ A Graph Neural Network (GNN) based earthquake phase associator and spatio-tempor
 
 The paper associated with this work is given at https://pubs.geoscienceworld.org/ssa/bssa/article/doi/10.1785/0120220182/619845/Earthquake-Phase-Association-with-Graph-Neural.
 
-The source code is posted (https://github.com/imcbrearty/GENIE/tree/main/Code).
+The source code is posted at https://github.com/imcbrearty/GENIE/tree/main/Code.
 
 Note that this is an <em> early </em> release of the code. Increased documentation, more thorough user testing, and pre-trained models will be forthcoming.
 
