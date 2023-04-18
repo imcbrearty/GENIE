@@ -6,7 +6,7 @@ The paper associated with this work is given at https://pubs.geoscienceworld.org
 
 The source code is posted at https://github.com/imcbrearty/GENIE/tree/main/Code.
 
-Note that this is an <em> early </em> release of the code. Increased documentation, more thorough user testing, and pre-trained models will be forthcoming.
+Note that this is an early release of the code. Increased documentation, more thorough user testing, and pre-trained models will be forthcoming.
 
 ## Applying the model
 
