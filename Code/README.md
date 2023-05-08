@@ -1,7 +1,7 @@
 
 ## Running GENIE
 
-Follow order of scripts explained in "Applying the model" section. After training, to run an individual day of, data, run process_continuous_days.py; the input format for the data is given below.
+Follow order of scripts explained in "Applying the model" section. After training, to run an individual day of data, run process_continuous_days.py; the input format for the data is given below.
 
 ## Running process_continuous_days.py
 
