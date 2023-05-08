@@ -308,4 +308,4 @@ for nn in [0]: ## Only compute one travel time model
 		Tp_interp[:,j] = mp(ftrns1(X))
 		Ts_interp[:,j] = ms(ftrns1(X))
 
-	np.savez_compressed(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model_version_%d.npz'%(name_of_project, n_ver), xx = xx, xx_latlon = ftrns2(xx), X = X, locs_ref = locs_ref, Tp = Tp, Ts = Ts, Tp_interp = Tp_interp, Ts_interp = Ts_interp, Vp = Vp, Vs = Vs, Vp_profile = Vp_profile, Vs_profile = Vs_profile, depth_grid = depth_grid)
+	np.savez_compressed(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, n_ver), xx = xx, xx_latlon = ftrns2(xx), X = X, locs_ref = locs_ref, Tp = Tp, Ts = Ts, Tp_interp = Tp_interp, Ts_interp = Ts_interp, Vp = Vp, Vs = Vs, Vp_profile = Vp_profile, Vs_profile = Vs_profile, depth_grid = depth_grid)
