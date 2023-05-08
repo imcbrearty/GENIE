@@ -25,4 +25,4 @@ sta_ind_use: indices of stations used, corresponding to sta_names_use (reference
 
 Examples pick files in this format are given in: https://github.com/imcbrearty/GENIE/tree/main/BSSA/Datasets/500%20random%20day%20test   
 
-Each of the scripts (i - iv). should run with minimal changes, though some hyperparemeters can be changed, and a few features are hard-coded. Increased documentation will be added.   
+Each of the scripts (i - v). should run with minimal changes, though some hyperparemeters can be changed, and a few features are hard-coded. Increased documentation will be added.   
