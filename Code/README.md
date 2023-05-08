@@ -17,7 +17,7 @@ first column is time index from start of day (assuming 100 Hz sampling).
 second column is station index (corresponding to indices of stations in the NC_EHZ_network.npz file).   
 third column is maximum peak ground velocity from 1 s before to 2.5 s after each pick time.   
 fourth column is probability of PhaseNet pick.   
-fifth column is phase type (P waves, 0; S waves, 1), labeled by PhaseNet (these phase labels are not used by GENIE by default).   
+fifth column is phase type (P waves, 0; S waves, 1), labeled by PhaseNet
 
 sta_names_use: used stations on this day (referenced to the absolute network file).   
 
