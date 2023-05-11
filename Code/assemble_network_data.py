@@ -29,7 +29,7 @@ print(locs)
 
 # Region file
 # z = np.load(ext_dir + '%s_region.npz'%name_of_project)
-z = np.load(ext_dir + 'region.npz')
+z = np.load(ext_dir + 'region.npz', allow_pickle = True)
 lat_range, lon_range, depth_range = z['lat_range'], z['lon_range'], z['depth_range'], 
 deg_pad, num_grids, years = z['deg_pad'], z['num_grids'], z['years']
 n_spatial_nodes = z['n_spatial_nodes']
