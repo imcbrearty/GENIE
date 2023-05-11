@@ -2,6 +2,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from obspy.clients.fdsn import Client
 from obspy.core import UTCDateTime
+import pathlib
 
 ## This script is an example for how to initilize the station, region, and 1d velocity model files. It creates the variables:
 ## locs : a numpy array of N x 3 shape, with columns of latitude, longitude, elevation (elevations are positive above sea level, and negative below sea level, in meters).
