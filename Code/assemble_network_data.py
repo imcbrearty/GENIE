@@ -33,8 +33,8 @@ z = np.load(ext_dir + 'region.npz', allow_pickle = True)
 lat_range, lon_range, depth_range = z['lat_range'], z['lon_range'], z['depth_range'], 
 deg_pad, num_grids, years = z['deg_pad'], z['num_grids'], z['years']
 n_spatial_nodes = z['n_spatial_nodes']
-load_initial_files = z['load_initial_files']
-use_pretrained_model = z['use_pretrained_model']
+load_initial_files = z['load_initial_files'][0]
+use_pretrained_model = z['use_pretrained_model'][0]
 z.close()
 shutil.copy(ext_dir + 'region.npz', ext_dir + '%s_region.npz'%name_of_project)
 
