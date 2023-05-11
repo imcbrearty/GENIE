@@ -12,9 +12,9 @@ import pathlib
 ## The purpose of this script is only to make the three files saved below; one can create these files any way they prefer, but should follow the same
 ## naming scheme of variables, units and sign conventions for velocities and elevations (or equivelently, depths).
 
-lat_range = [18.8, 20.3]
-lon_range = [-156.1, -154.7]
-depth_range = [-40e3, 5e3] ## Note: depths are positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
+lat_range = [18.8, 20.3] # Latitude range of the region that will be processed
+lon_range = [-156.1, -154.7] # Longitude range of the region that will be processed
+depth_range = [-40e3, 5e3] ## Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
 
 t0 = UTCDateTime(2018, 1, 1)
 tf = UTCDateTime(2023, 1, 1)
