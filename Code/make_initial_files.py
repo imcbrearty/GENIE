@@ -37,6 +37,10 @@ locs = locs[iarg]
 stas = stas[iarg]
 
 path_to_file = str(pathlib.Path().absolute())
+if '\\' in path_to_file: ## Windows
+	path_to_file = path_to_file + '\\'
+elif '/' in path_to_file: ## Linux
+	path_to_file = path_to_file + '/'	
 
 ## Save network file
 np.savez_compressed(path_to_file + 'stations.npz', locs = locs, stas = stas)
