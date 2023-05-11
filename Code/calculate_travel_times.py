@@ -261,7 +261,6 @@ Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., 
 num_cores = 1
 
 n_ver = 1
-n_updates = 100
 
 ## By using the reference point in the corner of the region, might
 ## induce a slight bias to the estimates as lon and lat vary widely
