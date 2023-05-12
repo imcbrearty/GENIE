@@ -11,6 +11,11 @@ conda install pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvi
 ## (Also can check pytorch website for install details; https://pytorch.org/)
 pip install torch_geometric
 ## (Also can check pytorch geometric website for install details; https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html)
+pip install -U scikit-learn
+## (can also install sklearn with conda install -c anaconda scikit-learn; https://scikit-learn.org/stable/install.html)
+pip install obspy
+pip install cvxpy
+
 
 ## If going to run calculate_travel_times.py, then need to install skfmm
 pip install scikit-fmm==0.0.7
