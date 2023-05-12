@@ -6,6 +6,8 @@ second column is station index (corresponding to indices of stations in the NC_E
 third column is phase type (P waves, 0; S waves, 1), labeled by PhaseNet (these phase labels are not used by GENIE by default).  
 fourth column is probability of PhaseNet pick.  
 
+Note: the format of the pick files for the 100 continuous day dataset slightly varies from the 500 random day dataset; the codes in process_continuous_days.py are set up for the format given in the 500 random day test folder.
+
 sta_names_use: used stations on this day.  
 
 sta_ind_use: indices of stations used, corresponding to sta_names_use. Indices are the indices of stations in the NC_EHZ_network.npz network file.  
