@@ -271,6 +271,46 @@ def interp_1D_velocity_model_to_3D_travel_times(X, locs, Xmin, X0, Dx, Mn, Tp, T
 
 	return lambda y, x: evaluate_func(y, x)
 
+def kmeans_packing(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 1000, n_sim = 3, lr = 0.01):
+
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
+
+			tree = cKDTree(ftrns1(v))
+			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
+			q, ip = tree.query(ftrns1(x))
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
+		q, ip = tree.query(x)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return V_results[ibest], V_results, Losses, losses, rz
+
 def assemble_time_pointers_for_stations_multiple_grids(trv_out, max_t, dt = 1.0, k = 10, win = 10.0):
 
 	n_temp, n_sta = trv_out.shape[0:2]
@@ -951,7 +991,7 @@ def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut 
 
 	z.close()
 
-	return P_l, locs_use, sta_use, ind_use, cat, np.array([yr, mn, dy]) # Note: this permutation of locs_use.
+	return P_l, ind_use # Note: this permutation of locs_use.
 
 def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, phase_labels, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2, n_queries = 3000, n_batch = 75, max_rate_events = 5000, max_miss_events = 3500, max_false_events = 2000, T = 3600.0*24.0, dt = 30, tscale = 3600.0, n_sta_range = [0.25, 1.0], plot_on = False, verbose = False):
 
@@ -1785,7 +1825,6 @@ else: ## Linux or Unix
 	z.close()
 
 	# Load trained model
-	read_model_file = 
 	z = np.load(path_to_file + '/GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d_losses.h5'%(name_of_project, n_step_load, n_ver_load))
 	training_params, graph_params, pred_params = z['training_params'], z['graph_params'], z['pred_params']
 	t_win = pred_params[0]
@@ -2049,6 +2088,7 @@ for cnt, strs in enumerate([0]):
 	srcs = np.vstack(srcs_l)
 
 	if len(srcs) == 0:
+		print('No sources detected, finishing script')
 		continue ## No sources, continue
 
 	print('Detected %d number of sources'%srcs.shape[0])
