@@ -124,7 +124,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	k_sta_edges, k_spc_edges, k_time_edges = graph_params
 	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
 
-	n_queries = training_params[1]
+	n_spc_query, n_src_query = training_params
 	spc_random = 30e3
 	sig_t = 0.03 # 3 percent of travel time error on pick times
 	spc_thresh_rand = 20e3
@@ -540,14 +540,14 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		A_edges_time_s_l.append(A_edges_time_s)
 		A_edges_ref_l.append(x_grids_trv_refs[grid_select])
 
-		x_query = np.random.rand(n_queries, 3)*scale_x + offset_x # Check if scale_x and offset_x are correct.
+		x_query = np.random.rand(n_spc_query, 3)*scale_x + offset_x # Check if scale_x and offset_x are correct.
 
 		if len(lp_srcs[-1]) > 0:
 			x_query[0:len(lp_srcs[-1]),0:3] = lp_srcs[-1][:,0:3]
 
 		if len(active_sources_per_slice) == 0:
-			lbls_grid = np.zeros((x_grids[grid_select].shape[0],len(t_slice)))
-			lbls_query = np.zeros((n_queries,len(t_slice)))
+			lbls_grid = np.zeros((x_grids[grid_select].shape[0], len(t_slice)))
+			lbls_query = np.zeros((n_spc_query, len(t_slice)))
 		else:
 			active_sources_per_slice = active_sources_per_slice.astype('int')
 
