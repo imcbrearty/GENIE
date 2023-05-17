@@ -1799,7 +1799,7 @@ if '\\' in path_to_file: ## Windows
 	z.close()
 
 	# Load trained model
-	z = np.load(path_to_file + '\\GNN_TrainedModels\\%s_trained_gnn_model_step_%d_ver_%d_losses.h5'%(name_of_project, n_step_load, n_ver_load))
+	z = np.load(path_to_file + '\\GNN_TrainedModels\\%s_trained_gnn_model_step_%d_ver_%d_losses.npz'%(name_of_project, n_step_load, n_ver_load))
 	training_params, graph_params, pred_params = z['training_params'], z['graph_params'], z['pred_params']
 	t_win = pred_params[0]
 	z.close()
@@ -1826,7 +1826,7 @@ else: ## Linux or Unix
 	z.close()
 
 	# Load trained model
-	z = np.load(path_to_file + '/GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d_losses.h5'%(name_of_project, n_step_load, n_ver_load))
+	z = np.load(path_to_file + '/GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d_losses.npz'%(name_of_project, n_step_load, n_ver_load))
 	training_params, graph_params, pred_params = z['training_params'], z['graph_params'], z['pred_params']
 	t_win = pred_params[0]
 	z.close()
