@@ -207,10 +207,6 @@ offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_rang
 
 ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
 ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)  # invert ftrns1
-rbest_cuda = torch.Tensor(rbest).cuda()
-mn_cuda = torch.Tensor(mn).cuda()
-ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x) - mn_cuda).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
-ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda)
 
 lat_grid = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg)
 lon_grid = np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
