@@ -72,6 +72,7 @@ vel_model_ver = 1
 n_ver_load = 1
 n_step_load = 20000
 n_save_ver = 1
+n_ver_picks = 1
 
 offset_increment = 500
 n_rand_query = 112000
@@ -1970,7 +1971,7 @@ date = t0_init + day*day_len
 yr, mo, dy = date.year, date.month, date.day
 date = np.array([yr, mo, dy])
 
-P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks)
+P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
 locs_use = locs[ind_use]
 
 for cnt, strs in enumerate([0]):
