@@ -1045,6 +1045,9 @@ if '\\' in path_to_file: ## Windows
 	## Load travel times
 	z = np.load(path_to_file + '\\1D_Velocity_Models_Regional\\%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
 
+	## Create path to write files
+	write_training_file = path_to_file + '\\GNN_TrainedModels\\' + name_of_project + '_'
+	
 else: ## Linux or Unix
 
 	# Load region
@@ -1066,6 +1069,9 @@ else: ## Linux or Unix
 	## Load travel times
 	z = np.load(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
 
+	## Create path to write files
+	write_training_file = path_to_file + '/GNN_TrainedModels/' + name_of_project + '_'
+	
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
 
@@ -1173,8 +1179,6 @@ mx_pred_1, mx_pred_2, mx_pred_3, mx_pred_4 = np.zeros(n_epochs), np.zeros(n_epoc
 
 weights = torch.Tensor([0.4, 0.2, 0.2, 0.2]).to(device)
 n_ver = 1
-
-write_training_file = path_to_file + '/GNN_TrainedModels/'
 
 lat_range_interior = [lat_range[0], lat_range[1]]
 lon_range_interior = [lon_range[0], lon_range[1]]
