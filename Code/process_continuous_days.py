@@ -93,7 +93,7 @@ d_win_depth = 10e3 ## Depth window to re-locate initial source detetections with
 dx_depth = 50.0 ## Depth resolution to locate events with travel time based re-location
 
 device = torch.device('cpu') ## Right now, this isn't updated to work with cuda, since
-## the necessary variables to not have .to(device) at the right places
+## the necessary variables do not have .to(device) at the right places
 
 def lla2ecef(p, a = 6378137.0, e = 8.18191908426215e-2): # 0.0818191908426215, previous 8.1819190842622e-2
 	p = p.copy().astype('float')
