@@ -1966,8 +1966,7 @@ tq_sample = torch.rand(n_src_query)*t_win - t_win/2.0 # Note this part!
 tq_sample = torch.zeros(1)
 tq = torch.arange(-t_win/2.0, t_win/2.0 + 1.0).reshape(-1,1).float()
 
-day = int(argvs[1])
-date = t0_init + day*day_len
+date = t0_init + day_select*day_len
 yr, mo, dy = date.year, date.month, date.day
 date = np.array([yr, mo, dy])
 
