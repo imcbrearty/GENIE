@@ -86,8 +86,9 @@ break_win = 15.0 # Temporal window to find disjoint groups of sources,
 spr_picks = 100 # Assumed sampling rate of picks 
 ## (can be 1 if absolute times are used for pick time values)
 
-d_win = 0.25
-d_win_depth = 10e3
+d_win = 0.25 ## Lat and lon window to re-locate initial source detetections with refined sampling over
+d_win_depth = 10e3 ## Depth window to re-locate initial source detetections with refined sampling over
+dx_depth = 50.0 ## Depth resolution to locate events with travel time based re-location
 
 def lla2ecef(p, a = 6378137.0, e = 8.18191908426215e-2): # 0.0818191908426215, previous 8.1819190842622e-2
 	p = p.copy().astype('float')
@@ -1484,7 +1485,7 @@ def MLE_particle_swarm_location_one_mean_stable_depth(trv, locs_use, arv_p, ind_
 
 	return x0_max, x0_max_val, Swarm
 
-def MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, hull, ftrns1, ftrns2, sig_t = 3.0, dx_depth, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
+def MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
 
 	if (len(arv_p) + len(arv_s)) == 0:
 		return np.nan*np.ones((1,3)), np.nan, []
@@ -2299,7 +2300,7 @@ for cnt, strs in enumerate([0]):
 
 	srcs_trv = []
 	for i in range(srcs_refined.shape[0]):
-		xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use, Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int'), lat_range_extend, lon_range_extend, depth_range, hull, ftrns1, ftrns2)
+		xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use, Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int'), lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
 		if np.isnan(xmle).sum() > 0:
 			srcs_trv.append(np.nan*np.ones((1, 4)))
 			continue
