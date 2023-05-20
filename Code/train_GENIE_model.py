@@ -40,8 +40,11 @@ kernel_sig_t = 5.0 # Kernel to embed arrival time - theoretical time misfit (s)
 src_t_kernel = 6.5 # Kernel or origin time label (s)
 src_x_kernel = 15e3 # Kernel of Cartesian projection, horizontal distance (m)
 src_depth_kernel = 15e3 # Kernel of Cartesian projection, vertical distance (m)
-t_win = 10.0 ## This is the time window over which predictions are made.
+t_win = 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
+dist_range = [15e3, 500e3] ## The spatial window over which to sample max distance of 
+## source-station moveouts in m, per event. E.g., 15 - 500 km. Should set slightly lower if using small region.
+
 ## Will update to be adaptive soon. The step size of temporal prediction is fixed at 1 s right now.
 
 pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
@@ -1209,7 +1212,7 @@ for i in range(n_restart_step, n_epochs):
 	while cwork == 0:
 		try: ## Does this actually ever through an exception? Probably not.
 
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, fixed_subnetworks = Ind_subnetworks, use_preferential_sampling = True, n_batch = n_batch, verbose = True)
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, fixed_subnetworks = Ind_subnetworks, use_preferential_sampling = True, n_batch = n_batch, verbose = True, dist_range = dist_range)
 
 			cwork = 1
 		except:
