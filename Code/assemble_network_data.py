@@ -38,6 +38,10 @@ use_pretrained_model = z['use_pretrained_model'][0]
 z.close()
 shutil.copy(ext_dir + 'region.npz', ext_dir + '%s_region.npz'%name_of_project)
 
+with_density = None
+# else, set with_density = srcs with srcs[:,0] == lat, srcs[:,1] == lon, srcs[:,2] == depth
+## to preferentially focus the spatial graphs closer around reference sources. 
+
 ## Fit projection coordinates and create spatial grids
 
 def lla2ecef(p, a = 6378137.0, e = 8.18191908426215e-2): # 0.0818191908426215, previous 8.1819190842622e-2
@@ -377,7 +381,65 @@ def kmeans_packing_weight_vector(weight_vector, scale_x, offset_x, ndim, n_clust
 
 	return V_results[ibest], V_results, Losses, losses, rz
 
-def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps = 5000, extend_grids = True):
+def kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 1000, n_sim = 1, frac = 0.75, lr = 0.01):
+
+	## Frac specifies how many of the random samples are from the density versus background
+
+	n1 = int(n_clusters*frac) ## Number to sample from density
+	n2 = n_clusters - n1 ## Number to sample uniformly
+
+	n1_sample = int(n_batch*frac)
+	n2_sample = n_batch - n1_sample
+
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v1 = m_density.sample(n1)
+				v1 = np.concatenate((v1, np.random.rand(n1).reshape(-1,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
+				v2 = np.random.rand(n2, ndim)*scale_x + offset_x
+				v = np.concatenate((v1, v2), axis = 0)
+
+			tree = cKDTree(ftrns1(v)*weight_vector)
+			x1 = m_density.sample(n1)
+			x1 = np.concatenate((x1, np.random.rand(n1).reshape(-1,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
+			x2 = np.random.rand(n2, ndim)*scale_x + offset_x
+			x = np.concatenate((x1, x2), axis = 0)
+			q, ip = tree.query(ftrns1(x)*weight_vector)
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
+		q, ip = tree.query(x)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return V_results[ibest], V_results, Losses, losses, rz
+
+def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps = 5000, extend_grids = True, with_density = None, density_kernel = 0.15):
+
+	if with_density is not None:
+		from sklearn.neighbors import KernelDensity
+		m_density = KernelDensity(kernel = 'gaussian', bandwidth = density_kernel).fit(with_density[:,0:2])
 
 	x_grids = []
 	for i in range(n_grids):
@@ -410,7 +472,13 @@ def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps 
 
 		offset_x_grid = scale_up*np.array([offset_x_extend_slice[0,0] - eps_extra*scale_x_extend_slice[0,0], offset_x_extend_slice[0,1] - eps_extra*scale_x_extend_slice[0,1], offset_x_extend_slice[0,2] - eps_extra_depth*scale_x_extend_slice[0,2]]).reshape(1,-1)
 		scale_x_grid = scale_up*np.array([scale_x_extend_slice[0,0] + 2.0*eps_extra*scale_x_extend_slice[0,0], scale_x_extend_slice[0,1] + 2.0*eps_extra*scale_x_extend_slice[0,1], scale_x_extend_slice[0,2] + 2.0*eps_extra_depth*scale_x_extend_slice[0,2]]).reshape(1,-1)
-		x_grid = kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch = 10000, n_steps = n_steps, n_sim = 1, lr = 0.005)[0]/scale_up # .to(device) # 8000
+	
+		if with_density is not None:
+
+			x_grid = kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch = 10000, n_steps = n_steps, n_sim = 1, lr = 0.005)[0]/scale_up # .to(device) # 8000
+
+		else:
+			x_grid = kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch = 10000, n_steps = n_steps, n_sim = 1, lr = 0.005)[0]/scale_up # .to(device) # 8000
 
 		iargsort = np.argsort(x_grid[:,0])
 		x_grid = x_grid[iargsort]
@@ -435,6 +503,6 @@ if load_initial_files == True:
 		skip_making_grid = True
 
 if skip_making_grid == False:
-	x_grids = assemble_grids(scale_x_extend, offset_x_extend, num_grids, n_spatial_nodes, n_steps = 5000)
+	x_grids = assemble_grids(scale_x_extend, offset_x_extend, num_grids, n_spatial_nodes, n_steps = 5000, with_density = with_density)
 
 	np.savez_compressed(ext_dir + 'Grids/%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = [x_grids[i] for i in range(len(x_grids))], corr1 = corr1, corr2 = corr2)
