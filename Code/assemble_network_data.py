@@ -380,7 +380,6 @@ def kmeans_packing_weight_vector(weight_vector, scale_x, offset_x, ndim, n_clust
 	ibest = np.argmin(Losses)
 
 	return V_results[ibest], V_results, Losses, losses, rz
-
 def kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 1000, n_sim = 1, frac = 0.75, lr = 0.01):
 
 	## Frac specifies how many of the random samples are from the density versus background
@@ -403,11 +402,19 @@ def kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x,
 				v2 = np.random.rand(n2, ndim)*scale_x + offset_x
 				v = np.concatenate((v1, v2), axis = 0)
 
+				iremove = np.where((v[:,0] > (offset_x[0,0] + scale_x[0,0]))*((v[:,1] > (offset_x[0,1] + scale_x[0,1])))*(v[:,0] < offset_x[0,0])*(v[:,1] < offset_x[0,1]))[0]
+				if len(iremove) > 0:
+					v[iremove] = np.random.rand(len(iremove), ndim)*scale_x + offset_x
+
 			tree = cKDTree(ftrns1(v)*weight_vector)
 			x1 = m_density.sample(n1)
 			x1 = np.concatenate((x1, np.random.rand(n1).reshape(-1,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
 			x2 = np.random.rand(n2, ndim)*scale_x + offset_x
 			x = np.concatenate((x1, x2), axis = 0)
+			iremove = np.where((x[:,0] > (offset_x[0,0] + scale_x[0,0]))*((x[:,1] > (offset_x[0,1] + scale_x[0,1])))*(x[:,0] < offset_x[0,0])*(x[:,1] < offset_x[0,1]))[0]
+			if len(iremove) > 0:
+				x[iremove] = np.random.rand(len(iremove), ndim)*scale_x + offset_x
+
 			q, ip = tree.query(ftrns1(x)*weight_vector)
 
 			rs = []
