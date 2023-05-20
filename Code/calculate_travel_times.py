@@ -243,7 +243,7 @@ ip = np.where((query_proj[:,0] >= zz[:,0].min())*(query_proj[:,0] <= zz[:,0].max
 ys = query_proj[ip,:] # not actually used for anything (non-trivial.)
 
 ## If the queries are out of bounts when calling 
-x1 = np.arange(ys[:,0].min() - 20*dx, ys[:,0].max() + 15*dx, dx)
+x1 = np.arange(ys[:,0].min() - 20*dx, ys[:,0].max() + 20*dx, dx)
 x2 = np.arange(ys[:,1].min() - 20*dx, ys[:,1].max() + 20*dx, dx)
 x3 = np.arange(ys[:,2].min() - 4*dx, ys[:,2].max() + 4*dx, dx)
 x11, x12, x13 = np.meshgrid(x1, x2, x3)
