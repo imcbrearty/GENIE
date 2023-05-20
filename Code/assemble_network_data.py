@@ -402,7 +402,7 @@ def kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x,
 				v2 = np.random.rand(n2, ndim)*scale_x + offset_x
 				v = np.concatenate((v1, v2), axis = 0)
 
-				iremove = np.where((v[:,0] > (offset_x[0,0] + scale_x[0,0])) + ((v[:,1] > (offset_x[0,1] + scale_x[0,1]))) + (v[:,0] < offset_x[0,0]) + (v[:,1] < offset_x[0,1]))[0]
+				iremove = np.where(((v[:,0] > (offset_x[0,0] + scale_x[0,0])) + ((v[:,1] > (offset_x[0,1] + scale_x[0,1]))) + (v[:,0] < offset_x[0,0]) + (v[:,1] < offset_x[0,1])) > 0)[0]
 				if len(iremove) > 0:
 					v[iremove] = np.random.rand(len(iremove), ndim)*scale_x + offset_x
 
@@ -411,7 +411,7 @@ def kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x,
 			x1 = np.concatenate((x1, np.random.rand(n1).reshape(-1,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
 			x2 = np.random.rand(n2, ndim)*scale_x + offset_x
 			x = np.concatenate((x1, x2), axis = 0)
-			iremove = np.where((x[:,0] > (offset_x[0,0] + scale_x[0,0])) + ((x[:,1] > (offset_x[0,1] + scale_x[0,1]))) + (x[:,0] < offset_x[0,0]) + (x[:,1] < offset_x[0,1]))[0]
+			iremove = np.where(((x[:,0] > (offset_x[0,0] + scale_x[0,0])) + ((x[:,1] > (offset_x[0,1] + scale_x[0,1]))) + (x[:,0] < offset_x[0,0]) + (x[:,1] < offset_x[0,1])) > 0)[0]
 			if len(iremove) > 0:
 				x[iremove] = np.random.rand(len(iremove), ndim)*scale_x + offset_x
 
