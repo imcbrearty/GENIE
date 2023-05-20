@@ -1545,7 +1545,7 @@ def MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use, a
 		xcart_new = xcart + xvel_new ## New X is updated with "new" velocity
 
 		## Check if points outside hull; if so, re-initilize.
-		in_hull_val = in_hull(xcart_new, hull) # Double check this
+		in_hull_val = in_hull(ftrns2(xcart_new), hull) # Double check this
 		ioutside = np.where(in_hull_val == False)[0]
 		if len(ioutside) > 0:
 			xcart_new[ioutside] = ftrns1(np.random.rand(len(ioutside), 3)*scale_x + offset_x)
