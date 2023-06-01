@@ -1,4 +1,3 @@
-
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -29,6 +28,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.colors import Normalize
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
+from sklearn.cluster import SpectralClustering
 from numpy.matlib import repmat
 import pathlib
 import itertools
@@ -91,6 +91,12 @@ spr_picks = 100 # Assumed sampling rate of picks
 d_win = 0.25 ## Lat and lon window to re-locate initial source detetections with refined sampling over
 d_win_depth = 10e3 ## Depth window to re-locate initial source detetections with refined sampling over
 dx_depth = 50.0 ## Depth resolution to locate events with travel time based re-location
+
+use_expanded_competitive_assignment = True
+cost_value = 3.0 # If use expanded competitve assignment, then this is the fixed cost applied per source
+## when optimizing joint source-arrival assignments between nearby sources. The value is in terms of the 
+## `sum' over the predicted source-arrival assignment for each pick. Ideally could make this number more
+## adpative, potentially with number of stations or number of possible observing picks for each event. 
 
 device = torch.device('cpu') ## Right now, this isn't updated to work with cuda, since
 ## the necessary variables do not have .to(device) at the right places
@@ -1000,28 +1006,47 @@ def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut 
 
 	return P_l, ind_use # Note: this permutation of locs_use.
 
-def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, phase_labels, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2, n_queries = 3000, n_batch = 75, max_rate_events = 5000, max_miss_events = 3500, max_false_events = 2000, T = 3600.0*24.0, dt = 30, tscale = 3600.0, n_sta_range = [0.25, 1.0], plot_on = False, verbose = False):
+def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, phase_labels, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, ftrns1, ftrns2, n_queries = 3000, n_batch = 75, max_rate_events = 5000, max_miss_events = 3500, max_false_events = 2000, T = 3600.0*24.0, dt = 30, tscale = 3600.0, n_sta_range = [0.25, 1.0], plot_on = False, verbose = False):
 
 	if verbose == True:
 		st = time.time()
 
-	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
-	k_sta_edges, k_spc_edges, k_time_edges = graph_params
+	## Can simplify, and only focus on one network (could even re-create the correct x_grids_trv_pointers_p for specific network?)
+	## This would speed up inference application
 
 	scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 	offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
 	n_sta = locs.shape[0]
 	n_spc = x_grid.shape[0]
 	locs_tensor = torch.Tensor(locs)
+	# grid_select = np.random.randint(0, high = len(x_grids))
+	# time_samples = np.copy(srcs[:,3])
 
-	arrivals = np.concatenate((arrivals, 0*np.ones((arrivals.shape[0],3))), axis = 1) # why append 0's?
+	## Removing this concatenate step, since now passing all information with arrivals
+	# arrivals = np.concatenate((arrivals, 0*np.ones((arrivals.shape[0],3))), axis = 1) # why append 0's?
 
+	# n_sta = locs.shape[0]
+	# n_spc = x_grid.shape[0]
+	# n_sta_slice = len(ind_use)
+
+	# perm_vec = -1*np.ones(locs.shape[0])
+	# perm_vec[ind_use] = np.arange(len(ind_use))
+
+	t_win = 10.0
 	scale_vec = np.array([1,2*t_win]).reshape(1,-1)
 	n_batch = len(time_samples)
 
+	## Max_t is dependent on x_grids_trv. Else, can pass max_t as an input.
+	# max_t = float(np.ceil(max([x_grids_trv[j].max() for j in range(len(x_grids_trv))])))
+
+	src_t_kernel = 8.0 # change these kernels
+	src_x_kernel = 30e3
+	src_depth_kernel = 5e3
+	min_sta_arrival = 0
+
 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
 
-	tree = cKDTree(arrivals[:,0][:,None])
+	tree = cKDTree(arrivals[:,0][:,None]) ## It might be expensive to keep re-creating this every time step
 	lp = tree.query_ball_point(time_samples.reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0) 
 
 	lp_concat = np.hstack([np.array(list(lp[j])) for j in range(n_batch)]).astype('int')
@@ -1039,9 +1064,15 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 
 	## Note, this loop could be vectorized
 	for i in range(n_batch):
+		# i0 = np.random.randint(0, high = len(x_grids)) ## Will be fixed grid, if x_grids is length 1.
+		# n_spc = x_grids[i0].shape[0]
 
 		ind_sta_select = np.unique(ind_use) ## Subset of locations, from total set.
 		n_sta_select = len(ind_sta_select)
+
+		# Not, trv_subset_p and trv_subset_s only differ in the last entry, for all iterations of the loop.
+		## In other wors, what's the point of this costly duplication of Trv_subset_p and s? Why not more
+		## effectively use this data.
 
 		Trv_subset_p.append(np.concatenate((x_grid_trv[:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
 		Trv_subset_s.append(np.concatenate((x_grid_trv[:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
@@ -1051,6 +1082,7 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 		Sample_indices.append(np.arange(len(ind_sta_select)*n_spc) + sc)
 		sc += len(Sample_indices[-1])
 
+	# sc += len(Sample_indices[-1])
 	Trv_subset_p = np.vstack(Trv_subset_p)
 	Trv_subset_s = np.vstack(Trv_subset_s)
 	Batch_indices = np.hstack(Batch_indices)
@@ -1067,6 +1099,8 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 	arrivals_select = arrivals_select[iargsort]
 	phase_labels_select = phase_labels_select[iargsort]
 
+	## If len(arrivals_select) == 0, this breaks. However, if len(arrivals_select) == 0; then clearly there is no data here...
+
 	query_time_p = Trv_subset_p[:,0] + Batch_indices*offset_per_batch + Trv_subset_p[:,1]*offset_per_station
 	query_time_s = Trv_subset_s[:,0] + Batch_indices*offset_per_batch + Trv_subset_s[:,1]*offset_per_station
 
@@ -1079,6 +1113,7 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 	ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
 
 	if len(arrivals_select) > 0:
+		## See how much we can "skip", when len(arrivals_select) == 0. 
 		rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
 		rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
 	
@@ -1099,7 +1134,16 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 		ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
 		rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
 
+	kernel_sig_t = 5.0 # Can speed up by only using matches.
+	k_sta_edges = 8
+	k_spc_edges = 15
+	k_time_edges = 10 ## Make sure is same as in train_regional_GNN.py
 	time_vec_slice = np.arange(k_time_edges)
+
+	# X_fixed = [] # fixed
+	# X_query = [] # fixed
+	# Locs = [] # fixed
+	# Trv_out = [] # fixed
 
 	Inpts = [] # duplicate
 	Masks = [] # duplicate
@@ -1148,17 +1192,25 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 		phase_vals = phase_vals[ineed]
 		meta = meta[ineed]	
 
+		# ind_src_unique = np.unique(meta[meta[:,2] > -1.0,2]).astype('int') # ignore -1.0 entries.
 		lex_sort = np.lexsort((times, indices)) ## Make sure lexsort doesn't cause any problems
 		lp_times.append(times[lex_sort] - time_samples[i])
 		lp_stations.append(indices[lex_sort])
 		lp_phases.append(phase_vals[lex_sort])
 		lp_meta.append(meta[lex_sort]) # final index of meta points into 
+		# lp_srcs.append(src_subset)
+
+	# Trv_out.append(trv_out)
+	# Locs.append(locs[sta_select])
+	# X_fixed.append(x_grid)
+
+	# assert(A_edges_time_p.max() < n_spc*n_sta_slice) ## Can remove these, after a bit of testing.
+	# assert(A_edges_time_s.max() < n_spc*n_sta_slice)
 
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
 
 	return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
-
 ## Return the adjacencies for a set of inputs.
 def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_trv_ref, x_grid_trv_pointers_p, x_grid_trv_pointers_s, graph_params, verbose = False):
 
@@ -1395,6 +1447,171 @@ def competitive_assignment(w, sta_inds, cost, min_val = 0.02, restrict = None, f
 
 	return assignments, sources_active
 
+def competitive_assignment_split(w, sta_inds, cost, min_val = 0.02, restrict = None, force_n_sources = None, verbose = False):
+
+	# w is the edges, or weight matrix between sources and arrivals.
+	# It's a list of 2d numpy arrays, w = [w1, w2, w3...], where each wi is the
+	# weight matrix for phase type i. So usually, w = [wp, ws] (actually, algorithm will probably not work unless it is exactly this!)
+	# and wp and ws are shape n_srcs, n_arvs = w[0].shape
+
+	# sta_inds, is the list of station indices, for each of the arrivals, corresponding to entries in the w matrices.
+	# E.g., each row of w[0] is the set of all arrivals edge weights to the source for that row of w[0] (using P-wave moveouts)
+	# Hence, each row is always referencing the same set of picks (which have arbitrary ordering). But, we need to know which arrivals
+	# of this list are associated with each station. So sta_inds just records the index for each arrival. (You could group all arrivals
+	# of a given station to be sequential, or not, it doesn't make a difference as long as sta_inds is correct). 
+
+	# The supplemental of Earthquake Arrival Association with Backprojection and Graph Theory explains the
+	# pseudocode for making all of the constraint matrices.
+
+	if verbose == True:
+		start_time = time()
+
+	n_unique_stations = len(np.unique(sta_inds))
+	unique_stations = np.unique(sta_inds)
+	n_phases = len(w)
+
+	# Create cost vector c by concatenating all (arrival-source-phase) fitness weight matrices together
+
+	np.random.seed(0)
+
+	for i in range(n_phases):
+
+		w[i][w[i] < min_val] = -1.0*min_val
+
+	n_srcs, n_arvs = w[0].shape
+
+	c = np.concatenate(((-1.0*np.concatenate(w, axis = 0).T).reshape(-1), cost*np.ones(n_srcs)), axis = 0)
+
+	# Initilize constraints A1 - A3, b1 - b3
+	# Constraint (1) force each arrival assigned to <= one phase
+	# Constraint (2) force each station to have <= 1 phase to each source
+	# Constraint (3) force source to be activates if has >= 1 assignment
+
+	A1 = np.zeros((n_arvs, n_phases*n_srcs*n_arvs + n_srcs))
+	A2 = np.zeros((n_unique_stations*n_phases*n_srcs, n_phases*n_srcs*n_arvs + n_srcs))
+	A3 = np.zeros((n_srcs, n_phases*n_srcs*n_arvs + n_srcs))
+
+	b1 = np.ones((n_arvs, 1))
+	b2 = np.inf*np.ones((n_unique_stations*n_phases*n_srcs, 1)) ## Allow muliple picks per station, in split phase
+	b3 = np.zeros((n_srcs, 1))
+
+	# Constraint A1
+
+	for j in range(n_arvs):
+
+		A1[j, j*n_phases*n_srcs:(j + 1)*n_phases*n_srcs] = 1
+
+	# Constraint A2
+
+	sc = 0
+	step = n_phases*n_srcs
+
+	for j in range(n_unique_stations):
+
+		ip = np.where(sta_inds == unique_stations[j])[0]
+		vec = ip*n_srcs*n_phases
+
+		for k in range(n_srcs):
+
+			for l in range(n_phases):
+
+				for n in range(len(ip)):
+
+					A2[sc, ip[n]*n_srcs*n_phases + k + l*n_srcs] = 1
+
+				sc += 1
+
+	# Constraint A3
+
+	activation_term = -n_phases*n_unique_stations
+
+	vec = np.arange(0, n_phases*n_srcs*n_arvs, n_srcs)
+
+	for j in range(n_srcs):
+
+		A3[j, vec + j] = 1
+		A3[j, n_phases*n_srcs*n_arvs + j] = activation_term
+
+	# Concatenate Constraints together
+
+	A = np.concatenate((A1, A2, A3), axis = 0)
+	b = np.concatenate((b1, b2, b3), axis = 0)
+
+	# Optional constraints:
+	# (1) Restrict activations between pairs of source to <= 1 (this can be used to force a spatio-temporal seperation between active sources)
+	# (2) Force a certain number of sources to be active simultaneously
+
+	# Optional Constraint 1
+
+	if restrict is not None:
+
+		O1 = []
+
+		for j in range(len(restrict)):
+
+			vec = np.zeros((1, n_phases*n_srcs*n_arvs + n_srcs))
+			vec[0, restrict[j] + n_phases*n_srcs*n_arvs] = 1
+			O1.append(vec)
+
+		O1 = np.vstack(O1)
+		b1 = np.ones((len(restrict),1))
+
+		A = np.concatenate((A, O1), axis = 0)
+		b = np.concatenate((b, b1), axis = 0)
+
+	# Optional Constraint 2
+
+	if force_n_sources is not None:
+
+		O1 = np.zeros((1,n_phases*n_srcs*n_arvs + n_srcs))
+		O1[0, n_phases*n_srcs*n_arvs::] = -1
+		b1 = -force_n_sources*np.ones((1,1))
+
+		A = np.concatenate((A, O1), axis = 0)
+		b = np.concatenate((b, b1), axis = 0)
+
+	# Solve ILP
+
+	x = cp.Variable(n_phases*n_srcs*n_arvs + n_srcs, integer = True)
+
+	prob = cp.Problem(cp.Minimize(c.T@x), constraints = [A@x <= b.reshape(-1), 0 <= x, x <= 1])
+
+	prob.solve()
+
+	assert prob.status == 'optimal', 'competitive assignment solution is not optimal'
+
+	# read result
+	# (1) find active sources
+	# (2) find arrivals assigned to each source
+	# (3) determine arrival phase types
+
+	solution = np.round(x.value)
+	
+	# (1) find active sources
+	
+	sources_active = np.where(solution[n_phases*n_srcs*n_arvs::])[0]
+
+	# (2,3) find arrival assignments and phase types
+
+	assignments = solution[0:n_phases*n_srcs*n_arvs].reshape(n_arvs,-1)
+	lists = [[] for j in range(len(sources_active))]
+
+	for j in range(len(sources_active)):
+
+		for k in range(n_phases):
+
+			ip = np.where(assignments[:,sources_active[j] + n_srcs*k])[0]
+
+			lists[j].append(ip)
+
+	assignments = lists
+
+	if verbose == True:
+		print('competitive assignment took: %0.2f'%(time() - start_time))
+		print('CA inferred number of sources: %d'%(len(sources_active)))
+		print('CA took: %f seconds \n'%(time() - start_time))
+
+	return assignments, sources_active
 
 def MLE_particle_swarm_location_one_mean_stable_depth(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, ftrns1, ftrns2, sig_t = 3.0, dx_depth = 50.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
 
@@ -2022,7 +2239,7 @@ for cnt, strs in enumerate([0]):
 		for x_grid_ind in x_grid_ind_list:
 
 			## It might be more efficient if Inpts, Masks, lp_times, and lp_stations were already on Tensor
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P[:,0:2], P[:,4], tsteps_slice, x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], tsteps_slice, x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
 
 			for i0 in range(len(tsteps_slice)):
 
@@ -2152,7 +2369,7 @@ for cnt, strs in enumerate([0]):
 
 		for x_grid_ind in x_grid_ind_list_1:
 
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P[:,0:2], P[:,4], srcs_slice[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], srcs_slice[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
 
 			for i in range(srcs_slice.shape[0]):
 
@@ -2195,7 +2412,7 @@ for cnt, strs in enumerate([0]):
 
 		for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P[:,0:2], P[:,4], srcs_refined[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], srcs_refined[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
 
 			if inc == 0:
 
@@ -2239,61 +2456,496 @@ for cnt, strs in enumerate([0]):
 	Save_picks = [Save_picks[i] for i in iargsort]
 	lp_meta = [lp_meta_l[i] for i in iargsort]
 
+	if use_expanded_competitive_assignment == False:
 
-	Assigned_picks = []
-	Picks_P = []
-	Picks_S = []
-	Picks_P_perm = []
-	Picks_S_perm = []
-	# Out_save = []
+		Assigned_picks = []
+		Picks_P = []
+		Picks_S = []
+		Picks_P_perm = []
+		Picks_S_perm = []
+		# Out_save = []
 
-	## Implement CA, so that is runs over disjoint sets of "nearby" sources.
-	## Rather than individually, for each source.
-	for i in range(srcs_refined.shape[0]):
+		## Implement CA, so that is runs over disjoint sets of "nearby" sources.
+		## Rather than individually, for each source.
+		for i in range(srcs_refined.shape[0]):
 
-		## Now do assignments, on the stacked association predictions (over grids)
+			## Now do assignments, on the stacked association predictions (over grids)
 
-		ipick, tpick = Save_picks[i][:,1].astype('int'), Save_picks[i][:,0]
+			ipick, tpick = Save_picks[i][:,1].astype('int'), Save_picks[i][:,0]
 
-		print(i)
+			print(i)
 
-		## Need to replace this with competitive assignment over "connected"
-		## Sources. This will reduce duplicate events.
-		wp = np.zeros((1,len(tpick))); wp[0,:] = Out_p_save[i]
-		ws = np.zeros((1,len(tpick))); ws[0,:] = Out_s_save[i]
-		wp[wp <= thresh_assoc] = 0.0
-		ws[ws <= thresh_assoc] = 0.0
-		assignments, srcs_active = competitive_assignment([wp, ws], ipick, 1.5, force_n_sources = 1) ## force 1 source?
-		
+			## Need to replace this with competitive assignment over "connected"
+			## Sources. This will reduce duplicate events.
+			wp = np.zeros((1,len(tpick))); wp[0,:] = Out_p_save[i]
+			ws = np.zeros((1,len(tpick))); ws[0,:] = Out_s_save[i]
+			wp[wp <= thresh_assoc] = 0.0
+			ws[ws <= thresh_assoc] = 0.0
+			assignments, srcs_active = competitive_assignment([wp, ws], ipick, 1.5, force_n_sources = 1) ## force 1 source?
+			
 
-		# Note, calling tree_picks
-		ip_picks = tree_picks.query(lp_meta[i][:,0:2]) # meta uses absolute indices
-		assert(abs(ip_picks[0]).max() == 0.0)
-		ip_picks = ip_picks[1]
+			# Note, calling tree_picks
+			ip_picks = tree_picks.query(lp_meta[i][:,0:2]) # meta uses absolute indices
+			assert(abs(ip_picks[0]).max() == 0.0)
+			ip_picks = ip_picks[1]
 
-		# p_pred, s_pred = np.zeros(len(tpick)), np.zeros(len(tpick))
-		assert(len(srcs_active) == 1)
-		## Assumes 1 source
+			# p_pred, s_pred = np.zeros(len(tpick)), np.zeros(len(tpick))
+			assert(len(srcs_active) == 1)
+			## Assumes 1 source
 
-		ind_p = ipick[assignments[0][0]]
-		ind_s = ipick[assignments[0][1]]
-		arv_p = tpick[assignments[0][0]]
-		arv_s = tpick[assignments[0][1]]
+			ind_p = ipick[assignments[0][0]]
+			ind_s = ipick[assignments[0][1]]
+			arv_p = tpick[assignments[0][0]]
+			arv_s = tpick[assignments[0][1]]
 
-		p_assign = np.concatenate((P[ip_picks[assignments[0][0]],:], i*np.ones(len(assignments[0][0])).reshape(-1,1)), axis = 1) ## Note: could concatenate ip_picks, if desired here, so all picks in Picks_P lists know the index of the absolute pick index.
-		s_assign = np.concatenate((P[ip_picks[assignments[0][1]],:], i*np.ones(len(assignments[0][1])).reshape(-1,1)), axis = 1)
-		p_assign_perm = np.copy(p_assign)
-		s_assign_perm = np.copy(s_assign)
-		p_assign_perm[:,1] = perm_vec[p_assign_perm[:,1].astype('int')]
-		s_assign_perm[:,1] = perm_vec[s_assign_perm[:,1].astype('int')]
-		Picks_P.append(p_assign)
-		Picks_S.append(s_assign)
-		Picks_P_perm.append(p_assign_perm)
-		Picks_S_perm.append(s_assign_perm)
+			p_assign = np.concatenate((P[ip_picks[assignments[0][0]],:], i*np.ones(len(assignments[0][0])).reshape(-1,1)), axis = 1) ## Note: could concatenate ip_picks, if desired here, so all picks in Picks_P lists know the index of the absolute pick index.
+			s_assign = np.concatenate((P[ip_picks[assignments[0][1]],:], i*np.ones(len(assignments[0][1])).reshape(-1,1)), axis = 1)
+			p_assign_perm = np.copy(p_assign)
+			s_assign_perm = np.copy(s_assign)
+			p_assign_perm[:,1] = perm_vec[p_assign_perm[:,1].astype('int')]
+			s_assign_perm[:,1] = perm_vec[s_assign_perm[:,1].astype('int')]
+			Picks_P.append(p_assign)
+			Picks_S.append(s_assign)
+			Picks_P_perm.append(p_assign_perm)
+			Picks_S_perm.append(s_assign_perm)
 
-		print('add relocation!')
+			print('add relocation!')
 
-		## Implemente CA, to deal with mixing events (nearby in time, with shared arrival association assignments)
+			## Implemente CA, to deal with mixing events (nearby in time, with shared arrival association assignments)
+
+	elif use_expanded_competitive_assignment == True:
+
+		Assigned_picks = []
+		Picks_P = []
+		Picks_S = []
+		Picks_P_perm = []
+		Picks_S_perm = []
+		# Out_save = []
+
+		## Implement CA, so that is runs over disjoint sets of "nearby" sources.
+		## Rather than individually, for each source.
+
+		# ## Find overlapping events (events with shared pick assignments)
+		all_picks = np.vstack(lp_meta) # [:,0:2] # np.vstack([Save_picks[i] for i in range(len(Save_picks))])
+		# unique_picks = np.unique(all_picks[:,0:2], axis = 0)
+		unique_picks = np.unique(all_picks, axis = 0)
+
+		# ip_sort_unique = np.lexsort((unique_picks[:,0], unique_picks[:,1])) # sort by station
+		ip_sort_unique = np.lexsort((unique_picks[:,1], unique_picks[:,0])) # sort by time
+		unique_picks = unique_picks[ip_sort_unique]
+		len_unique_picks = len(unique_picks)
+
+		# tree_picks_select = cKDTree(all_picks[:,0:2])
+		tree_picks_unique_select = cKDTree(unique_picks[:,0:2])
+		# lp_tree_picks_select  = tree_picks_select.query_ball_point(unique_picks, r = 0)
+
+		matched_src_arrival_indices = []
+		matched_src_arrival_indices_p = []
+		matched_src_arrival_indices_s = []
+
+		min_picks = 4
+
+		for i in range(len(lp_meta)):
+
+			if len(lp_meta[i]) == 0:
+				continue
+
+			matched_arv_indices_val = tree_picks_unique_select.query(lp_meta[i][:,0:2])
+			assert(matched_arv_indices_val[0].max() == 0)
+			matched_arv_indices = matched_arv_indices_val[1]
+
+			ifind_p = np.where(Out_p_save[i] > thresh_assoc)[0]
+			ifind_s = np.where(Out_s_save[i] > thresh_assoc)[0]
+
+			# Check for minimum number of picks, otherwise, skip source
+			if (len(ifind_p) + len(ifind_s)) >= min_picks:
+
+				ifind = np.unique(np.concatenate((ifind_p, ifind_s), axis = 0)) # Create combined set of indices
+
+				## concatenate both p and s likelihoods and edges for all of ifind, so that the dense matrices extracted for each
+				## disconnected component are the same size.
+
+				## First row is arrival indices, second row are src indices
+				# if len(ifind_p) > 0:
+				# matched_src_arrival_indices_p.append(np.concatenate((matched_arv_indices[ifind_p].reshape(1,-1), i*np.ones(len(ifind_p)).reshape(1,-1), Out_p_save[i][ifind_p].reshape(1,-1)), axis = 0))
+				matched_src_arrival_indices_p.append(np.concatenate((matched_arv_indices[ifind].reshape(1,-1), i*np.ones(len(ifind)).reshape(1,-1), Out_p_save[i][ifind].reshape(1,-1)), axis = 0))
+
+				# if len(ifind_s) > 0:
+				# matched_src_arrival_indices_s.append(np.concatenate((matched_arv_indices[ifind_s].reshape(1,-1), i*np.ones(len(ifind_s)).reshape(1,-1), Out_s_save[i][ifind_s].reshape(1,-1)), axis = 0))
+				matched_src_arrival_indices_s.append(np.concatenate((matched_arv_indices[ifind].reshape(1,-1), i*np.ones(len(ifind)).reshape(1,-1), Out_s_save[i][ifind].reshape(1,-1)), axis = 0))
+
+				matched_src_arrival_indices.append(np.concatenate((matched_arv_indices[ifind].reshape(1,-1), i*np.ones(len(ifind)).reshape(1,-1), np.concatenate((Out_p_save[i][ifind].reshape(1,-1), Out_s_save[i][ifind].reshape(1,-1)), axis = 0).max(0, keepdims = True)), axis = 0))
+
+
+		## Are we adding all edges, not just edges above a threshold?
+
+		## Then, remove sources with less than min number of pick assignments.
+
+		## From this, we may not have memory issues with competitive assignment. If so,
+		## can still reduce the size of disjoint groups.
+
+		matched_src_arrival_indices = np.hstack(matched_src_arrival_indices)
+		matched_src_arrival_indices_p = np.hstack(matched_src_arrival_indices_p)
+		matched_src_arrival_indices_s = np.hstack(matched_src_arrival_indices_s)
+
+		## Convert to linear graph, find disconected components, apply CA
+
+		w_edges = np.concatenate((matched_src_arrival_indices[0,:][None,:], matched_src_arrival_indices[1,:][None,:] + len_unique_picks, matched_src_arrival_indices[2,:].reshape(1,-1)), axis = 0)
+		wp_edges = np.concatenate((matched_src_arrival_indices_p[0,:][None,:], matched_src_arrival_indices_p[1,:][None,:] + len_unique_picks, matched_src_arrival_indices_p[2,:].reshape(1,-1)), axis = 0)
+		ws_edges = np.concatenate((matched_src_arrival_indices_s[0,:][None,:], matched_src_arrival_indices_s[1,:][None,:] + len_unique_picks, matched_src_arrival_indices_s[2,:].reshape(1,-1)), axis = 0)
+		assert(np.abs(wp_edges[0:2,:] - ws_edges[0:2,:]).max() == 0)
+		# w_edges = np.copy(wp_edges)
+		# w_edges[2,:] = np.maximum(wp_edges[2,:], ws_edges[2,:])
+
+		## w_edges: first row are unique arrival indices
+		## w_edges: second row are unique src indices (with index 0 being the len(unique_picks))
+
+		## Need to combined wp and ws graphs
+		G_nx = nx.Graph()
+		G_nx.add_weighted_edges_from(w_edges.T)
+		G_nx.add_weighted_edges_from(w_edges[np.array([1,0,2]),:].T)
+
+		Gp_nx = nx.Graph()
+		Gp_nx.add_weighted_edges_from(wp_edges.T)
+		Gp_nx.add_weighted_edges_from(wp_edges[np.array([1,0,2]),:].T)
+
+		Gs_nx = nx.Graph()
+		Gs_nx.add_weighted_edges_from(ws_edges.T)
+		Gs_nx.add_weighted_edges_from(ws_edges[np.array([1,0,2]),:].T)
+
+		discon_components = list(nx.connected_components(G_nx))
+		discon_components = [np.sort(np.array(list(discon_components[i])).astype('int')) for i in range(len(discon_components))]
+		# tree_srcs = cKDTree(w_edges[0:2,:].T)
+
+
+		finish_splits = False
+		max_sources = 15 ## per competitive assignment run
+		max_splits = 30
+		num_splits = 0
+		while finish_splits == False:
+
+			# trgt_clusters = [] # Store the source indices and the target clusters
+			# flag_disconnected = []
+			# cnt_clusters = 0
+
+			remove_edges_from = []
+
+			discon_components = list(nx.connected_components(G_nx))
+			discon_components = [np.sort(np.array(list(discon_components[i])).astype('int')) for i in range(len(discon_components))]
+
+			len_discon = np.array([len(np.where(discon_components[j] > (len_unique_picks - 1))[0]) for j in range(len(discon_components))])
+			print('Number discon components: %d \n'%(len(len_discon)))
+			print('Number large discon components: %d \n'%(len(np.where(len_discon > max_sources)[0])))
+			print('Largest discon component: %d \n'%(max(len_discon)))
+
+			if (len(np.where(len_discon > max_sources)[0]) == 0) or (num_splits > max_splits):
+				finish_splits = True
+				continue
+
+			print('Beginning split step %d'%num_splits)
+
+			for i in range(len(discon_components)):
+
+				subset_edges = G_nx.subgraph(discon_components[i])
+				adj_matrix = nx.adjacency_matrix(subset_edges, nodelist = discon_components[i]).toarray() # nodelist = np.arange(len(discon_components[i]))).toarray()
+
+				subset_edges = Gp_nx.subgraph(discon_components[i])
+				adj_matrix_p = nx.adjacency_matrix(subset_edges, nodelist = discon_components[i]).toarray() # nodelist = np.arange(len(discon_components[i]))).toarray()
+
+				subset_edges = Gs_nx.subgraph(discon_components[i])
+				adj_matrix_s = nx.adjacency_matrix(subset_edges, nodelist = discon_components[i]).toarray() # nodelist = np.arange(len(discon_components[i]))).toarray()
+
+				# ifind_matched_inds = tree_srcs.query(w_edges[0:2,discon_components[i]].T)[1]
+
+				## Apply CA to the subset of sources/picks in a disconnected component
+				ifind_src_inds = np.where(discon_components[i] > (len_unique_picks - 1))[0]
+				ifind_arv_inds = np.delete(np.arange(len(discon_components[i])), ifind_src_inds, axis = 0)
+
+				arv_ind_slice = np.sort(discon_components[i][ifind_arv_inds])
+				arv_src_slice = np.sort(discon_components[i][ifind_src_inds]) - len_unique_picks
+				len_arv_slice = len(arv_ind_slice)
+
+				tpick = unique_picks[arv_ind_slice,0]
+				ipick = unique_picks[arv_ind_slice,1].astype('int')
+
+				if len(ifind_src_inds) <= max_sources:
+
+					pass
+
+					# trgt_clusters.append(np.concatenate((ifind_src_inds.reshape(1,-1), cnt_clusters*np.ones(len(ifind_src_inds)).reshape(1,-1)), axis = 0))
+					# cnt_clusters = cnt_clusters + 1
+					# flag_disconnected.append(np.ones(len(ifind_src_inds)))
+
+				elif len(ifind_src_inds) > max_sources:
+
+					## Create a source-source index graph, based on how much they "share" arrivals. Then find min-cut on this graph,
+					## to seperate sources. Modify the discon_components so the sources are split.
+					## See if either can directly modify the disconnected components, or use "remove edges" on the graph to
+					## directly change disconnected components, and re-compute disconnected components (e.g., like was originally
+					## tried). Need to decide how to partition picks between either source, since don't want to duplicate sources
+					## once re-computing the solution for either seperately. Also don't want to miss events because of a bad split
+					## of picks to either group. The duplicate events may be less problematic due to the remove duplicate event
+					## script at the end.
+
+					## If disconnected graphs doesn't work, can also try finding optimal split points by counting origin times or picks
+					## in time, and finding min cuts based on minimum rates of origin times or picks
+
+					# subset_edges = G_nx.subgraph(discon_components[i])
+					# adj_matrix = nx.adjacency_matrix(subset_edges, nodelist = discon_components[i]).toarray() # nodelist = np.arange(len(discon_components[i]))).toarray()
+
+					w_slice = adj_matrix[len_arv_slice::,0:len_arv_slice] # np.zeros((len(arv_src_slice), len(arv_ind_slice)))
+					wp_slice = adj_matrix_p[len_arv_slice::,0:len_arv_slice] # np.zeros((len(arv_src_slice), len(arv_ind_slice)))
+					ws_slice = adj_matrix_s[len_arv_slice::,0:len_arv_slice] # np.zeros((len(arv_src_slice), len(arv_ind_slice)))
+
+					isource, iarv = np.where(w_slice > thresh_assoc)
+					tree_src_ind = cKDTree(isource.reshape(-1,1)) ## all sources should appear here
+					# lp_src_ind = tree_src_ind.query_ball_point(np.sort(np.unique(isource)).reshape(-1,1), r = 0)
+					lp_src_ind = tree_src_ind.query_ball_point(np.arange(len(ifind_src_inds)).reshape(-1,1), r = 0)
+
+					assert(len(np.sort(np.unique(isource))) == len(ifind_src_inds))
+
+					## Note: could concievably use MCL on these graphs, just like in original association application.
+					## May want to use MCL even on the original source-time graphs as well.
+					## Why is memory overloading for recent runs?
+
+					w_src_adj = np.zeros((len(ifind_src_inds), len(ifind_src_inds)))
+
+					for j in range(len(ifind_src_inds)):
+						for k in range(len(ifind_src_inds)):
+							if j == k:
+								continue
+							if (len(lp_src_ind[j]) > 0)*(len(lp_src_ind[k]) > 0):
+								w_src_adj[j,k] = len(list(set(iarv[lp_src_ind[j]]).intersection(iarv[lp_src_ind[k]])))
+
+					## Try to implement mincut
+
+					# inode1, inode2 = np.where(w_src_adj > 0)
+
+					# _, partition = nx.minimum_cut(G_nx.subgraph(discon_components[i]), discon_components[i][ifind_src_inds[0]], discon_components[i][ifind_src_inds[-1]])
+					# g_src = nx.Graph() ## Need to specify the number of sources
+					# g_src.add_weighted_edges_from(np.concatenate((inode1.reshape(-1,1), inode2.reshape(-1,1), w_src_adj[inode1, inode2].reshape(-1,1)), axis = 1))
+					# cutset = nx.minimum_edge_cut(g_src) # , s = 0, t = discon_components[i][ifind_src_inds[-1]]
+					# cutset = nx.minimum_edge_cut(g_src, s = 0, t = len(ifind_src_inds) - 1)
+					# cutset = list(cutset)
+
+					## Simply split sources into groups of two (need to make sure this rarely cuts off indidual sources)
+					clusters = SpectralClustering(n_clusters = 2, affinity = 'precomputed').fit_predict(w_src_adj)
+
+					i1, i2 = np.where(clusters == 0)[0], np.where(clusters == 1)[0]
+
+					# if len(i1) > 0:
+					# 	trgt_clusters.append(np.concatenate((ifind_src_inds[i1].reshape(1,-1), cnt_clusters*np.ones(len(i1)).reshape(1,-1)), axis = 0))
+					# 	cnt_clusters = cnt_clusters + 1
+
+					# if len(i2) > 0:
+					# 	trgt_clusters.append(np.concatenate((ifind_src_inds[i2].reshape(1,-1), cnt_clusters*np.ones(len(i2)).reshape(1,-1)), axis = 0))
+					# 	cnt_clusters = cnt_clusters + 1
+
+					## Optimize all (union) of picks between split sources, so can determine which edges (between arrivals and sources) to delete
+					## This should `trim' the source-arrival graphs and increase amount of disconnected components.
+
+					## Which srcs in clusters 1 need to be cut from sources in clusters 2 to disconnect graphs?
+					## Can use min-cut with the last source in cluster 1 against the first source in cluster 2.
+					# min_time1, min_time2 = srcs_refined[ifind_src_inds[i1],3].min(), srcs_refined[ifind_src_inds[i2],3].min()
+					min_time1, min_time2 = srcs_refined[arv_src_slice[i1],3].min(), srcs_refined[arv_src_slice[i2],3].min()
+
+					if min_time1 <= min_time2:
+						# cutset = nx.minimum_edge_cut(g_src, s = max(i1), t = min(i2))
+						pass
+					else:
+						i3 = np.copy(i1)
+						i1 = np.copy(i2)
+						i2 = np.copy(i3)
+
+
+					## Instead of cut-set, find all sources that "link" across the two groups. Use these as reference sources.
+					## In bad cases, could this set also be too big?
+					cutset_left = []
+					cutset_right = []
+					for j in range(len(i1)):
+						cutset_right.append(i2[np.where(w_src_adj[i1[j],i2] > 0)[0]])
+					for j in range(len(i2)):
+						cutset_left.append(i1[np.where(w_src_adj[i2[j],i1] > 0)[0]])
+
+					cutset_left = np.unique(np.hstack(cutset_left))	
+					cutset_right = np.unique(np.hstack(cutset_right))	
+					cutset = np.unique(np.concatenate((cutset_left, cutset_right), axis = 0))
+
+					# cutset = nx.minimum_edge_cut(g_src, s = max(i1), t = min(i2))
+
+					## Extract the arrival-source weights from w_edges for these nodes
+					## Then "take max value" of these picks across these sources
+					## Then use CA to maximize assignment of picks to either "distinct"
+					## cluster. Then remove those arrival attachements from the full graph
+					## for the cluster the picks arn't assigned too. Then, do this for all
+					## disconnected graphs, update the disconnected components, and iterate
+					## until all graphs are less than or equal to maximum size.
+
+					# cutset = np.array(list(cutset)).astype('int')
+					unique_src_inds = np.sort(np.unique(cutset.reshape(-1,1))).astype('int')
+					arv_indices_sliced = np.where(w_slice[unique_src_inds,:].max(0) > thresh_assoc)[0]
+
+					arv_weights_p_cluster_1 = wp_slice[np.unique(cutset_left).astype('int').reshape(-1,1), arv_indices_sliced.reshape(1,-1)].max(0).reshape(1,-1)
+					arv_weights_s_cluster_1 = ws_slice[np.unique(cutset_left).astype('int').reshape(-1,1), arv_indices_sliced.reshape(1,-1)].max(0).reshape(1,-1)
+
+					arv_weights_p_cluster_2 = wp_slice[np.unique(cutset_right).astype('int').reshape(-1,1), arv_indices_sliced.reshape(1,-1)].max(0).reshape(1,-1)
+					arv_weights_s_cluster_2 = ws_slice[np.unique(cutset_right).astype('int').reshape(-1,1), arv_indices_sliced.reshape(1,-1)].max(0).reshape(1,-1)
+
+					arv_weights_p = np.concatenate((arv_weights_p_cluster_1, arv_weights_p_cluster_2), axis = 0)
+					arv_weights_s = np.concatenate((arv_weights_s_cluster_1, arv_weights_s_cluster_2), axis = 0)
+
+					## Now: use competitive assignment to optimize pick assignments to either cluster (use a cost on sources, or no?)
+					# assignment_picks, srcs_active_picks = competitive_assignment_split([arv_weights_p, arv_weights_s], ipick[arv_indices_sliced], 1.0) ## force 1 source?
+					assignment_picks, srcs_active_picks = competitive_assignment_split([arv_weights_p, arv_weights_s], ipick[arv_indices_sliced], 0.0) ## force 1 source?
+					node_all_arrivals = arv_ind_slice[arv_indices_sliced]
+
+					if len(assignment_picks) > 0:
+						assign_picks_1 = np.unique(np.hstack(assignment_picks[0]))
+						# node_arrival_1 = arv_ind_slice[arv_indices_sliced[assign_picks_1]]
+					else:
+						# node_arrival_1 = np.array([])
+						assign_picks_1 = np.array([])
+
+					## Cut these arrivals from sources in group 1
+					node_src_1 = arv_src_slice[cutset_left] + len_unique_picks
+					node_arrival_1_del = np.delete(node_all_arrivals, assign_picks_1, axis = 0)
+					node_arrival_1_repeat = np.repeat(node_arrival_1_del, len(node_src_1), axis = 0)
+					node_src_1_repeat = np.tile(node_src_1, len(node_arrival_1_del))
+					remove_edges_from.append(np.concatenate((node_arrival_1_repeat.reshape(1,-1), node_src_1_repeat.reshape(1,-1)), axis = 0))
+
+					if len(assignment_picks) > 1:
+						assign_picks_2 = np.unique(np.hstack(assignment_picks[1]))
+						# node_arrival_2 = arv_ind_slice[arv_indices_sliced[assign_picks_2]]
+					else:
+						# node_arrival_2 = np.array([])
+						assign_picks_2 = np.array([])
+
+					node_src_2 = arv_src_slice[cutset_right] + len_unique_picks
+					node_arrival_2_del = np.delete(node_all_arrivals, assign_picks_2, axis = 0)
+					node_arrival_2_repeat = np.repeat(node_arrival_2_del, len(node_src_2), axis = 0)
+					node_src_2_repeat = np.tile(node_src_2, len(node_arrival_2_del))
+					remove_edges_from.append(np.concatenate((node_arrival_2_repeat.reshape(1,-1), node_src_2_repeat.reshape(1,-1)), axis = 0))
+
+					# for j in range(2):
+						## Delete the opposite groups (not assigned) pick edges from all graphs, w, wp, ws.
+						## Then update graphs and iterate
+
+					# if len(node_arrival_2) > 0:
+						## Remove from opposite set of sources
+
+					# if len(node_arrival_1) > 0:
+						## Remove from opposite set of sources
+
+					# flag_disconnected.append(np.zeros(len(ifind_src_inds)))
+
+					print('%d %d %d'%(len(arv_ind_slice), sum(clusters == 0), sum(clusters == 1)))
+
+
+			if len(remove_edges_from) > 0:
+				remove_edges_from = np.hstack(remove_edges_from)
+				remove_edges_from = np.concatenate((remove_edges_from, np.flip(remove_edges_from, axis = 0)), axis = 1)
+
+				G_nx.remove_edges_from(remove_edges_from.T)
+				Gp_nx.remove_edges_from(remove_edges_from.T)
+				Gs_nx.remove_edges_from(remove_edges_from.T)
+
+			num_splits = num_splits + 1
+
+
+
+		srcs_retained = []
+		cnt_src = 0
+
+		for i in range(len(discon_components)):
+
+			## Need to check that each subgraph and sets of edges are for same combinations of source-arrivals,
+			## for all three graphs.
+
+			subset_edges = G_nx.subgraph(discon_components[i])
+			adj_matrix = nx.adjacency_matrix(subset_edges, nodelist = discon_components[i]).toarray() # nodelist = np.arange(len(discon_components[i]))).toarray()
+
+			subset_edges = Gp_nx.subgraph(discon_components[i])
+			adj_matrix_p = nx.adjacency_matrix(subset_edges, nodelist = discon_components[i]).toarray() # nodelist = np.arange(len(discon_components[i]))).toarray()
+
+			subset_edges = Gs_nx.subgraph(discon_components[i])
+			adj_matrix_s = nx.adjacency_matrix(subset_edges, nodelist = discon_components[i]).toarray() # nodelist = np.arange(len(discon_components[i]))).toarray()
+
+			# ifind_matched_inds = tree_srcs.query(w_edges[0:2,discon_components[i]].T)[1]
+
+			## Apply CA to the subset of sources/picks in a disconnected component
+			ifind_src_inds = np.where(discon_components[i] > (len_unique_picks - 1))[0]
+			ifind_arv_inds = np.delete(np.arange(len(discon_components[i])), ifind_src_inds, axis = 0)
+
+			arv_ind_slice = np.sort(discon_components[i][ifind_arv_inds])
+			arv_src_slice = np.sort(discon_components[i][ifind_src_inds]) - len_unique_picks
+			len_arv_slice = len(arv_ind_slice)
+
+			wp_slice = adj_matrix_p[len_arv_slice::,0:len_arv_slice] # np.zeros((len(arv_src_slice), len(arv_ind_slice)))
+			ws_slice = adj_matrix_s[len_arv_slice::,0:len_arv_slice] # np.zeros((len(arv_src_slice), len(arv_ind_slice)))
+			
+			tpick = unique_picks[arv_ind_slice,0]
+			ipick = unique_picks[arv_ind_slice,1].astype('int')
+
+			## Now do assignments, on the stacked association predictions (over grids)
+
+			# ipick, tpick = Save_picks[i][:,1].astype('int'), Save_picks[i][:,0]
+
+			# wp = np.zeros((1,len(tpick))); wp[0,:] = Out_p_save[i]
+			# ws = np.zeros((1,len(tpick))); ws[0,:] = Out_s_save[i]
+
+			if (len(ipick) == 0) or (len(arv_src_slice) == 0):
+				continue
+
+			# thresh_assoc = 0.125
+			wp_slice[wp_slice <= thresh_assoc] = 0.0
+			ws_slice[ws_slice <= thresh_assoc] = 0.0
+			# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
+			assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
+
+			if len(srcs_active) > 0:
+				# srcs_retained.append(arv_src_slice[srcs_active])
+
+				for j in range(len(srcs_active)):
+
+
+					srcs_retained.append(srcs_refined[arv_src_slice[srcs_active[j]]].reshape(1,-1))
+
+
+					# ind_p = ipick[assignments[0][0]]
+					# ind_s = ipick[assignments[0][1]]
+					# arv_p = tpick[assignments[0][0]]
+					# arv_s = tpick[assignments[0][1]]
+
+					# Assigned_picks.append(np.concatenate((arv_p.reshape(-1,1) + srcs_refined[i,3], ind_p.reshape(-1,1), np.zeros(len(assignments[0][0])).reshape(-1,1), i*np.ones(len(assignments[0][0])).reshape(-1,1)), axis = 1))
+					# Assigned_picks.append(np.concatenate((arv_s.reshape(-1,1) + srcs_refined[i,3], ind_s.reshape(-1,1), np.ones(len(assignments[0][1])).reshape(-1,1), i*np.ones(len(assignments[0][1])).reshape(-1,1)), axis = 1))
+					p_assign = np.concatenate((unique_picks[arv_ind_slice[assignments[j][0]],:], cnt_src*np.ones(len(assignments[j][0])).reshape(-1,1)), axis = 1) ## Note: could concatenate ip_picks, if desired here, so all picks in Picks_P lists know the index of the absolute pick index.
+					s_assign = np.concatenate((unique_picks[arv_ind_slice[assignments[j][1]],:], cnt_src*np.ones(len(assignments[j][1])).reshape(-1,1)), axis = 1)
+					p_assign_perm = np.copy(p_assign)
+					s_assign_perm = np.copy(s_assign)
+					p_assign_perm[:,1] = perm_vec[p_assign_perm[:,1].astype('int')]
+					s_assign_perm[:,1] = perm_vec[s_assign_perm[:,1].astype('int')]
+					Picks_P.append(p_assign)
+					Picks_S.append(s_assign)
+					Picks_P_perm.append(p_assign_perm)
+					Picks_S_perm.append(s_assign_perm)
+
+					cnt_src += 1
+
+
+			print('%d : %d of %d'%(i, len(srcs_active), len(arv_src_slice)))
+
+			## Find unique set of arrival indices, write to subset of matrix weights
+			## for wp and ws.
+
+			## Then solve CA. Need to scale weights so that: (i). Primarily, the cost is related to the number
+			## of picks per event, and (ii). It still identifies "good" fit and "bad" fit source-arrival pairs,
+			## based on the source-arrival weights.
+
+			print('add relocation!')
+
+			## Implemente CA, to deal with mixing events (nearby in time, with shared arrival association assignments)
+
+		srcs_refined = np.vstack(srcs_retained)
 
 	# Count number of P and S picks
 	cnt_p, cnt_s = np.zeros(srcs_refined.shape[0]), np.zeros(srcs_refined.shape[0])
@@ -2316,17 +2968,17 @@ for cnt, strs in enumerate([0]):
 		res_p = pred_out[0,ind_p,0] - arv_p
 		res_s = pred_out[0,ind_s,1] - arv_s
 
+
 		mean_shift = 0.0
 		cnt_phases = 0
 		if len(res_p) > 0:
-			mean_shift += np.median(res_p)
+			mean_shift += np.median(res_p)*(len(res_p)/(len(res_p) + len(res_s)))
 			cnt_phases += 1
 
 		if len(res_s) > 0:
-			mean_shift += np.median(res_s)
+			mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
 			cnt_phases += 1
 
-		mean_shift = mean_shift/np.maximum(1.0, cnt_phases)
 		srcs_trv.append(np.concatenate((xmle, np.array([srcs_refined[i,3] - mean_shift]).reshape(1,-1)), axis = 1))
 
 	srcs_trv = np.vstack(srcs_trv)
