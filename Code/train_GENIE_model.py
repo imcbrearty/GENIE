@@ -1141,7 +1141,17 @@ if use_only_active_stations == True:
 	ifind = np.where([len(Ind_subnetworks[i]) >= min_sta for i in range(len(Ind_subnetworks))])[0]
 	Ind_subnetworks = [Ind_subnetworks[i] for i in ifind]
 
-
+## Check if knn is working on cuda
+if device.type == 'cuda':
+	check_len = knn(torch.rand(10,3).to(device), torch.rand(10,3).to(device), k = 5).numel()
+	if check_len == 0:
+		raise SystemError('Issue with knn on cuda for some versions of pytorch geometric and cuda')
+	## Note: can update train script to still use cuda except use cpu for all knn operations,
+	## (need to convert inputs to knn to .cpu(), and then outputs of knn back to .cuda())
+	## or, just update cuda to the latest version (e.g., >= 12.1)
+	## See these issues: https://github.com/rusty1s/pytorch_cluster/issues/181,
+	## https://github.com/pyg-team/pytorch_geometric/issues/7475
+	
 ## Make supplemental information for grids
 x_grids_trv = []
 x_grids_trv_pointers_p = []
