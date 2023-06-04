@@ -1144,7 +1144,7 @@ if use_only_active_stations == True:
 ## Check if knn is working on cuda
 if device.type == 'cuda':
 	check_len = knn(torch.rand(10,3).to(device), torch.rand(10,3).to(device), k = 5).numel()
-	if ((check_len == 0) + (check_len < 100)): # If it's less than 2 * 10 * 5, there's an issue
+	if check_len < 100: # If it's less than 2 * 10 * 5, there's an issue
 		raise SystemError('Issue with knn on cuda for some versions of pytorch geometric and cuda')
 	## Note: can update train script to still use cuda except use cpu for all knn operations,
 	## (need to convert inputs to knn to .cpu(), and then outputs of knn back to .cuda())
