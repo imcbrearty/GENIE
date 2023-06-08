@@ -45,6 +45,11 @@ t_win = 10.0 ## This is the time window over which predictions are made. Shouldn
 dist_range = [15e3, 500e3] ## The spatial window over which to sample max distance of 
 ## source-station moveouts in m, per event. E.g., 15 - 500 km. Should set slightly lower if using small region.
 
+# File versions
+template_ver = 1 # spatial grid version
+vel_model_ver = 1 # velocity model version
+n_ver = 1 # GNN save version
+
 ## Will update to be adaptive soon. The step size of temporal prediction is fixed at 1 s right now.
 
 pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
@@ -1023,10 +1028,8 @@ class GCN_Detection_Network_extended(nn.Module):
 ## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
 path_to_file = str(pathlib.Path().absolute())
 
-template_ver = 1
-vel_model_ver = 1
-## Load Files
 
+## Load Files
 if '\\' in path_to_file: ## Windows
 
 	# Load region
@@ -1191,7 +1194,6 @@ mx_trgt_1, mx_trgt_2, mx_trgt_3, mx_trgt_4 = np.zeros(n_epochs), np.zeros(n_epoc
 mx_pred_1, mx_pred_2, mx_pred_3, mx_pred_4 = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
 
 weights = torch.Tensor([0.4, 0.2, 0.2, 0.2]).to(device)
-n_ver = 1
 
 lat_range_interior = [lat_range[0], lat_range[1]]
 lon_range_interior = [lon_range[0], lon_range[1]]
