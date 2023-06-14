@@ -511,8 +511,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		lp_meta.append(meta[lex_sort]) # final index of meta points into 
 		lp_srcs.append(src_subset)
 
-		A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[sta_select])).to(device), torch.Tensor(ftrns1(locs[sta_select])).to(device), k = k_sta_edges + 1).flip(0).contiguous())[0]
-		A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grids[grid_select])).to(device), torch.Tensor(ftrns1(x_grids[grid_select])).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
+		A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), k = k_sta_edges + 1).flip(0).contiguous())[0]
+		A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
 		## Cross-product graph is: source node x station node. Order as, for each source node, all station nodes.
 
 		# Cross-product graph, nodes connected by: same source node, connected stations
@@ -739,7 +739,7 @@ class SpatialAttention(MessagePassing):
 
 	def forward(self, inpts, x_query, x_context, k = 10): # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
 
-		edge_index = knn(x_context, x_query, k = k).flip(0)
+		edge_index = knn(x_context/1000.0, x_query/1000.0, k = k).flip(0)
 		edge_attr = (x_query[edge_index[1]] - x_context[edge_index[0]])/self.scale_rel # /scale_x
 
 		return self.activate2(self.proj(self.propagate(edge_index, x = inpts, edge_attr = edge_attr, size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
@@ -1177,7 +1177,7 @@ for i in range(len(x_grids)):
 	x_grids_trv_pointers_s.append(A_edges_time_s)
 	x_grids_trv_refs.append(dt_partition) # save as cuda tensor, or no?
 
-	edge_index = knn(torch.Tensor(ftrns1(x_grids[i])).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device), k = k_spc_edges).flip(0).contiguous()
+	edge_index = knn(torch.Tensor(ftrns1(x_grids[i])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[i])/1000.0).to(device), k = k_spc_edges).flip(0).contiguous()
 	edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
 	x_grids_edges.append(edge_index)
 
