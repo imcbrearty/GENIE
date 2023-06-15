@@ -38,7 +38,9 @@ training_params = [n_spc_query, n_src_query]
 ## Prediction params
 kernel_sig_t = 5.0 # Kernel to embed arrival time - theoretical time misfit (s)
 src_t_kernel = 6.5 # Kernel or origin time label (s)
-src_x_kernel = 15e3 # Kernel of Cartesian projection, horizontal distance (m)
+src_t_arv_kernel = 6.5 # Kernel for arrival association time label (s)
+src_x_kernel = 15e3 # Kernel for source label, horizontal distance (m)
+src_x_arv_kernel = 15e3 # Kernel for arrival-source association label, horizontal distance (m)
 src_depth_kernel = 15e3 # Kernel of Cartesian projection, vertical distance (m)
 t_win = 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
@@ -1272,7 +1274,7 @@ for i in range(n_restart_step, n_epochs):
 
 		out = mz(torch.Tensor(Inpts[i0]).to(device).reshape(-1,4), torch.Tensor(Masks[i0]).to(device).reshape(-1,4), torch.Tensor(A_prod_sta_sta_l[i0]).long().to(device), torch.Tensor(A_prod_src_src_l[i0]).long().to(device), Data(x = spatial_vals, edge_index = torch.Tensor(A_src_in_prod_l[i0]).long().to(device)), Data(x = spatial_vals, edge_index = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod_l[i0], axis = 0))).long().to(device)), torch.Tensor(A_src_src_l[i0]).long().to(device), torch.Tensor(A_edges_time_p_l[i0]).long().to(device), torch.Tensor(A_edges_time_s_l[i0]).long().to(device), torch.Tensor(A_edges_ref_l[i0]).to(device), trv_out, torch.Tensor(lp_times[i0]).to(device), torch.Tensor(lp_stations[i0]).long().to(device), torch.Tensor(lp_phases[i0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(Locs[i0])).to(device), torch.Tensor(ftrns1(X_fixed[i0])).to(device), torch.Tensor(ftrns1(X_query[i0])).to(device), torch.Tensor(x_src_query_cart).to(device), tq, tq_sample, trv_out_src)
 
-		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1)
+		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 
 		if i0 != (n_batch - 1):
