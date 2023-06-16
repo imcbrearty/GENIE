@@ -39,6 +39,8 @@ z.close()
 shutil.copy(ext_dir + 'region.npz', ext_dir + '%s_region.npz'%name_of_project)
 
 with_density = None
+depth_importance_weighting_value_for_spatial_graphs = 2.5
+
 # else, set with_density = srcs with srcs[:,0] == lat, srcs[:,1] == lon, srcs[:,2] == depth
 ## to preferentially focus the spatial graphs closer around reference sources. 
 
@@ -454,7 +456,7 @@ def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps 
 		eps_extra = 0.1
 		eps_extra_depth = 0.02
 		scale_up = 1.0 # 10000.0
-		weight_vector = np.array([1.0, 1.0, 2.5]).reshape(1,-1) ## Tries to scale importance of depth up, so that nodes fill depth-axis well
+		weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1,-1) ## Tries to scale importance of depth up, so that nodes fill depth-axis well
 
 		offset_x_extend_slice = np.array([offset_x_extend[0,0], offset_x_extend[0,1], offset_x_extend[0,2]]).reshape(1,-1)
 		scale_x_extend_slice = np.array([scale_x_extend[0,0], scale_x_extend[0,1], scale_x_extend[0,2]]).reshape(1,-1)
