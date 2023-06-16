@@ -54,6 +54,7 @@ n_ver = 1 # GNN save version
 
 ## Will update to be adaptive soon. The step size of temporal prediction is fixed at 1 s right now.
 
+## Should add src_x_arv_kernel and src_t_arv_kerne to pred_params, but need to check usage of this variable in this and later scripts
 pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
 
 device = torch.device('cuda') ## or use cpu
