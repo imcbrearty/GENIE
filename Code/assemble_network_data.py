@@ -454,7 +454,7 @@ def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps 
 		eps_extra = 0.1
 		eps_extra_depth = 0.02
 		scale_up = 1.0 # 10000.0
-		weight_vector = np.array([1.0, 1.0, 5.0]).reshape(1,-1) ## Tries to scale importance of depth up, so that nodes fill depth-axis well
+		weight_vector = np.array([1.0, 1.0, 2.5]).reshape(1,-1) ## Tries to scale importance of depth up, so that nodes fill depth-axis well
 
 		offset_x_extend_slice = np.array([offset_x_extend[0,0], offset_x_extend[0,1], offset_x_extend[0,2]]).reshape(1,-1)
 		scale_x_extend_slice = np.array([scale_x_extend[0,0], scale_x_extend[0,1], scale_x_extend[0,2]]).reshape(1,-1)
