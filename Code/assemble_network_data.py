@@ -39,7 +39,9 @@ z.close()
 shutil.copy(ext_dir + 'region.npz', ext_dir + '%s_region.npz'%name_of_project)
 
 with_density = None
-depth_importance_weighting_value_for_spatial_graphs = 2.5
+use_spherical = False ## Should only set to true if travel time model also has spherical projection (to be added soon)
+depth_importance_weighting_value_for_spatial_graphs = 2.5 # up scale the depth importance of node positions when creating spatial 
+## graph if using a large horizontally extended domain
 
 # else, set with_density = srcs with srcs[:,0] == lat, srcs[:,1] == lon, srcs[:,2] == depth
 ## to preferentially focus the spatial graphs closer around reference sources. 
@@ -142,8 +144,67 @@ def rotation_matrix_full_precision(a, b, c):
 
 	return rot
 
-ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef_diff(x) - mn).T).T # just subtract mean
-ftrns2 = lambda x, rbest, mn: ecef2lla_diff((rbest.T @ x.T).T + mn) # just subtract mean
+def optimize_with_direct_method(center_loc, nominal_depth = 0.0):
+
+	loss_coef = [1,1,1.0,0]
+
+	unit_lat = np.array([0.001, 0.0, 0.0]).reshape(1,-1) + center_loc
+	unit_vert = np.array([0.0, 0.0, 10.0]).reshape(1,-1) + center_loc
+
+	norm_lat = np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0)), axis = 0), axis = 1)
+	norm_vert = np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0)), axis = 0), axis = 1)
+
+	trgt_lat = np.array([0,1.0,0]).reshape(1,-1)
+	trgt_vert = np.array([0,0,1.0]).reshape(1,-1)
+	trgt_depths = np.array([nominal_depth]) ## Not used
+	trgt_center = np.zeros(3)
+	# trgt_center[2] = earth_radius
+
+	def loss_function(x):
+
+		rbest = rotation_matrix_full_precision(x[0], x[1], x[2])
+
+		norm_lat = lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0))
+		norm_vert = lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0))
+		norm_lat = np.linalg.norm(norm_lat[1] - norm_lat[0])
+		norm_vert = np.linalg.norm(norm_vert[1] - norm_vert[0])
+
+		center_out = ftrns1(center_loc, rbest, x[3::].reshape(1,-1))
+
+		out_unit_lat = ftrns1(unit_lat, rbest, x[3::].reshape(1,-1))
+		out_unit_lat = (out_unit_lat - center_out)/norm_lat
+
+		out_unit_vert = ftrns1(unit_vert, rbest, x[3::].reshape(1,-1))
+		out_unit_vert = (out_unit_vert - center_out)/norm_vert
+
+		out_locs = ftrns1(locs, rbest, x[3::].reshape(1,-1))
+
+		loss1 = np.linalg.norm(trgt_lat - out_unit_lat, axis = 1)
+		loss2 = np.linalg.norm(trgt_vert - out_unit_vert, axis = 1)
+		loss3 = np.linalg.norm(trgt_center.reshape(1,-1) - center_out, axis = 1) ## Scaling loss down
+		loss = loss_coef[0]*loss1 + loss_coef[1]*loss2 + loss_coef[2]*loss3 # + loss_coef[3]*loss4
+
+		return loss
+
+	bounds = [(0, 2.0*np.pi), (0, 2.0*np.pi), (0, 2.0*np.pi), (-1e7, 1e7), (-1e7, 1e7), (-1e7, 1e7)]
+
+	soln = differential_evolution(lambda x: loss_function(x), bounds, popsize = 30, maxiter = 1000, disp = True)
+
+	# soln = direct(lambda x: loss_function(x), bounds, maxfun = int(100e3), maxiter = int(10e3))
+
+	return soln
+
+if use_spherical == True:
+
+	earth_radius = 6371e3
+	ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T # just subtract mean
+	ftrns2 = lambda x, rbest, mn: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius) # just subtract mean
+
+else:
+
+	earth_radius = 6378137.0
+	ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef_diff(x) - mn).T).T # just subtract mean
+	ftrns2 = lambda x, rbest, mn: ecef2lla_diff((rbest.T @ x.T).T + mn) # just subtract mean
 
 ## Unit lat, vertical vectors; point positive y, and outward normal
 ## mean centered stations. Keep the vertical depth, consistent.
@@ -154,7 +215,7 @@ print(lat_range)
 print('\n Longitude:')
 print(lon_range)
 
-fix_nominal_depth = False
+fix_nominal_depth = True
 if fix_nominal_depth == True:
 	nominal_depth = 0.0 ## Can change the target depth projection if prefered
 else:
@@ -162,90 +223,127 @@ else:
 
 center_loc = np.array([lat_range[0] + 0.5*np.diff(lat_range)[0], lon_range[0] + 0.5*np.diff(lon_range)[0], nominal_depth]).reshape(1,-1)
 # center_loc = locs.mean(0, keepdims = True)
-unit_lat = np.array([0.01, 0.0, 0.0]).reshape(1,-1) + center_loc
-unit_vert = np.array([0.0, 0.0, 1000.0]).reshape(1,-1) + center_loc
 
-norm_lat = torch.Tensor(np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0)), axis = 0), axis = 1))
-norm_vert = torch.Tensor(np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0)), axis = 0), axis = 1))
+use_differetial_evolution = True
+if use_differetial_evolution == True:
 
-trgt_lat = torch.Tensor([0,1.0,0]).reshape(1,-1)
-trgt_vert = torch.Tensor([0,0,1.0]).reshape(1,-1)
-trgt_depths = torch.Tensor([nominal_depth]) ## Not used
-trgt_center = torch.zeros(2)
-
-loss_func = nn.MSELoss()
-
-losses = []
-losses1, losses2, losses3, losses4 = [], [], [], []
-loss_coef = [1,1,1,0]
-
-n_attempts = 10
-## Based on initial conditions, sometimes this converges to a projection plane that is flipped polarity.
-## E.g., "up" in the lat-lon domain is "down" in the Cartesian domain, and vice versa.
-## So try a few attempts to make sure it has the correct polarity.
-for attempt in range(n_attempts):
-
-	vec = nn.Parameter(2.0*np.pi*torch.rand(3))
-
-	# mn = nn.Parameter(torch.Tensor(lla2ecef(locs).mean(0, keepdims = True)))
-	mn = nn.Parameter(torch.Tensor(lla2ecef(center_loc.reshape(1,-1)).mean(0, keepdims = True)))
-
-	optimizer = optim.Adam([vec, mn], lr = 0.001)
-
-	print('\n Optimize the projection coefficients \n')
-
-	n_steps_optimize = 5000
-	for i in range(n_steps_optimize):
-
-		optimizer.zero_grad()
-
-		rbest = rotation_matrix(vec[0], vec[1], vec[2])
-
-		norm_lat = lla2ecef_diff(torch.Tensor(np.concatenate((center_loc, unit_lat), axis = 0)))
-		norm_vert = lla2ecef_diff(torch.Tensor(np.concatenate((center_loc, unit_vert), axis = 0)))
-		norm_lat = torch.norm(norm_lat[1] - norm_lat[0])
-		norm_vert = torch.norm(norm_vert[1] - norm_vert[0])
-
-		center_out = ftrns1(torch.Tensor(center_loc), rbest, mn)
-
-		out_unit_lat = ftrns1(torch.Tensor(unit_lat), rbest, mn)
-		out_unit_lat = (out_unit_lat - center_out)/norm_lat
-
-		out_unit_vert = ftrns1(torch.Tensor(unit_vert), rbest, mn)
-		out_unit_vert = (out_unit_vert - center_out)/norm_vert
-
-		out_locs = ftrns1(torch.Tensor(locs), rbest, mn)
-
-		loss1 = loss_func(trgt_lat, out_unit_lat)
-		loss2 = loss_func(trgt_vert, out_unit_vert)
-		loss3 = loss_func(0.1*trgt_center, 0.1*center_out[0,0:2]) ## Scaling loss down
-
-		loss = loss_coef[0]*loss1 + loss_coef[1]*loss2 + loss_coef[2]*loss3 # + loss_coef[3]*loss4
-		loss.backward()
-		optimizer.step()
-
-		losses.append(loss.item())
-		losses1.append(loss1.item())
-		losses2.append(loss2.item())
-		losses3.append(loss3.item())
-		# losses4.append(loss4.item())
-
-		if np.mod(i, 50) == 0:
-			print('%d %0.8f'%(i, loss.item()))
-
-	## Save approriate files and make extensions for directory
-	print('\n Loss of lat and lon: %0.4f \n'%(loss_coef[0]*loss1 + loss_coef[1]*loss2))
-
-	if (loss_coef[0]*loss1 + loss_coef[1]*loss2) < 1e-1:
-		print('\n Finished converging \n')
-		break
+	## This is prefered fitting method
+	
+	## Unit lat, vertical vectors; point positive y, and outward normal
+	## mean centered stations. Keep the vertical depth, consistent.
+	
+	print('\n Using domain')
+	print('\n Latitude:')
+	print(lat_range)
+	print('\n Longitude:')
+	print(lon_range)
+	
+	fix_nominal_depth = True
+	assert(fix_nominal_depth == True)
+	if fix_nominal_depth == True:
+		nominal_depth = 0.0 ## Can change the target depth projection if prefered
 	else:
-		print('\n Did not converge, restarting (%d) \n'%attempt)
+		nominal_depth = locs[:,2].mean() ## Can change the target depth projection if prefered
+	
+	center_loc = np.array([lat_range[0] + 0.5*np.diff(lat_range)[0], lon_range[0] + 0.5*np.diff(lon_range)[0], nominal_depth]).reshape(1,-1)
+	
+	from scipy.optimize import direct, differential_evolution
+	
+	# os.rename(ext_dir + 'stations.npz', ext_dir + '%s_stations_backup.npz'%name_of_project)
+	
+	soln = optimize_with_direct_method(center_loc)
+	rbest = rotation_matrix_full_precision(soln.x[0], soln.x[1], soln.x[2])
+	mn = soln.x[3::].reshape(1,-1)
 
-# os.rename(ext_dir + 'stations.npz', ext_dir + '%s_stations_backup.npz'%name_of_project)
+else:
 
-rbest = rbest.cpu().detach().numpy()
-mn = mn.cpu().detach().numpy()
+	## Iterative optimization, does not converge as well
+
+	n_attempts = 10
+
+	unit_lat = np.array([0.01, 0.0, 0.0]).reshape(1,-1) + center_loc
+	unit_vert = np.array([0.0, 0.0, 1000.0]).reshape(1,-1) + center_loc
+	
+	norm_lat = torch.Tensor(np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0)), axis = 0), axis = 1))
+	norm_vert = torch.Tensor(np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0)), axis = 0), axis = 1))
+	
+	trgt_lat = torch.Tensor([0,1.0,0]).reshape(1,-1)
+	trgt_vert = torch.Tensor([0,0,1.0]).reshape(1,-1)
+	trgt_depths = torch.Tensor([nominal_depth]) ## Not used
+	trgt_center = torch.zeros(2)
+	
+	loss_func = nn.MSELoss()
+	
+	losses = []
+	losses1, losses2, losses3, losses4 = [], [], [], []
+	loss_coef = [1,1,1,0]
+	
+	## Based on initial conditions, sometimes this converges to a projection plane that is flipped polarity.
+	## E.g., "up" in the lat-lon domain is "down" in the Cartesian domain, and vice versa.
+	## So try a few attempts to make sure it has the correct polarity.
+	for attempt in range(n_attempts):
+	
+		vec = nn.Parameter(2.0*np.pi*torch.rand(3))
+	
+		# mn = nn.Parameter(torch.Tensor(lla2ecef(locs).mean(0, keepdims = True)))
+		mn = nn.Parameter(torch.Tensor(lla2ecef(center_loc.reshape(1,-1)).mean(0, keepdims = True)))
+	
+		optimizer = optim.Adam([vec, mn], lr = 0.001)
+	
+		print('\n Optimize the projection coefficients \n')
+	
+		n_steps_optimize = 5000
+		for i in range(n_steps_optimize):
+	
+			optimizer.zero_grad()
+	
+			rbest = rotation_matrix(vec[0], vec[1], vec[2])
+	
+			norm_lat = lla2ecef_diff(torch.Tensor(np.concatenate((center_loc, unit_lat), axis = 0)))
+			norm_vert = lla2ecef_diff(torch.Tensor(np.concatenate((center_loc, unit_vert), axis = 0)))
+			norm_lat = torch.norm(norm_lat[1] - norm_lat[0])
+			norm_vert = torch.norm(norm_vert[1] - norm_vert[0])
+	
+			center_out = ftrns1(torch.Tensor(center_loc), rbest, mn)
+	
+			out_unit_lat = ftrns1(torch.Tensor(unit_lat), rbest, mn)
+			out_unit_lat = (out_unit_lat - center_out)/norm_lat
+	
+			out_unit_vert = ftrns1(torch.Tensor(unit_vert), rbest, mn)
+			out_unit_vert = (out_unit_vert - center_out)/norm_vert
+	
+			out_locs = ftrns1(torch.Tensor(locs), rbest, mn)
+	
+			loss1 = loss_func(trgt_lat, out_unit_lat)
+			loss2 = loss_func(trgt_vert, out_unit_vert)
+			loss3 = loss_func(0.1*trgt_center, 0.1*center_out[0,0:2]) ## Scaling loss down
+	
+			loss = loss_coef[0]*loss1 + loss_coef[1]*loss2 + loss_coef[2]*loss3 # + loss_coef[3]*loss4
+			loss.backward()
+			optimizer.step()
+	
+			losses.append(loss.item())
+			losses1.append(loss1.item())
+			losses2.append(loss2.item())
+			losses3.append(loss3.item())
+			# losses4.append(loss4.item())
+	
+			if np.mod(i, 50) == 0:
+				print('%d %0.8f'%(i, loss.item()))
+	
+		## Save approriate files and make extensions for directory
+		print('\n Loss of lat and lon: %0.4f \n'%(loss_coef[0]*loss1 + loss_coef[1]*loss2))
+	
+		if (loss_coef[0]*loss1 + loss_coef[1]*loss2) < 1e-1:
+			print('\n Finished converging \n')
+			break
+		else:
+			print('\n Did not converge, restarting (%d) \n'%attempt)
+	
+	# os.rename(ext_dir + 'stations.npz', ext_dir + '%s_stations_backup.npz'%name_of_project)
+	
+	rbest = rbest.cpu().detach().numpy()
+	mn = mn.cpu().detach().numpy()
 
 if use_pretrained_model is not None:
 	shutil.move(ext_dir + 'Pretrained/trained_gnn_model_step_%d_ver_%d.h5'%(20000, use_pretrained_model), ext_dir + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, 20000, 1))
@@ -270,7 +368,6 @@ if use_pretrained_model is not None:
 else:
 	corr1 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
 	corr2 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
-
 
 np.savez_compressed(ext_dir + '%s_stations.npz'%name_of_project, locs = locs, stas = stas, rbest = rbest, mn = mn)
 
@@ -495,8 +592,18 @@ def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps 
 
 	return x_grids # , x_grids_edges
 
-ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
-ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)  # invert ftrns1
+if use_spherical == True:
+
+	earth_radius = 6371e3
+	ftrns1 = lambda x: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
+	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius)  # invert ftrns1
+
+else:
+
+	earth_radius = 6378137.0	
+	ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
+	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)  # invert ftrns1
+	
 
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
