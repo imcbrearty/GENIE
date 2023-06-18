@@ -144,7 +144,7 @@ def rotation_matrix_full_precision(a, b, c):
 
 	return rot
 
-def optimize_with_direct_method(center_loc, nominal_depth = 0.0):
+def optimize_with_differential_evolution(center_loc, nominal_depth = 0.0):
 
 	loss_coef = [1,1,1.0,0]
 
@@ -251,7 +251,7 @@ if use_differetial_evolution == True:
 	
 	# os.rename(ext_dir + 'stations.npz', ext_dir + '%s_stations_backup.npz'%name_of_project)
 	
-	soln = optimize_with_direct_method(center_loc)
+	soln = optimize_with_differential_evolution(center_loc)
 	rbest = rotation_matrix_full_precision(soln.x[0], soln.x[1], soln.x[2])
 	mn = soln.x[3::].reshape(1,-1)
 
