@@ -7,7 +7,6 @@ from torch import optim, nn
 from torch_cluster import knn ## Note torch_cluster should be installed automatically with pytorch geometric
 import shutil
 from scipy.spatial import cKDTree
-from scipy.optimize import differential_evolution
 
 ## User: Input stations and spatial region
 ## (must have station and region files at
@@ -248,7 +247,7 @@ if use_differetial_evolution == True:
 	
 	center_loc = np.array([lat_range[0] + 0.5*np.diff(lat_range)[0], lon_range[0] + 0.5*np.diff(lon_range)[0], nominal_depth]).reshape(1,-1)
 	
-	from scipy.optimize import direct, differential_evolution
+	from scipy.optimize import differential_evolution
 	
 	# os.rename(ext_dir + 'stations.npz', ext_dir + '%s_stations_backup.npz'%name_of_project)
 	
