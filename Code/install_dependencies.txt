@@ -17,6 +17,7 @@ pip install -U scikit-learn
 pip install networkx
 pip install obspy
 pip install cvxpy
+pip install h5py
 
 
 ## If going to run calculate_travel_times.py, then need to install skfmm
