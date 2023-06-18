@@ -224,8 +224,8 @@ else:
 center_loc = np.array([lat_range[0] + 0.5*np.diff(lat_range)[0], lon_range[0] + 0.5*np.diff(lon_range)[0], nominal_depth]).reshape(1,-1)
 # center_loc = locs.mean(0, keepdims = True)
 
-use_differetial_evolution = True
-if use_differetial_evolution == True:
+use_differential_evolution = True
+if use_differential_evolution == True:
 
 	## This is prefered fitting method
 	
