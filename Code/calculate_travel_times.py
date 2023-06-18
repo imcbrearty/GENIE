@@ -212,12 +212,24 @@ lat_grid = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg)
 lon_grid = np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
 depth_grid = np.arange(depth_range[0], depth_range[1] + dx_depth, dx_depth)
 
-tree = cKDTree(depths.reshape(-1,1))
-ip_query = tree.query(depth_grid.reshape(-1,1))[1]
+use_interp_for_velocity_model = True
+if use_interp_for_velocity_model == True:
 
-Vp_profile = vp[ip_query]
-Vs_profile = vs[ip_query]
+	## Velocity model must be specified at 
+	## increasing depth values
+	assert(np.diff(depths).min() > 0)
 
+	Vp_profile = interp(depth_grid, depths, vp)
+	Vs_profile = interp(depth_grid, depths, vs)
+
+else:
+
+	tree = cKDTree(depths.reshape(-1,1))
+	ip_query = tree.query(depth_grid.reshape(-1,1))[1]
+
+	Vp_profile = vp[ip_query]
+	Vs_profile = vs[ip_query]
+	
 replace_zero = True
 
 x11, x12, x13 = np.meshgrid(lat_grid, lon_grid, depth_grid)
