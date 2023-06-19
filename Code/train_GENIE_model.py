@@ -210,15 +210,17 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	amp_thresh = 1.0
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
-	use_updated_distance_threshold = True
+	use_uniform_distance_threshold = False
 	## This previously sampled a skewed distribution by default, not it samples a uniform
 	## distribution of the maximum source-reciever distances allowed for each event.
-	if use_updated_distance_threshold == True:
+	if use_uniform_distance_threshold == True:
 		dist_thresh = np.random.rand(n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
 	else:
-		dist_thresh = -1.0*np.log(np.sqrt(np.random.rand(n_src))) ## Sort of strange dist threshold set!
-		dist_thresh = (dist_thresh*dist_range[1]/10.0 + dist_range[0]).reshape(-1,1)
-
+		## Use beta distribution to generate more samples with smaller moveouts
+		# dist_thresh = -1.0*np.log(np.sqrt(np.random.rand(n_src))) ## Sort of strange dist threshold set!
+		# dist_thresh = (dist_thresh*dist_range[1]/10.0 + dist_range[0]).reshape(-1,1)
+		dist_thresh = scipy.stats.beta(2,5).rvs(size = n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
+		
 	# create different distance dependent thresholds.
 	dist_thresh_p = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None] # Increased sig from 20e3 to 25e3 # Decreased to 10 km
 	dist_thresh_s = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None]
