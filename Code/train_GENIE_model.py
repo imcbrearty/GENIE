@@ -214,7 +214,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	## This previously sampled a skewed distribution by default, not it samples a uniform
 	## distribution of the maximum source-reciever distances allowed for each event.
 	if use_updated_distance_threshold == True:
-		dist_thresh = np.random.rand(n_src)*(dist_range[1] - dist_range[0]) + dist_range[0]
+		dist_thresh = np.random.rand(n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
 	else:
 		dist_thresh = -1.0*np.log(np.sqrt(np.random.rand(n_src))) ## Sort of strange dist threshold set!
 		dist_thresh = (dist_thresh*dist_range[1]/10.0 + dist_range[0]).reshape(-1,1)
