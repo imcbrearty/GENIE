@@ -141,7 +141,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	spc_thresh_rand = 20e3
 	min_sta_arrival = 4
 	coda_rate = 0.035 # 5 percent arrival have code. Probably more than this? Increased from 0.035.
-	coda_win = np.array([0, 25.0]) # coda occurs within 0 to 15 s after arrival (should be less?) # Increased to 25, from 20.0
+	coda_win = np.array([0, 25.0]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
 	max_num_spikes = 80
 
 	assert(np.floor(n_sta_range[0]*locs.shape[0]) > k_sta_edges)
@@ -209,8 +209,15 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	amp_thresh = 1.0
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
-	dist_thresh = -1.0*np.log(np.sqrt(np.random.rand(n_src))) ## Sort of strange dist threshold set!
-	dist_thresh = (dist_thresh*dist_range[1]/10.0 + dist_range[0]).reshape(-1,1)
+
+	use_updated_distance_threshold = True
+	## This previously sampled a skewed distribution by default, not it samples a uniform
+	## distribution of the maximum source-reciever distances allowed for each event.
+	if use_updated_distance_threshold == True:
+		dist_thresh = np.random.rand(n_src)*(dist_range[1] - dist_range[0]) + dist_range[0]
+	else:
+		dist_thresh = -1.0*np.log(np.sqrt(np.random.rand(n_src))) ## Sort of strange dist threshold set!
+		dist_thresh = (dist_thresh*dist_range[1]/10.0 + dist_range[0]).reshape(-1,1)
 
 	# create different distance dependent thresholds.
 	dist_thresh_p = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None] # Increased sig from 20e3 to 25e3 # Decreased to 10 km
