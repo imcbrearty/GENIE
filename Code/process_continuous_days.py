@@ -51,6 +51,9 @@ import glob
 ## sbatch or a bash script can call this file for a parallel set of cpu threads
 ## (each for a different n, or, day).
 
+## Need to update how extract_inputs_from_data_fixed_grids_with_phase_type uses a variable t_win parammeter, 
+## and also adding inputs of training_params, graph_params, pred_params
+
 t0_init = UTCDateTime(2019, 1, 1) ## Choose this day, add (day_select), or (day_select + offset_select*offset_increment)
 
 argvs = sys.argv
