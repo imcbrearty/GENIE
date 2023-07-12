@@ -245,18 +245,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	arrivals = np.delete(arrivals, idel, axis = 0)
 	n_events = len(src_times)
 
-	source_tree_indices = cKDTree(arrivals[:,2].reshape(-1,1))
-	lp = source_tree_indices.query_ball_point(np.arange(n_events).reshape(-1,1), r = 0)
-	lp_backup = [lp[j] for j in range(len(lp))]
-	n_unique_station_counts = np.array([len(np.unique(arrivals[lp[j],1])) for j in range(n_events)])
-	active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] # subset of sources
-	non_active_sources = np.delete(np.arange(n_events), active_sources, axis = 0)
-	src_positions_active = src_positions[active_sources]
-	src_times_active = src_times[active_sources]
-	src_magnitude_active = src_magnitude[active_sources] ## Not currently used
-
-	inside_interior = ((src_positions[:,0] < lat_range[1])*(src_positions[:,0] > lat_range[0])*(src_positions[:,1] < lon_range[1])*(src_positions[:,1] > lon_range[0]))
-
 	icoda = np.where(np.random.rand(arrivals.shape[0]) < coda_rate)[0]
 	if len(icoda) > 0:
 		false_coda_arrivals = np.random.rand(len(icoda))*(coda_win[1] - coda_win[0]) + coda_win[0] + arrivals[icoda,0] + arrivals[icoda,3]
@@ -285,9 +273,36 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		false_arrivals_spikes = np.concatenate((sta_time_spikes.reshape(-1,1), sta_ind_spikes.reshape(-1,1), -1.0*np.ones((len(sta_ind_spikes),1)), np.zeros((len(sta_ind_spikes),1)), -1.0*np.ones((len(sta_ind_spikes),1))), axis = 1)
 		arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) ## Concatenate on spikes
 
-	iz = np.where(arrivals[:,4] >= 0)[0]
-	arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 
+	use_stable_association_labels = True
+	## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
+	if use_stable_association_labels == True:
+		thresh_noise_max = 1.5
+		iz = np.where(arrivals[:,4] >= 0)[0]
+		noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values
+		iexcess_noise = np.where(np.abs(noise_values) > thresh_noise_max*sig_t*arrivals[iz,0])[0]
+		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
+			arrivals[iz[iexcess_noise],2] = -1
+			arrivals[iz[iexcess_noise],3] = 0
+			arrivals[iz[iexcess_noise],4] = -1
+	else: ## This was the original version
+		iz = np.where(arrivals[:,4] >= 0)[0]
+		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+
+	## Check which sources are active
+	source_tree_indices = cKDTree(arrivals[:,2].reshape(-1,1))
+	lp = source_tree_indices.query_ball_point(np.arange(n_events).reshape(-1,1), r = 0)
+	lp_backup = [lp[j] for j in range(len(lp))]
+	n_unique_station_counts = np.array([len(np.unique(arrivals[lp[j],1])) for j in range(n_events)])
+	active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] # subset of sources
+	non_active_sources = np.delete(np.arange(n_events), active_sources, axis = 0)
+	src_positions_active = src_positions[active_sources]
+	src_times_active = src_times[active_sources]
+	src_magnitude_active = src_magnitude[active_sources] ## Not currently used
+
+	inside_interior = ((src_positions[:,0] < lat_range[1])*(src_positions[:,0] > lat_range[0])*(src_positions[:,1] < lon_range[1])*(src_positions[:,1] > lon_range[0]))
+	
 	iwhere_real = np.where(arrivals[:,-1] > -1)[0]
 	iwhere_false = np.delete(np.arange(arrivals.shape[0]), iwhere_real)
 	phase_observed = np.copy(arrivals[:,-1]).astype('int')
