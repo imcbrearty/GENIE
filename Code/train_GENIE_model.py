@@ -274,7 +274,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) ## Concatenate on spikes
 
 
-	use_stable_association_labels = False ## There might be a possible bug when using this, when creating association labels
+	use_stable_association_labels = True
 	## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
 	if use_stable_association_labels == True:
 		thresh_noise_max = 1.5
