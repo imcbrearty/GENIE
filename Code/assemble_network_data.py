@@ -203,8 +203,8 @@ if use_spherical == True:
 else:
 
 	earth_radius = 6378137.0
-	ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef_diff(x) - mn).T).T # just subtract mean
-	ftrns2 = lambda x, rbest, mn: ecef2lla_diff((rbest.T @ x.T).T + mn) # just subtract mean
+	ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef(x) - mn).T).T # just subtract mean
+	ftrns2 = lambda x, rbest, mn: ecef2lla((rbest.T @ x.T).T + mn) # just subtract mean
 
 ## Unit lat, vertical vectors; point positive y, and outward normal
 ## mean centered stations. Keep the vertical depth, consistent.
@@ -257,6 +257,20 @@ if use_differential_evolution == True:
 
 else:
 
+	## If optimizing projection coefficients with this option, need 
+	## ftrns1 and ftrns2 to accept torch Tensors instead of numpy arrays
+	if use_spherical == True:
+
+		earth_radius = 6371e3
+		ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef_diff(x, e = 0.0, a = earth_radius) - mn).T).T # just subtract mean
+		ftrns2 = lambda x, rbest, mn: ecef2lla_diff((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius) # just subtract mean
+	
+	else:
+	
+		earth_radius = 6378137.0
+		ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef_diff(x) - mn).T).T # just subtract mean
+		ftrns2 = lambda x, rbest, mn: ecef2lla_diff((rbest.T @ x.T).T + mn) # just subtract mean
+	
 	## Iterative optimization, does not converge as well
 
 	n_attempts = 10
