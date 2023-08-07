@@ -934,7 +934,7 @@ def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut 
 	elif '/' in path_to_file:
 		z = np.load(path_to_file + '/Picks/%d/%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
 
-	yr, mn, dy = z['day']
+	yr, mn, dy = date[0], date[1], date[2]
 	t0 = UTCDateTime(yr, mn, dy)
 	P, sta_names_use, sta_ind_use = z['P'], z['sta_names_use'], z['sta_ind_use']
 	
