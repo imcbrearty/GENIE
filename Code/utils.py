@@ -243,3 +243,140 @@ def kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x,
 	ibest = np.argmin(Losses)
 
 	return V_results[ibest], V_results, Losses, losses, rz
+
+
+
+### TRAVEL TIMES ###
+
+def interp_3D_return_function_adaptive(X, Xmin, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
+
+	nsta = Tp.shape[1]
+	i1 = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1], [1,1,0], [1,0,1], [0,1,1], [1,1,1]])
+	x10, x20, x30 = Xmin
+	Xv = X - np.array([x10,x20,x30])[None,:] 
+
+	def evaluate_func(y, x):
+
+		xv = x - np.array([x10,x20,x30])[None,:]
+		nx = np.shape(x)[0] # nx is the number of query points in x
+		nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
+		nz_vals1 = np.minimum(nz_vals, N - 2)
+
+		nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
+		val_p = Tp[nz,:]
+		val_s = Ts[nz,:]
+
+		x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
+		x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
+
+		val_p = np.sum(val_p*x0[:,:,None], axis = 0)
+		val_s = np.sum(val_s*x0[:,:,None], axis = 0)
+
+		return np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)
+
+	return lambda y, x: evaluate_func(y, ftrns1(x))
+
+def interp_1D_velocity_model_to_3D_travel_times(X, locs, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
+
+	i1 = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1], [1,1,0], [1,0,1], [0,1,1], [1,1,1]])
+	x10, x20, x30 = Xmin
+	Xv = X - np.array([x10,x20,x30])[None,:]
+	depth_grid = np.copy(locs[:,2]).reshape(1,-1)
+	mask = np.array([1.0,1.0,0.0]).reshape(1,-1)
+
+	print('Check way X0 is used')
+
+	def evaluate_func(y, x):
+
+		y, x = y.cpu().detach().numpy(), x.cpu().detach().numpy()
+
+		ind_depth = np.tile(np.argmin(np.abs(y[:,2].reshape(-1,1) - depth_grid), axis = 1), x.shape[0])
+		rel_pos = (np.expand_dims(x, axis = 1) - np.expand_dims(y*mask, axis = 0)).reshape(-1,3)
+		rel_pos[:,0:2] = np.abs(rel_pos[:,0:2]) ## Postive relative pos, relative to X0.
+		x_relative = X0 + rel_pos
+
+		xv = x_relative - Xmin[None,:]
+		nx = np.shape(rel_pos)[0] # nx is the number of query points in x
+		nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
+		nz_vals1 = np.minimum(nz_vals, N - 2)
+
+		nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
+
+		val_p = Tp[nz,ind_depth]
+		val_s = Ts[nz,ind_depth]
+
+		x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
+		x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
+
+		val_p = np.sum(val_p*x0, axis = 0).reshape(-1, y.shape[0])
+		val_s = np.sum(val_s*x0, axis = 0).reshape(-1, y.shape[0])
+
+		return torch.Tensor(np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)).to(device)
+
+	return lambda y, x: evaluate_func(y, x)
+
+
+### PREP INPUTS ###
+def assemble_time_pointers_for_stations(trv_out, dt = 1.0, k = 10, win = 10.0, tbuffer = 10.0):
+
+	n_temp, n_sta = trv_out.shape[0:2]
+	dt_partition = np.arange(-win, win + trv_out.max() + dt + tbuffer, dt)
+
+	edges_p = []
+	edges_s = []
+	for i in range(n_sta):
+		tree_p = cKDTree(trv_out[:,i,0][:,np.newaxis])
+		tree_s = cKDTree(trv_out[:,i,1][:,np.newaxis])
+		q_p, ip_p = tree_p.query(dt_partition[:,np.newaxis], k = k)
+		q_s, ip_s = tree_s.query(dt_partition[:,np.newaxis], k = k)
+		# ip must project to Lg indices.
+		edges_p.append((ip_p*n_sta + i).reshape(-1)) # Lg indices are each source x n_sta + sta_ind. The reshape places each subsequence of k, per time step, per station.
+		edges_s.append((ip_s*n_sta + i).reshape(-1)) # Lg indices are each source x n_sta + sta_ind. The reshape places each subsequence of k, per time step, per station.
+		# Overall, each station, each time step, each k sets of edges.
+	edges_p = np.hstack(edges_p)
+	edges_s = np.hstack(edges_s)
+
+	return edges_p, edges_s, dt_partition
+
+def assemble_time_pointers_for_stations_multiple_grids(trv_out, max_t, dt = 1.0, k = 10, win = 10.0):
+
+	n_temp, n_sta = trv_out.shape[0:2]
+	dt_partition = np.arange(-win, win + max_t + dt, dt)
+
+	edges_p = []
+	edges_s = []
+	for i in range(n_sta):
+		tree_p = cKDTree(trv_out[:,i,0][:,np.newaxis])
+		tree_s = cKDTree(trv_out[:,i,1][:,np.newaxis])
+		q_p, ip_p = tree_p.query(dt_partition[:,np.newaxis], k = k)
+		q_s, ip_s = tree_s.query(dt_partition[:,np.newaxis], k = k)
+		# ip must project to Lg indices.
+		edges_p.append((ip_p*n_sta + i).reshape(-1))
+		edges_s.append((ip_s*n_sta + i).reshape(-1))
+		# Overall, each station, each time step, each k sets of edges.
+	edges_p = np.hstack(edges_p)
+	edges_s = np.hstack(edges_s)
+
+	return edges_p, edges_s, dt_partition
+
+
+## ACTUAL UTILS
+def remove_mean(x, axis):
+	
+	return x - np.nanmean(x, axis = axis, keepdims = True)
+
+## From https://stackoverflow.com/questions/16750618/whats-an-efficient-way-to-find-if-a-point-lies-in-the-convex-hull-of-a-point-cl
+def in_hull(p, hull):
+	"""
+	Test if points in `p` are in `hull`
+	`p` should be a `NxK` coordinates of `N` points in `K` dimensions
+	`hull` is either a scipy.spatial.Delaunay object or the `MxK` array of the 
+	coordinates of `M` points in `K`dimensions for which Delaunay triangulation
+	will be computed
+	"""
+	from scipy.spatial import Delaunay
+	if not isinstance(hull,Delaunay):
+	    hull = Delaunay(hull)
+
+	return hull.find_simplex(p)>=0
+

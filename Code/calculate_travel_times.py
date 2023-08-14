@@ -22,6 +22,7 @@ from numpy import interp
 # import netCDF4 as nc
 import shutil
 import pathlib
+from utils import *
 
 ## Initilize
 import os
@@ -33,50 +34,6 @@ depth_steps = np.arange(-500.0, 4000.0 + 150, 150) # Elevation steps to compute 
 ## (These are reference points for stations; can be a regular grid, and each station looks up the
 ## travel times with respect to these values. It is discretized (nearest-neighber) rather than continous.
 
-def lla2ecef(p, a = 6378137.0, e = 8.18191908426215e-2): # 0.0818191908426215, previous 8.1819190842622e-2
-	p = p.copy().astype('float')
-	p[:,0:2] = p[:,0:2]*np.array([np.pi/180.0, np.pi/180.0]).reshape(1,-1)
-	N = a/np.sqrt(1 - (e**2)*np.sin(p[:,0])**2)
-    # results:
-	x = (N + p[:,2])*np.cos(p[:,0])*np.cos(p[:,1])
-	y = (N + p[:,2])*np.cos(p[:,0])*np.sin(p[:,1])
-	z = ((1-e**2)*N + p[:,2])*np.sin(p[:,0])
-	return np.concatenate((x[:,None],y[:,None],z[:,None]), axis = 1)
-
-def ecef2lla(x, a = 6378137.0, e = 8.18191908426215e-2):
-	x = x.copy().astype('float')
-	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
-	b = np.sqrt((a**2)*(1 - e**2))
-	ep = np.sqrt((a**2 - b**2)/(b**2))
-	p = np.sqrt(x[:,0]**2 + x[:,1]**2)
-	th = np.arctan2(a*x[:,2], b*p)
-	lon = np.arctan2(x[:,1], x[:,0])
-	lat = np.arctan2((x[:,2] + (ep**2)*b*(np.sin(th)**3)), (p - (e**2)*a*(np.cos(th)**3)))
-	N = a/np.sqrt(1 - (e**2)*(np.sin(lat)**2))
-	alt = p/np.cos(lat) - N
-	# lon = np.mod(lon, 2.0*np.pi) # don't use!
-	k = (np.abs(x[:,0]) < 1) & (np.abs(x[:,1]) < 1)
-	alt[k] = np.abs(x[k,2]) - b
-	return np.concatenate((180.0*lat[:,None]/np.pi, 180.0*lon[:,None]/np.pi, alt[:,None]), axis = 1)
-
-def remove_mean(x, axis):
-	
-	return x - np.nanmean(x, axis = axis, keepdims = True)
-
-## From https://stackoverflow.com/questions/16750618/whats-an-efficient-way-to-find-if-a-point-lies-in-the-convex-hull-of-a-point-cl
-def in_hull(p, hull):
-	"""
-	Test if points in `p` are in `hull`
-	`p` should be a `NxK` coordinates of `N` points in `K` dimensions
-	`hull` is either a scipy.spatial.Delaunay object or the `MxK` array of the 
-	coordinates of `M` points in `K`dimensions for which Delaunay triangulation
-	will be computed
-	"""
-	from scipy.spatial import Delaunay
-	if not isinstance(hull,Delaunay):
-	    hull = Delaunay(hull)
-
-	return hull.find_simplex(p)>=0
 
 def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores = 10):
 
@@ -111,33 +68,7 @@ def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_core
 
 	return tp_times, ts_times
 
-def interp_3D_return_function_adaptive(X, Xmin, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
 
-	nsta = Tp.shape[1]
-	i1 = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1], [1,1,0], [1,0,1], [0,1,1], [1,1,1]])
-	x10, x20, x30 = Xmin
-	Xv = X - np.array([x10,x20,x30])[None,:] 
-
-	def evaluate_func(y, x):
-
-		xv = x - np.array([x10,x20,x30])[None,:]
-		nx = np.shape(x)[0] # nx is the number of query points in x
-		nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
-		nz_vals1 = np.minimum(nz_vals, N - 2)
-
-		nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
-		val_p = Tp[nz,:]
-		val_s = Ts[nz,:]
-
-		x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
-		x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
-
-		val_p = np.sum(val_p*x0[:,:,None], axis = 0)
-		val_s = np.sum(val_s*x0[:,:,None], axis = 0)
-
-		return np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)
-
-	return lambda y, x: evaluate_func(y, ftrns1(x))
 
 ## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
 path_to_file = str(pathlib.Path().absolute())
