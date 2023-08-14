@@ -13,7 +13,6 @@ import time
 from joblib import Parallel, delayed
 import multiprocessing
 import skfmm
-import h5py
 from joblib import Parallel, delayed
 from numpy.matlib import repmat
 from scipy.interpolate import RegularGridInterpolator
@@ -21,8 +20,6 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.interpolate import interp1d
 from numpy import interp
 # import netCDF4 as nc
-import sys
-import glob
 import shutil
 import pathlib
 

@@ -4,7 +4,6 @@ from matplotlib import pyplot as plt
 import os
 import torch
 from torch import optim, nn
-from torch_cluster import knn ## Note torch_cluster should be installed automatically with pytorch geometric
 import shutil
 from scipy.spatial import cKDTree
 
@@ -151,9 +150,11 @@ def optimize_with_differential_evolution(center_loc, nominal_depth = 0.0):
 	unit_lat = np.array([0.001, 0.0, 0.0]).reshape(1,-1) + center_loc
 	unit_vert = np.array([0.0, 0.0, 10.0]).reshape(1,-1) + center_loc
 
+	### LOOK HERE ###
 	norm_lat = np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0)), axis = 0), axis = 1)
 	norm_vert = np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0)), axis = 0), axis = 1)
-
+	### LOOK HERE ###
+	
 	trgt_lat = np.array([0,1.0,0]).reshape(1,-1)
 	trgt_vert = np.array([0,0,1.0]).reshape(1,-1)
 	trgt_depths = np.array([nominal_depth]) ## Not used
