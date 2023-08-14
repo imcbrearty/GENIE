@@ -245,7 +245,45 @@ def kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x,
 
 	return V_results[ibest], V_results, Losses, losses, rz
 
+def kmeans_packing_sampling_points(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 1000, n_sim = 3, lr = 0.01):
 
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
+
+			tree = cKDTree(ftrns1(v))
+			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
+			q, ip = tree.query(ftrns1(x))
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
+		q, ip = tree.query(x)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return V_results[ibest], V_results, Losses, losses, rz
 
 ### TRAVEL TIMES ###
 
