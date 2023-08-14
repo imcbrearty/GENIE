@@ -87,7 +87,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	scale_x = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 	offset_x = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
 	n_sta = locs.shape[0]
-	locs_tensor = torch.Tensor(locs).to(device)
 
 	t_slice = np.arange(-t_win/2.0, t_win/2.0 + 1.0, 1.0)
 
@@ -96,7 +95,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	tvec_kernel = np.exp(-(tvec**2)/(2.0*(tscale**2)))
 
 	p_rate_events = fftconvolve(np.random.randn(2*locs.shape[0] + 3, len(tsteps)), tvec_kernel.reshape(1,-1).repeat(2*locs.shape[0] + 3,0), 'same', axes = 1)
-	c_cor = (p_rate_events@p_rate_events.T) ## Not slow!
 	global_event_rate, global_miss_rate, global_false_rate = p_rate_events[0:3,:]
 
 	# Process global event rate, to physical units.
@@ -142,10 +140,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		sample_random_depths = -sample_random_depths*(scale_x[0,2] - 2e3) + (offset_x[0,2] + scale_x[0,2] - 2e3) # Project along axis, going negative direction. Removing 2e3 on edges.
 		src_positions[:,2] = sample_random_depths
 
-	m1 = [0.5761163, -0.21916288]
-	m2 = 1.15
-
-	amp_thresh = 1.0
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
 	use_uniform_distance_threshold = False
@@ -234,10 +228,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	lp_backup = [lp[j] for j in range(len(lp))]
 	n_unique_station_counts = np.array([len(np.unique(arrivals[lp[j],1])) for j in range(n_events)])
 	active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] # subset of sources
-	non_active_sources = np.delete(np.arange(n_events), active_sources, axis = 0)
-	src_positions_active = src_positions[active_sources]
 	src_times_active = src_times[active_sources]
-	src_magnitude_active = src_magnitude[active_sources] ## Not currently used
 
 	inside_interior = ((src_positions[:,0] < lat_range[1])*(src_positions[:,0] > lat_range[0])*(src_positions[:,1] < lon_range[1])*(src_positions[:,1] > lon_range[0]))
 	
@@ -253,9 +244,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		n_switch = int(np.random.rand()*(0.2*len(iwhere_real))) # switch up to 20% phases
 		iflip = np.random.choice(iwhere_real, size = n_switch, replace = False)
 		phase_observed[iflip] = np.mod(phase_observed[iflip] + 1, 2)
-
-	scale_vec = np.array([1,2*t_win]).reshape(1,-1)
-
 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
 
 	if use_sources == False:
@@ -277,7 +265,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	tree_src_times_all = cKDTree(src_times[:,np.newaxis])
 	tree_src_times = cKDTree(src_times_active[:,np.newaxis])
 	lp_src_times_all = tree_src_times_all.query_ball_point(time_samples[:,np.newaxis], r = 3.0*src_t_kernel)
-	lp_src_times = tree_src_times.query_ball_point(time_samples[:,np.newaxis], r = 3.0*src_t_kernel)
 
 	st = time.time()
 	tree = cKDTree(arrivals[:,0][:,None])
@@ -303,8 +290,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		fixed_subnetworks_flag = 0		
 
 	active_sources_per_slice_l = []
-	src_positions_active_per_slice_l = []
-	src_times_active_per_slice_l = []
 
 	for i in range(n_batch):
 		i0 = np.random.randint(0, high = len(x_grids))
@@ -386,7 +371,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
 	rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
 
-	time_vec_slice = np.arange(k_time_edges)
 
 	Inpts = []
 	Masks = []
@@ -411,7 +395,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	lp_phases = []
 	lp_meta = []
 	lp_srcs = []
-	lp_srcs_active = []
 
 	thresh_mask = 0.01
 	for i in range(n_batch):
@@ -462,7 +445,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			perm_vec_meta = np.arange(ind_src_unique.max() + 1)
 			perm_vec_meta[ind_src_unique] = np.arange(len(ind_src_unique))
 			meta = np.concatenate((meta, -1.0*np.ones((meta.shape[0],1))), axis = 1)
-			# ifind = np.where(meta[:,2] > -1.0)[0] ## Need to find picks with a source index inside the active_sources_per_slice
 			ifind = np.where([meta[j,2] in ind_src_unique for j in range(meta.shape[0])])[0]
 			meta[ifind,-1] = perm_vec_meta[meta[ifind,2].astype('int')] # save pointer to active source, for these picks (in new, local index, of subset of sources)
 		else:
@@ -500,7 +482,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		one_vec = np.repeat(sta_select*np.ones(n_sta_slice), k_time_edges*len_dt).astype('int') # also used elsewhere
 		A_edges_time_p = (n_sta_slice*(A_edges_time_p - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
 		A_edges_time_s = (n_sta_slice*(A_edges_time_s - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
-		# print('permute indices 1')
+
 		assert(A_edges_time_p.max() < n_spc*n_sta_slice) ## Can remove these, after a bit of testing.
 		assert(A_edges_time_s.max() < n_spc*n_sta_slice)
 
