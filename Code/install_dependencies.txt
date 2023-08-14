@@ -4,7 +4,7 @@
 
 ## Suggested install routine
 
-conda create env -n Geometric python=3.10 numpy scipy matplotlib pip ipython
+conda create -n Geometric python=3.10 numpy scipy matplotlib pip ipython
 conda activate Geometric
 conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
 ## (note: use your correct cuda version in place of "11.8" above; run nvcc -V on command line to check)
