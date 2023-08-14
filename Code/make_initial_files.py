@@ -52,9 +52,9 @@ np.savez_compressed(
     lat_range=lat_range,
     lon_range=lon_range,
     depth_range=depth_range,
-    deg_pad=config['deg_pad'],
-    num_grids=config['num_grids'],
-    n_spatial_nodes=config['n_spatial_nodes'],
+    deg_pad=config['degree_padding'],
+    num_grids=config['number_of_grids'],
+    n_spatial_nodes=config['number_of_spatial_nodes'],
     years=years,
     load_initial_files=config['load_initial_files'],
     use_pretrained_model=config['use_pretrained_model'])
