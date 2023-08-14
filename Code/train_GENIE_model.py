@@ -6,7 +6,6 @@ import numpy as np
 from matplotlib import pyplot as plt
 import torch
 from torch import nn, optim
-import h5py
 from sklearn.metrics import pairwise_distances as pd
 from scipy.signal import fftconvolve
 from scipy.spatial import cKDTree
@@ -19,7 +18,6 @@ from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from torch_scatter import scatter
 from numpy.matlib import repmat
-import itertools
 import pathlib
 
 from utils import *
