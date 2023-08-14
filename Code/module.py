@@ -417,3 +417,77 @@ class GCN_Detection_Network_extended(nn.Module):
 		arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
 
 		return y, x, arv_p, arv_s
+	
+
+
+
+
+	#### EXTRA
+	class TrvNet(nn.Module):
+
+	def __init__(self, offset, scale, tscale, n_dims = 3, n_phase = 2, n_hidden = 120, n_hidden1 = 50, device = 'cpu'):
+
+		super(TrvNet, self).__init__()
+
+		self.offset = torch.Tensor(offset).reshape(1,-1).to(device)
+		self.scale = torch.Tensor(scale).reshape(1,-1).to(device)
+		self.tscale = tscale
+		self.n_phase = n_phase
+
+		self.fc_x = nn.Linear(n_dims, n_hidden)
+		self.fc1_x = nn.Linear(n_hidden, n_hidden1)
+		self.fc_y = nn.Linear(n_dims, n_hidden)
+		self.fc1_y = nn.Linear(n_hidden, n_hidden1)
+		self.embed = nn.Linear(n_dims, 20)
+
+		self.merged1 = nn.Linear(2*n_hidden1 + 20, n_hidden1)
+		self.merged2 = nn.Linear(n_hidden1, n_phase)
+
+		self.activation1 = nn.PReLU()
+		self.activation2 = nn.PReLU()
+		self.activation3 = nn.PReLU()
+		self.activation4 = nn.PReLU()
+		self.activation5 = nn.PReLU()
+		self.activation6 = nn.PReLU()
+
+	def forward(self, y, x):
+
+		n_src, n_sta = x.shape[0], y.shape[0]
+		x_scaled = (x - self.offset)/self.scale
+		y_scaled = (y - self.offset)/self.scale
+
+		source_embed = self.activation2(self.fc1_x(self.activation1(self.fc_x(x_scaled))))
+		station_embed = self.activation4(self.fc1_y(self.activation3(self.fc_y(y_scaled))))
+		relative_spatial = self.activation5(self.embed(x_scaled.repeat_interleave(n_sta, dim = 0) - y_scaled.repeat(n_src, 1))) ## Could embed this, if desired.
+
+		return (self.merged2(self.activation6(self.merged1(torch.cat((source_embed.repeat_interleave(n_sta, dim = 0), station_embed.repeat(n_src, 1), relative_spatial), dim = 1))))*self.tscale).view(n_src, n_sta, self.n_phase)
+
+class TrvNet1D(nn.Module):
+
+	def __init__(self, scale, tscale, n_dims = 4, n_phase = 2, n_hidden = 120, n_hidden1 = 50, device = 'cpu'):
+
+		super(TrvNet1D, self).__init__()
+
+		self.scale = torch.Tensor(scale).to(device)
+		self.tscale = tscale
+		self.n_phase = n_phase
+
+		self.fc_x = nn.Linear(n_dims, n_hidden)
+		self.fc1_x = nn.Linear(n_hidden, n_hidden1)
+
+		self.fc2_x = nn.Linear(n_hidden1, n_hidden1)
+		self.fc3_x = nn.Linear(n_hidden1, n_phase)
+
+		self.activation1 = nn.PReLU()
+		self.activation2 = nn.PReLU()
+		self.activation3 = nn.PReLU()
+
+	def forward(self, y, x):
+
+		n_src, n_sta = x.shape[0], y.shape[0]
+		x_scaled = torch.cat((y[:,2].view(-1,1).repeat(n_src, 1), torch.abs(y[:,0:2].repeat(n_src,1) - x[:,0:2].repeat_interleave(n_sta, dim = 0)), x[:,2].view(-1,1).repeat_interleave(n_sta, dim = 0)), dim = 1)
+		x_scaled = x_scaled/self.scale
+
+		source_embed = self.activation2(self.fc1_x(self.activation1(self.fc_x(x_scaled))))
+
+		return (self.fc3_x(self.activation3(self.fc2_x(source_embed)))*self.tscale).view(n_src, n_sta, self.n_phase)
