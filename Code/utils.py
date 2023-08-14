@@ -99,3 +99,147 @@ def rotation_matrix_full_precision(a, b, c):
 	rot[2,2] = np.cos(a)*np.cos(b)
 
 	return rot
+
+### K-means scripts
+
+def kmeans_packing(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1, lr = 0.01):
+
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
+
+			tree = cKDTree(ftrns1(v))
+			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
+			q, ip = tree.query(ftrns1(x))
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
+		q, ip = tree.query(x)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return V_results[ibest], V_results, Losses, losses, rz
+
+def kmeans_packing_weight_vector(weight_vector, scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1, lr = 0.01):
+
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
+
+			tree = cKDTree(ftrns1(v)*weight_vector)
+			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
+			q, ip = tree.query(ftrns1(x)*weight_vector)
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
+		q, ip = tree.query(x)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return V_results[ibest], V_results, Losses, losses, rz
+	
+def kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 1000, n_sim = 1, frac = 0.75, lr = 0.01):
+
+	## Frac specifies how many of the random samples are from the density versus background
+
+	n1 = int(n_clusters*frac) ## Number to sample from density
+	n2 = n_clusters - n1 ## Number to sample uniformly
+
+	n1_sample = int(n_batch*frac)
+	n2_sample = n_batch - n1_sample
+
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v1 = m_density.sample(n1)
+				v1 = np.concatenate((v1, np.random.rand(n1).reshape(-1,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
+				v2 = np.random.rand(n2, ndim)*scale_x + offset_x
+				v = np.concatenate((v1, v2), axis = 0)
+
+				iremove = np.where(((v[:,0] > (offset_x[0,0] + scale_x[0,0])) + ((v[:,1] > (offset_x[0,1] + scale_x[0,1]))) + (v[:,0] < offset_x[0,0]) + (v[:,1] < offset_x[0,1])) > 0)[0]
+				if len(iremove) > 0:
+					v[iremove] = np.random.rand(len(iremove), ndim)*scale_x + offset_x
+
+			tree = cKDTree(ftrns1(v)*weight_vector)
+			x1 = m_density.sample(n1)
+			x1 = np.concatenate((x1, np.random.rand(n1).reshape(-1,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
+			x2 = np.random.rand(n2, ndim)*scale_x + offset_x
+			x = np.concatenate((x1, x2), axis = 0)
+			iremove = np.where(((x[:,0] > (offset_x[0,0] + scale_x[0,0])) + ((x[:,1] > (offset_x[0,1] + scale_x[0,1]))) + (x[:,0] < offset_x[0,0]) + (x[:,1] < offset_x[0,1])) > 0)[0]
+			if len(iremove) > 0:
+				x[iremove] = np.random.rand(len(iremove), ndim)*scale_x + offset_x
+
+			q, ip = tree.query(ftrns1(x)*weight_vector)
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
+		q, ip = tree.query(x)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return V_results[ibest], V_results, Losses, losses, rz
