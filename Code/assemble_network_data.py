@@ -62,9 +62,7 @@ def optimize_with_differential_evolution(center_loc, nominal_depth = 0.0):
 	
 	trgt_lat = np.array([0,1.0,0]).reshape(1,-1)
 	trgt_vert = np.array([0,0,1.0]).reshape(1,-1)
-	trgt_depths = np.array([nominal_depth]) ## Not used
 	trgt_center = np.zeros(3)
-	# trgt_center[2] = earth_radius
 
 	def loss_function(x):
 
@@ -240,7 +238,6 @@ else:
 	
 	trgt_lat = torch.Tensor([0,1.0,0]).reshape(1,-1)
 	trgt_vert = torch.Tensor([0,0,1.0]).reshape(1,-1)
-	trgt_depths = torch.Tensor([nominal_depth]) ## Not used
 	trgt_center = torch.zeros(2)
 	
 	loss_func = nn.MSELoss()
@@ -297,7 +294,6 @@ else:
 			losses1.append(loss1.item())
 			losses2.append(loss2.item())
 			losses3.append(loss3.item())
-			# losses4.append(loss4.item())
 	
 			if np.mod(i, 50) == 0:
 				print('%d %0.8f'%(i, loss.item()))
