@@ -21,6 +21,8 @@ from numpy.matlib import repmat
 import itertools
 import pathlib
 
+device = torch.device('cuda') ## or use cpu
+
 class DataAggregation(MessagePassing): # make equivelent version with sum operations.
 	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4):
 		super(DataAggregation, self).__init__('mean') # node dim
@@ -422,8 +424,8 @@ class GCN_Detection_Network_extended(nn.Module):
 
 
 
-	#### EXTRA
-	class TrvNet(nn.Module):
+#### EXTRA
+class TrvNet(nn.Module):
 
 	def __init__(self, offset, scale, tscale, n_dims = 3, n_phase = 2, n_hidden = 120, n_hidden1 = 50, device = 'cpu'):
 

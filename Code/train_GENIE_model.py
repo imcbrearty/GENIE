@@ -22,6 +22,9 @@ from numpy.matlib import repmat
 import itertools
 import pathlib
 
+from utils import *
+from module import *
+
 ## Graph params
 k_sta_edges = 8
 k_spc_edges = 15
