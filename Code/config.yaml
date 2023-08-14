@@ -1,0 +1,24 @@
+latitude_range: [18.8, 20.3] #Latitude range of the region that will be processed
+longitude_range: [-156.1, -154.7] #Longitude range of the region that will be processed
+depth_range: [-40000, 5000] #Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
+time_range:
+  start: '2018-01-01'
+  end: '2023-01-01'
+
+client : 'IRIS'
+network: 'HV'
+
+degree_padding: 0.25 #This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
+number_of_grids: 5 #Number of distinct spatial graphs to create (this reduced slight bias that can result from only using one spatial graph)
+number_of_spatial_nodes: 500 #Number of nodes per spatial graph
+
+load_initial_files: [False]
+use_pretrained_model: [None]
+
+velocity_model:
+  Depths: [-40000, -35000, -30000, -25000, -20000, -15000, -10000, -5000, 0, 5000]
+  Vp: [8200, 8200, 8150, 8100, 8050, 7400, 6800, 6100, 2900, 2900]
+  Vs: [4700, 4700, 4650, 4600, 4600, 4200, 3800, 3400, 1800, 1800]
+
+
+
