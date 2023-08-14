@@ -1,7 +1,5 @@
 
 import numpy as np
-import torch
-from torch import nn, optim
 from scipy.io import loadmat
 from matplotlib import pyplot as plt
 from runpy import run_path
@@ -9,7 +7,6 @@ from argparse import Namespace
 from scipy.interpolate import griddata
 from scipy.spatial import ConvexHull
 from scipy.spatial import cKDTree
-import time
 from joblib import Parallel, delayed
 import multiprocessing
 import skfmm
@@ -24,8 +21,6 @@ import shutil
 import pathlib
 from utils import *
 
-## Initilize
-import os
 
 dx = 500.0 # Cartesian distance between nodes in FMM computation
 d_deg = 0.005 # Degree distance between saved interpolation query points
@@ -212,35 +207,33 @@ assert(inside_hull.sum() == locs_ref.shape[0])
 
 n_ver = 1
 
-for nn in [0]: ## Only compute one travel time model
+Vp = interp(ftrns2(xx)[:,2], depth_grid, Vp_profile) ## This may be locating some depths at incorrect positions, due to projection.
+Vs = interp(ftrns2(xx)[:,2], depth_grid, Vs_profile)
 
-	Vp = interp(ftrns2(xx)[:,2], depth_grid, Vp_profile) ## This may be locating some depths at incorrect positions, due to projection.
-	Vs = interp(ftrns2(xx)[:,2], depth_grid, Vs_profile)
+if num_cores == 1:
 
-	if num_cores == 1:
+	Tp = []
+	Ts = []
+	for j in range(reciever_proj.shape[0]):
+		results = compute_travel_times_parallel(xx, reciever_proj[j][None,:], Vp, Vs, dx_v, x11, x12, x13, num_cores = num_cores)
+		Tp.append(results[0])
+		Ts.append(results[1])
+	Tp = np.hstack(Tp)
+	Ts = np.hstack(Ts)
 
-		Tp = []
-		Ts = []
-		for j in range(reciever_proj.shape[0]):
-			results = compute_travel_times_parallel(xx, reciever_proj[j][None,:], Vp, Vs, dx_v, x11, x12, x13, num_cores = num_cores)
-			Tp.append(results[0])
-			Ts.append(results[1])
-		Tp = np.hstack(Tp)
-		Ts = np.hstack(Ts)
+else:
 
-	else:
+	results = compute_travel_times_parallel(xx, reciever_proj, Vp, Vs, dx_v, x11, x12, x13, num_cores = num_cores)
+	Tp = results[0]
+	Ts = results[1]
 
-		results = compute_travel_times_parallel(xx, reciever_proj, Vp, Vs, dx_v, x11, x12, x13, num_cores = num_cores)
-		Tp = results[0]
-		Ts = results[1]
+Tp_interp = np.zeros((X.shape[0], reciever_proj.shape[0]))
+Ts_interp = np.zeros((X.shape[0], reciever_proj.shape[0]))
+for j in range(reciever_proj.shape[0]): ## Need to check if it's ok to interpolate with 3D grids defined on lat,lon,depth, since depth
+										## has a very different scale.
+	mp = RegularGridInterpolator((x1, x2, x3), Tp[:,j].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
+	ms = RegularGridInterpolator((x1, x2, x3), Ts[:,j].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
+	Tp_interp[:,j] = mp(ftrns1(X))
+	Ts_interp[:,j] = ms(ftrns1(X))
 
-	Tp_interp = np.zeros((X.shape[0], reciever_proj.shape[0]))
-	Ts_interp = np.zeros((X.shape[0], reciever_proj.shape[0]))
-	for j in range(reciever_proj.shape[0]): ## Need to check if it's ok to interpolate with 3D grids defined on lat,lon,depth, since depth
-											## has a very different scale.
-		mp = RegularGridInterpolator((x1, x2, x3), Tp[:,j].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-		ms = RegularGridInterpolator((x1, x2, x3), Ts[:,j].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-		Tp_interp[:,j] = mp(ftrns1(X))
-		Ts_interp[:,j] = ms(ftrns1(X))
-
-	np.savez_compressed(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, n_ver), X = X, locs_ref = locs_ref, Tp_interp = Tp_interp, Ts_interp = Ts_interp, Vp_profile = Vp_profile, Vs_profile = Vs_profile, depth_grid = depth_grid)
+np.savez_compressed(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, n_ver), X = X, locs_ref = locs_ref, Tp_interp = Tp_interp, Ts_interp = Ts_interp, Vp_profile = Vp_profile, Vs_profile = Vs_profile, depth_grid = depth_grid)
