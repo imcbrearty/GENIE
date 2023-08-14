@@ -125,48 +125,6 @@ def download_catalog(lat_range, lon_range, min_magnitude, startime, endtime, t0 
 
 	return cat, cat_l, event_type
 
-
-def kmeans_packing(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 1000, n_sim = 3, lr = 0.01):
-
-	V_results = []
-	Losses = []
-	for n in range(n_sim):
-
-		losses, rz = [], []
-		for i in range(n_steps):
-			if i == 0:
-				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
-
-			tree = cKDTree(ftrns1(v))
-			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
-			q, ip = tree.query(ftrns1(x))
-
-			rs = []
-			ipu = np.unique(ip)
-			for j in range(len(ipu)):
-				ipz = np.where(ip == ipu[j])[0]
-				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
-				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
-				v[ipu[j],:] = v[ipu[j],:] + lr*update
-				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
-
-			rz.append(np.mean(rs)) # record average update size.
-
-			if np.mod(i, 10) == 0:
-				print('%d %f'%(i, rz[-1]))
-
-		# Evaluate loss (5 times batch size)
-		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
-		q, ip = tree.query(x)
-		Losses.append(q.mean())
-		V_results.append(np.copy(v))
-
-	Losses = np.array(Losses)
-	ibest = np.argmin(Losses)
-
-	return V_results[ibest], V_results, Losses, losses, rz
-
-
 class LocalMarching(MessagePassing): # make equivelent version with sum operations.
 	def __init__(self, device = 'cpu'):
 		super(LocalMarching, self).__init__(aggr = 'max') # node dim
@@ -1122,10 +1080,6 @@ def sample_random_spatial_query(lat_range, lon_range, depth_range, n):
 
 	return X_query, X_query_cart
 
-def remove_mean(x, axis):
-	
-	return x - np.nanmean(x, axis = axis, keepdims = True)
-
 def maximize_bipartite_assignment(cat, srcs, ftrns1, ftrns2, temporal_win = 10.0, spatial_win = 75e3):
 
 	tree_t = cKDTree(srcs[:,3].reshape(-1,1))
@@ -1445,7 +1399,7 @@ x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
 
 use_irregular_reference_grid = True
 if use_irregular_reference_grid == True:
-	X_query = kmeans_packing(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1)[0]
+	X_query = kmeans_packing_sampling_points(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1)[0]
 	X_query_cart = torch.Tensor(ftrns1(np.copy(X_query)))
 else:
 	x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
