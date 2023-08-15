@@ -32,6 +32,9 @@ with open('config.yaml', 'r') as file:
 
 name_of_project = config['name_of_project']
 
+path_to_file = str(pathlib.Path().absolute())
+path_to_file += '\\' if '\\' in path_to_file else '/'
+
 ## Graph params
 k_sta_edges = config['k_sta_edges']
 k_spc_edges = config['k_spc_edges']
@@ -577,10 +580,8 @@ def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_
 
 
 ## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
-path_to_file = str(pathlib.Path().absolute())
 
-
-lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X = load_files(path_to_file, name_of_project, template_ver, vel_model_ver)
+lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X = load_files_with_travel_times(path_to_file, name_of_project, template_ver, vel_model_ver)
 
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
