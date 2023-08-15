@@ -747,14 +747,14 @@ for i in range(n_restart_step, n_epochs):
 	cwork = 0
 	inc_c = 0
 	while (cwork == 0)*(inc_c < 10):
-		try: ## Does this actually ever through an exception? Probably not.
+		# try: ## Does this actually ever through an exception? Probably not.
 
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, fixed_subnetworks = Ind_subnetworks, use_preferential_sampling = True, n_batch = n_batch, verbose = True, dist_range = dist_range)
+		[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, fixed_subnetworks = Ind_subnetworks, use_preferential_sampling = True, n_batch = n_batch, verbose = True, dist_range = dist_range)
 
-			cwork = 1
-		except:
-			inc_c += 1
-			print('Failed data gen! %d'%inc_c)
+		cwork = 1
+		# except:
+		# 	inc_c += 1
+		# 	print('Failed data gen! %d'%inc_c)
 
 		## To look at the synthetic data, do:
 		## plt.scatter(data[0][:,0], data[0][:,1])
