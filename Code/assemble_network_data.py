@@ -11,8 +11,6 @@ from utils import *
 ## (ext_dir + 'stations.npz'), and
 ## (ext_dir + 'region.npz')
 
-# ext_dir = 'D:/Projects/Mayotte/Mayotte/' ## Replace with absolute directory to location to setup folders, and where all the ".py" files from Github are located.
-
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
 	config = yaml.safe_load(file)
@@ -23,6 +21,10 @@ with_density = config['with_density']
 use_spherical = config['use_spherical']
 depth_importance_weighting_value_for_spatial_graphs = config['depth_importance_weighting_value_for_spatial_graphs']
 fix_nominal_depth = config['fix_nominal_depth']
+
+EPS_EXTRA = 0.1
+EPS_EXTRA_DEPTH = 0.02
+SCALE_UP = 1.0
 
 path_to_file = str(pathlib.Path().absolute())
 path_to_file += '\\' if '\\' in path_to_file else '/'
@@ -100,56 +102,64 @@ def optimize_with_differential_evolution(center_loc):
 
     return soln
 
-def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps = 5000, extend_grids = True, with_density = None, density_kernel = 0.15):
+def extend_grid(offset, scale, deg_scale, depth_scale, extend_grids=True):
+    if extend_grids:
+        extend1, extend2, extend3, extend4 = (np.random.rand(4) - 0.5) * deg_scale
+        extend5 = (np.random.rand() - 0.5) * depth_scale
+        
+        offset[0, 0] += extend1
+        offset[0, 1] += extend2
+        scale[0, 0] += extend3
+        scale[0, 1] += extend4
+        offset[0, 2] += extend5
+    return offset, scale
 
-	if with_density == True:
-		from sklearn.neighbors import KernelDensity
-		m_density = KernelDensity(kernel = 'gaussian', bandwidth = density_kernel).fit(with_density[:,0:2])
 
-	x_grids = []
-	for i in range(n_grids):
+def get_offset_scale_slices(offset_x_extend, scale_x_extend):
+    """Extract slices from the offset and scale matrices."""
+    offset_slice = np.array([offset_x_extend[0, 0], offset_x_extend[0, 1], offset_x_extend[0, 2]]).reshape(1, -1)
+    scale_slice = np.array([scale_x_extend[0, 0], scale_x_extend[0, 1], scale_x_extend[0, 2]]).reshape(1, -1)
+    return offset_slice, scale_slice
 
-		eps_extra = 0.1
-		eps_extra_depth = 0.02
-		scale_up = 1.0 # 10000.0
-		weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1,-1) ## Tries to scale importance of depth up, so that nodes fill depth-axis well
+def get_grid_params(offset_slice, scale_slice, eps_extra, eps_extra_depth, scale_up):
+    """Calculate parameters for the grid."""
+    offset_x_grid = scale_up * (offset_slice - eps_extra * scale_slice)
+    offset_x_grid[0, 2] -= eps_extra_depth * scale_slice[0, 2]
+    
+    scale_x_grid = scale_up * (scale_slice + 2.0 * eps_extra * scale_slice)
+    scale_x_grid[0, 2] += 2.0 * eps_extra_depth * scale_slice[0, 2]
+    
+    return offset_x_grid, scale_x_grid
 
-		offset_x_extend_slice = np.array([offset_x_extend[0,0], offset_x_extend[0,1], offset_x_extend[0,2]]).reshape(1,-1)
-		scale_x_extend_slice = np.array([scale_x_extend[0,0], scale_x_extend[0,1], scale_x_extend[0,2]]).reshape(1,-1)
+def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=5000, extend_grids=True, with_density=None, density_kernel=0.15):
+    if with_density:
+        from sklearn.neighbors import KernelDensity
+        m_density = KernelDensity(kernel='gaussian', bandwidth=density_kernel).fit(with_density[:, 0:2])
 
-		depth_scale = (np.diff(depth_range)*0.02)
-		deg_scale = ((0.5*np.diff(lat_range) + 0.5*np.diff(lon_range))*0.08)
+    x_grids = []
+    
+    weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1, -1)
+    depth_scale = (np.diff(depth_range) * 0.02)
+    deg_scale = ((0.5 * np.diff(lat_range) + 0.5 * np.diff(lon_range)) * 0.08)
 
-		if extend_grids == True:
-			extend1, extend2, extend3, extend4 = (np.random.rand(4) - 0.5)*deg_scale
-			extend5 = (np.random.rand() - 0.5)*depth_scale
-			offset_x_extend_slice[0,0] += extend1
-			offset_x_extend_slice[0,1] += extend2
-			scale_x_extend_slice[0,0] += extend3
-			scale_x_extend_slice[0,1] += extend4
-			offset_x_extend_slice[0,2] += extend5
-			scale_x_extend_slice[0,2] = depth_range[1] - offset_x_extend_slice[0,2]
+    for i in range(n_grids):
+        offset_slice, scale_slice = get_offset_scale_slices(offset_x_extend, scale_x_extend)
+        offset_slice, scale_slice = extend_grid(offset_slice, scale_slice, deg_scale, depth_scale, extend_grids)
+        
+        print(f'\nOptimize for spatial grid ({i + 1} / {n_grids})')
+        
+        offset_x_grid, scale_x_grid = get_grid_params(offset_slice, scale_slice, EPS_EXTRA, EPS_EXTRA_DEPTH, SCALE_UP)
+        
+        if with_density:
+            x_grid = kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=0.005)[0] / SCALE_UP
+        else:
+            x_grid = kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=0.005)[0] / SCALE_UP
+        
+        x_grid = x_grid[np.argsort(x_grid[:, 0])]
+        x_grids.append(x_grid)
 
-		else:
-			pass
+    return x_grids
 
-		print('\n Optimize for spatial grid (%d / %d)'%(i + 1, n_grids))
-
-		offset_x_grid = scale_up*np.array([offset_x_extend_slice[0,0] - eps_extra*scale_x_extend_slice[0,0], offset_x_extend_slice[0,1] - eps_extra*scale_x_extend_slice[0,1], offset_x_extend_slice[0,2] - eps_extra_depth*scale_x_extend_slice[0,2]]).reshape(1,-1)
-		scale_x_grid = scale_up*np.array([scale_x_extend_slice[0,0] + 2.0*eps_extra*scale_x_extend_slice[0,0], scale_x_extend_slice[0,1] + 2.0*eps_extra*scale_x_extend_slice[0,1], scale_x_extend_slice[0,2] + 2.0*eps_extra_depth*scale_x_extend_slice[0,2]]).reshape(1,-1)
-	
-		if with_density == True:
-
-			x_grid = kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch = 10000, n_steps = n_steps, n_sim = 1, lr = 0.005)[0]/scale_up # .to(device) # 8000
-
-		else:
-			x_grid = kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch = 10000, n_steps = n_steps, n_sim = 1, lr = 0.005)[0]/scale_up # .to(device) # 8000
-
-		iargsort = np.argsort(x_grid[:,0])
-		x_grid = x_grid[iargsort]
-		x_grids.append(x_grid)
-
-	return x_grids # , x_grids_edges
 
 if use_spherical == True:
 
