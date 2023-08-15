@@ -20,7 +20,10 @@ name_of_project = 'Mayotte' ## Replace with the name of project (a single word i
 path_to_file = str(pathlib.Path().absolute())
 path_to_file += '\\' if '\\' in path_to_file else '/'
 
+print(path_to_file)
+
 # Station file
+
 # z = np.load(ext_dir + '%s_stations.npz'%name_of_project)
 z = np.load(path_to_file + 'stations.npz')
 locs, stas = z['locs'], z['stas']
@@ -39,6 +42,10 @@ deg_pad, num_grids, years = z['deg_pad'], z['num_grids'], z['years']
 n_spatial_nodes = z['n_spatial_nodes']
 load_initial_files = z['load_initial_files'][0]
 use_pretrained_model = z['use_pretrained_model'][0]
+
+if use_pretrained_model == 'None':
+    use_pretrained_model = None
+
 z.close()
 shutil.copy(path_to_file + 'region.npz', path_to_file + '%s_region.npz'%name_of_project)
 
