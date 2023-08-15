@@ -1,9 +1,9 @@
 name_of_project: 'Mayotte'
-num_cores: 1 #How many cores would you like to use for travel time calculations?
+num_cores: 1 # How many cores would you like to use for travel time calculations?
 
-latitude_range: [18.8, 20.3] #Latitude range of the region that will be processed
-longitude_range: [-156.1, -154.7] #Longitude range of the region that will be processed
-depth_range: [-40000, 5000] #Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
+latitude_range: [18.8, 20.3] # Latitude range of the region that will be processed
+longitude_range: [-156.1, -154.7] # Longitude range of the region that will be processed
+depth_range: [-40000, 5000] # Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
 time_range:
   start: '2018-01-01'
   end: '2023-01-01'
@@ -11,9 +11,9 @@ time_range:
 client : 'IRIS'
 network: 'HV'
 
-degree_padding: 0.25 #This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
-number_of_grids: 5 #Number of distinct spatial graphs to create (this reduced slight bias that can result from only using one spatial graph)
-number_of_spatial_nodes: 500 #Number of nodes per spatial graph
+degree_padding: 0.25 # This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
+number_of_grids: 5 # Number of distinct spatial graphs to create (this reduced slight bias that can result from only using one spatial graph)
+number_of_spatial_nodes: 500 # Number of nodes per spatial graph
 
 load_initial_files: [False]
 use_pretrained_model: [None]
