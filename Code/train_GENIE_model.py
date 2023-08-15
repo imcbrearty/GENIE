@@ -286,6 +286,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		iflip = np.random.choice(iwhere_real, size = n_switch, replace = False)
 		phase_observed[iflip] = np.mod(phase_observed[iflip] + 1, 2)
 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
+	
+	print('src_spatial_kernel', src_spatial_kernel.dtype)
 
 	if use_sources == False:
 		time_samples = np.sort(np.random.rand(n_batch)*T) ## Uniform
