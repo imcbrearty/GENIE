@@ -75,9 +75,6 @@ def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_core
 path_to_file = str(pathlib.Path().absolute())
 path_to_file += '\\' if '\\' in path_to_file else '/'
 
-## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
-path_to_file = str(pathlib.Path().absolute())
-
 template_ver = 1
 vel_model_ver = 1
 ## Load Files
