@@ -22,7 +22,18 @@ velocity_model:
   Vp: [8200, 8200, 8150, 8100, 8050, 7400, 6800, 6100, 2900, 2900]
   Vs: [4700, 4700, 4650, 4600, 4600, 4200, 3800, 3400, 1800, 1800]
 
+### ASSEMBLE NETWORK DATA ###
 with_density: False
 use_spherical: False ## Should only set to true if travel time model also has spherical projection (to be added soon)
 depth_importance_weighting_value_for_spatial_graphs: 2.5 # up scale the depth importance of node positions when creating spatial graph if using a large horizontally extended domain
 fix_nominal_depth: True
+
+### TRAVEL TIMES ###
+depth_steps:
+  min_elevation: -500 # meters
+  max_elevation: 4000 # meters
+  elevation_step: 150 # meters
+
+dx: 500.0 # Cartesian distance between nodes in FMM computation
+d_deg: 0.005 # Degree distance between saved interpolation query points
+dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved query points

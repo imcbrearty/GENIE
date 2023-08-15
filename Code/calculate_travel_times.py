@@ -1,4 +1,4 @@
-
+import yaml
 import numpy as np
 from scipy.io import loadmat
 from matplotlib import pyplot as plt
@@ -22,10 +22,18 @@ import pathlib
 from utils import *
 
 
-dx = 500.0 # Cartesian distance between nodes in FMM computation
-d_deg = 0.005 # Degree distance between saved interpolation query points
-dx_depth = 500.0 # Depth distance between nodes in FMM computation and saved query points
-depth_steps = np.arange(-500.0, 4000.0 + 150, 150) # Elevation steps to compute travel times from 
+# Load configuration from YAML
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
+
+
+dx = config['dx']
+d_deg = config['d_deg']
+dx_depth = config['dx_depth']
+depth_steps = config['depth_steps']
+
+
+depth_steps = np.arange(depth_steps['min_elevation'], depth_steps['max_elevation'] + depth_steps['elevation_step'], depth_steps['elevation_step']) # Elevation steps to compute travel times from 
 ## (These are reference points for stations; can be a regular grid, and each station looks up the
 ## travel times with respect to these values. It is discretized (nearest-neighber) rather than continous.
 
