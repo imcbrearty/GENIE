@@ -38,3 +38,28 @@ depth_steps:
 dx: 500.0 # Cartesian distance between nodes in FMM computation
 d_deg: 0.005 # Degree distance between saved interpolation query points
 dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved query points
+
+### TRAIN ###
+
+## Graph params
+k_sta_edges: 8
+k_spc_edges: 15
+k_time_edges: 10
+
+## Training params
+n_batch: 75
+n_epochs: 20001 # add 1, so it saves on last iteration (since it saves every 100 steps)
+n_spc_query: 4500 # Number of src queries per sample
+n_src_query: 300 # Number of src-arrival queries per sample
+
+## Prediction params
+kernel_sig_t: 5.0 # Kernel to embed arrival time - theoretical time misfit (s)
+src_t_kernel: 6.5 # Kernel or origin time label (s)
+src_t_arv_kernel: 6.5 # Kernel for arrival association time label (s)
+src_x_kernel: 15e3 # Kernel for source label, horizontal distance (m)
+src_x_arv_kernel: 15e3 # Kernel for arrival-source association label, horizontal distance (m)
+src_depth_kernel: 15e3 # Kernel of Cartesian projection, vertical distance (m)
+t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
+## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
+dist_range: [15e3, 500e3] ## The spatial window over which to sample max distance of 
+## source-station moveouts in m, per event. E.g., 15 - 500 km. Should set slightly lower if using small region.
