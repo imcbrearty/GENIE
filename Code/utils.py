@@ -30,7 +30,7 @@ def lla2ecef(p, a = 6378137.0, e = 8.18191908426215e-2): # 0.0818191908426215, p
 	p = p.copy().astype('float')
 	p[:,0:2] = p[:,0:2]*np.array([np.pi/180.0, np.pi/180.0]).reshape(1,-1)
 	N = a/np.sqrt(1 - (e**2)*np.sin(p[:,0])**2)
-    # results:
+	# results:
 	x = (N + p[:,2])*np.cos(p[:,0])*np.cos(p[:,1])
 	y = (N + p[:,2])*np.cos(p[:,0])*np.sin(p[:,1])
 	z = ((1-e**2)*N + p[:,2])*np.sin(p[:,0])
@@ -59,7 +59,7 @@ def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908
 	pi = torch.Tensor([np.pi])
 	p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1)
 	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0])**2)
-    # results:
+	# results:
 	x = (N + p[:,2])*torch.cos(p[:,0])*torch.cos(p[:,1])
 	y = (N + p[:,2])*torch.cos(p[:,0])*torch.sin(p[:,1])
 	z = ((1-e**2)*N + p[:,2])*torch.sin(p[:,0])
@@ -436,47 +436,47 @@ def in_hull(p, hull):
 	"""
 	from scipy.spatial import Delaunay
 	if not isinstance(hull,Delaunay):
-	    hull = Delaunay(hull)
+		hull = Delaunay(hull)
 
 	return hull.find_simplex(p)>=0
 
 
 ## Load Files
 def load_files(path_to_file, name_of_project, template_ver, vel_model_ver):
-    if '\\' in path_to_file:  # Windows
-        separator = '\\'
-    else:  # Linux or Unix
-        separator = '/'
+	if '\\' in path_to_file:  # Windows
+		separator = '\\'
+	else:  # Linux or Unix
+		separator = '/'
 
-    # Load region
-    z = np.load(path_to_file + separator + '%s_region.npz' % name_of_project)
-    lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-    z.close()
+	# Load region
+	z = np.load(path_to_file + separator + '%s_region.npz' % name_of_project)
+	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
+	z.close()
 
-    # Load templates
-    z = np.load(path_to_file + separator + 'Grids/%s_seismic_network_templates_ver_%d.npz' % (name_of_project, template_ver))
-    x_grids = z['x_grids']
-    z.close()
+	# Load templates
+	z = np.load(path_to_file + separator + 'Grids/%s_seismic_network_templates_ver_%d.npz' % (name_of_project, template_ver))
+	x_grids = z['x_grids']
+	z.close()
 
-    # Load stations
-    z = np.load(path_to_file + separator + '%s_stations.npz' % name_of_project)
-    locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-    z.close()
+	# Load stations
+	z = np.load(path_to_file + separator + '%s_stations.npz' % name_of_project)
+	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
+	z.close()
 
-    # Load travel times
-    z = np.load(path_to_file + separator + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz' % (name_of_project, vel_model_ver))
+	# Load travel times
+	z = np.load(path_to_file + separator + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz' % (name_of_project, vel_model_ver))
 	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
-    
+	
 	Tp = z['Tp_interp']
 	Ts = z['Ts_interp']
 
 	locs_ref = z['locs_ref']
 	X = z['X']
 	z.close()
-    
-    # You can extract further variables from z if needed here
+	
+	# You can extract further variables from z if needed here
 
-    # Create path to write files
-    write_training_file = path_to_file + separator + 'GNN_TrainedModels/' + name_of_project + '_'
+	# Create path to write files
+	write_training_file = path_to_file + separator + 'GNN_TrainedModels/' + name_of_project + '_'
 
-    return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
+	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
