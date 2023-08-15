@@ -23,7 +23,7 @@ import pathlib
 
 from utils import *
 from module import *
-from generate_synthetic_data import *
+from generate_synthetic_data import generate_synthetic_data
 
 
 # Load configuration from YAML
