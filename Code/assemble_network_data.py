@@ -1,11 +1,9 @@
 import yaml
 import numpy as np
-from matplotlib import pyplot as plt
 import os
 import torch
 from torch import optim, nn
 import shutil
-from scipy.spatial import cKDTree
 from utils import *
 
 ## User: Input stations and spatial region
@@ -18,13 +16,16 @@ from utils import *
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
-    
-name_of_project = 'Mayotte' ## Replace with the name of project (a single word is prefered).
+
+with_density = config['with_density']
+use_spherical = config['use_spherical'] 
+depth_importance_weighting_value_for_spatial_graphs = config['depth_importance_weighting_value_for_spatial_graphs'] 
+fix_nominal_depth = config['fix_nominal_depth']
 
 path_to_file = str(pathlib.Path().absolute())
 path_to_file += '\\' if '\\' in path_to_file else '/'
 
-print(path_to_file)
+print(f'Working in the directory: {path_to_file}')
 
 # Station file
 
@@ -51,12 +52,9 @@ if use_pretrained_model == 'None':
     use_pretrained_model = None
 
 z.close()
-shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config['name_of_project']}_region.npz')
+shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config["name_of_project"]}_region.npz')
 
-with_density = None
-use_spherical = False ## Should only set to true if travel time model also has spherical projection (to be added soon)
-depth_importance_weighting_value_for_spatial_graphs = 2.5 # up scale the depth importance of node positions when creating spatial 
-## graph if using a large horizontally extended domain
+
 
 # else, set with_density = srcs with srcs[:,0] == lat, srcs[:,1] == lon, srcs[:,2] == depth
 ## to preferentially focus the spatial graphs closer around reference sources. 
@@ -185,7 +183,7 @@ print(lat_range)
 print('\n Longitude:')
 print(lon_range)
 
-fix_nominal_depth = True
+
 if fix_nominal_depth == True:
 	nominal_depth = 0.0 ## Can change the target depth projection if prefered
 else:
@@ -328,8 +326,8 @@ else:
 	mn = mn.cpu().detach().numpy()
 
 if use_pretrained_model is not None:
-	shutil.move(path_to_file + 'Pretrained/trained_gnn_model_step_%d_ver_%d.h5'%(20000, use_pretrained_model), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(config['name_of_project'], 20000, 1))
-	shutil.move(path_to_file + 'Pretrained/1d_travel_time_grid_ver_%d.npz'%use_pretrained_model, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(config['name_of_project'], 1))
+	shutil.move(path_to_file + 'Pretrained/trained_gnn_model_step_%d_ver_%d.h5'%(20000, use_pretrained_model), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(config["name_of_project"], 20000, 1))
+	shutil.move(path_to_file + 'Pretrained/1d_travel_time_grid_ver_%d.npz'%use_pretrained_model, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(config["name_of_project"], 1))
 	shutil.move(path_to_file + 'Pretrained/seismic_network_templates_ver_%d.npz'%use_pretrained_model, path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(use_pretrained_model, 1))
 
 	## Find offset corrections if using one of the pre-trained models
@@ -345,13 +343,13 @@ if use_pretrained_model is not None:
 	z.close()
 
 	locs = np.copy(locs) - corr1 + corr2
-	shutil.copy(path_to_file + 'Pretrained/region_ver_%d.npz'%use_pretrained_model, path_to_file + f'{config['name_of_project']}_region.npz')
+	shutil.copy(path_to_file + 'Pretrained/region_ver_%d.npz'%use_pretrained_model, path_to_file + f'{config["name_of_project"]}_region.npz')
 
 else:
 	corr1 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
 	corr2 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
 
-np.savez_compressed(path_to_file + f'{config['name_of_project']}_stations.npz', locs = locs, stas = stas, rbest = rbest, mn = mn)
+np.savez_compressed(path_to_file + f'{config["name_of_project"]}_stations.npz', locs = locs, stas = stas, rbest = rbest, mn = mn)
 
 ## Make necessary directories
 
@@ -370,15 +368,15 @@ if (load_initial_files == True)*(use_pretrained_model == False):
 	step_load = 20000
 	ver_load = 1
 	if os.path.exists(path_to_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(step_load, ver_load)):
-		shutil.move(path_to_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(step_load, ver_load), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(config['name_of_project'], step_load, ver_load))
+		shutil.move(path_to_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(step_load, ver_load), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(config["name_of_project"], step_load, ver_load))
 
 	ver_load = 1
 	if os.path.exists(path_to_file + '1d_travel_time_grid_ver_%d.npz'%ver_load):
-		shutil.move(path_to_file + '1d_travel_time_grid_ver_%d.npz'%ver_load, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(config['name_of_project'], ver_load))
+		shutil.move(path_to_file + '1d_travel_time_grid_ver_%d.npz'%ver_load, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(config["name_of_project"], ver_load))
 
 	ver_load = 1
 	if os.path.exists(path_to_file + 'seismic_network_templates_ver_%d.npz'%ver_load):
-		shutil.move(path_to_file + 'seismic_network_templates_ver_%d.npz'%ver_load, path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(config['name_of_project'], ver_load))
+		shutil.move(path_to_file + 'seismic_network_templates_ver_%d.npz'%ver_load, path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(config["name_of_project"], ver_load))
 
 ## Make spatial grids
 
@@ -405,10 +403,10 @@ offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_rang
 
 skip_making_grid = False
 if load_initial_files == True:
-	if os.path.exists('Grids/%s_seismic_network_templates_ver_%d.npz'%(config['name_of_project'], ver_load)) == True:
+	if os.path.exists('Grids/%s_seismic_network_templates_ver_%d.npz'%(config["name_of_project"], ver_load)) == True:
 		skip_making_grid = True
 
 if skip_making_grid == False:
 	x_grids = assemble_grids(scale_x_extend, offset_x_extend, num_grids, n_spatial_nodes, n_steps = 5000, with_density = with_density)
 
-	np.savez_compressed(path_to_file + 'Grids/%s_seismic_network_templates_ver_1.npz'%config['name_of_project'], x_grids = [x_grids[i] for i in range(len(x_grids))], corr1 = corr1, corr2 = corr2)
+	np.savez_compressed(path_to_file + 'Grids/%s_seismic_network_templates_ver_1.npz'%config["name_of_project"], x_grids = [x_grids[i] for i in range(len(x_grids))], corr1 = corr1, corr2 = corr2)
