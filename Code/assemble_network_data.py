@@ -6,14 +6,165 @@ from torch import optim, nn
 import shutil
 from utils import *
 
+def optimize_with_differential_evolution(center_loc):
+    """
+    Optimize using the differential evolution algorithm to minimize a loss function based on geospatial transformations.
+    
+    Parameters:
+    - center_loc (numpy.ndarray): The central location to optimize around.
+    
+    Returns:
+    - soln (object): Solution object from the differential evolution algorithm.
+    """
+    
+    loss_coef = [1, 1, 1.0, 0]
+
+    # Calculate initial ecef values as they don't depend on x
+    norm_lat_ecef = lla2ecef(np.concatenate((center_loc, center_loc + [0.001, 0.0, 0.0]), axis=0))
+    norm_vert_ecef = lla2ecef(np.concatenate((center_loc, center_loc + [0.0, 0.0, 10.0]), axis=0))
+    norm_lat = np.linalg.norm(norm_lat_ecef[1] - norm_lat_ecef[0])
+    norm_vert = np.linalg.norm(norm_vert_ecef[1] - norm_vert_ecef[0])
+
+    trgt_lat = np.array([0, 1.0, 0]).reshape(1, -1)
+    trgt_vert = np.array([0, 0, 1.0]).reshape(1, -1)
+    trgt_center = np.zeros(3)
+
+    def loss_function(x):
+        rbest = rotation_matrix_full_precision(x[0], x[1], x[2])
+
+        center_out = ftrns1(center_loc, rbest, x[3:].reshape(1, -1))
+        out_unit_lat = (ftrns1(center_loc + [0.001, 0.0, 0.0], rbest, x[3:].reshape(1, -1)) - center_out) / norm_lat
+        out_unit_vert = (ftrns1(center_loc + [0.0, 0.0, 10.0], rbest, x[3:].reshape(1, -1)) - center_out) / norm_vert
+
+        # If locs are global, then include this line
+        # out_locs = ftrns1(locs, rbest, x[3:].reshape(1, -1))
+
+        loss1 = np.linalg.norm(trgt_lat - out_unit_lat, axis=1)
+        loss2 = np.linalg.norm(trgt_vert - out_unit_vert, axis=1)
+        loss3 = np.linalg.norm(trgt_center.reshape(1, -1) - center_out, axis=1)
+        loss = loss_coef[0] * loss1 + loss_coef[1] * loss2 + loss_coef[2] * loss3
+
+        return loss
+
+    bounds = [(0, 2.0 * np.pi) for _ in range(3)] + [(-1e7, 1e7) for _ in range(3)]
+    soln = differential_evolution(loss_function, bounds, popsize=30, maxiter=1000, disp=True)
+
+    return soln
+
+def extend_grid(offset, scale, deg_scale, depth_scale, extend_grids=True):
+    """
+    Extend a spatial grid based on randomized extensions.
+    
+    Parameters:
+    - offset (numpy.ndarray): The offset values of the grid.
+    - scale (numpy.ndarray): The scale values of the grid.
+    - deg_scale (float): Degree scaling factor.
+    - depth_scale (float): Depth scaling factor.
+    - extend_grids (bool, optional): Flag to determine if grid should be extended. Default is True.
+    
+    Returns:
+    - offset (numpy.ndarray): Updated offset values.
+    - scale (numpy.ndarray): Updated scale values.
+    """
+    
+    if extend_grids:
+        extend1, extend2, extend3, extend4 = (np.random.rand(4) - 0.5) * deg_scale
+        extend5 = (np.random.rand() - 0.5) * depth_scale
+        
+        offset[0, 0] += extend1
+        offset[0, 1] += extend2
+        scale[0, 0] += extend3
+        scale[0, 1] += extend4
+        offset[0, 2] += extend5
+    return offset, scale
+
+def get_offset_scale_slices(offset_x_extend, scale_x_extend):
+    """Extract slices from the offset and scale matrices."""
+    offset_slice = np.array([offset_x_extend[0, 0], offset_x_extend[0, 1], offset_x_extend[0, 2]]).reshape(1, -1)
+    scale_slice = np.array([scale_x_extend[0, 0], scale_x_extend[0, 1], scale_x_extend[0, 2]]).reshape(1, -1)
+    return offset_slice, scale_slice
+
+def get_grid_params(offset_slice, scale_slice, eps_extra, eps_extra_depth, scale_up):
+    """Calculate parameters for the grid."""
+    offset_x_grid = scale_up * (offset_slice - eps_extra * scale_slice)
+    offset_x_grid[0, 2] -= eps_extra_depth * scale_slice[0, 2]
+    
+    scale_x_grid = scale_up * (scale_slice + 2.0 * eps_extra * scale_slice)
+    scale_x_grid[0, 2] += 2.0 * eps_extra_depth * scale_slice[0, 2]
+    
+    return offset_x_grid, scale_x_grid
+
+def calculate_density(if_density, kernel, bandwidth, data):
+    """
+    Calculate and return kernel density if the density flag is set.
+    
+    Parameters:
+    - if_density (bool): Flag indicating whether to compute density.
+    - kernel (str): Type of kernel to use for density estimation.
+    - bandwidth (float): Bandwidth for the kernel density estimation.
+    - data (numpy.ndarray): Data to compute the kernel density on.
+    
+    Returns:
+    - KernelDensity (object, None): Returns KernelDensity instance if if_density is True, else returns None.
+    """
+    if if_density:
+        from sklearn.neighbors import KernelDensity
+        return KernelDensity(kernel=kernel, bandwidth=bandwidth).fit(data[:, 0:2])
+    return None
+
+def create_grid(using_density, m_density, weight_vector, scale_x_grid, offset_x_grid, n_cluster, ftrns1, n_steps, lr):
+    """Create a grid based on density or default method."""
+    if using_density:
+        return kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
+    return kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
+
+def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=5000, extend_grids=True, with_density=None, density_kernel=0.15):
+    """
+    Assemble a set of spatial grids based on various parameters.
+    
+    Parameters:
+    - scale_x_extend (numpy.ndarray): Extended scale values for the grid.
+    - offset_x_extend (numpy.ndarray): Extended offset values for the grid.
+    - n_grids (int): Number of grids to assemble.
+    - n_cluster (int): Number of clusters to use in the k-means algorithm.
+    - n_steps (int, optional): Number of steps for the k-means algorithm. Default is 5000.
+    - extend_grids (bool, optional): Flag to determine if grids should be extended. Default is True.
+    - with_density (numpy.ndarray, None, optional): Data to use for density calculations. Default is None.
+    - density_kernel (float, optional): Kernel bandwidth for density estimation. Default is 0.15.
+    
+    Returns:
+    - x_grids (list): List of assembled grids.
+    """
+    
+    m_density = calculate_density(with_density, 'gaussian', density_kernel, with_density)
+    x_grids = []
+    
+    weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1, -1)
+    depth_scale = (np.diff(depth_range) * 0.02)
+    deg_scale = ((0.5 * np.diff(lat_range) + 0.5 * np.diff(lon_range)) * 0.08)
+
+    for i in range(n_grids):
+        offset_slice, scale_slice = get_offset_scale_slices(offset_x_extend, scale_x_extend)
+        offset_slice, scale_slice = extend_grid(offset_slice, scale_slice, deg_scale, depth_scale, extend_grids)
+        
+        print(f'\nOptimize for spatial grid ({i + 1} / {n_grids})')
+        
+        offset_x_grid, scale_x_grid = get_grid_params(offset_slice, scale_slice, EPS_EXTRA, EPS_EXTRA_DEPTH, SCALE_UP)
+        
+        x_grid = create_grid(with_density, m_density, weight_vector, scale_x_grid, offset_x_grid, n_cluster, ftrns1, n_steps, lr=0.005)
+        
+        x_grid = x_grid[np.argsort(x_grid[:, 0])]
+        x_grids.append(x_grid)
+
+    return x_grids
+
 ## User: Input stations and spatial region
 ## (must have station and region files at
 ## (ext_dir + 'stations.npz'), and
 ## (ext_dir + 'region.npz')
 
 # Load configuration from YAML
-with open('config.yaml', 'r') as file:
-	config = yaml.safe_load(file)
+config = load_config('config.yaml')
 
 num_steps = config['number_of_update_steps']
 
@@ -66,107 +217,6 @@ shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config["name_of_proje
 ## to preferentially focus the spatial graphs closer around reference sources. 
 
 ## Fit projection coordinates and create spatial grids
-
-def optimize_with_differential_evolution(center_loc):
-    loss_coef = [1, 1, 1.0, 0]
-
-    # Calculate initial ecef values as they don't depend on x
-    norm_lat_ecef = lla2ecef(np.concatenate((center_loc, center_loc + [0.001, 0.0, 0.0]), axis=0))
-    norm_vert_ecef = lla2ecef(np.concatenate((center_loc, center_loc + [0.0, 0.0, 10.0]), axis=0))
-    norm_lat = np.linalg.norm(norm_lat_ecef[1] - norm_lat_ecef[0])
-    norm_vert = np.linalg.norm(norm_vert_ecef[1] - norm_vert_ecef[0])
-
-    trgt_lat = np.array([0, 1.0, 0]).reshape(1, -1)
-    trgt_vert = np.array([0, 0, 1.0]).reshape(1, -1)
-    trgt_center = np.zeros(3)
-
-    def loss_function(x):
-        rbest = rotation_matrix_full_precision(x[0], x[1], x[2])
-
-        center_out = ftrns1(center_loc, rbest, x[3:].reshape(1, -1))
-        out_unit_lat = (ftrns1(center_loc + [0.001, 0.0, 0.0], rbest, x[3:].reshape(1, -1)) - center_out) / norm_lat
-        out_unit_vert = (ftrns1(center_loc + [0.0, 0.0, 10.0], rbest, x[3:].reshape(1, -1)) - center_out) / norm_vert
-
-        # If locs are global, then include this line
-        # out_locs = ftrns1(locs, rbest, x[3:].reshape(1, -1))
-
-        loss1 = np.linalg.norm(trgt_lat - out_unit_lat, axis=1)
-        loss2 = np.linalg.norm(trgt_vert - out_unit_vert, axis=1)
-        loss3 = np.linalg.norm(trgt_center.reshape(1, -1) - center_out, axis=1)
-        loss = loss_coef[0] * loss1 + loss_coef[1] * loss2 + loss_coef[2] * loss3
-
-        return loss
-
-    bounds = [(0, 2.0 * np.pi) for _ in range(3)] + [(-1e7, 1e7) for _ in range(3)]
-    soln = differential_evolution(loss_function, bounds, popsize=30, maxiter=1000, disp=True)
-
-    return soln
-
-def extend_grid(offset, scale, deg_scale, depth_scale, extend_grids=True):
-    if extend_grids:
-        extend1, extend2, extend3, extend4 = (np.random.rand(4) - 0.5) * deg_scale
-        extend5 = (np.random.rand() - 0.5) * depth_scale
-        
-        offset[0, 0] += extend1
-        offset[0, 1] += extend2
-        scale[0, 0] += extend3
-        scale[0, 1] += extend4
-        offset[0, 2] += extend5
-    return offset, scale
-
-def get_offset_scale_slices(offset_x_extend, scale_x_extend):
-    """Extract slices from the offset and scale matrices."""
-    offset_slice = np.array([offset_x_extend[0, 0], offset_x_extend[0, 1], offset_x_extend[0, 2]]).reshape(1, -1)
-    scale_slice = np.array([scale_x_extend[0, 0], scale_x_extend[0, 1], scale_x_extend[0, 2]]).reshape(1, -1)
-    return offset_slice, scale_slice
-
-def get_grid_params(offset_slice, scale_slice, eps_extra, eps_extra_depth, scale_up):
-    """Calculate parameters for the grid."""
-    offset_x_grid = scale_up * (offset_slice - eps_extra * scale_slice)
-    offset_x_grid[0, 2] -= eps_extra_depth * scale_slice[0, 2]
-    
-    scale_x_grid = scale_up * (scale_slice + 2.0 * eps_extra * scale_slice)
-    scale_x_grid[0, 2] += 2.0 * eps_extra_depth * scale_slice[0, 2]
-    
-    return offset_x_grid, scale_x_grid
-
-def calculate_density(if_density, kernel, bandwidth, data):
-    """Return a KernelDensity instance if a density flag is set."""
-    if if_density:
-        from sklearn.neighbors import KernelDensity
-        return KernelDensity(kernel=kernel, bandwidth=bandwidth).fit(data[:, 0:2])
-    return None
-
-def create_grid(using_density, m_density, weight_vector, scale_x_grid, offset_x_grid, n_cluster, ftrns1, n_steps, lr):
-    """Create a grid based on density or default method."""
-    if using_density:
-        return kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
-    return kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
-
-def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=5000, extend_grids=True, with_density=None, density_kernel=0.15):
-    m_density = calculate_density(with_density, 'gaussian', density_kernel, with_density)
-    x_grids = []
-    
-    weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1, -1)
-    depth_scale = (np.diff(depth_range) * 0.02)
-    deg_scale = ((0.5 * np.diff(lat_range) + 0.5 * np.diff(lon_range)) * 0.08)
-
-    for i in range(n_grids):
-        offset_slice, scale_slice = get_offset_scale_slices(offset_x_extend, scale_x_extend)
-        offset_slice, scale_slice = extend_grid(offset_slice, scale_slice, deg_scale, depth_scale, extend_grids)
-        
-        print(f'\nOptimize for spatial grid ({i + 1} / {n_grids})')
-        
-        offset_x_grid, scale_x_grid = get_grid_params(offset_slice, scale_slice, EPS_EXTRA, EPS_EXTRA_DEPTH, SCALE_UP)
-        
-        x_grid = create_grid(with_density, m_density, weight_vector, scale_x_grid, offset_x_grid, n_cluster, ftrns1, n_steps, lr=0.005)
-        
-        x_grid = x_grid[np.argsort(x_grid[:, 0])]
-        x_grids.append(x_grid)
-
-    return x_grids
-
-
 if use_spherical == True:
 
 	earth_radius = 6371e3

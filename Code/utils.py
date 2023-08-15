@@ -21,9 +21,16 @@ from torch_scatter import scatter
 from numpy.matlib import repmat
 import itertools
 import pathlib
+import yaml
 
 device = torch.device('cuda') ## or use cpu
 
+
+def load_config(file_path: str) -> dict:
+    """Load configuration from a YAML file."""
+    with open(file_path, 'r') as file:
+        return yaml.safe_load(file)
+    
 ### Projections
 
 def lla2ecef(p, a = 6378137.0, e = 8.18191908426215e-2): # 0.0818191908426215, previous 8.1819190842622e-2
