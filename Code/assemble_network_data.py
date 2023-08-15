@@ -1,482 +1,417 @@
-
+import yaml
 import numpy as np
+import os
 import torch
-from scipy.spatial import cKDTree
-import numpy as np
-from matplotlib import pyplot as plt
-import torch
-from torch import nn, optim
-import h5py
-from sklearn.metrics import pairwise_distances as pd
-from scipy.signal import fftconvolve
-from scipy.spatial import cKDTree
-from scipy.stats import gamma, beta
-import time
-from torch_cluster import knn
-from torch_geometric.utils import remove_self_loops, subgraph
-from torch_geometric.data import Data
-from torch_geometric.nn import MessagePassing
-from torch_geometric.utils import softmax
-from torch_scatter import scatter
-from numpy.matlib import repmat
-import itertools
-import pathlib
+from torch import optim, nn
+import shutil
+from utils import *
 
-device = torch.device('cuda') ## or use cpu
+## User: Input stations and spatial region
+## (must have station and region files at
+## (ext_dir + 'stations.npz'), and
+## (ext_dir + 'region.npz')
 
-### Projections
+# ext_dir = 'D:/Projects/Mayotte/Mayotte/' ## Replace with absolute directory to location to setup folders, and where all the ".py" files from Github are located.
 
-def lla2ecef(p, a = 6378137.0, e = 8.18191908426215e-2): # 0.0818191908426215, previous 8.1819190842622e-2
-	p = p.copy().astype('float')
-	p[:,0:2] = p[:,0:2]*np.array([np.pi/180.0, np.pi/180.0]).reshape(1,-1)
-	N = a/np.sqrt(1 - (e**2)*np.sin(p[:,0])**2)
-	# results:
-	x = (N + p[:,2])*np.cos(p[:,0])*np.cos(p[:,1])
-	y = (N + p[:,2])*np.cos(p[:,0])*np.sin(p[:,1])
-	z = ((1-e**2)*N + p[:,2])*np.sin(p[:,0])
-	return np.concatenate((x[:,None],y[:,None],z[:,None]), axis = 1)
+# Load configuration from YAML
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
 
-def ecef2lla(x, a = 6378137.0, e = 8.18191908426215e-2):
-	x = x.copy().astype('float')
-	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
-	b = np.sqrt((a**2)*(1 - e**2))
-	ep = np.sqrt((a**2 - b**2)/(b**2))
-	p = np.sqrt(x[:,0]**2 + x[:,1]**2)
-	th = np.arctan2(a*x[:,2], b*p)
-	lon = np.arctan2(x[:,1], x[:,0])
-	lat = np.arctan2((x[:,2] + (ep**2)*b*(np.sin(th)**3)), (p - (e**2)*a*(np.cos(th)**3)))
-	N = a/np.sqrt(1 - (e**2)*(np.sin(lat)**2))
-	alt = p/np.cos(lat) - N
-	# lon = np.mod(lon, 2.0*np.pi) # don't use!
-	k = (np.abs(x[:,0]) < 1) & (np.abs(x[:,1]) < 1)
-	alt[k] = np.abs(x[k,2]) - b
-	return np.concatenate((180.0*lat[:,None]/np.pi, 180.0*lon[:,None]/np.pi, alt[:,None]), axis = 1)
+num_steps = config['number_of_update_steps']
 
-def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2])):
-	# x = x.astype('float')
-	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
-	p = p.detach().clone().float()
-	pi = torch.Tensor([np.pi])
-	p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1)
-	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0])**2)
-	# results:
-	x = (N + p[:,2])*torch.cos(p[:,0])*torch.cos(p[:,1])
-	y = (N + p[:,2])*torch.cos(p[:,0])*torch.sin(p[:,1])
-	z = ((1-e**2)*N + p[:,2])*torch.sin(p[:,0])
+with_density = config['with_density']
+use_spherical = config['use_spherical']
+depth_importance_weighting_value_for_spatial_graphs = config['depth_importance_weighting_value_for_spatial_graphs']
+fix_nominal_depth = config['fix_nominal_depth']
 
-	return torch.cat((x.view(-1,1), y.view(-1,1), z.view(-1,1)), dim = 1)
+path_to_file = str(pathlib.Path().absolute())
+path_to_file += '\\' if '\\' in path_to_file else '/'
 
-def ecef2lla_diff(x, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2])):
-	# x = x.astype('float')
-	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
-	pi = torch.Tensor([np.pi])
-	b = torch.sqrt((a**2)*(1 - e**2))
-	ep = torch.sqrt((a**2 - b**2)/(b**2))
-	p = torch.sqrt(x[:,0]**2 + x[:,1]**2)
-	th = torch.atan2(a*x[:,2], b*p)
-	lon = torch.atan2(x[:,1], x[:,0])
-	lat = torch.atan2((x[:,2] + (ep**2)*b*(torch.sin(th)**3)), (p - (e**2)*a*(torch.cos(th)**3)))
-	N = a/torch.sqrt(1 - (e**2)*(torch.sin(lat)**2))
-	alt = p/torch.cos(lat) - N
-	# lon = np.mod(lon, 2.0*np.pi) # don't use!
-	k = (torch.abs(x[:,0]) < 1) & (torch.abs(x[:,1]) < 1)
-	alt[k] = torch.abs(x[k,2]) - b
+print(f'Working in the directory: {path_to_file}')
+
+# Station file
+
+# z = np.load(ext_dir + '%s_stations.npz'%name_of_project)
+z = np.load(path_to_file + 'stations.npz')
+locs, stas = z['locs'], z['stas']
+z.close()
+
+print('\n Using stations:')
+print(stas)
+print('\n Using locations:')
+print(locs)
+
+# Region file
+# z = np.load(ext_dir + '%s_region.npz'%name_of_project)
+z = np.load(path_to_file + 'region.npz', allow_pickle = True)
+lat_range, lon_range, depth_range = z['lat_range'], z['lon_range'], z['depth_range'], 
+deg_pad, num_grids, years = z['deg_pad'], z['num_grids'], z['years']
+n_spatial_nodes = z['n_spatial_nodes']
+load_initial_files = z['load_initial_files'][0]
+use_pretrained_model = z['use_pretrained_model'][0]
+
+if use_pretrained_model == 'None':
+    use_pretrained_model = None
+
+if with_density == 'None':
+    with_density = None
+
+z.close()
+shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config["name_of_project"]}_region.npz')
+
+
+
+# else, set with_density = srcs with srcs[:,0] == lat, srcs[:,1] == lon, srcs[:,2] == depth
+## to preferentially focus the spatial graphs closer around reference sources. 
+
+## Fit projection coordinates and create spatial grids
+
+def optimize_with_differential_evolution(center_loc, nominal_depth = 0.0):
+
+	loss_coef = [1,1,1.0,0]
+
+	unit_lat = np.array([0.001, 0.0, 0.0]).reshape(1,-1) + center_loc
+	unit_vert = np.array([0.0, 0.0, 10.0]).reshape(1,-1) + center_loc
+
+	### LOOK HERE ###
+	norm_lat = np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0)), axis = 0), axis = 1)
+	norm_vert = np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0)), axis = 0), axis = 1)
+	### LOOK HERE ###
 	
-	return torch.cat((180.0*lat[:,None]/pi, 180.0*lon[:,None]/pi, alt[:,None]), axis = 1)
+	trgt_lat = np.array([0,1.0,0]).reshape(1,-1)
+	trgt_vert = np.array([0,0,1.0]).reshape(1,-1)
+	trgt_center = np.zeros(3)
 
-def rotation_matrix(a, b, c):
+	def loss_function(x):
 
-	# a, b, c = vec
+		rbest = rotation_matrix_full_precision(x[0], x[1], x[2])
 
-	rot = torch.zeros(3,3)
-	rot[0,0] = torch.cos(b)*torch.cos(c)
-	rot[0,1] = torch.sin(a)*torch.sin(b)*torch.cos(c) - torch.cos(a)*torch.sin(c)
-	rot[0,2] = torch.cos(a)*torch.sin(b)*torch.cos(c) + torch.sin(a)*torch.sin(c)
+		norm_lat = lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0))
+		norm_vert = lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0))
+		norm_lat = np.linalg.norm(norm_lat[1] - norm_lat[0])
+		norm_vert = np.linalg.norm(norm_vert[1] - norm_vert[0])
 
-	rot[1,0] = torch.cos(b)*torch.sin(c)
-	rot[1,1] = torch.sin(a)*torch.sin(b)*torch.sin(c) + torch.cos(a)*torch.cos(c)
-	rot[1,2] = torch.cos(a)*torch.sin(b)*torch.sin(c) - torch.sin(a)*torch.cos(c)
+		center_out = ftrns1(center_loc, rbest, x[3::].reshape(1,-1))
 
-	rot[2,0] = -torch.sin(b)
-	rot[2,1] = torch.sin(a)*torch.cos(b)
-	rot[2,2] = torch.cos(a)*torch.cos(b)
+		out_unit_lat = ftrns1(unit_lat, rbest, x[3::].reshape(1,-1))
+		out_unit_lat = (out_unit_lat - center_out)/norm_lat
 
-	return rot
+		out_unit_vert = ftrns1(unit_vert, rbest, x[3::].reshape(1,-1))
+		out_unit_vert = (out_unit_vert - center_out)/norm_vert
 
-def rotation_matrix_full_precision(a, b, c):
+		out_locs = ftrns1(locs, rbest, x[3::].reshape(1,-1))
 
-	# a, b, c = vec
+		loss1 = np.linalg.norm(trgt_lat - out_unit_lat, axis = 1)
+		loss2 = np.linalg.norm(trgt_vert - out_unit_vert, axis = 1)
+		loss3 = np.linalg.norm(trgt_center.reshape(1,-1) - center_out, axis = 1) ## Scaling loss down
+		loss = loss_coef[0]*loss1 + loss_coef[1]*loss2 + loss_coef[2]*loss3 # + loss_coef[3]*loss4
 
-	rot = np.zeros((3,3))
-	rot[0,0] = np.cos(b)*np.cos(c)
-	rot[0,1] = np.sin(a)*np.sin(b)*np.cos(c) - np.cos(a)*np.sin(c)
-	rot[0,2] = np.cos(a)*np.sin(b)*np.cos(c) + np.sin(a)*np.sin(c)
+		return loss
 
-	rot[1,0] = np.cos(b)*np.sin(c)
-	rot[1,1] = np.sin(a)*np.sin(b)*np.sin(c) + np.cos(a)*np.cos(c)
-	rot[1,2] = np.cos(a)*np.sin(b)*np.sin(c) - np.sin(a)*np.cos(c)
+	bounds = [(0, 2.0*np.pi), (0, 2.0*np.pi), (0, 2.0*np.pi), (-1e7, 1e7), (-1e7, 1e7), (-1e7, 1e7)]
 
-	rot[2,0] = -np.sin(b)
-	rot[2,1] = np.sin(a)*np.cos(b)
-	rot[2,2] = np.cos(a)*np.cos(b)
+	soln = differential_evolution(lambda x: loss_function(x), bounds, popsize = 30, maxiter = 1000, disp = True)
 
-	return rot
+	# soln = direct(lambda x: loss_function(x), bounds, maxfun = int(100e3), maxiter = int(10e3))
 
-### K-means scripts
+	return soln
 
-def kmeans_packing(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1, lr = 0.01):
+def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps = 5000, extend_grids = True, with_density = None, density_kernel = 0.15):
 
-	V_results = []
-	Losses = []
-	for n in range(n_sim):
+	if with_density == True:
+		from sklearn.neighbors import KernelDensity
+		m_density = KernelDensity(kernel = 'gaussian', bandwidth = density_kernel).fit(with_density[:,0:2])
 
-		losses, rz = [], []
-		for i in range(n_steps):
-			if i == 0:
-				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
+	x_grids = []
+	for i in range(n_grids):
 
-			tree = cKDTree(ftrns1(v))
-			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
-			q, ip = tree.query(ftrns1(x))
+		eps_extra = 0.1
+		eps_extra_depth = 0.02
+		scale_up = 1.0 # 10000.0
+		weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1,-1) ## Tries to scale importance of depth up, so that nodes fill depth-axis well
 
-			rs = []
-			ipu = np.unique(ip)
-			for j in range(len(ipu)):
-				ipz = np.where(ip == ipu[j])[0]
-				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
-				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
-				v[ipu[j],:] = v[ipu[j],:] + lr*update
-				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+		offset_x_extend_slice = np.array([offset_x_extend[0,0], offset_x_extend[0,1], offset_x_extend[0,2]]).reshape(1,-1)
+		scale_x_extend_slice = np.array([scale_x_extend[0,0], scale_x_extend[0,1], scale_x_extend[0,2]]).reshape(1,-1)
 
-			rz.append(np.mean(rs)) # record average update size.
+		depth_scale = (np.diff(depth_range)*0.02)
+		deg_scale = ((0.5*np.diff(lat_range) + 0.5*np.diff(lon_range))*0.08)
 
-			if np.mod(i, 10) == 0:
-				print('%d %f'%(i, rz[-1]))
+		if extend_grids == True:
+			extend1, extend2, extend3, extend4 = (np.random.rand(4) - 0.5)*deg_scale
+			extend5 = (np.random.rand() - 0.5)*depth_scale
+			offset_x_extend_slice[0,0] += extend1
+			offset_x_extend_slice[0,1] += extend2
+			scale_x_extend_slice[0,0] += extend3
+			scale_x_extend_slice[0,1] += extend4
+			offset_x_extend_slice[0,2] += extend5
+			scale_x_extend_slice[0,2] = depth_range[1] - offset_x_extend_slice[0,2]
 
-		# Evaluate loss (5 times batch size)
-		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
-		q, ip = tree.query(x)
-		Losses.append(q.mean())
-		V_results.append(np.copy(v))
+		else:
+			pass
 
-	Losses = np.array(Losses)
-	ibest = np.argmin(Losses)
+		print('\n Optimize for spatial grid (%d / %d)'%(i + 1, n_grids))
 
-	return V_results[ibest], V_results, Losses, losses, rz
-
-def kmeans_packing_weight_vector(weight_vector, scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1, lr = 0.01):
-
-	V_results = []
-	Losses = []
-	for n in range(n_sim):
-
-		losses, rz = [], []
-		for i in range(n_steps):
-			if i == 0:
-				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
-
-			tree = cKDTree(ftrns1(v)*weight_vector)
-			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
-			q, ip = tree.query(ftrns1(x)*weight_vector)
-
-			rs = []
-			ipu = np.unique(ip)
-			for j in range(len(ipu)):
-				ipz = np.where(ip == ipu[j])[0]
-				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
-				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
-				v[ipu[j],:] = v[ipu[j],:] + lr*update
-				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
-
-			rz.append(np.mean(rs)) # record average update size.
-
-			if np.mod(i, 10) == 0:
-				print('%d %f'%(i, rz[-1]))
-
-		# Evaluate loss (5 times batch size)
-		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
-		q, ip = tree.query(x)
-		Losses.append(q.mean())
-		V_results.append(np.copy(v))
-
-	Losses = np.array(Losses)
-	ibest = np.argmin(Losses)
-
-	return V_results[ibest], V_results, Losses, losses, rz
+		offset_x_grid = scale_up*np.array([offset_x_extend_slice[0,0] - eps_extra*scale_x_extend_slice[0,0], offset_x_extend_slice[0,1] - eps_extra*scale_x_extend_slice[0,1], offset_x_extend_slice[0,2] - eps_extra_depth*scale_x_extend_slice[0,2]]).reshape(1,-1)
+		scale_x_grid = scale_up*np.array([scale_x_extend_slice[0,0] + 2.0*eps_extra*scale_x_extend_slice[0,0], scale_x_extend_slice[0,1] + 2.0*eps_extra*scale_x_extend_slice[0,1], scale_x_extend_slice[0,2] + 2.0*eps_extra_depth*scale_x_extend_slice[0,2]]).reshape(1,-1)
 	
-def kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 1000, n_sim = 1, frac = 0.75, lr = 0.01):
+		if with_density == True:
 
-	## Frac specifies how many of the random samples are from the density versus background
+			x_grid = kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch = 10000, n_steps = n_steps, n_sim = 1, lr = 0.005)[0]/scale_up # .to(device) # 8000
 
-	n1 = int(n_clusters*frac) ## Number to sample from density
-	n2 = n_clusters - n1 ## Number to sample uniformly
+		else:
+			x_grid = kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch = 10000, n_steps = n_steps, n_sim = 1, lr = 0.005)[0]/scale_up # .to(device) # 8000
 
-	n1_sample = int(n_batch*frac)
-	n2_sample = n_batch - n1_sample
+		iargsort = np.argsort(x_grid[:,0])
+		x_grid = x_grid[iargsort]
+		x_grids.append(x_grid)
 
-	V_results = []
-	Losses = []
-	for n in range(n_sim):
+	return x_grids # , x_grids_edges
 
-		losses, rz = [], []
-		for i in range(n_steps):
-			if i == 0:
-				v1 = m_density.sample(n1)
-				v1 = np.concatenate((v1, np.random.rand(n1).reshape(-1,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
-				v2 = np.random.rand(n2, ndim)*scale_x + offset_x
-				v = np.concatenate((v1, v2), axis = 0)
+if use_spherical == True:
 
-				iremove = np.where(((v[:,0] > (offset_x[0,0] + scale_x[0,0])) + ((v[:,1] > (offset_x[0,1] + scale_x[0,1]))) + (v[:,0] < offset_x[0,0]) + (v[:,1] < offset_x[0,1])) > 0)[0]
-				if len(iremove) > 0:
-					v[iremove] = np.random.rand(len(iremove), ndim)*scale_x + offset_x
+	earth_radius = 6371e3
+	ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T # just subtract mean
+	ftrns2 = lambda x, rbest, mn: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius) # just subtract mean
 
-			tree = cKDTree(ftrns1(v)*weight_vector)
-			x1 = m_density.sample(n1)
-			x1 = np.concatenate((x1, np.random.rand(n1).reshape(-1,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
-			x2 = np.random.rand(n2, ndim)*scale_x + offset_x
-			x = np.concatenate((x1, x2), axis = 0)
-			iremove = np.where(((x[:,0] > (offset_x[0,0] + scale_x[0,0])) + ((x[:,1] > (offset_x[0,1] + scale_x[0,1]))) + (x[:,0] < offset_x[0,0]) + (x[:,1] < offset_x[0,1])) > 0)[0]
-			if len(iremove) > 0:
-				x[iremove] = np.random.rand(len(iremove), ndim)*scale_x + offset_x
+else:
 
-			q, ip = tree.query(ftrns1(x)*weight_vector)
+	earth_radius = 6378137.0
+	ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef(x) - mn).T).T # just subtract mean
+	ftrns2 = lambda x, rbest, mn: ecef2lla((rbest.T @ x.T).T + mn) # just subtract mean
 
-			rs = []
-			ipu = np.unique(ip)
-			for j in range(len(ipu)):
-				ipz = np.where(ip == ipu[j])[0]
-				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
-				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
-				v[ipu[j],:] = v[ipu[j],:] + lr*update
-				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+## Unit lat, vertical vectors; point positive y, and outward normal
+## mean centered stations. Keep the vertical depth, consistent.
 
-			rz.append(np.mean(rs)) # record average update size.
-
-			if np.mod(i, 10) == 0:
-				print('%d %f'%(i, rz[-1]))
-
-		# Evaluate loss (5 times batch size)
-		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
-		q, ip = tree.query(x)
-		Losses.append(q.mean())
-		V_results.append(np.copy(v))
-
-	Losses = np.array(Losses)
-	ibest = np.argmin(Losses)
-
-	return V_results[ibest], V_results, Losses, losses, rz
-
-def kmeans_packing_sampling_points(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 1000, n_sim = 3, lr = 0.01):
-
-	V_results = []
-	Losses = []
-	for n in range(n_sim):
-
-		losses, rz = [], []
-		for i in range(n_steps):
-			if i == 0:
-				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
-
-			tree = cKDTree(ftrns1(v))
-			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
-			q, ip = tree.query(ftrns1(x))
-
-			rs = []
-			ipu = np.unique(ip)
-			for j in range(len(ipu)):
-				ipz = np.where(ip == ipu[j])[0]
-				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
-				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
-				v[ipu[j],:] = v[ipu[j],:] + lr*update
-				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
-
-			rz.append(np.mean(rs)) # record average update size.
-
-			if np.mod(i, 10) == 0:
-				print('%d %f'%(i, rz[-1]))
-
-		# Evaluate loss (5 times batch size)
-		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
-		q, ip = tree.query(x)
-		Losses.append(q.mean())
-		V_results.append(np.copy(v))
-
-	Losses = np.array(Losses)
-	ibest = np.argmin(Losses)
-
-	return V_results[ibest], V_results, Losses, losses, rz
-
-### TRAVEL TIMES ###
-
-def interp_3D_return_function_adaptive(X, Xmin, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
-
-	nsta = Tp.shape[1]
-	i1 = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1], [1,1,0], [1,0,1], [0,1,1], [1,1,1]])
-	x10, x20, x30 = Xmin
-	Xv = X - np.array([x10,x20,x30])[None,:] 
-
-	def evaluate_func(y, x):
-
-		xv = x - np.array([x10,x20,x30])[None,:]
-		nx = np.shape(x)[0] # nx is the number of query points in x
-		nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
-		nz_vals1 = np.minimum(nz_vals, N - 2)
-
-		nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
-		val_p = Tp[nz,:]
-		val_s = Ts[nz,:]
-
-		x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
-		x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
-
-		val_p = np.sum(val_p*x0[:,:,None], axis = 0)
-		val_s = np.sum(val_s*x0[:,:,None], axis = 0)
-
-		return np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)
-
-	return lambda y, x: evaluate_func(y, ftrns1(x))
-
-def interp_1D_velocity_model_to_3D_travel_times(X, locs, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
-
-	i1 = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1], [1,1,0], [1,0,1], [0,1,1], [1,1,1]])
-	x10, x20, x30 = Xmin
-	Xv = X - np.array([x10,x20,x30])[None,:]
-	depth_grid = np.copy(locs[:,2]).reshape(1,-1)
-	mask = np.array([1.0,1.0,0.0]).reshape(1,-1)
-
-	print('Check way X0 is used')
-
-	def evaluate_func(y, x):
-
-		y, x = y.cpu().detach().numpy(), x.cpu().detach().numpy()
-
-		ind_depth = np.tile(np.argmin(np.abs(y[:,2].reshape(-1,1) - depth_grid), axis = 1), x.shape[0])
-		rel_pos = (np.expand_dims(x, axis = 1) - np.expand_dims(y*mask, axis = 0)).reshape(-1,3)
-		rel_pos[:,0:2] = np.abs(rel_pos[:,0:2]) ## Postive relative pos, relative to X0.
-		x_relative = X0 + rel_pos
-
-		xv = x_relative - Xmin[None,:]
-		nx = np.shape(rel_pos)[0] # nx is the number of query points in x
-		nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
-		nz_vals1 = np.minimum(nz_vals, N - 2)
-
-		nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
-
-		val_p = Tp[nz,ind_depth]
-		val_s = Ts[nz,ind_depth]
-
-		x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
-		x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
-
-		val_p = np.sum(val_p*x0, axis = 0).reshape(-1, y.shape[0])
-		val_s = np.sum(val_s*x0, axis = 0).reshape(-1, y.shape[0])
-
-		return torch.Tensor(np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)).to(device)
-
-	return lambda y, x: evaluate_func(y, x)
+print('\n Using domain')
+print('\n Latitude:')
+print(lat_range)
+print('\n Longitude:')
+print(lon_range)
 
 
-### PREP INPUTS ###
-def assemble_time_pointers_for_stations(trv_out, dt = 1.0, k = 10, win = 10.0, tbuffer = 10.0):
+if fix_nominal_depth == True:
+	nominal_depth = 0.0 ## Can change the target depth projection if prefered
+else:
+	nominal_depth = locs[:,2].mean() ## Can change the target depth projection if prefered
 
-	n_temp, n_sta = trv_out.shape[0:2]
-	dt_partition = np.arange(-win, win + trv_out.max() + dt + tbuffer, dt)
+center_loc = np.array([lat_range[0] + 0.5*np.diff(lat_range)[0], lon_range[0] + 0.5*np.diff(lon_range)[0], nominal_depth]).reshape(1,-1)
+# center_loc = locs.mean(0, keepdims = True)
 
-	edges_p = []
-	edges_s = []
-	for i in range(n_sta):
-		tree_p = cKDTree(trv_out[:,i,0][:,np.newaxis])
-		tree_s = cKDTree(trv_out[:,i,1][:,np.newaxis])
-		q_p, ip_p = tree_p.query(dt_partition[:,np.newaxis], k = k)
-		q_s, ip_s = tree_s.query(dt_partition[:,np.newaxis], k = k)
-		# ip must project to Lg indices.
-		edges_p.append((ip_p*n_sta + i).reshape(-1)) # Lg indices are each source x n_sta + sta_ind. The reshape places each subsequence of k, per time step, per station.
-		edges_s.append((ip_s*n_sta + i).reshape(-1)) # Lg indices are each source x n_sta + sta_ind. The reshape places each subsequence of k, per time step, per station.
-		# Overall, each station, each time step, each k sets of edges.
-	edges_p = np.hstack(edges_p)
-	edges_s = np.hstack(edges_s)
+use_differential_evolution = True
+if use_differential_evolution == True:
 
-	return edges_p, edges_s, dt_partition
-
-def assemble_time_pointers_for_stations_multiple_grids(trv_out, max_t, dt = 1.0, k = 10, win = 10.0):
-
-	n_temp, n_sta = trv_out.shape[0:2]
-	dt_partition = np.arange(-win, win + max_t + dt, dt)
-
-	edges_p = []
-	edges_s = []
-	for i in range(n_sta):
-		tree_p = cKDTree(trv_out[:,i,0][:,np.newaxis])
-		tree_s = cKDTree(trv_out[:,i,1][:,np.newaxis])
-		q_p, ip_p = tree_p.query(dt_partition[:,np.newaxis], k = k)
-		q_s, ip_s = tree_s.query(dt_partition[:,np.newaxis], k = k)
-		# ip must project to Lg indices.
-		edges_p.append((ip_p*n_sta + i).reshape(-1))
-		edges_s.append((ip_s*n_sta + i).reshape(-1))
-		# Overall, each station, each time step, each k sets of edges.
-	edges_p = np.hstack(edges_p)
-	edges_s = np.hstack(edges_s)
-
-	return edges_p, edges_s, dt_partition
-
-
-## ACTUAL UTILS
-def remove_mean(x, axis):
+	## This is prefered fitting method
 	
-	return x - np.nanmean(x, axis = axis, keepdims = True)
+	## Unit lat, vertical vectors; point positive y, and outward normal
+	## mean centered stations. Keep the vertical depth, consistent.
+	
+	print('\n Using domain')
+	print('\n Latitude:')
+	print(lat_range)
+	print('\n Longitude:')
+	print(lon_range)
+	
+	fix_nominal_depth = True
+	assert(fix_nominal_depth == True)
+	if fix_nominal_depth == True:
+		nominal_depth = 0.0 ## Can change the target depth projection if prefered
+	else:
+		nominal_depth = locs[:,2].mean() ## Can change the target depth projection if prefered
+	
+	center_loc = np.array([lat_range[0] + 0.5*np.diff(lat_range)[0], lon_range[0] + 0.5*np.diff(lon_range)[0], nominal_depth]).reshape(1,-1)
+	
+	from scipy.optimize import differential_evolution
+	
+	# os.rename(ext_dir + 'stations.npz', ext_dir + '%s_stations_backup.npz'%name_of_project)
+	
+	soln = optimize_with_differential_evolution(center_loc)
+	rbest = rotation_matrix_full_precision(soln.x[0], soln.x[1], soln.x[2])
+	mn = soln.x[3::].reshape(1,-1)
 
-## From https://stackoverflow.com/questions/16750618/whats-an-efficient-way-to-find-if-a-point-lies-in-the-convex-hull-of-a-point-cl
-def in_hull(p, hull):
-	"""
-	Test if points in `p` are in `hull`
-	`p` should be a `NxK` coordinates of `N` points in `K` dimensions
-	`hull` is either a scipy.spatial.Delaunay object or the `MxK` array of the 
-	coordinates of `M` points in `K`dimensions for which Delaunay triangulation
-	will be computed
-	"""
-	from scipy.spatial import Delaunay
-	if not isinstance(hull,Delaunay):
-		hull = Delaunay(hull)
+else:
 
-	return hull.find_simplex(p)>=0
+	## If optimizing projection coefficients with this option, need 
+	## ftrns1 and ftrns2 to accept torch Tensors instead of numpy arrays
+	if use_spherical == True:
 
+		earth_radius = 6371e3
+		ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef_diff(x, e = 0.0, a = earth_radius) - mn).T).T # just subtract mean
+		ftrns2 = lambda x, rbest, mn: ecef2lla_diff((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius) # just subtract mean
+	
+	else:
+	
+		earth_radius = 6378137.0
+		ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef_diff(x) - mn).T).T # just subtract mean
+		ftrns2 = lambda x, rbest, mn: ecef2lla_diff((rbest.T @ x.T).T + mn) # just subtract mean
+	
+	## Iterative optimization, does not converge as well
 
-## Load Files
-def load_files(path_to_file, name_of_project, template_ver, vel_model_ver):
-	if '\\' in path_to_file:  # Windows
-		separator = '\\'
-	else:  # Linux or Unix
-		separator = '/'
+	n_attempts = 10
 
-	# Load region
-	z = np.load(path_to_file + separator + '%s_region.npz' % name_of_project)
+	unit_lat = np.array([0.01, 0.0, 0.0]).reshape(1,-1) + center_loc
+	unit_vert = np.array([0.0, 0.0, 1000.0]).reshape(1,-1) + center_loc
+	
+	norm_lat = torch.Tensor(np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0)), axis = 0), axis = 1))
+	norm_vert = torch.Tensor(np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0)), axis = 0), axis = 1))
+	
+	trgt_lat = torch.Tensor([0,1.0,0]).reshape(1,-1)
+	trgt_vert = torch.Tensor([0,0,1.0]).reshape(1,-1)
+	trgt_center = torch.zeros(2)
+	
+	loss_func = nn.MSELoss()
+	
+	losses = []
+	losses1, losses2, losses3, losses4 = [], [], [], []
+	loss_coef = [1,1,1,0]
+	
+	## Based on initial conditions, sometimes this converges to a projection plane that is flipped polarity.
+	## E.g., "up" in the lat-lon domain is "down" in the Cartesian domain, and vice versa.
+	## So try a few attempts to make sure it has the correct polarity.
+	for attempt in range(n_attempts):
+	
+		vec = nn.Parameter(2.0*np.pi*torch.rand(3))
+	
+		# mn = nn.Parameter(torch.Tensor(lla2ecef(locs).mean(0, keepdims = True)))
+		mn = nn.Parameter(torch.Tensor(lla2ecef(center_loc.reshape(1,-1)).mean(0, keepdims = True)))
+	
+		optimizer = optim.Adam([vec, mn], lr = 0.001)
+	
+		print('\n Optimize the projection coefficients \n')
+	
+		n_steps_optimize = 5000
+		for i in range(n_steps_optimize):
+	
+			optimizer.zero_grad()
+	
+			rbest = rotation_matrix(vec[0], vec[1], vec[2])
+	
+			norm_lat = lla2ecef_diff(torch.Tensor(np.concatenate((center_loc, unit_lat), axis = 0)))
+			norm_vert = lla2ecef_diff(torch.Tensor(np.concatenate((center_loc, unit_vert), axis = 0)))
+			norm_lat = torch.norm(norm_lat[1] - norm_lat[0])
+			norm_vert = torch.norm(norm_vert[1] - norm_vert[0])
+	
+			center_out = ftrns1(torch.Tensor(center_loc), rbest, mn)
+	
+			out_unit_lat = ftrns1(torch.Tensor(unit_lat), rbest, mn)
+			out_unit_lat = (out_unit_lat - center_out)/norm_lat
+	
+			out_unit_vert = ftrns1(torch.Tensor(unit_vert), rbest, mn)
+			out_unit_vert = (out_unit_vert - center_out)/norm_vert
+	
+			out_locs = ftrns1(torch.Tensor(locs), rbest, mn)
+	
+			loss1 = loss_func(trgt_lat, out_unit_lat)
+			loss2 = loss_func(trgt_vert, out_unit_vert)
+			loss3 = loss_func(0.1*trgt_center, 0.1*center_out[0,0:2]) ## Scaling loss down
+	
+			loss = loss_coef[0]*loss1 + loss_coef[1]*loss2 + loss_coef[2]*loss3 # + loss_coef[3]*loss4
+			loss.backward()
+			optimizer.step()
+	
+			losses.append(loss.item())
+			losses1.append(loss1.item())
+			losses2.append(loss2.item())
+			losses3.append(loss3.item())
+	
+			if np.mod(i, 50) == 0:
+				print('%d %0.8f'%(i, loss.item()))
+	
+		## Save approriate files and make extensions for directory
+		print('\n Loss of lat and lon: %0.4f \n'%(loss_coef[0]*loss1 + loss_coef[1]*loss2))
+	
+		if (loss_coef[0]*loss1 + loss_coef[1]*loss2) < 1e-1:
+			print('\n Finished converging \n')
+			break
+		else:
+			print('\n Did not converge, restarting (%d) \n'%attempt)
+	
+	# os.rename(ext_dir + 'stations.npz', ext_dir + '%s_stations_backup.npz'%name_of_project)
+	
+	rbest = rbest.cpu().detach().numpy()
+	mn = mn.cpu().detach().numpy()
+
+if use_pretrained_model is not None:
+	shutil.move(path_to_file + 'Pretrained/trained_gnn_model_step_%d_ver_%d.h5'%(20000, use_pretrained_model), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(config["name_of_project"], 20000, 1))
+	shutil.move(path_to_file + 'Pretrained/1d_travel_time_grid_ver_%d.npz'%use_pretrained_model, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(config["name_of_project"], 1))
+	shutil.move(path_to_file + 'Pretrained/seismic_network_templates_ver_%d.npz'%use_pretrained_model, path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(use_pretrained_model, 1))
+
+	## Find offset corrections if using one of the pre-trained models
+	## Load these and apply offsets for runing "process_continuous_days.py"
+	z = np.load(path_to_file + 'Pretrained/stations_ver_%d.npz'%use_pretrained_model)['locs']
+	sta_loc, rbest, mn = z['locs'], z['rbest'], z['mn']
+	corr1 = locs.mean(0, keepdims = True)
+	corr2 = sta_loc.mean(0, keepdims = True)
+	z.close()
+
+	z = np.load(path_to_file + 'Pretrained/region_ver_%d.npz'%use_pretrained_model)
 	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
 	z.close()
 
-	# Load templates
-	z = np.load(path_to_file + separator + 'Grids/%s_seismic_network_templates_ver_%d.npz' % (name_of_project, template_ver))
-	x_grids = z['x_grids']
-	z.close()
+	locs = np.copy(locs) - corr1 + corr2
+	shutil.copy(path_to_file + 'Pretrained/region_ver_%d.npz'%use_pretrained_model, path_to_file + f'{config["name_of_project"]}_region.npz')
 
-	# Load stations
-	z = np.load(path_to_file + separator + '%s_stations.npz' % name_of_project)
-	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-	z.close()
+else:
+	corr1 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
+	corr2 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
 
-	# Load travel times
-	z = np.load(path_to_file + separator + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz' % (name_of_project, vel_model_ver))
-	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+np.savez_compressed(path_to_file + f'{config["name_of_project"]}_stations.npz', locs = locs, stas = stas, rbest = rbest, mn = mn)
+
+## Make necessary directories
+
+os.makedirs(path_to_file + 'Picks', exist_ok=True)
+os.makedirs(path_to_file + 'Catalog', exist_ok=True)
+for year in years:
+	os.makedirs(path_to_file + f'Picks/{year}', exist_ok=True)
+	os.makedirs(path_to_file + f'Catalog/{year}', exist_ok=True)
+
+os.makedirs(path_to_file + 'Plots', exist_ok=True)
+os.makedirs(path_to_file + 'GNN_TrainedModels', exist_ok=True)
+os.makedirs(path_to_file + 'Grids', exist_ok=True)
+os.makedirs(path_to_file + '1D_Velocity_Models_Regional', exist_ok=True)
+
+if (load_initial_files == True)*(use_pretrained_model == False):
+	step_load = 20000
+	ver_load = 1
+	if os.path.exists(path_to_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(step_load, ver_load)):
+		shutil.move(path_to_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(step_load, ver_load), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(config["name_of_project"], step_load, ver_load))
+
+	ver_load = 1
+	if os.path.exists(path_to_file + '1d_travel_time_grid_ver_%d.npz'%ver_load):
+		shutil.move(path_to_file + '1d_travel_time_grid_ver_%d.npz'%ver_load, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(config["name_of_project"], ver_load))
+
+	ver_load = 1
+	if os.path.exists(path_to_file + 'seismic_network_templates_ver_%d.npz'%ver_load):
+		shutil.move(path_to_file + 'seismic_network_templates_ver_%d.npz'%ver_load, path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(config["name_of_project"], ver_load))
+
+## Make spatial grids
+
+if use_spherical == True:
+
+	earth_radius = 6371e3
+	ftrns1 = lambda x: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
+	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius)  # invert ftrns1
+
+else:
+
+	earth_radius = 6378137.0	
+	ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
+	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)  # invert ftrns1
 	
-	Tp = z['Tp_interp']
-	Ts = z['Ts_interp']
 
-	locs_ref = z['locs_ref']
-	X = z['X']
-	z.close()
-	
-	# You can extract further variables from z if needed here
+lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
+lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
 
-	# Create path to write files
-	write_training_file = path_to_file + separator + 'GNN_TrainedModels/' + name_of_project + '_'
+scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
+scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
 
-	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
+skip_making_grid = False
+if load_initial_files == True:
+	if os.path.exists('Grids/%s_seismic_network_templates_ver_%d.npz'%(config["name_of_project"], ver_load)) == True:
+		skip_making_grid = True
+
+if skip_making_grid == False:
+	x_grids = assemble_grids(scale_x_extend, offset_x_extend, num_grids, n_spatial_nodes, n_steps = num_steps, with_density = with_density)
+
+	np.savez_compressed(path_to_file + 'Grids/%s_seismic_network_templates_ver_1.npz'%config["name_of_project"], x_grids = [x_grids[i] for i in range(len(x_grids))], corr1 = corr1, corr2 = corr2)
