@@ -552,17 +552,18 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			spatial_term1 = np.expand_dims(ftrns1(x_grids[grid_select]), axis=1)
 			spatial_term2 = np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis=0)
 			spatial_diff = spatial_term1 - spatial_term2
+
+			print('spatial_diff.dtype', spatial_diff.dtype)  # Check the type
 			spatial_exp_term = np.exp(-0.5 * (spatial_diff**2) / (src_spatial_kernel**2))
 
 			# Temporal component
 			temporal_term1 = (time_samples[i] + t_slice).reshape(1,-1,1)
 			temporal_term2 = src_times[active_sources_per_slice].reshape(1,1,-1)
 			temporal_diff = temporal_term1 - temporal_term2
+
+			print('temporal_diff.dtype', temporal_diff.dtype)  # Check the type
 			temporal_exp_term = np.exp(-0.5 * (temporal_diff**2) / (src_t_kernel**2))
-
-			print(spatial_diff.dtype)  # Check the type
-			print(temporal_diff.dtype)  # Check the type
-
+			
 			# Combine components
 			lbls_grid = (np.expand_dims(spatial_exp_term.sum(2), axis=1) * temporal_exp_term).max(2)
 			lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
