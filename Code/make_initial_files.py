@@ -61,15 +61,25 @@ def save_files(base_path: str, locs, stas, config, years):
     )
 
 if __name__ == '__main__':
+    print("Loading configuration from 'config.yaml'...")
     config = load_config('config.yaml')
 
+    print("Setting up time range...")
     t0 = UTCDateTime(config['time_range']['start'])
     tf = UTCDateTime(config['time_range']['end'])
     years = list(range(t0.year, tf.year + 1))
 
+    print("Connecting to IRIS client...")
     client = Client('IRIS')
+    print("Setting up region based on configuration...")
     stations = setup_region(client, config, t0, tf)
+
+    print("Extracting station data...")
     locs, stas = extract_station_data(stations)
 
+    print("Determining base path for saving files...")
     base_path = str(pathlib.Path().absolute()) + ('\\' if '\\' in str(pathlib.Path().absolute()) else '/')
+    
+    print("Saving files...")
     save_files(base_path, locs, stas, config, years)
+    print("All files saved successfully!")
