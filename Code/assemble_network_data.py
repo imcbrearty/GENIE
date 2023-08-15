@@ -60,7 +60,8 @@ z.close()
 
 shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config["name_of_project"]}_region.npz')
 
-shutil.copy(path_to_file + '1d_velocity_model.npz', path_to_file + '1D_Velocity_Models_Regional' + f'{config["name_of_project"]}_1d_velocity_model.npz')
+n_ver_velocity_model = 1
+shutil.copy(path_to_file + '1d_velocity_model.npz', path_to_file + '1D_Velocity_Models_Regional' + f'{config["name_of_project"]}_1d_velocity_model_ver_{n_ver_velocity_model}.npz')
 
 
 # else, set with_density = srcs with srcs[:,0] == lat, srcs[:,1] == lon, srcs[:,2] == depth
