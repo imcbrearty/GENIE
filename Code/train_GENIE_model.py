@@ -2,6 +2,7 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
+import yaml
 import numpy as np
 from matplotlib import pyplot as plt
 import torch
@@ -23,29 +24,37 @@ import pathlib
 from utils import *
 from module import *
 
+
+# Load configuration from YAML
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
+
+name_of_project = config['name_of_project']
+
 ## Graph params
-k_sta_edges = 8
-k_spc_edges = 15
-k_time_edges = 10
+k_sta_edges = config['k_sta_edges']
+k_spc_edges = config['k_spc_edges']
+k_time_edges = config['k_time_edges']
+
 graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
 ## Training params
-n_batch = 75
-n_epochs = 20000 + 1 # add 1, so it saves on last iteration (since it saves every 100 steps)
-n_spc_query = 4500 # Number of src queries per sample
-n_src_query = 300 # Number of src-arrival queries per sample
+n_batch = config['n_batch']
+n_epochs = config['n_epochs'] # add 1, so it saves on last iteration (since it saves every 100 steps)
+n_spc_query = config['n_spc_query'] # Number of src queries per sample
+n_src_query = config['n_src_query'] # Number of src-arrival queries per sample
 training_params = [n_spc_query, n_src_query]
 
 ## Prediction params
-kernel_sig_t = 5.0 # Kernel to embed arrival time - theoretical time misfit (s)
-src_t_kernel = 6.5 # Kernel or origin time label (s)
-src_t_arv_kernel = 6.5 # Kernel for arrival association time label (s)
-src_x_kernel = 15e3 # Kernel for source label, horizontal distance (m)
-src_x_arv_kernel = 15e3 # Kernel for arrival-source association label, horizontal distance (m)
-src_depth_kernel = 15e3 # Kernel of Cartesian projection, vertical distance (m)
-t_win = 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
+kernel_sig_t = config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
+src_t_kernel = config['src_t_kernel'] # Kernel or origin time label (s)
+src_t_arv_kernel = config['src_t_arv_kernel'] # Kernel for arrival association time label (s)
+src_x_kernel = config['src_x_kernel'] # Kernel for source label, horizontal distance (m)
+src_x_arv_kernel = config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
+src_depth_kernel = config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
+t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
-dist_range = [15e3, 500e3] ## The spatial window over which to sample max distance of 
+dist_range = config['dist_range'] ## The spatial window over which to sample max distance of 
 ## source-station moveouts in m, per event. E.g., 15 - 500 km. Should set slightly lower if using small region.
 
 # File versions
@@ -59,8 +68,6 @@ n_ver = 1 # GNN save version
 pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
 
 device = torch.device('cuda') ## or use cpu
-
-
 
 
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, n_batch = 75, dist_range = [15e3, 500e3], max_rate_events = 6000/8, max_miss_events = 2500/8, max_false_events = 2500/8, T = 3600.0*3.0, dt = 30, tscale = 3600.0, n_sta_range = [0.35, 1.0], use_sources = False, use_full_network = False, fixed_subnetworks = None, use_preferential_sampling = False, use_shallow_sources = False, plot_on = False, verbose = False):
@@ -535,60 +542,12 @@ def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_
 	return lbl_trgt
 
 
-
 ## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
 path_to_file = str(pathlib.Path().absolute())
 
 
-## Load Files
-if '\\' in path_to_file: ## Windows
+lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file = load_files(path_to_file, name_of_project, template_ver, vel_model_ver)
 
-	# Load region
-	name_of_project = path_to_file.split('\\')[-1] ## Windows
-	z = np.load(path_to_file + '\\%s_region.npz'%name_of_project)
-	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-	z.close()
-
-	# Load templates
-	z = np.load(path_to_file + '\\Grids\\%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-	x_grids = z['x_grids']
-	z.close()
-
-	# Load stations
-	z = np.load(path_to_file + '\\%s_stations.npz'%name_of_project)
-	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-	z.close()
-
-	## Load travel times
-	z = np.load(path_to_file + '\\1D_Velocity_Models_Regional\\%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
-
-	## Create path to write files
-	write_training_file = path_to_file + '\\GNN_TrainedModels\\' + name_of_project + '_'
-	
-else: ## Linux or Unix
-
-	# Load region
-	name_of_project = path_to_file.split('/')[-1] ## Windows
-	z = np.load(path_to_file + '/%s_region.npz'%name_of_project)
-	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-	z.close()
-
-	# Load templates
-	z = np.load(path_to_file + '/Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-	x_grids = z['x_grids']
-	z.close()
-
-	# Load stations
-	z = np.load(path_to_file + '/%s_stations.npz'%name_of_project)
-	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-	z.close()
-
-	## Load travel times
-	z = np.load(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
-
-	## Create path to write files
-	write_training_file = path_to_file + '/GNN_TrainedModels/' + name_of_project + '_'
-	
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
 

@@ -79,52 +79,7 @@ template_ver = 1
 vel_model_ver = 1
 
 ## Load Files
-
-if '\\' in path_to_file: ## Windows
-
-	# Load region
-	z = np.load(path_to_file + '\\%s_region.npz'%name_of_project)
-	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-	z.close()
-
-	# Load templates
-	z = np.load(path_to_file + '\\Grids\\%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-	x_grids = z['x_grids']
-	z.close()
-
-	# Load stations
-	z = np.load(path_to_file + '\\%s_stations.npz'%name_of_project)
-	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-	z.close()
-
-	## Load travel times
-	shutil.copy(path_to_file + '\\1d_velocity_model.npz', path_to_file + '\\1D_Velocity_Models_Regional\\%s_1d_velocity_model.npz'%name_of_project)
-	z = np.load(path_to_file + '\\1D_Velocity_Models_Regional\\%s_1d_velocity_model.npz'%name_of_project)
-	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
-	z.close()
-
-else: ## Linux or Unix
-
-	# Load region
-	z = np.load(path_to_file + '/%s_region.npz'%name_of_project)
-	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-	z.close()
-
-	# Load templates
-	z = np.load(path_to_file + '/Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-	x_grids = z['x_grids']
-	z.close()
-
-	# Load stations
-	z = np.load(path_to_file + '/%s_stations.npz'%name_of_project)
-	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-	z.close()
-
-	## Load travel times
-	shutil.copy(path_to_file + '/1d_velocity_model.npz', path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model.npz'%name_of_project)
-	z = np.load(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model.npz'%name_of_project)
-	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
-	z.close()
+lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file = load_files(path_to_file, name_of_project, template_ver, vel_model_ver)
 
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
