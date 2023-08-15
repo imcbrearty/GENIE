@@ -4,8 +4,6 @@ import os
 import torch
 from torch import optim, nn
 import shutil
-from sklearn.neighbors import KernelDensity
-
 from utils import *
 
 ## User: Input stations and spatial region
@@ -102,44 +100,58 @@ def optimize_with_differential_evolution(center_loc):
 
     return soln
 
-def extend_grid(offset, scale, deg_scale, depth_scale, extend_grids):
+def extend_grid(offset, scale, deg_scale, depth_scale, extend_grids=True):
     if extend_grids:
-        offset[0] += (np.random.rand(2) - 0.5) * deg_scale
-        offset[2] += (np.random.rand() - 0.5) * depth_scale
-        scale[0:2] += (np.random.rand(2) - 0.5) * deg_scale
-        scale[2] = depth_range[1] - offset[2]
+        extend1, extend2, extend3, extend4 = (np.random.rand(4) - 0.5) * deg_scale
+        extend5 = (np.random.rand() - 0.5) * depth_scale
+        
+        offset[0, 0] += extend1
+        offset[0, 1] += extend2
+        scale[0, 0] += extend3
+        scale[0, 1] += extend4
+        offset[0, 2] += extend5
     return offset, scale
 
-def create_grid(scale, offset, eps_extra, eps_extra_depth, scale_up):
-    adjusted_offset = scale_up * (offset - np.array([eps_extra, eps_extra, eps_extra_depth]) * scale)
-    adjusted_scale = scale_up * (scale + 2.0 * np.array([eps_extra, eps_extra, eps_extra_depth]) * scale)
-    return adjusted_offset, adjusted_scale
 
-def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=5000, extend_grids=True, with_density=None, density_kernel=0.15):
-    
-    if with_density is True:
-        m_density = KernelDensity(kernel='gaussian', bandwidth=density_kernel).fit(with_density[:,0:2])
-    
+def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps = 5000, extend_grids=True, with_density=None, density_kernel=0.15):
+    if with_density:
+        from sklearn.neighbors import KernelDensity
+        m_density = KernelDensity(kernel='gaussian', bandwidth=density_kernel).fit(with_density[:, 0:2])
+
     x_grids = []
+    
     for i in range(n_grids):
-        eps_extra, eps_extra_depth, scale_up = 0.1, 0.02, 1.0
-        weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1,-1)
-        depth_scale = (np.diff(depth_range)*0.02)
-        deg_scale = ((0.5*np.diff(lat_range) + 0.5*np.diff(lon_range))*0.08)
+        eps_extra = 0.1
+        eps_extra_depth = 0.02
+        scale_up = 1.0
+
+        weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1, -1)
         
-        offset_slice, scale_slice = offset_x_extend[0].copy(), scale_x_extend[0].copy()
-        offset_slice, scale_slice = extend_grid(offset_slice, scale_slice, deg_scale, depth_scale, extend_grids)
+        offset_x_extend_slice = np.array([offset_x_extend[0, 0], offset_x_extend[0, 1], offset_x_extend[0, 2]]).reshape(1, -1)
+        scale_x_extend_slice = np.array([scale_x_extend[0, 0], scale_x_extend[0, 1], scale_x_extend[0, 2]]).reshape(1, -1)
+
+        depth_scale = (np.diff(depth_range) * 0.02)
+        deg_scale = ((0.5 * np.diff(lat_range) + 0.5 * np.diff(lon_range)) * 0.08)
+
+        offset_x_extend_slice, scale_x_extend_slice = extend_grid(offset_x_extend_slice, scale_x_extend_slice, deg_scale, depth_scale, extend_grids)
+
+        print('\n Optimize for spatial grid (%d / %d)' % (i + 1, n_grids))
+
+        offset_x_grid = scale_up * np.array([offset_x_extend_slice[0, 0] - eps_extra * scale_x_extend_slice[0, 0], offset_x_extend_slice[0, 1] - eps_extra * scale_x_extend_slice[0, 1], offset_x_extend_slice[0, 2] - eps_extra_depth * scale_x_extend_slice[0, 2]]).reshape(1, -1)
         
-        adjusted_offset, adjusted_scale = create_grid(scale_slice, offset_slice, eps_extra, eps_extra_depth, scale_up)
-        
+        scale_x_grid = scale_up * np.array([scale_x_extend_slice[0, 0] + 2.0 * eps_extra * scale_x_extend_slice[0, 0], scale_x_extend_slice[0, 1] + 2.0 * eps_extra * scale_x_extend_slice[0, 1], scale_x_extend_slice[0, 2] + 2.0 * eps_extra_depth * scale_x_extend_slice[0, 2]]).reshape(1, -1)
+
         if with_density:
-            x_grid = kmeans_packing_weight_vector_with_density(m_density, weight_vector, adjusted_scale, adjusted_offset, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=0.005)[0] / scale_up
+            x_grid = kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=0.005)[0] / scale_up
         else:
-            x_grid = kmeans_packing_weight_vector(weight_vector, adjusted_scale, adjusted_offset, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=0.005)[0] / scale_up
-        
-        x_grids.append(x_grid[np.argsort(x_grid[:,0])])
+            x_grid = kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=0.005)[0] / scale_up
+
+        iargsort = np.argsort(x_grid[:, 0])
+        x_grid = x_grid[iargsort]
+        x_grids.append(x_grid)
 
     return x_grids
+
 
 if use_spherical == True:
 
