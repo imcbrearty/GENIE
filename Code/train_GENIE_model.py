@@ -546,7 +546,7 @@ def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_
 path_to_file = str(pathlib.Path().absolute())
 
 
-lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs = load_files(path_to_file, name_of_project, template_ver, vel_model_ver)
+lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X = load_files(path_to_file, name_of_project, template_ver, vel_model_ver)
 
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
@@ -562,13 +562,6 @@ rbest_cuda = torch.Tensor(rbest).to(device)
 mn_cuda = torch.Tensor(mn).to(device)
 ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x) - mn_cuda).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
 ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda)
-
-Tp = z['Tp_interp']
-Ts = z['Ts_interp']
-
-locs_ref = z['locs_ref']
-X = z['X']
-z.close()
 
 x1 = np.unique(X[:,0])
 x2 = np.unique(X[:,1])

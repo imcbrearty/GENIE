@@ -466,9 +466,17 @@ def load_files(path_to_file, name_of_project, template_ver, vel_model_ver):
     # Load travel times
     z = np.load(path_to_file + separator + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz' % (name_of_project, vel_model_ver))
 	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+    
+	Tp = z['Tp_interp']
+	Ts = z['Ts_interp']
+
+	locs_ref = z['locs_ref']
+	X = z['X']
+	z.close()
+    
     # You can extract further variables from z if needed here
 
     # Create path to write files
     write_training_file = path_to_file + separator + 'GNN_TrainedModels/' + name_of_project + '_'
 
-    return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs
+    return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
