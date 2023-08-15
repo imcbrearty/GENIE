@@ -60,10 +60,6 @@ z.close()
 
 shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config["name_of_project"]}_region.npz')
 
-n_ver_velocity_model = 1
-shutil.copy(path_to_file + '1d_velocity_model.npz', path_to_file + '1D_Velocity_Models_Regional' + f'{config["name_of_project"]}_1d_velocity_model_ver_{n_ver_velocity_model}.npz')
-
-
 # else, set with_density = srcs with srcs[:,0] == lat, srcs[:,1] == lon, srcs[:,2] == depth
 ## to preferentially focus the spatial graphs closer around reference sources. 
 
@@ -371,6 +367,11 @@ os.makedirs(path_to_file + 'Plots', exist_ok=True)
 os.makedirs(path_to_file + 'GNN_TrainedModels', exist_ok=True)
 os.makedirs(path_to_file + 'Grids', exist_ok=True)
 os.makedirs(path_to_file + '1D_Velocity_Models_Regional', exist_ok=True)
+
+n_ver_velocity_model = 1
+seperator = '\\' if '\\' in path_to_file else '/'
+shutil.copy(path_to_file + '1d_velocity_model.npz', path_to_file + '1D_Velocity_Models_Regional' + seperator + f'{config["name_of_project"]}_1d_velocity_model_ver_{n_ver_velocity_model}.npz')
+
 
 if (load_initial_files == True)*(use_pretrained_model == False):
 	step_load = 20000
