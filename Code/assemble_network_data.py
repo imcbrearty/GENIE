@@ -57,8 +57,11 @@ if with_density == 'None':
 	with_density = None
 
 z.close()
+
 shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config["name_of_project"]}_region.npz')
 
+seperator = '\\' if '\\' in path_to_file else '/'
+shutil.copy(path_to_file + seperator + '1d_velocity_model.npz', path_to_file + seperator + '1D_Velocity_Models_Regional' + seperator '%s_1d_velocity_model.npz'%name_of_project)
 
 
 # else, set with_density = srcs with srcs[:,0] == lat, srcs[:,1] == lon, srcs[:,2] == depth
