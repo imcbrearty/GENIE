@@ -65,55 +65,40 @@ shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config["name_of_proje
 
 ## Fit projection coordinates and create spatial grids
 
-def optimize_with_differential_evolution(center_loc, nominal_depth = 0.0):
+def optimize_with_differential_evolution(center_loc):
+    loss_coef = [1, 1, 1.0, 0]
 
-	loss_coef = [1,1,1.0,0]
+    # Calculate initial ecef values as they don't depend on x
+    norm_lat_ecef = lla2ecef(np.concatenate((center_loc, center_loc + [0.001, 0.0, 0.0]), axis=0))
+    norm_vert_ecef = lla2ecef(np.concatenate((center_loc, center_loc + [0.0, 0.0, 10.0]), axis=0))
+    norm_lat = np.linalg.norm(norm_lat_ecef[1] - norm_lat_ecef[0])
+    norm_vert = np.linalg.norm(norm_vert_ecef[1] - norm_vert_ecef[0])
 
-	unit_lat = np.array([0.001, 0.0, 0.0]).reshape(1,-1) + center_loc
-	unit_vert = np.array([0.0, 0.0, 10.0]).reshape(1,-1) + center_loc
+    trgt_lat = np.array([0, 1.0, 0]).reshape(1, -1)
+    trgt_vert = np.array([0, 0, 1.0]).reshape(1, -1)
+    trgt_center = np.zeros(3)
 
-	### LOOK HERE ###
-	norm_lat = np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0)), axis = 0), axis = 1)
-	norm_vert = np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0)), axis = 0), axis = 1)
-	### LOOK HERE ###
-	
-	trgt_lat = np.array([0,1.0,0]).reshape(1,-1)
-	trgt_vert = np.array([0,0,1.0]).reshape(1,-1)
-	trgt_center = np.zeros(3)
+    def loss_function(x):
+        rbest = rotation_matrix_full_precision(x[0], x[1], x[2])
 
-	def loss_function(x):
+        center_out = ftrns1(center_loc, rbest, x[3:].reshape(1, -1))
+        out_unit_lat = (ftrns1(center_loc + [0.001, 0.0, 0.0], rbest, x[3:].reshape(1, -1)) - center_out) / norm_lat
+        out_unit_vert = (ftrns1(center_loc + [0.0, 0.0, 10.0], rbest, x[3:].reshape(1, -1)) - center_out) / norm_vert
 
-		rbest = rotation_matrix_full_precision(x[0], x[1], x[2])
+        # If locs are global, then include this line
+        # out_locs = ftrns1(locs, rbest, x[3:].reshape(1, -1))
 
-		norm_lat = lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0))
-		norm_vert = lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0))
-		norm_lat = np.linalg.norm(norm_lat[1] - norm_lat[0])
-		norm_vert = np.linalg.norm(norm_vert[1] - norm_vert[0])
+        loss1 = np.linalg.norm(trgt_lat - out_unit_lat, axis=1)
+        loss2 = np.linalg.norm(trgt_vert - out_unit_vert, axis=1)
+        loss3 = np.linalg.norm(trgt_center.reshape(1, -1) - center_out, axis=1)
+        loss = loss_coef[0] * loss1 + loss_coef[1] * loss2 + loss_coef[2] * loss3
 
-		center_out = ftrns1(center_loc, rbest, x[3::].reshape(1,-1))
+        return loss
 
-		out_unit_lat = ftrns1(unit_lat, rbest, x[3::].reshape(1,-1))
-		out_unit_lat = (out_unit_lat - center_out)/norm_lat
+    bounds = [(0, 2.0 * np.pi) for _ in range(3)] + [(-1e7, 1e7) for _ in range(3)]
+    soln = differential_evolution(loss_function, bounds, popsize=30, maxiter=1000, disp=True)
 
-		out_unit_vert = ftrns1(unit_vert, rbest, x[3::].reshape(1,-1))
-		out_unit_vert = (out_unit_vert - center_out)/norm_vert
-
-		out_locs = ftrns1(locs, rbest, x[3::].reshape(1,-1))
-
-		loss1 = np.linalg.norm(trgt_lat - out_unit_lat, axis = 1)
-		loss2 = np.linalg.norm(trgt_vert - out_unit_vert, axis = 1)
-		loss3 = np.linalg.norm(trgt_center.reshape(1,-1) - center_out, axis = 1) ## Scaling loss down
-		loss = loss_coef[0]*loss1 + loss_coef[1]*loss2 + loss_coef[2]*loss3 # + loss_coef[3]*loss4
-
-		return loss
-
-	bounds = [(0, 2.0*np.pi), (0, 2.0*np.pi), (0, 2.0*np.pi), (-1e7, 1e7), (-1e7, 1e7), (-1e7, 1e7)]
-
-	soln = differential_evolution(lambda x: loss_function(x), bounds, popsize = 30, maxiter = 1000, disp = True)
-
-	# soln = direct(lambda x: loss_function(x), bounds, maxfun = int(100e3), maxiter = int(10e3))
-
-	return soln
+    return soln
 
 def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps = 5000, extend_grids = True, with_density = None, density_kernel = 0.15):
 
