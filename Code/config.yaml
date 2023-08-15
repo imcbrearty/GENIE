@@ -28,6 +28,7 @@ with_density: False
 use_spherical: False ## Should only set to true if travel time model also has spherical projection (to be added soon)
 depth_importance_weighting_value_for_spatial_graphs: 2.5 # up scale the depth importance of node positions when creating spatial graph if using a large horizontally extended domain
 fix_nominal_depth: True
+number_of_update_steps: 5000
 
 ### TRAVEL TIMES ###
 depth_steps:
