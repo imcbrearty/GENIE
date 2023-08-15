@@ -15,7 +15,7 @@ from utils import *
 
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
-    config = yaml.safe_load(file)
+	config = yaml.safe_load(file)
 
 num_steps = config['number_of_update_steps']
 
@@ -51,10 +51,10 @@ load_initial_files = z['load_initial_files'][0]
 use_pretrained_model = z['use_pretrained_model'][0]
 
 if use_pretrained_model == 'None':
-    use_pretrained_model = None
+	use_pretrained_model = None
 
 if with_density == 'None':
-    with_density = None
+	with_density = None
 
 z.close()
 shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config["name_of_project"]}_region.npz')
