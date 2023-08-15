@@ -1,4 +1,4 @@
-name_of_project: 'Hawaii'
+name_of_project: 'Mayotte'
 num_cores: 1 #How many cores would you like to use for travel time calculations?
 
 latitude_range: [18.8, 20.3] #Latitude range of the region that will be processed
