@@ -303,6 +303,9 @@ for i in range(n_restart_step, n_epochs):
 		## To look at the synthetic data, do:
 		## plt.scatter(data[0][:,0], data[0][:,1])
 		## (plots time of pick against station index; will need to use an interactive plot to see details)
+	print('')
+	print('lp_times', lp_times)
+	print('')
 
 	loss_val = 0
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
