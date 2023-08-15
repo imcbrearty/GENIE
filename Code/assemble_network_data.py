@@ -8,18 +8,16 @@ from utils import *
 
 ## User: Input stations and spatial region
 ## (must have station and region files at
-## (ext_dir + 'stations.npz'), and
-## (ext_dir + 'region.npz')
-
-# ext_dir = 'D:/Projects/Mayotte/Mayotte/' ## Replace with absolute directory to location to setup folders, and where all the ".py" files from Github are located.
+## (path_to_file + 'stations.npz'), and
+## (path_to_file + 'region.npz')
 
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 with_density = config['with_density']
-use_spherical = config['use_spherical'] 
-depth_importance_weighting_value_for_spatial_graphs = config['depth_importance_weighting_value_for_spatial_graphs'] 
+use_spherical = config['use_spherical']
+depth_importance_weighting_value_for_spatial_graphs = config['depth_importance_weighting_value_for_spatial_graphs']
 fix_nominal_depth = config['fix_nominal_depth']
 
 path_to_file = str(pathlib.Path().absolute())
@@ -50,6 +48,9 @@ use_pretrained_model = z['use_pretrained_model'][0]
 
 if use_pretrained_model == 'None':
     use_pretrained_model = None
+
+if with_density == 'None':
+    with_density = None
 
 z.close()
 shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config["name_of_project"]}_region.npz')
@@ -113,7 +114,7 @@ def optimize_with_differential_evolution(center_loc, nominal_depth = 0.0):
 
 def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps = 5000, extend_grids = True, with_density = None, density_kernel = 0.15):
 
-	if with_density is not None:
+	if with_density == True:
 		from sklearn.neighbors import KernelDensity
 		m_density = KernelDensity(kernel = 'gaussian', bandwidth = density_kernel).fit(with_density[:,0:2])
 
@@ -149,7 +150,7 @@ def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps 
 		offset_x_grid = scale_up*np.array([offset_x_extend_slice[0,0] - eps_extra*scale_x_extend_slice[0,0], offset_x_extend_slice[0,1] - eps_extra*scale_x_extend_slice[0,1], offset_x_extend_slice[0,2] - eps_extra_depth*scale_x_extend_slice[0,2]]).reshape(1,-1)
 		scale_x_grid = scale_up*np.array([scale_x_extend_slice[0,0] + 2.0*eps_extra*scale_x_extend_slice[0,0], scale_x_extend_slice[0,1] + 2.0*eps_extra*scale_x_extend_slice[0,1], scale_x_extend_slice[0,2] + 2.0*eps_extra_depth*scale_x_extend_slice[0,2]]).reshape(1,-1)
 	
-		if with_density is not None:
+		if with_density == True:
 
 			x_grid = kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch = 10000, n_steps = n_steps, n_sim = 1, lr = 0.005)[0]/scale_up # .to(device) # 8000
 
@@ -353,16 +354,16 @@ np.savez_compressed(path_to_file + f'{config["name_of_project"]}_stations.npz', 
 
 ## Make necessary directories
 
-os.mkdir(path_to_file + 'Picks')
-os.mkdir(path_to_file + 'Catalog')
+os.makedirs(path_to_file + 'Picks', exist_ok=True)
+os.makedirs(path_to_file + 'Catalog', exist_ok=True)
 for year in years:
-	os.mkdir(path_to_file + 'Picks/%d'%year)
-	os.mkdir(path_to_file + 'Catalog/%d'%year)
+	os.makedirs(path_to_file + f'Picks/{year}', exist_ok=True)
+	os.makedirs(path_to_file + f'Catalog/{year}', exist_ok=True)
 
-os.mkdir(path_to_file + 'Plots')
-os.mkdir(path_to_file + 'GNN_TrainedModels')
-os.mkdir(path_to_file + 'Grids')
-os.mkdir(path_to_file + '1D_Velocity_Models_Regional')
+os.makedirs(path_to_file + 'Plots', exist_ok=True)
+os.makedirs(path_to_file + 'GNN_TrainedModels', exist_ok=True)
+os.makedirs(path_to_file + 'Grids', exist_ok=True)
+os.makedirs(path_to_file + '1D_Velocity_Models_Regional', exist_ok=True)
 
 if (load_initial_files == True)*(use_pretrained_model == False):
 	step_load = 20000
