@@ -165,10 +165,9 @@ def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=
 
     with ProcessPoolExecutor() as executor:
         args = [(i, offset_x_extend, scale_x_extend, deg_scale, depth_scale, extend_grids, m_density, weight_vector, n_cluster, ftrns1, n_steps) for i in range(n_grids)]
-        x_grids = list(executor.map(lambda p: single_grid_iteration(*p), args))
+        x_grids = list(executor.map(single_grid_iteration, *zip(*args)))
 
     return x_grids
-
 
 
 if use_spherical == True:
