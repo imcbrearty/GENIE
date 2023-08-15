@@ -4,8 +4,6 @@ import os
 import torch
 from torch import optim, nn
 import shutil
-from concurrent.futures import ProcessPoolExecutor
-
 from utils import *
 
 ## User: Input stations and spatial region
@@ -145,27 +143,26 @@ def create_grid(using_density, m_density, weight_vector, scale_x_grid, offset_x_
         return kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
     return kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
 
-def single_grid_iteration(i, offset_x_extend, scale_x_extend, deg_scale, depth_scale, extend_grids, m_density, weight_vector, n_cluster, ftrns1, n_steps):
-    offset_slice, scale_slice = get_offset_scale_slices(offset_x_extend, scale_x_extend)
-    offset_slice, scale_slice = extend_grid(offset_slice, scale_slice, deg_scale, depth_scale, extend_grids)
-    
-    print(f'\nOptimize for spatial grid ({i + 1})')
-    
-    offset_x_grid, scale_x_grid = get_grid_params(offset_slice, scale_slice, EPS_EXTRA, EPS_EXTRA_DEPTH, SCALE_UP)
-    x_grid = create_grid(m_density is not None, m_density, weight_vector, scale_x_grid, offset_x_grid, n_cluster, ftrns1, n_steps, lr=0.005)
-    x_grid = x_grid[np.argsort(x_grid[:, 0])]
-    
-    return x_grid
-
 def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=5000, extend_grids=True, with_density=None, density_kernel=0.15):
     m_density = calculate_density(with_density, 'gaussian', density_kernel, with_density)
+    x_grids = []
+    
     weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1, -1)
     depth_scale = (np.diff(depth_range) * 0.02)
     deg_scale = ((0.5 * np.diff(lat_range) + 0.5 * np.diff(lon_range)) * 0.08)
 
-    with ProcessPoolExecutor() as executor:
-        args = [(i, offset_x_extend, scale_x_extend, deg_scale, depth_scale, extend_grids, m_density, weight_vector, n_cluster, ftrns1, n_steps) for i in range(n_grids)]
-        x_grids = list(executor.map(single_grid_iteration, *zip(*args)))
+    for i in range(n_grids):
+        offset_slice, scale_slice = get_offset_scale_slices(offset_x_extend, scale_x_extend)
+        offset_slice, scale_slice = extend_grid(offset_slice, scale_slice, deg_scale, depth_scale, extend_grids)
+        
+        print(f'\nOptimize for spatial grid ({i + 1} / {n_grids})')
+        
+        offset_x_grid, scale_x_grid = get_grid_params(offset_slice, scale_slice, EPS_EXTRA, EPS_EXTRA_DEPTH, SCALE_UP)
+        
+        x_grid = create_grid(with_density, m_density, weight_vector, scale_x_grid, offset_x_grid, n_cluster, ftrns1, n_steps, lr=0.005)
+        
+        x_grid = x_grid[np.argsort(x_grid[:, 0])]
+        x_grids.append(x_grid)
 
     return x_grids
 
