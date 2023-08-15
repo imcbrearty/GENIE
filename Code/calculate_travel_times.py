@@ -21,17 +21,17 @@ import shutil
 import pathlib
 from utils import *
 
-
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
+name_of_project = config['name_of_project']
+num_cores = config['num_cores']
 
 dx = config['dx']
 d_deg = config['d_deg']
 dx_depth = config['dx_depth']
 depth_steps = config['depth_steps']
-
 
 depth_steps = np.arange(depth_steps['min_elevation'], depth_steps['max_elevation'] + depth_steps['elevation_step'], depth_steps['elevation_step']) # Elevation steps to compute travel times from 
 ## (These are reference points for stations; can be a regular grid, and each station looks up the
@@ -71,19 +71,18 @@ def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_core
 
 	return tp_times, ts_times
 
-
-
 ## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
 path_to_file = str(pathlib.Path().absolute())
+path_to_file += '\\' if '\\' in path_to_file else '/'
 
 template_ver = 1
 vel_model_ver = 1
+
 ## Load Files
 
 if '\\' in path_to_file: ## Windows
 
 	# Load region
-	name_of_project = path_to_file.split('\\')[-1] ## Windows
 	z = np.load(path_to_file + '\\%s_region.npz'%name_of_project)
 	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
 	z.close()
@@ -107,7 +106,6 @@ if '\\' in path_to_file: ## Windows
 else: ## Linux or Unix
 
 	# Load region
-	name_of_project = path_to_file.split('/')[-1] ## Windows
 	z = np.load(path_to_file + '/%s_region.npz'%name_of_project)
 	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
 	z.close()
@@ -197,7 +195,7 @@ Xmin = xx.min(0)
 Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
 Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
 
-num_cores = 1
+
 
 n_ver = 1
 
