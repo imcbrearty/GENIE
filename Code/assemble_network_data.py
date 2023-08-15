@@ -114,7 +114,6 @@ def extend_grid(offset, scale, deg_scale, depth_scale, extend_grids=True):
         offset[0, 2] += extend5
     return offset, scale
 
-
 def get_offset_scale_slices(offset_x_extend, scale_x_extend):
     """Extract slices from the offset and scale matrices."""
     offset_slice = np.array([offset_x_extend[0, 0], offset_x_extend[0, 1], offset_x_extend[0, 2]]).reshape(1, -1)
@@ -131,11 +130,21 @@ def get_grid_params(offset_slice, scale_slice, eps_extra, eps_extra_depth, scale
     
     return offset_x_grid, scale_x_grid
 
-def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=5000, extend_grids=True, with_density=None, density_kernel=0.15):
-    if with_density:
+def calculate_density(if_density, kernel, bandwidth, data):
+    """Return a KernelDensity instance if a density flag is set."""
+    if if_density:
         from sklearn.neighbors import KernelDensity
-        m_density = KernelDensity(kernel='gaussian', bandwidth=density_kernel).fit(with_density[:, 0:2])
+        return KernelDensity(kernel=kernel, bandwidth=bandwidth).fit(data[:, 0:2])
+    return None
 
+def create_grid(using_density, m_density, weight_vector, scale_x_grid, offset_x_grid, n_cluster, ftrns1, n_steps, lr):
+    """Create a grid based on density or default method."""
+    if using_density:
+        return kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
+    return kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
+
+def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=5000, extend_grids=True, with_density=None, density_kernel=0.15):
+    m_density = calculate_density(with_density, 'gaussian', density_kernel, with_density)
     x_grids = []
     
     weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1, -1)
@@ -150,10 +159,7 @@ def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=
         
         offset_x_grid, scale_x_grid = get_grid_params(offset_slice, scale_slice, EPS_EXTRA, EPS_EXTRA_DEPTH, SCALE_UP)
         
-        if with_density:
-            x_grid = kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=0.005)[0] / SCALE_UP
-        else:
-            x_grid = kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=0.005)[0] / SCALE_UP
+        x_grid = create_grid(with_density, m_density, weight_vector, scale_x_grid, offset_x_grid, n_cluster, ftrns1, n_steps, lr=0.005)
         
         x_grid = x_grid[np.argsort(x_grid[:, 0])]
         x_grids.append(x_grid)
