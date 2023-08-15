@@ -1,34 +1,34 @@
 
 ## Training params list 2
-spc_random = 30e3
-sig_t = 0.03 # 3 percent of travel time error on pick times
-spc_thresh_rand = 20e3
-min_sta_arrival = 4
-coda_rate = 0.035 # 5 percent arrival have code. Probably more than this? Increased from 0.035.
-coda_win = np.array([0, 25.0]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
-max_num_spikes = 80
-spike_time_spread = 0.15
-s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
-use_stable_association_labels = True
-thresh_noise_max = 1.5
-training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
+# spc_random = 30e3
+# sig_t = 0.03 # 3 percent of travel time error on pick times
+# spc_thresh_rand = 20e3
+# min_sta_arrival = 4
+# coda_rate = 0.035 # 5 percent arrival have code. Probably more than this? Increased from 0.035.
+# coda_win = np.array([0, 25.0]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
+# max_num_spikes = 80
+# spike_time_spread = 0.15
+# s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
+# use_stable_association_labels = True
+# thresh_noise_max = 1.5
+# training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
 
 ## Training params list 3
-n_batch = 75
-dist_range = [15e3, 500e3]
-max_rate_events = 6000/8
-max_miss_events = 2500/8
-max_false_events = 2500/8
-T = 3600.0*3.0
-dt = 30
-tscale = 3600.0
-n_sta_range = [0.35, 1.0]
-use_sources = False
-use_full_network = False
-fixed_subnetworks = None
-use_preferential_sampling = False
-use_shallow_sources = False
-training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
+# n_batch = 75
+# dist_range = [15e3, 500e3]
+# max_rate_events = 6000/8
+# max_miss_events = 2500/8
+# max_false_events = 2500/8
+# T = 3600.0*3.0
+# dt = 30
+# tscale = 3600.0
+# n_sta_range = [0.35, 1.0]
+# use_sources = False
+# use_full_network = False
+# fixed_subnetworks = None
+# use_preferential_sampling = False
+# use_shallow_sources = False
+# training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
 
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params_1, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False):
 
