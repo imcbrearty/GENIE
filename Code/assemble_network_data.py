@@ -1,4 +1,4 @@
-
+import yaml
 import numpy as np
 from matplotlib import pyplot as plt
 import os
@@ -15,6 +15,10 @@ from utils import *
 
 # ext_dir = 'D:/Projects/Mayotte/Mayotte/' ## Replace with absolute directory to location to setup folders, and where all the ".py" files from Github are located.
 
+# Load configuration from YAML
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
+    
 name_of_project = 'Mayotte' ## Replace with the name of project (a single word is prefered).
 
 path_to_file = str(pathlib.Path().absolute())
@@ -47,7 +51,7 @@ if use_pretrained_model == 'None':
     use_pretrained_model = None
 
 z.close()
-shutil.copy(path_to_file + 'region.npz', path_to_file + '%s_region.npz'%name_of_project)
+shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config['name_of_project']}_region.npz')
 
 with_density = None
 use_spherical = False ## Should only set to true if travel time model also has spherical projection (to be added soon)
@@ -324,8 +328,8 @@ else:
 	mn = mn.cpu().detach().numpy()
 
 if use_pretrained_model is not None:
-	shutil.move(path_to_file + 'Pretrained/trained_gnn_model_step_%d_ver_%d.h5'%(20000, use_pretrained_model), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, 20000, 1))
-	shutil.move(path_to_file + 'Pretrained/1d_travel_time_grid_ver_%d.npz'%use_pretrained_model, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(name_of_project, 1))
+	shutil.move(path_to_file + 'Pretrained/trained_gnn_model_step_%d_ver_%d.h5'%(20000, use_pretrained_model), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(config['name_of_project'], 20000, 1))
+	shutil.move(path_to_file + 'Pretrained/1d_travel_time_grid_ver_%d.npz'%use_pretrained_model, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(config['name_of_project'], 1))
 	shutil.move(path_to_file + 'Pretrained/seismic_network_templates_ver_%d.npz'%use_pretrained_model, path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(use_pretrained_model, 1))
 
 	## Find offset corrections if using one of the pre-trained models
@@ -341,13 +345,13 @@ if use_pretrained_model is not None:
 	z.close()
 
 	locs = np.copy(locs) - corr1 + corr2
-	shutil.copy(path_to_file + 'Pretrained/region_ver_%d.npz'%use_pretrained_model, path_to_file + '%s_region.npz'%name_of_project)
+	shutil.copy(path_to_file + 'Pretrained/region_ver_%d.npz'%use_pretrained_model, path_to_file + f'{config['name_of_project']}_region.npz')
 
 else:
 	corr1 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
 	corr2 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
 
-np.savez_compressed(path_to_file + '%s_stations.npz'%name_of_project, locs = locs, stas = stas, rbest = rbest, mn = mn)
+np.savez_compressed(path_to_file + f'{config['name_of_project']}_stations.npz', locs = locs, stas = stas, rbest = rbest, mn = mn)
 
 ## Make necessary directories
 
@@ -366,15 +370,15 @@ if (load_initial_files == True)*(use_pretrained_model == False):
 	step_load = 20000
 	ver_load = 1
 	if os.path.exists(path_to_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(step_load, ver_load)):
-		shutil.move(path_to_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(step_load, ver_load), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, step_load, ver_load))
+		shutil.move(path_to_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(step_load, ver_load), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(config['name_of_project'], step_load, ver_load))
 
 	ver_load = 1
 	if os.path.exists(path_to_file + '1d_travel_time_grid_ver_%d.npz'%ver_load):
-		shutil.move(path_to_file + '1d_travel_time_grid_ver_%d.npz'%ver_load, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(name_of_project, ver_load))
+		shutil.move(path_to_file + '1d_travel_time_grid_ver_%d.npz'%ver_load, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(config['name_of_project'], ver_load))
 
 	ver_load = 1
 	if os.path.exists(path_to_file + 'seismic_network_templates_ver_%d.npz'%ver_load):
-		shutil.move(path_to_file + 'seismic_network_templates_ver_%d.npz'%ver_load, path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, ver_load))
+		shutil.move(path_to_file + 'seismic_network_templates_ver_%d.npz'%ver_load, path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(config['name_of_project'], ver_load))
 
 ## Make spatial grids
 
@@ -401,10 +405,10 @@ offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_rang
 
 skip_making_grid = False
 if load_initial_files == True:
-	if os.path.exists('Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, ver_load)) == True:
+	if os.path.exists('Grids/%s_seismic_network_templates_ver_%d.npz'%(config['name_of_project'], ver_load)) == True:
 		skip_making_grid = True
 
 if skip_making_grid == False:
 	x_grids = assemble_grids(scale_x_extend, offset_x_extend, num_grids, n_spatial_nodes, n_steps = 5000, with_density = with_density)
 
-	np.savez_compressed(path_to_file + 'Grids/%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = [x_grids[i] for i in range(len(x_grids))], corr1 = corr1, corr2 = corr2)
+	np.savez_compressed(path_to_file + 'Grids/%s_seismic_network_templates_ver_1.npz'%config['name_of_project'], x_grids = [x_grids[i] for i in range(len(x_grids))], corr1 = corr1, corr2 = corr2)
