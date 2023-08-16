@@ -3,11 +3,8 @@ import numpy as np
 from obspy.clients.fdsn import Client
 from obspy.core import UTCDateTime
 import pathlib
+from utils import load_config
 
-def load_config(file_path: str) -> dict:
-    """Load configuration from a YAML file."""
-    with open(file_path, 'r') as file:
-        return yaml.safe_load(file)
 
 def setup_region(client: Client, config: dict, t0: UTCDateTime, tf: UTCDateTime):
     """Set up region based on configuration."""
@@ -69,8 +66,8 @@ if __name__ == '__main__':
     tf = UTCDateTime(config['time_range']['end'])
     years = list(range(t0.year, tf.year + 1))
 
-    print("Connecting to IRIS client...")
-    client = Client('IRIS')
+    print(f"Connecting to {config['client']} client...")
+    client = Client(config['client'])
     print("Setting up region based on configuration...")
     stations = setup_region(client, config, t0, tf)
 
