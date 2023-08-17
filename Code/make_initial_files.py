@@ -68,6 +68,7 @@ if __name__ == '__main__':
 
     print(f"Connecting to {config['client']} client...")
     client = Client(config['client'])
+
     print("Setting up region based on configuration...")
     stations = setup_region(client, config, t0, tf)
 
@@ -79,4 +80,6 @@ if __name__ == '__main__':
     
     print("Saving files...")
     save_files(base_path, locs, stas, config, years)
+
     print("All files saved successfully!")
+    print("✔ Script execution: Done")
