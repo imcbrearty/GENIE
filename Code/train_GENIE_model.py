@@ -25,6 +25,11 @@ from utils import *
 from module import *
 from generate_synthetic_data import generate_synthetic_data
 
+import wandb
+
+# Initialize wandb run 
+wandb.init(project="GENIE")
+
 
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
@@ -287,8 +292,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		phase_observed[iflip] = np.mod(phase_observed[iflip] + 1, 2)
 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
 	
-	print('src_spatial_kernel.dtype', src_spatial_kernel.dtype)
-	print('src_spatial_kernel', src_spatial_kernel)
 
 	if use_sources == False:
 		time_samples = np.sort(np.random.rand(n_batch)*T) ## Uniform
@@ -555,16 +558,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			spatial_term1 = np.expand_dims(ftrns1(x_grids[grid_select]), axis=1)
 			spatial_term2 = np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis=0)
 			spatial_diff = spatial_term1 - spatial_term2
-
-			print('spatial_diff.dtype', spatial_diff.dtype)  # Check the type
 			spatial_exp_term = np.exp(-0.5 * (spatial_diff**2) / (src_spatial_kernel**2))
 
 			# Temporal component
 			temporal_term1 = (time_samples[i] + t_slice).reshape(1,-1,1)
 			temporal_term2 = src_times[active_sources_per_slice].reshape(1,1,-1)
 			temporal_diff = temporal_term1 - temporal_term2
-
-			print('temporal_diff.dtype', temporal_diff.dtype)  # Check the type
 			temporal_exp_term = np.exp(-0.5 * (temporal_diff**2) / (src_t_kernel**2))
 			
 			# Combine components
@@ -816,8 +815,44 @@ for i in range(n_restart_step, n_epochs):
 
 		spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(X_fixed[i0], axis = 1), Locs[i0].shape[0], axis = 1) - np.repeat(np.expand_dims(Locs[i0], axis = 0), X_fixed[i0].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
 
-		out = mz(torch.Tensor(Inpts[i0]).to(device).reshape(-1,4), torch.Tensor(Masks[i0]).to(device).reshape(-1,4), torch.Tensor(A_prod_sta_sta_l[i0]).long().to(device), torch.Tensor(A_prod_src_src_l[i0]).long().to(device), Data(x = spatial_vals, edge_index = torch.Tensor(A_src_in_prod_l[i0]).long().to(device)), Data(x = spatial_vals, edge_index = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod_l[i0], axis = 0))).long().to(device)), torch.Tensor(A_src_src_l[i0]).long().to(device), torch.Tensor(A_edges_time_p_l[i0]).long().to(device), torch.Tensor(A_edges_time_s_l[i0]).long().to(device), torch.Tensor(A_edges_ref_l[i0]).to(device), trv_out, torch.Tensor(lp_times[i0]).to(device), torch.Tensor(lp_stations[i0]).long().to(device), torch.Tensor(lp_phases[i0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(Locs[i0])).to(device), torch.Tensor(ftrns1(X_fixed[i0])).to(device), torch.Tensor(ftrns1(X_query[i0])).to(device), torch.Tensor(x_src_query_cart).to(device), tq, tq_sample, trv_out_src)
+		# Pre-process tensors for Inpts and Masks
+		input_tensor_1 = torch.Tensor(Inpts[i0]).to(device).reshape(-1, 4)
+		input_tensor_2 = torch.Tensor(Masks[i0]).to(device).reshape(-1, 4)
 
+		# Process tensors for A_prod and A_src arrays
+		A_prod_sta_tensor = torch.Tensor(A_prod_sta_sta_l[i0]).long().to(device)
+		A_prod_src_tensor = torch.Tensor(A_prod_src_src_l[i0]).long().to(device)
+
+		# Process edge index data
+		edge_index_1 = torch.Tensor(A_src_in_prod_l[i0]).long().to(device)
+		flipped_edge = np.ascontiguousarray(np.flip(A_src_in_prod_l[i0], axis=0))
+		edge_index_2 = torch.Tensor(flipped_edge).long().to(device)
+
+		data_1 = Data(x=spatial_vals, edge_index=edge_index_1)
+		data_2 = Data(x=spatial_vals, edge_index=edge_index_2)
+
+		# Continue processing the rest of the inputs
+		input_tensors = [
+			input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor,
+			data_1, data_2,
+			torch.Tensor(A_src_src_l[i0]).long().to(device),
+			torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
+			torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
+			torch.Tensor(A_edges_ref_l[i0]).to(device),
+			trv_out,
+			torch.Tensor(lp_times[i0]).to(device),
+			torch.Tensor(lp_stations[i0]).long().to(device),
+			torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
+			torch.Tensor(ftrns1(Locs[i0])).to(device),
+			torch.Tensor(ftrns1(X_fixed[i0])).to(device),
+			torch.Tensor(ftrns1(X_query[i0])).to(device),
+			torch.Tensor(x_src_query_cart).to(device),
+			tq, tq_sample, trv_out_src
+		]
+
+		# Call the model with pre-processed tensors
+		out = mz(*input_tensors)
+		
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 
@@ -849,6 +884,9 @@ for i in range(n_restart_step, n_epochs):
 	mx_pred_4[i] = mx_pred_val_4/n_batch
 
 	print('%d %0.8f'%(i, loss_val))
+
+	# Log losses 
+	wandb.log({"loss": loss_val})
 
 	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
 		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
