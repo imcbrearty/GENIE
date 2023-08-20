@@ -57,6 +57,8 @@ def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = 10
 		tp_val = mp(ftrns1(X))
 		ts_val = ms(ftrns1(X))
 
+		print('Finished interpolation %d'%ind)
+		
 		return tp_val, ts_val, ind
 
 	n_grid = X.shape[0]
