@@ -59,7 +59,7 @@ def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, ftrns1, num_cores = 10):
 
 		return tp_val, ts_val, ind
 
-	n_grid = Tp.shape[0]
+	n_grid = X.shape[0]
 	n_sta = Tp.shape[1]
 	Tp_interp = np.zeros((n_grid, n_sta))
 	Ts_interp = np.zeros((n_grid, n_sta))
