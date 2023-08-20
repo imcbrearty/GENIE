@@ -25,10 +25,12 @@ from utils import *
 from module import *
 from generate_synthetic_data import generate_synthetic_data
 
-import wandb
+use_wandb_logging = False
+if use_wandb_logging == True:
 
-# Initialize wandb run 
-wandb.init(project="GENIE")
+	import wandb
+	# Initialize wandb run 
+	wandb.init(project="GENIE")
 
 
 # Load configuration from YAML
@@ -885,8 +887,9 @@ for i in range(n_restart_step, n_epochs):
 
 	print('%d %0.8f'%(i, loss_val))
 
-	# Log losses 
-	wandb.log({"loss": loss_val})
+	# Log losses
+	if use_wandb_logging == True:
+		wandb.log({"loss": loss_val})
 
 	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
 		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
