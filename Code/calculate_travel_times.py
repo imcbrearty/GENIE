@@ -46,11 +46,11 @@ def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_core
 
 	return tp_times, ts_times
 
-def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, ftrns1, num_cores = 10):
+def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = 10):
 
 	def step_test(args):
 
-		x1, x2, x3, tp, ts, ftrns1, ind = args[0], args[1], args[2], args[3], args[4], args[5], args[6]
+		x1, x2, x3, tp, ts, X, ftrns1, ind = args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]
 
 		mp = RegularGridInterpolator((x1, x2, x3), tp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
 		ms = RegularGridInterpolator((x1, x2, x3), ts.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
@@ -65,7 +65,7 @@ def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, ftrns1, num_cores = 10):
 	Ts_interp = np.zeros((n_grid, n_sta))
 	assert(Tp_interp.shape[1] == Ts_interp.shape[1])
 
-	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [x1, x2, x3, Tp[:,i], Ts[:,i], lambda x: ftrns1(x), i] ) for i in range(n_sta))
+	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [x1, x2, x3, Tp[:,i], Ts[:,i], X, lambda x: ftrns1(x), i] ) for i in range(n_sta))
 
 	for i in range(n_sta):
 
@@ -237,7 +237,7 @@ if num_cores == 1:
 
 else:
 
-	Tp_interp, Ts_interp = compute_interpolation_parallel(x1, x2, x3, Tp, Ts, ftrns1, num_cores = num_cores)
+	Tp_interp, Ts_interp = compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = num_cores)
 
 np.savez_compressed(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, n_ver), X = X, locs_ref = locs_ref, Tp_interp = Tp_interp, Ts_interp = Ts_interp, Vp_profile = Vp_profile, Vs_profile = Vs_profile, depth_grid = depth_grid)
 
