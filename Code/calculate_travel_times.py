@@ -235,9 +235,9 @@ if num_cores == 1:
 		Tp_interp[:,j] = mp(ftrns1(X))
 		Ts_interp[:,j] = ms(ftrns1(X))
 
-	else:
+else:
 
-		Tp_interp, Ts_interp = compute_interpolation_parallel(x1, x2, x3, Tp, Ts, ftrns1, num_cores = num_cores)
+	Tp_interp, Ts_interp = compute_interpolation_parallel(x1, x2, x3, Tp, Ts, ftrns1, num_cores = num_cores)
 
 np.savez_compressed(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, n_ver), X = X, locs_ref = locs_ref, Tp_interp = Tp_interp, Ts_interp = Ts_interp, Vp_profile = Vp_profile, Vs_profile = Vs_profile, depth_grid = depth_grid)
 
