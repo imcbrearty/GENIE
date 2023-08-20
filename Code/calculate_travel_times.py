@@ -158,10 +158,6 @@ Xmin = xx.min(0)
 Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
 Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
 
-
-
-n_ver = 1
-
 ## By using the reference point in the corner of the region, might
 ## induce a slight bias to the estimates as lon and lat vary widely
 ## (due to elliptical shape of Earth)
