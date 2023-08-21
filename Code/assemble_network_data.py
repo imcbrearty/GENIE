@@ -118,7 +118,7 @@ def create_grid(using_density, m_density, weight_vector, scale_x_grid, offset_x_
         return kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
     return kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
 
-def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=5000, extend_grids=True, with_density=None, density_kernel=0.15):
+def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=5000, extend_grids=False, with_density=None, density_kernel=0.15):
     """
     Assemble a set of spatial grids based on various parameters.
     
@@ -173,8 +173,8 @@ use_spherical = config['use_spherical']
 depth_importance_weighting_value_for_spatial_graphs = config['depth_importance_weighting_value_for_spatial_graphs']
 fix_nominal_depth = config['fix_nominal_depth']
 
-EPS_EXTRA = 0.1
-EPS_EXTRA_DEPTH = 0.02
+EPS_EXTRA = 0.0 # 0.1
+EPS_EXTRA_DEPTH = 0.0 # 0.02
 SCALE_UP = 1.0
 
 path_to_file = str(pathlib.Path().absolute())
