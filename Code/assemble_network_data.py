@@ -51,7 +51,7 @@ def optimize_with_differential_evolution(center_loc):
 
     return soln
 
-def extend_grid(offset, scale, deg_scale, depth_scale, extend_grids=True):
+def extend_grid(offset, scale, deg_scale, depth_scale, extend_grids):
     """
     Extend a spatial grid based on randomized extensions.
     
