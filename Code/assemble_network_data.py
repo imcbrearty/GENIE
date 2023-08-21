@@ -633,6 +633,6 @@ if load_initial_files == True:
 		skip_making_grid = True
 
 if skip_making_grid == False:
-	x_grids = assemble_grids(scale_x_extend, offset_x_extend, num_grids, n_spatial_nodes, n_steps = 5000, with_density = with_density)
+	x_grids = assemble_grids(scale_x_extend, offset_x_extend, num_grids, n_spatial_nodes, n_steps = 5000, extend_grids = False, with_density = with_density)
 
 	np.savez_compressed(ext_dir + 'Grids/%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = [x_grids[i] for i in range(len(x_grids))], corr1 = corr1, corr2 = corr2)
