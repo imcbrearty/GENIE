@@ -885,7 +885,7 @@ for i in range(n_restart_step, n_epochs):
 	mx_pred_3[i] = mx_pred_val_3/n_batch
 	mx_pred_4[i] = mx_pred_val_4/n_batch
 
-	print('%d %0.8f'%(i, loss_val))
+	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
 
 	# Log losses
 	if use_wandb_logging == True:
