@@ -40,8 +40,10 @@ dx: 500.0 # Cartesian distance between nodes in FMM computation
 d_deg: 0.005 # Degree distance between saved interpolation query points
 dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved query points
 
-save_dense_travel_time_data: True
-train_travel_time_neural_network: True
+save_dense_travel_time_data: True # Save the dense travel times (only necessary if not training travel time neural network)
+train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
+using_3D: False
+using_1D: True
 
 ### TRAIN ###
 
