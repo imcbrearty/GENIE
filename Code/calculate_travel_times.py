@@ -462,7 +462,7 @@ if train_travel_time_neural_network == True:
 	# loss_func1 = nn.BCELoss()
 
 	n_batch = 5000
-	n_steps = 20001 # 50000
+	n_steps = 30001 # 50000
 	n_ver_save = 1
 
 	assert((using_3D + using_1D) == 1)
