@@ -601,7 +601,9 @@ def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_
 	return lbl_trgt
 
 
-## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
+# Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
+
+max_number_pick_association_labels_per_sample = config['max_number_pick_association_labels_per_sample']
 
 # Load region
 z = np.load(path_to_file + '%s_region.npz'%name_of_project)
@@ -792,7 +794,7 @@ for i in range(n_restart_step, n_epochs):
 		np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
 		print('saved model %s %d'%(n_ver, i))
 		print('saved model at step %d'%i)		
-
+	
 	for i0 in range(n_batch):
 
 		## Adding skip... to skip samples with zero input picks
@@ -833,6 +835,10 @@ for i in range(n_restart_step, n_epochs):
 		data_1 = Data(x=spatial_vals, edge_index=edge_index_1)
 		data_2 = Data(x=spatial_vals, edge_index=edge_index_2)
 
+		if len(lp_times[i0]) > max_number_pick_association_labels_per_sample:
+			isample_picks = np.sort(np.random.choice(len(lp_times[i0]), size = max_number_pick_association_labels_per_sample, replace = False))
+			lp_meta[i0] = lp_meta[i0][isample_picks]
+		
 		# Continue processing the rest of the inputs
 		input_tensors = [
 			input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor,
@@ -842,9 +848,9 @@ for i in range(n_restart_step, n_epochs):
 			torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
 			torch.Tensor(A_edges_ref_l[i0]).to(device),
 			trv_out,
-			torch.Tensor(lp_times[i0]).to(device),
-			torch.Tensor(lp_stations[i0]).long().to(device),
-			torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
+			torch.Tensor(lp_times[i0][isample_picks]).to(device),
+			torch.Tensor(lp_stations[i0][isample_picks]).long().to(device),
+			torch.Tensor(lp_phases[i0][isample_picks]).reshape(-1, 1).float().to(device),
 			torch.Tensor(ftrns1(Locs[i0])).to(device),
 			torch.Tensor(ftrns1(X_fixed[i0])).to(device),
 			torch.Tensor(ftrns1(X_query[i0])).to(device),
