@@ -66,7 +66,7 @@ def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908
 	a = a.to(device)
 	e = e.to(device)
 	p = p.detach().clone().float()
-	pi = torch.Tensor([np.pi])
+	pi = torch.Tensor([np.pi]).to(device)
 	p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1)
 	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0])**2)
 	# results:
@@ -81,7 +81,7 @@ def ecef2lla_diff(x, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908
 	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
 	a = a.to(device)
 	e = e.to(device)
-	pi = torch.Tensor([np.pi])
+	pi = torch.Tensor([np.pi]).to(device)
 	b = torch.sqrt((a**2)*(1 - e**2))
 	ep = torch.sqrt((a**2 - b**2)/(b**2))
 	p = torch.sqrt(x[:,0]**2 + x[:,1]**2)
