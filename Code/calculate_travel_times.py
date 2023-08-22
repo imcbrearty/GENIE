@@ -243,6 +243,7 @@ else:
 	Tp_interp, Ts_interp = compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = num_cores)
 
 save_dense_travel_time_data = True
+train_travel_time_neural_network = True
 if ((train_travel_time_neural_network == False) + (save_dense_travel_time_data == True)) > 0:
 
 	np.savez_compressed(path_to_file + '1D_Velocity_Models_Regional' + seperator + '%s_1d_velocity_model_ver_%d.npz'%(name_of_project, n_ver), X = X, locs_ref = locs_ref, Tp_interp = Tp_interp, Ts_interp = Ts_interp, Vp_profile = Vp_profile, Vs_profile = Vs_profile, depth_grid = depth_grid)
@@ -339,8 +340,12 @@ if train_travel_time_neural_network == True:
 				Ts_samples_vald.append(Ts_interp[isample_vald,n])
 				Locs_samples_vald.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample_vald), axis = 0))
 
-	## Currently same as using 3D
-	elif use_1D == True:
+	elif using_1D == True:
+
+		## For 3D, randomly shift the source and reciever to emulate being in 3D (if using fixed at specific node coordinates, or other
+		## wise accept locs_ref as is)
+
+		one_vec = np.array([1.0, 1.0, 0.0]).reshape(1,-1)
 
 		grab_near_station_samples = True
 		if grab_near_station_samples == True:
@@ -353,10 +358,16 @@ if train_travel_time_neural_network == True:
 				p = 1.0/np.maximum(Tp_interp[:,n], 0.1)
 				isample = np.sort(np.random.choice(len(p), size = n_per_station, p = p/p.sum(), replace = False))
 
-				X_samples.append(X[isample])
+				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample]*one_vec
+				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
+				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
+				X_offset_sample = X_offset_sample + locs_rand
+				X_offset_sample[:,2] = X[isample,2]
+
+				X_samples.append(X_offset_sample)
 				Tp_samples.append(Tp_interp[isample,n])
 				Ts_samples.append(Ts_interp[isample,n])
-				Locs_samples.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample), axis = 0))
+				Locs_samples.append(locs_rand)
 
 		grab_near_boundaries_samples = True
 		if grab_near_boundaries_samples == True:
@@ -369,10 +380,16 @@ if train_travel_time_neural_network == True:
 				p = 1.0/np.maximum(Tp_interp[:,n].max() - Tp_interp[:,n], 0.1)
 				isample = np.sort(np.random.choice(len(p), size = n_per_station, p = p/p.sum(), replace = False))
 
-				X_samples.append(X[isample])
+				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample]*one_vec
+				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
+				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
+				X_offset_sample = X_offset_sample + locs_rand
+				X_offset_sample[:,2] = X[isample,2]
+
+				X_samples.append(X_offset_sample)
 				Tp_samples.append(Tp_interp[isample,n])
 				Ts_samples.append(Ts_interp[isample,n])
-				Locs_samples.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample), axis = 0))
+				Locs_samples.append(locs_rand)
 
 		grab_interior_samples = True
 		if grab_interior_samples == True:
@@ -383,19 +400,32 @@ if train_travel_time_neural_network == True:
 			for n in range(locs_ref.shape[0]):
 
 				p = 1.0*np.ones(Tp_interp.shape[0]) # /np.maximum(Tp_interp[:,n].max() - Tp_interp[:,n], 0.1)
-				isample = np.sort(np.random.choice(len(p), size = n_per_station, p = p/p.sum(), replace = False))
-				isample_vald = np.random.choice(np.delete(np.arange(len(p)), isample, axis = 0), size = 10000)
 
-				X_samples.append(X[isample])
+				isample = np.sort(np.random.choice(len(p), size = n_per_station, p = p/p.sum(), replace = False))
+
+				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample]*one_vec
+				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
+				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
+				X_offset_sample = X_offset_sample + locs_rand
+				X_offset_sample[:,2] = X[isample,2]
+
+				X_samples.append(X_offset_sample)
 				Tp_samples.append(Tp_interp[isample,n])
 				Ts_samples.append(Ts_interp[isample,n])
-				Locs_samples.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample), axis = 0))
+				Locs_samples.append(locs_rand)
 
-				X_samples_vald.append(X[isample_vald])
+				isample_vald = np.random.choice(np.delete(np.arange(len(p)), isample, axis = 0), size = 10000)
+
+				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample_vald]*one_vec
+				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample_vald), 2))
+				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample_vald))]
+				X_offset_sample = X_offset_sample + locs_rand
+				X_offset_sample[:,2] = X[isample_vald,2]
+
+				X_samples_vald.append(X_offset_sample)
 				Tp_samples_vald.append(Tp_interp[isample_vald,n])
 				Ts_samples_vald.append(Ts_interp[isample_vald,n])
-				Locs_samples_vald.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample_vald), axis = 0))
-
+				Locs_samples_vald.append(locs_rand)
 	# Concatenate training dataset
 	X_samples = np.vstack(X_samples)
 	Tp_samples = np.hstack(Tp_samples)
