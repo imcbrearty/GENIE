@@ -7,6 +7,7 @@ from matplotlib import pyplot as plt
 import torch
 from torch import nn, optim
 import h5py
+from torch.optim.lr_scheduler import StepLR
 from sklearn.metrics import pairwise_distances as pd
 from scipy.signal import fftconvolve
 from scipy.spatial import cKDTree
@@ -59,7 +60,7 @@ def ecef2lla(x, a = 6378137.0, e = 8.18191908426215e-2):
 	alt[k] = np.abs(x[k,2]) - b
 	return np.concatenate((180.0*lat[:,None]/np.pi, 180.0*lon[:,None]/np.pi, alt[:,None]), axis = 1)
 
-def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2])):
+def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2]), device = 'cpu'):
 	# x = x.astype('float')
 	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
 	p = p.detach().clone().float()
@@ -73,7 +74,7 @@ def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908
 
 	return torch.cat((x.view(-1,1), y.view(-1,1), z.view(-1,1)), dim = 1)
 
-def ecef2lla_diff(x, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2])):
+def ecef2lla_diff(x, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2]), device = 'cpu'):
 	# x = x.astype('float')
 	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
 	pi = torch.Tensor([np.pi])
