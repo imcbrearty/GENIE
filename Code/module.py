@@ -425,71 +425,135 @@ class GCN_Detection_Network_extended(nn.Module):
 
 
 #### EXTRA
-class TrvNet(nn.Module):
+class TravelTimes(nn.Module):
 
-	def __init__(self, offset, scale, tscale, n_dims = 3, n_phase = 2, n_hidden = 120, n_hidden1 = 50, device = 'cpu'):
+	def __init__(self, ftrns1, ftrns2, n_phases = 1, scale_val = 1e6, trav_val = 200.0, device = 'cuda'):
+		super(TravelTimes, self).__init__()
 
-		super(TrvNet, self).__init__()
+		## Relative offset prediction [2]
+		self.fc1 = nn.Sequential(nn.Linear(3, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
 
-		self.offset = torch.Tensor(offset).reshape(1,-1).to(device)
-		self.scale = torch.Tensor(scale).reshape(1,-1).to(device)
-		self.tscale = tscale
-		self.n_phase = n_phase
+		## Absolute position prediction [3]
+		self.fc2 = nn.Sequential(nn.Linear(6, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
 
-		self.fc_x = nn.Linear(n_dims, n_hidden)
-		self.fc1_x = nn.Linear(n_hidden, n_hidden1)
-		self.fc_y = nn.Linear(n_dims, n_hidden)
-		self.fc1_y = nn.Linear(n_hidden, n_hidden1)
-		self.embed = nn.Linear(n_dims, 20)
+		## Relative offset prediction [2]
+		self.fc3 = nn.Sequential(nn.Linear(3, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
 
-		self.merged1 = nn.Linear(2*n_hidden1 + 20, n_hidden1)
-		self.merged2 = nn.Linear(n_hidden1, n_phase)
+		## Absolute position prediction [3]
+		self.fc4 = nn.Sequential(nn.Linear(6, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
 
-		self.activation1 = nn.PReLU()
-		self.activation2 = nn.PReLU()
-		self.activation3 = nn.PReLU()
-		self.activation4 = nn.PReLU()
-		self.activation5 = nn.PReLU()
-		self.activation6 = nn.PReLU()
+		## Projection functions
+		self.ftrns1 = ftrns1
+		self.ftrns2 = ftrns2
+		self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
+		self.tscale = torch.Tensor([trav_val]).to(device)
+		self.device = device
+		# self.Tp_average
 
-	def forward(self, y, x):
+	def forward(self, sta, src, method = 'pairs'):
 
-		n_src, n_sta = x.shape[0], y.shape[0]
-		x_scaled = (x - self.offset)/self.scale
-		y_scaled = (y - self.offset)/self.scale
+		if method == 'direct':
 
-		source_embed = self.activation2(self.fc1_x(self.activation1(self.fc_x(x_scaled))))
-		station_embed = self.activation4(self.fc1_y(self.activation3(self.fc_y(y_scaled))))
-		relative_spatial = self.activation5(self.embed(x_scaled.repeat_interleave(n_sta, dim = 0) - y_scaled.repeat(n_src, 1))) ## Could embed this, if desired.
+			return self.tscale*(self.fc1(self.ftrns1(sta)/self.scale - self.ftrns1(src)/self.scale) + self.fc2(torch.cat((self.ftrns1(sta)/self.scale, self.ftrns1(src)/self.scale), dim = 1)))
 
-		return (self.merged2(self.activation6(self.merged1(torch.cat((source_embed.repeat_interleave(n_sta, dim = 0), station_embed.repeat(n_src, 1), relative_spatial), dim = 1))))*self.tscale).view(n_src, n_sta, self.n_phase)
+		elif method == 'pairs':
 
-class TrvNet1D(nn.Module):
+			## First, create all pairs of srcs and recievers
 
-	def __init__(self, scale, tscale, n_dims = 4, n_phase = 2, n_hidden = 120, n_hidden1 = 50, device = 'cpu'):
+			src_repeat = self.ftrns1(src).repeat_interleave(len(sta), dim = 0)/self.scale
+			sta_repeat = self.ftrns1(sta).repeat(len(src), 1)/self.scale
 
-		super(TrvNet1D, self).__init__()
+			return self.tscale*(self.fc1(sta_repeat - src_repeat) + self.fc2(torch.cat((sta_repeat, src_repeat)), dim = 1))
 
-		self.scale = torch.Tensor(scale).to(device)
-		self.tscale = tscale
-		self.n_phase = n_phase
+	def forward_train(self, sta, src, p = 0.5, method = 'pairs'):
 
-		self.fc_x = nn.Linear(n_dims, n_hidden)
-		self.fc1_x = nn.Linear(n_hidden, n_hidden1)
+		## In training mode, drop p percent of the `local' corrections, so that the default source-reciever distance
+		## model is trained to be accurate enough in a stand-alone fashion. This way, travel time estimates can still
+		## be obtained for non-sampled source regions, which can help with the global application and simulated data
+		## in non-sampeled regions.
 
-		self.fc2_x = nn.Linear(n_hidden1, n_hidden1)
-		self.fc3_x = nn.Linear(n_hidden1, n_phase)
+		if method == 'direct':
 
-		self.activation1 = nn.PReLU()
-		self.activation2 = nn.PReLU()
-		self.activation3 = nn.PReLU()
+			rand_mask = (torch.rand(sta.shape[0],1).to(self.device) > p).float()
 
-	def forward(self, y, x):
+			return self.tscale*(self.fc1(self.ftrns1(sta)/self.scale - self.ftrns1(src)/self.scale) + rand_mask*self.fc2(torch.cat((self.ftrns1(sta)/self.scale, self.ftrns1(src)/self.scale), dim = 1)))
 
-		n_src, n_sta = x.shape[0], y.shape[0]
-		x_scaled = torch.cat((y[:,2].view(-1,1).repeat(n_src, 1), torch.abs(y[:,0:2].repeat(n_src,1) - x[:,0:2].repeat_interleave(n_sta, dim = 0)), x[:,2].view(-1,1).repeat_interleave(n_sta, dim = 0)), dim = 1)
-		x_scaled = x_scaled/self.scale
+		elif method == 'pairs':
 
-		source_embed = self.activation2(self.fc1_x(self.activation1(self.fc_x(x_scaled))))
+			## First, create all pairs of srcs and recievers
 
-		return (self.fc3_x(self.activation3(self.fc2_x(source_embed)))*self.tscale).view(n_src, n_sta, self.n_phase)
+			src_repeat = self.ftrns1(src).repeat_interleave(len(sta), dim = 0)/self.scale
+			sta_repeat = self.ftrns1(sta).repeat(len(src), 1)/self.scale
+
+			rand_mask = (torch.rand(sta_repeat.shape[0],1).to(self.device) > p).float()
+
+			return self.tscale*(self.fc1(sta_repeat - src_repeat) + rand_mask*self.fc2(torch.cat((sta_repeat, src_repeat), dim = 1)))
+
+	def forward_relative(self, sta, src, method = 'pairs'):
+
+		if method == 'direct':
+
+			return self.tscale*(self.fc1(self.ftrns1(sta)/self.scale - self.ftrns1(src)/self.scale))
+
+		elif method == 'pairs':
+
+			## First, create all pairs of srcs and recievers
+
+			src_repeat = self.ftrns1(src).repeat_interleave(len(sta), dim = 0)/self.scale
+			sta_repeat = self.ftrns1(sta).repeat(len(src), 1)/self.scale
+
+			return self.tscale*(self.fc1(sta_repeat - src_repeat))
+
+	def forward_mask(self, sta, src, method = 'pairs'):
+
+		if method == 'direct':
+
+			return torch.sigmoid(self.fc3(self.ftrns1(sta)/self.scale - self.ftrns1(src)/self.scale) + self.fc4(torch.cat((self.ftrns1(sta)/self.scale, self.ftrns1(src)/self.scale), dim = 1)))
+
+		elif method == 'pairs':
+
+			## First, create all pairs of srcs and recievers
+
+			src_repeat = self.ftrns1(src).repeat_interleave(len(sta), dim = 0)/self.scale
+			sta_repeat = self.ftrns1(sta).repeat(len(src), 1)/self.scale
+
+			return torch.sigmoid(self.fc3(sta_repeat - src_repeat) + self.fc4(torch.cat((sta_repeat, src_repeat)), dim = 1))
+
+	def forward_mask_train(self, sta, src, p = 0.5, method = 'pairs'):
+
+		## In training mode, drop p percent of the `local' corrections, so that the default source-reciever distance
+		## model is trained to be accurate enough in a stand-alone fashion. This way, travel time estimates can still
+		## be obtained for non-sampled source regions, which can help with the global application and simulated data
+		## in non-sampeled regions.
+
+		if method == 'direct':
+
+			rand_mask = (torch.rand(sta.shape[0],1).to(self.device) > p).float()
+
+			return torch.sigmoid(self.fc3(self.ftrns1(sta)/self.scale - self.ftrns1(src)/self.scale) + rand_mask*self.fc4(torch.cat((self.ftrns1(sta)/self.scale, self.ftrns1(src)/self.scale), dim = 1)))
+
+		elif method == 'pairs':
+
+			## First, create all pairs of srcs and recievers
+
+			src_repeat = self.ftrns1(src).repeat_interleave(len(sta), dim = 0)/self.scale
+			sta_repeat = self.ftrns1(sta).repeat(len(src), 1)/self.scale
+
+			rand_mask = (torch.rand(sta_repeat.shape[0],1).to(self.device) > p).float()
+
+			return torch.sigmoid(self.fc3(sta_repeat - src_repeat) + rand_mask*self.fc4(torch.cat((sta_repeat, src_repeat), dim = 1)))
+
+	def forward_mask_relative(self, sta, src, method = 'pairs'):
+
+		if method == 'direct':
+
+			return torch.sigmoid(self.fc3(self.ftrns1(sta)/self.scale - self.ftrns1(src)/self.scale))
+
+		elif method == 'pairs':
+
+			## First, create all pairs of srcs and recievers
+
+			src_repeat = self.ftrns1(src).repeat_interleave(len(sta), dim = 0)/self.scale
+			sta_repeat = self.ftrns1(sta).repeat(len(src), 1)/self.scale
+
+			return torch.sigmoid(self.fc3(sta_repeat - src_repeat))
