@@ -89,6 +89,12 @@ d_deg = config['d_deg']
 dx_depth = config['dx_depth']
 depth_steps = config['depth_steps']
 
+## Load travel time neural network settings
+save_dense_travel_time_data = config['save_dense_travel_time_data']
+train_travel_time_neural_network = config['train_travel_time_neural_network']
+using_3D = config['3D']
+using_1D = config['1D']
+
 depth_steps = np.arange(depth_steps['min_elevation'], depth_steps['max_elevation'] + depth_steps['elevation_step'], depth_steps['elevation_step']) # Elevation steps to compute travel times from 
 ## (These are reference points for stations; can be a regular grid, and each station looks up the
 ## travel times with respect to these values. It is discretized (nearest-neighber) rather than continous.
@@ -243,8 +249,6 @@ else:
 
 	Tp_interp, Ts_interp = compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = num_cores)
 
-save_dense_travel_time_data = True
-train_travel_time_neural_network = True
 if ((train_travel_time_neural_network == False) + (save_dense_travel_time_data == True)) > 0:
 
 	np.savez_compressed(path_to_file + '1D_Velocity_Models_Regional' + seperator + '%s_1d_velocity_model_ver_%d.npz'%(name_of_project, n_ver), X = X, locs_ref = locs_ref, Tp_interp = Tp_interp, Ts_interp = Ts_interp, Vp_profile = Vp_profile, Vs_profile = Vs_profile, depth_grid = depth_grid)
@@ -270,9 +274,6 @@ if train_travel_time_neural_network == True:
 		ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T # just subtract mean
 		ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device) # just subtract mean
 
-
-	using_3D = False
-	using_1D = True
 	assert((using_3D + using_1D) == 1)
 
 	X_samples, Tp_samples, Ts_samples, Locs_samples = [], [], [], []
