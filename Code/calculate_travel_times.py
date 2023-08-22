@@ -572,7 +572,7 @@ if train_travel_time_neural_network == True:
 		ax.set_xlabel('Update Step')
 		ax.set_ylabel('Losses')
 		ax.legend()
-		fig.savefig(path_to_file + 'Plots' + seperator + 'losses_travel_time_model.png', bbox_inches = 'tight', pad_inches = 0.2)
+		fig.savefig(path_to_file + 'Plots' + seperator + 'losses_travel_time_model_ver_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
 
 		fig, ax = plt.subplots(2, 2, figsize = [12,10])
 		ax[0,0].scatter(trgt1[:,0], out1[:,0] - trgt1[:,0], 30, alpha = 0.75, label = 'Train')
@@ -598,7 +598,7 @@ if train_travel_time_neural_network == True:
 		ax[1,1].set_xlabel('Travel Time Residual (S wave)')
 		ax[1,1].set_ylabel('Counts')
 		ax[1,1].legend()
-		fig.savefig(path_to_file + 'Plots' + seperator + 'residuals_travel_time_model.png', bbox_inches = 'tight', pad_inches = 0.2)
+		fig.savefig(path_to_file + 'Plots' + seperator + 'residuals_travel_time_model_ver_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
 
 		fig, ax = plt.subplots(1,2, figsize = [10,5])
 		ax[0].scatter(torch.norm(ftrns1_diff(sta_pos1) - ftrns1_diff(src_pos1), dim = 1).cpu().detach().numpy()/1000.0, trgt1[:,0], alpha = 0.5, label = 'Trgt')
@@ -612,7 +612,7 @@ if train_travel_time_neural_network == True:
 		ax[1].set_xlabel('Source - Reciever Distance (km)')
 		ax[1].set_ylabel('Travel Time (S wave)')
 		ax[1].legend()
-		fig.savefig(path_to_file + 'Plots' + seperator + 'travel_time_vs_distance.png', bbox_inches = 'tight', pad_inches = 0.2)
+		fig.savefig(path_to_file + 'Plots' + seperator + 'travel_time_vs_distance_ver_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
 
 		fig, ax = plt.subplots(2,1, figsize = [10,5])
 		ones_vec = torch.Tensor([1.0, 1.0, 0.0]).reshape(1,-1).to(device)
@@ -623,7 +623,7 @@ if train_travel_time_neural_network == True:
 		ax[1].set_ylabel('Source Depth (km)')
 		ax[0].legend()
 		ax[1].legend()
-		fig.savefig(path_to_file + 'Plots' + seperator + 'travel_time_vs_distance_depth.png', bbox_inches = 'tight', pad_inches = 0.2)
+		fig.savefig(path_to_file + 'Plots' + seperator + 'travel_time_vs_distance_depth_ver_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
 
 		plt.close('all')
 
