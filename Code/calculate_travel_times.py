@@ -11,6 +11,7 @@ from scipy.interpolate import RegularGridInterpolator
 from numpy import interp
 import shutil
 import pathlib
+from module import TravelTimes
 from utils import *
 
 def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores = 10):
