@@ -569,6 +569,8 @@ if train_travel_time_neural_network == True:
 		ax.plot(losses, label = 'Train')
 		ax.plot(vald_steps*np.arange(len(losses_vald)), losses_vald, label = 'Vald')
 		ax.set_yscale('log')
+		ax.set_xlabel('Update Step')
+		ax.set_ylabel('Losses')
 		ax.legend()
 		fig.savefig(path_to_file + 'Plots' + seperator + 'losses_travel_time_model.png', bbox_inches = 'tight', pad_inches = 0.2)
 
