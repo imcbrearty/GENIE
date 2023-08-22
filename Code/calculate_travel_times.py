@@ -445,6 +445,8 @@ if train_travel_time_neural_network == True:
 	scale_val = np.round(2.0*np.linalg.norm(ftrns1(X_samples[irand_sample]) - ftrns1(Locs_samples[irand_sample]), axis = 1).max())
 	trav_val = np.round(1.25*Ts_samples.max())
 
+	t_scale_val = trav_val*0.03
+	
 	print('Using a single model for both phase types')
 	# Note: training a seperate model for either phase type can be more accurate
 	m = TravelTimes(ftrns1_diff, ftrns2_diff, scale_val = scale_val, trav_val = trav_val, n_phases = 2, device = device).to(device)
@@ -494,7 +496,10 @@ if train_travel_time_neural_network == True:
 		elif using_1D == True:
 			out = m.forward_relative(sta_pos, src_pos, method = 'direct')
 
-		loss = loss_func(out/m.tscale, trgt/m.tscale)
+		loss_weight = torch.exp(-torch.abs(trgt[:,1])/t_scale_val)
+		loss_weight = loss_weight/loss_weight.sum()
+
+		loss = 0.5*loss_func(out/m.tscale, trgt/m.tscale) + 0.5*loss_func(loss_weight.reshape(-1,1)*out/m.tscale, loss_weight.reshape(-1,1)*trgt/m.tscale)
 
 		# sta_pos, src_pos, masks = sample_masks_unweighted(n_batch)
 		# out = m.forward_mask_train(torch.Tensor(sta_pos).to(device), torch.Tensor(src_pos).to(device), method = 'direct', p = 0.3)
@@ -523,7 +528,10 @@ if train_travel_time_neural_network == True:
 				elif using_1D == True:
 					out = m.forward_relative(sta_pos, src_pos, method = 'direct')
 
-			loss_vald = loss_func(out/m.tscale, trgt/m.tscale)
+			loss_weight = torch.exp(-torch.abs(trgt[:,1])/t_scale_val)
+			loss_weight = loss_weight/loss_weight.sum()
+	
+			loss_vald = 0.5*loss_func(out/m.tscale, trgt/m.tscale) + 0.5*loss_func(loss_weight.reshape(-1,1)*out/m.tscale, loss_weight.reshape(-1,1)*trgt/m.tscale)
 
 			losses_vald.append(loss_vald.item())
 
