@@ -802,6 +802,8 @@ for i in range(n_restart_step, n_epochs):
 			print('skip a sample!') ## If this skips, and yet i0 == (n_batch - 1), is it a problem?
 			continue ## Skip this!
 
+		## Should add increased samples in x_src_query around places of coherency
+		## and true labels
 		x_src_query = np.random.rand(n_src_query,3)*scale_x_extend + offset_x_extend
 
 		if len(lp_srcs[i0]) > 0:
@@ -837,6 +839,9 @@ for i in range(n_restart_step, n_epochs):
 
 		if len(lp_times[i0]) > max_number_pick_association_labels_per_sample:
 			isample_picks = np.sort(np.random.choice(len(lp_times[i0]), size = max_number_pick_association_labels_per_sample, replace = False))
+			lp_times[i0] = lp_times[i0][isample_picks]
+			lp_stations[i0] = lp_stations[i0][isample_picks]
+			lp_phases[i0] = lp_phases[i0][isample_picks]
 			lp_meta[i0] = lp_meta[i0][isample_picks]
 		
 		# Continue processing the rest of the inputs
@@ -848,9 +853,9 @@ for i in range(n_restart_step, n_epochs):
 			torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
 			torch.Tensor(A_edges_ref_l[i0]).to(device),
 			trv_out,
-			torch.Tensor(lp_times[i0][isample_picks]).to(device),
-			torch.Tensor(lp_stations[i0][isample_picks]).long().to(device),
-			torch.Tensor(lp_phases[i0][isample_picks]).reshape(-1, 1).float().to(device),
+			torch.Tensor(lp_times[i0]).to(device),
+			torch.Tensor(lp_stations[i0]).long().to(device),
+			torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
 			torch.Tensor(ftrns1(Locs[i0])).to(device),
 			torch.Tensor(ftrns1(X_fixed[i0])).to(device),
 			torch.Tensor(ftrns1(X_query[i0])).to(device),
