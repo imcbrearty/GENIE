@@ -431,16 +431,16 @@ class TravelTimes(nn.Module):
 		super(TravelTimes, self).__init__()
 
 		## Relative offset prediction [2]
-		self.fc1 = nn.Sequential(nn.Linear(3, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
+		self.fc1 = nn.Sequential(nn.Linear(3, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
 
 		## Absolute position prediction [3]
-		self.fc2 = nn.Sequential(nn.Linear(6, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
+		self.fc2 = nn.Sequential(nn.Linear(6, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
 
 		## Relative offset prediction [2]
-		self.fc3 = nn.Sequential(nn.Linear(3, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
+		self.fc3 = nn.Sequential(nn.Linear(3, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
 
 		## Absolute position prediction [3]
-		self.fc4 = nn.Sequential(nn.Linear(6, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
+		self.fc4 = nn.Sequential(nn.Linear(6, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, 80), nn.ReLU(), nn.Linear(80, n_phases))
 
 		## Projection functions
 		self.ftrns1 = ftrns1
