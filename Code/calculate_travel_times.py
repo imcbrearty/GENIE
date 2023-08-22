@@ -352,7 +352,7 @@ if train_travel_time_neural_network == True:
 		if grab_near_station_samples == True:
 
 			t_scale_sample = 5.0
-			n_per_station = 15000
+			n_per_station = 50000
 
 			for n in range(locs_ref.shape[0]):
 
@@ -375,7 +375,7 @@ if train_travel_time_neural_network == True:
 		if grab_near_boundaries_samples == True:
 
 			t_scale_sample = 5.0
-			n_per_station = 20000
+			n_per_station = 50000
 
 			for n in range(locs_ref.shape[0]):
 
@@ -430,6 +430,7 @@ if train_travel_time_neural_network == True:
 				Tp_samples_vald.append(Tp_interp[isample_vald,n])
 				Ts_samples_vald.append(Ts_interp[isample_vald,n])
 				Locs_samples_vald.append(locs_rand)
+				
 	# Concatenate training dataset
 	X_samples = np.vstack(X_samples)
 	Tp_samples = np.hstack(Tp_samples)
@@ -462,7 +463,7 @@ if train_travel_time_neural_network == True:
 	# loss_func1 = nn.BCELoss()
 
 	n_batch = 5000
-	n_steps = 30001 # 50000
+	n_steps = 20001 # 50000
 	n_ver_save = 1
 
 	assert((using_3D + using_1D) == 1)
