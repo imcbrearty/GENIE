@@ -501,10 +501,6 @@ if train_travel_time_neural_network == True:
 
 		loss = 0.5*loss_func(out/m.tscale, trgt/m.tscale) + 0.5*loss_func(loss_weight.reshape(-1,1)*out/m.tscale, loss_weight.reshape(-1,1)*trgt/m.tscale)
 
-		# sta_pos, src_pos, masks = sample_masks_unweighted(n_batch)
-		# out = m.forward_mask_train(torch.Tensor(sta_pos).to(device), torch.Tensor(src_pos).to(device), method = 'direct', p = 0.3)
-		# loss = loss + 0.3*loss_func1(out, torch.Tensor(masks.reshape(-1,1)).to(device))
-
 		loss.backward()
 		optimizer.step()
 		scheduler.step()
