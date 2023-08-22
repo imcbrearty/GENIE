@@ -291,8 +291,7 @@ if train_travel_time_neural_network == True:
 		grab_near_station_samples = True
 		if grab_near_station_samples == True:
 
-			t_scale_sample = 5.0
-			n_per_station = 15000
+			n_per_station = 150000
 
 			for n in range(locs_ref.shape[0]):
 
@@ -307,8 +306,7 @@ if train_travel_time_neural_network == True:
 		grab_near_boundaries_samples = True
 		if grab_near_boundaries_samples == True:
 
-			t_scale_sample = 5.0
-			n_per_station = 20000
+			n_per_station = 50000
 
 			for n in range(locs_ref.shape[0]):
 
@@ -323,7 +321,6 @@ if train_travel_time_neural_network == True:
 		grab_interior_samples = True
 		if grab_interior_samples == True:
 
-			t_scale_sample = 5.0
 			n_per_station = 100000
 
 			for n in range(locs_ref.shape[0]):
@@ -352,8 +349,7 @@ if train_travel_time_neural_network == True:
 		grab_near_station_samples = True
 		if grab_near_station_samples == True:
 
-			t_scale_sample = 5.0
-			n_per_station = 50000
+			n_per_station = 150000
 
 			for n in range(locs_ref.shape[0]):
 
@@ -375,7 +371,6 @@ if train_travel_time_neural_network == True:
 		grab_near_boundaries_samples = True
 		if grab_near_boundaries_samples == True:
 
-			t_scale_sample = 5.0
 			n_per_station = 50000
 
 			for n in range(locs_ref.shape[0]):
@@ -398,7 +393,6 @@ if train_travel_time_neural_network == True:
 		grab_interior_samples = True
 		if grab_interior_samples == True:
 
-			t_scale_sample = 5.0
 			n_per_station = 100000
 
 			for n in range(locs_ref.shape[0]):
