@@ -92,8 +92,8 @@ depth_steps = config['depth_steps']
 ## Load travel time neural network settings
 save_dense_travel_time_data = config['save_dense_travel_time_data']
 train_travel_time_neural_network = config['train_travel_time_neural_network']
-using_3D = config['3D']
-using_1D = config['1D']
+using_3D = config['using_3D']
+using_1D = config['using_1D']
 
 depth_steps = np.arange(depth_steps['min_elevation'], depth_steps['max_elevation'] + depth_steps['elevation_step'], depth_steps['elevation_step']) # Elevation steps to compute travel times from 
 ## (These are reference points for stations; can be a regular grid, and each station looks up the
