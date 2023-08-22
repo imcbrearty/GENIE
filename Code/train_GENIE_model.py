@@ -567,6 +567,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			temporal_term2 = src_times[active_sources_per_slice].reshape(1,1,-1)
 			temporal_diff = temporal_term1 - temporal_term2
 			temporal_exp_term = np.exp(-0.5 * (temporal_diff**2) / (src_t_kernel**2))
+
+			print('There is an error in these updated label definitions, since the first two targets should be of a similar value')
 			
 			# Combine components
 			lbls_grid = (np.expand_dims(spatial_exp_term.sum(2), axis=1) * temporal_exp_term).max(2)
