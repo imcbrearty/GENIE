@@ -67,7 +67,7 @@ def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908
 	e = e.to(device)
 	p = p.detach().clone().float().to(device) # why include detach here?
 	pi = torch.Tensor([np.pi]).to(device)
-	p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1)
+	p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1).to(device)
 	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0])**2)
 	# results:
 	x = (N + p[:,2])*torch.cos(p[:,0])*torch.cos(p[:,1])
