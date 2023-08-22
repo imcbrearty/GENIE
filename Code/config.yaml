@@ -70,3 +70,4 @@ src_depth_kernel: 15000. # Kernel of Cartesian projection, vertical distance (m)
 t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
 
+max_number_pick_association_labels_per_sample: 2000 # Max numbef of picks to compute associations for during training
