@@ -572,7 +572,7 @@ if train_travel_time_neural_network == True:
 		ax.legend()
 		fig.savefig(path_to_file + 'Plots' + seperator + 'losses_travel_time_model.png', bbox_inches = 'tight', pad_inches = 0.2)
 
-		fig, ax = plt.subplots(2, 2, figsize = [10,10])
+		fig, ax = plt.subplots(2, 2, figsize = [12,10])
 		ax[0,0].scatter(trgt1[:,0], out1[:,0] - trgt1[:,0], 30, alpha = 0.75, label = 'Train')
 		ax[0,0].scatter(trgt2[:,0], out2[:,0] - trgt2[:,0], 30, alpha = 0.75, label = 'Vald')
 		ax[0,0].set_xlabel('Travel Time (P wave)')
