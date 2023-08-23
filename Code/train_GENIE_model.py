@@ -23,7 +23,8 @@ import pathlib
 
 from utils import *
 from module import *
-from generate_synthetic_data import generate_synthetic_data
+# from generate_synthetic_data import generate_synthetic_data 
+## For now not using the seperate files definition of generate_synthetic_data
 
 use_wandb_logging = False
 if use_wandb_logging == True:
