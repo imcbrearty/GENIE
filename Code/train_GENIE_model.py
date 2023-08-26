@@ -628,9 +628,6 @@ z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
 locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
 z.close()
 
-## Load travel times
-z = np.load(path_to_file + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
-
 ## Create path to write files
 write_training_file = path_to_file + 'GNN_TrainedModels/' + name_of_project + '_'
 
@@ -649,29 +646,38 @@ mn_cuda = torch.Tensor(mn).to(device)
 ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x) - mn_cuda).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
 ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda)
 
-Tp = z['Tp_interp']
-Ts = z['Ts_interp']
+if config['train_travel_time_neural_network'] == False:
 
-locs_ref = z['locs_ref']
-X = z['X']
-z.close()
+	## Load travel times
+	z = np.load(path_to_file + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
+	
+	Tp = z['Tp_interp']
+	Ts = z['Ts_interp']
+	
+	locs_ref = z['locs_ref']
+	X = z['X']
+	z.close()
+	
+	x1 = np.unique(X[:,0])
+	x2 = np.unique(X[:,1])
+	x3 = np.unique(X[:,2])
+	assert(len(x1)*len(x2)*len(x3) == X.shape[0])
+	
+	
+	## Load fixed grid for velocity models
+	Xmin = X.min(0)
+	Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
+	Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
+	N = np.array([len(x1), len(x2), len(x3)])
+	X0 = np.array([locs_ref[0,0], locs_ref[0,1], 0.0]).reshape(1,-1)
+	
+	
+	trv = interp_1D_velocity_model_to_3D_travel_times(X, locs_ref, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2) # .to(device)
 
-x1 = np.unique(X[:,0])
-x2 = np.unique(X[:,1])
-x3 = np.unique(X[:,2])
-assert(len(x1)*len(x2)*len(x3) == X.shape[0])
+elif config['train_travel_time_neural_network'] == True:
 
-
-## Load fixed grid for velocity models
-Xmin = X.min(0)
-Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
-Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
-N = np.array([len(x1), len(x2), len(x3)])
-X0 = np.array([locs_ref[0,0], locs_ref[0,1], 0.0]).reshape(1,-1)
-
-
-trv = interp_1D_velocity_model_to_3D_travel_times(X, locs_ref, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2) # .to(device)
-
+	n_ver_trv_time_model_load = 1
+	trv = load_travel_time_neural_network(path_to_file, n_ver_trv_time_model_load)
 
 load_subnetworks = False
 if load_subnetworks == True:
