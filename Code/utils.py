@@ -517,3 +517,15 @@ def load_files_with_travel_times(path_to_file, name_of_project, template_ver, ve
 	write_training_file = path_to_file + 'GNN_TrainedModels/' + name_of_project + '_'
 
 	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
+
+def load_travel_time_neural_network(path_to_file, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
+
+	m = TravelTimes(device = device).to(device)
+	m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
+	m.eval()
+
+	if method == 'relative pairs':
+
+		trv = lambda sta_pos, src_pos: m.forward_relative(sta_pos, src_pos, method = 'pairs')
+
+	return trv
