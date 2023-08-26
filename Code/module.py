@@ -463,7 +463,7 @@ class TravelTimes(nn.Module):
 			src_repeat = self.ftrns1(src).repeat_interleave(len(sta), dim = 0)/self.scale
 			sta_repeat = self.ftrns1(sta).repeat(len(src), 1)/self.scale
 
-			return self.tscale*(self.fc1(sta_repeat - src_repeat) + self.fc2(torch.cat((sta_repeat, src_repeat)), dim = 1))
+			return self.tscale*(self.fc1(sta_repeat - src_repeat) + self.fc2(torch.cat((sta_repeat, src_repeat)), dim = 1)).reshape(len(src), len(sta), -1)
 
 	def forward_train(self, sta, src, p = 0.5, method = 'pairs'):
 
@@ -487,7 +487,7 @@ class TravelTimes(nn.Module):
 
 			rand_mask = (torch.rand(sta_repeat.shape[0],1).to(self.device) > p).float()
 
-			return self.tscale*(self.fc1(sta_repeat - src_repeat) + rand_mask*self.fc2(torch.cat((sta_repeat, src_repeat), dim = 1)))
+			return self.tscale*(self.fc1(sta_repeat - src_repeat) + rand_mask*self.fc2(torch.cat((sta_repeat, src_repeat), dim = 1))).reshape(len(src), len(sta), -1)
 
 	def forward_relative(self, sta, src, method = 'pairs'):
 
@@ -502,7 +502,7 @@ class TravelTimes(nn.Module):
 			src_repeat = self.ftrns1(src).repeat_interleave(len(sta), dim = 0)/self.scale
 			sta_repeat = self.ftrns1(sta).repeat(len(src), 1)/self.scale
 
-			return self.tscale*(self.fc1(sta_repeat - src_repeat))
+			return self.tscale*(self.fc1(sta_repeat - src_repeat)).reshape(len(src), len(sta), -1)
 
 	def forward_mask(self, sta, src, method = 'pairs'):
 
@@ -517,7 +517,7 @@ class TravelTimes(nn.Module):
 			src_repeat = self.ftrns1(src).repeat_interleave(len(sta), dim = 0)/self.scale
 			sta_repeat = self.ftrns1(sta).repeat(len(src), 1)/self.scale
 
-			return torch.sigmoid(self.fc3(sta_repeat - src_repeat) + self.fc4(torch.cat((sta_repeat, src_repeat)), dim = 1))
+			return torch.sigmoid(self.fc3(sta_repeat - src_repeat) + self.fc4(torch.cat((sta_repeat, src_repeat)), dim = 1)).reshape(len(src), len(sta), -1)
 
 	def forward_mask_train(self, sta, src, p = 0.5, method = 'pairs'):
 
@@ -541,7 +541,7 @@ class TravelTimes(nn.Module):
 
 			rand_mask = (torch.rand(sta_repeat.shape[0],1).to(self.device) > p).float()
 
-			return torch.sigmoid(self.fc3(sta_repeat - src_repeat) + rand_mask*self.fc4(torch.cat((sta_repeat, src_repeat), dim = 1)))
+			return torch.sigmoid(self.fc3(sta_repeat - src_repeat) + rand_mask*self.fc4(torch.cat((sta_repeat, src_repeat), dim = 1))).reshape(len(src), len(sta), -1)
 
 	def forward_mask_relative(self, sta, src, method = 'pairs'):
 
@@ -556,4 +556,4 @@ class TravelTimes(nn.Module):
 			src_repeat = self.ftrns1(src).repeat_interleave(len(sta), dim = 0)/self.scale
 			sta_repeat = self.ftrns1(sta).repeat(len(src), 1)/self.scale
 
-			return torch.sigmoid(self.fc3(sta_repeat - src_repeat))
+			return torch.sigmoid(self.fc3(sta_repeat - src_repeat)).reshape(len(src), len(sta), -1)
