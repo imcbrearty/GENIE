@@ -518,11 +518,15 @@ def load_files_with_travel_times(path_to_file, name_of_project, template_ver, ve
 
 	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
 
-def load_travel_time_neural_network(path_to_file, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
+def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
 
 	from module import TravelTimes
+
+	z = np.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+	n_phases = z['out1'].shape[1]
+	scale_val = float(z['scale_val']), trav_val = float(z['trav_val'])
 	
-	m = TravelTimes(device = device).to(device)
+	m = TravelTimes(ftrns1, ftrns2, scale_val = scale_val, trav_val = trav_val, n_phases = n_phases, device = device).to(device)
 	m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
 	m.eval()
 
