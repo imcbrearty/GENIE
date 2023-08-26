@@ -525,6 +525,7 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 	z = np.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_losses_ver_%d.npz'%(phase, n_ver_load))
 	n_phases = z['out1'].shape[1]
 	scale_val = float(z['scale_val']), trav_val = float(z['trav_val'])
+	z.close()
 	
 	m = TravelTimes(ftrns1, ftrns2, scale_val = scale_val, trav_val = trav_val, n_phases = n_phases, device = device).to(device)
 	m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
