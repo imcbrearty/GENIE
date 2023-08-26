@@ -520,6 +520,8 @@ def load_files_with_travel_times(path_to_file, name_of_project, template_ver, ve
 
 def load_travel_time_neural_network(path_to_file, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
 
+	from module import TravelTimes
+	
 	m = TravelTimes(device = device).to(device)
 	m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
 	m.eval()
