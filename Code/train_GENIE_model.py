@@ -629,7 +629,8 @@ locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
 z.close()
 
 ## Create path to write files
-write_training_file = path_to_file + 'GNN_TrainedModels/' + name_of_project + '_'
+seperator = '\\' if '\\' in path_to_file else '/'
+write_training_file = path_to_file + 'GNN_TrainedModels' + seperator + name_of_project + '_'
 
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
@@ -904,7 +905,8 @@ for i in range(n_restart_step, n_epochs):
 		n_visualize_step = 0
 		visualize_predictions = False
 		if (visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0):
-			visualize_predictions(i0)
+			save_plots_path = path_to_file + seperator + 'Plots' + seperator
+			visualize_predictions(i0, save_plots_path)
 		
 		if i0 != (n_batch - 1):
 			loss.backward(retain_graph = True)
