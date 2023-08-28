@@ -612,6 +612,7 @@ def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_
 # Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
 
 max_number_pick_association_labels_per_sample = config['max_number_pick_association_labels_per_sample']
+make_visualize_predictions = config['make_visualize_predictions']
 
 # Load region
 z = np.load(path_to_file + '%s_region.npz'%name_of_project)
@@ -903,7 +904,6 @@ for i in range(n_restart_step, n_epochs):
 		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 
 		n_visualize_step = 250
-		make_visualize_predictions = False
 		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0):
 			save_plots_path = path_to_file + seperator + 'Plots' + seperator
 
