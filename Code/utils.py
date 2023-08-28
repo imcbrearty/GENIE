@@ -632,11 +632,11 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 		ipred_picks = lp_stations[ind][ipred_picks.astype('int')].astype('int')
 
 		fig, ax = plt.subplots(1,2, sharex = True, sharey = True)
-		ax[0].scatter(X_query[ind][itrue_sources,1], X_query[ind][itrue_sources,1], c = Lbls_query[ind][itrue_sources,5], alpha = 0.2)
+		ax[0].scatter(X_query[ind][itrue_sources,1], X_query[ind][itrue_sources,0], c = Lbls_query[ind][itrue_sources,5], alpha = 0.2)
 		ax[0].scatter(Locs[ind][:,1], Locs[ind][:,0], c = 'grey', marker = '^')
 		ax[0].scatter(Locs[ind][itrue_picks,1], Locs[ind][itrue_picks,0], c = 'red', marker = '^')
 
-		ax[1].scatter(X_query[ind][ipred_sources,1], X_query[ind][ipred_sources,1], c = out[1][ipred_sources,5,0].cpu().detach().numpy(), alpha = 0.2)
+		ax[1].scatter(X_query[ind][ipred_sources,1], X_query[ind][ipred_sources,0], c = out[1][ipred_sources,5,0].cpu().detach().numpy(), alpha = 0.2)
 		ax[1].scatter(Locs[ind][:,1], Locs[ind][:,0], c = 'grey', marker = '^')
 		ax[1].scatter(Locs[ind][ipred_picks,1], Locs[ind][ipred_picks,0], c = 'red', marker = '^')
 		fig.savefig(ext_save + 'predictions_map_view_associated_phases_%d_ver_%d.png'%(ind, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
