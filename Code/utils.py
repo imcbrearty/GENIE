@@ -1,186 +1,145 @@
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 import numpy as np
 import torch
-from torch import nn, optim
+from scipy.spatial import cKDTree
+import numpy as np
 from matplotlib import pyplot as plt
-from torch_scatter import scatter
-import h5py
-import glob
-import networkx as nx
-
+import torch
 from torch import nn, optim
+import h5py
+from torch.optim.lr_scheduler import StepLR
+from sklearn.metrics import pairwise_distances as pd
+from scipy.signal import fftconvolve
+from scipy.spatial import cKDTree
+from scipy.stats import gamma, beta
+import time
 from torch_cluster import knn
 from torch_geometric.utils import remove_self_loops, subgraph
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
-from torch_geometric.utils import to_networkx, to_undirected, from_networkx
-from torch_geometric.transforms import FaceToEdge, GenerateMeshNormals
-from joblib import Parallel, delayed
-import multiprocessing
-from scipy.io import loadmat
-from scipy.special import sph_harm
-from scipy.spatial import cKDTree
-from torch.autograd import Variable
-from scipy.spatial import ConvexHull
-from scipy.spatial import Delaunay
+from torch_scatter import scatter
+from numpy.matlib import repmat
+import itertools
+import pathlib
 import yaml
 
+device = torch.device('cuda') ## or use cpu
+
+
 def load_config(file_path: str) -> dict:
-	"""Load configuration from a YAML file."""
-	with open(file_path, 'r') as file:
-		return yaml.safe_load(file)
+    """Load configuration from a YAML file."""
+    with open(file_path, 'r') as file:
+        return yaml.safe_load(file)
+    
+### Projections
 
-def make_cayleigh_graph(n):
+def lla2ecef(p, a = 6378137.0, e = 8.18191908426215e-2): # 0.0818191908426215, previous 8.1819190842622e-2
+	p = p.copy().astype('float')
+	p[:,0:2] = p[:,0:2]*np.array([np.pi/180.0, np.pi/180.0]).reshape(1,-1)
+	N = a/np.sqrt(1 - (e**2)*np.sin(p[:,0])**2)
+	# results:
+	x = (N + p[:,2])*np.cos(p[:,0])*np.cos(p[:,1])
+	y = (N + p[:,2])*np.cos(p[:,0])*np.sin(p[:,1])
+	z = ((1-e**2)*N + p[:,2])*np.sin(p[:,0])
+	return np.concatenate((x[:,None],y[:,None],z[:,None]), axis = 1)
 
-	generators = [np.array([1, 1, 0, 1]).reshape(2,2), np.array([1, 0, 1, 1]).reshape(2,2)]
-	nodes = np.vstack([generators[0].reshape(1,-1), generators[1].reshape(1,-1)])
-	edges = []
+def ecef2lla(x, a = 6378137.0, e = 8.18191908426215e-2):
+	x = x.copy().astype('float')
+	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
+	b = np.sqrt((a**2)*(1 - e**2))
+	ep = np.sqrt((a**2 - b**2)/(b**2))
+	p = np.sqrt(x[:,0]**2 + x[:,1]**2)
+	th = np.arctan2(a*x[:,2], b*p)
+	lon = np.arctan2(x[:,1], x[:,0])
+	lat = np.arctan2((x[:,2] + (ep**2)*b*(np.sin(th)**3)), (p - (e**2)*a*(np.cos(th)**3)))
+	N = a/np.sqrt(1 - (e**2)*(np.sin(lat)**2))
+	alt = p/np.cos(lat) - N
+	# lon = np.mod(lon, 2.0*np.pi) # don't use!
+	k = (np.abs(x[:,0]) < 1) & (np.abs(x[:,1]) < 1)
+	alt[k] = np.abs(x[k,2]) - b
+	return np.concatenate((180.0*lat[:,None]/np.pi, 180.0*lon[:,None]/np.pi, alt[:,None]), axis = 1)
 
-	new = np.inf
-	cnt = 0
+def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2]), device = 'cpu'):
+	# x = x.astype('float')
+	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
+	a = a.to(device)
+	e = e.to(device)
+	p = p.detach().clone().float().to(device) # why include detach here?
+	pi = torch.Tensor([np.pi]).to(device)
+	p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1).to(device)
+	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0])**2)
+	# results:
+	x = (N + p[:,2])*torch.cos(p[:,0])*torch.cos(p[:,1])
+	y = (N + p[:,2])*torch.cos(p[:,0])*torch.sin(p[:,1])
+	z = ((1-e**2)*N + p[:,2])*torch.sin(p[:,0])
 
-	while new > 0:
+	return torch.cat((x.view(-1,1), y.view(-1,1), z.view(-1,1)), dim = 1)
 
-		print('iteration %d, num nodes %d'%(cnt, len(nodes)))
+def ecef2lla_diff(x, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2]), device = 'cpu'):
+	# x = x.astype('float')
+	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
+	a = a.to(device)
+	e = e.to(device)
+	pi = torch.Tensor([np.pi]).to(device)
+	b = torch.sqrt((a**2)*(1 - e**2))
+	ep = torch.sqrt((a**2 - b**2)/(b**2))
+	p = torch.sqrt(x[:,0]**2 + x[:,1]**2)
+	th = torch.atan2(a*x[:,2], b*p)
+	lon = torch.atan2(x[:,1], x[:,0])
+	lat = torch.atan2((x[:,2] + (ep**2)*b*(torch.sin(th)**3)), (p - (e**2)*a*(torch.cos(th)**3)))
+	N = a/torch.sqrt(1 - (e**2)*(torch.sin(lat)**2))
+	alt = p/torch.cos(lat) - N
+	# lon = np.mod(lon, 2.0*np.pi) # don't use!
+	k = (torch.abs(x[:,0]) < 1) & (torch.abs(x[:,1]) < 1)
+	alt[k] = torch.abs(x[k,2]) - b
+	
+	return torch.cat((180.0*lat[:,None]/pi, 180.0*lon[:,None]/pi, alt[:,None]), axis = 1)
 
-		tree = cKDTree(nodes)
-		len_nodes = len(nodes)
+def rotation_matrix(a, b, c):
 
-		new_nodes_1 = []
-		new_nodes_2 = []
+	# a, b, c = vec
 
-		for i in range(len(nodes)):
+	rot = torch.zeros(3,3)
+	rot[0,0] = torch.cos(b)*torch.cos(c)
+	rot[0,1] = torch.sin(a)*torch.sin(b)*torch.cos(c) - torch.cos(a)*torch.sin(c)
+	rot[0,2] = torch.cos(a)*torch.sin(b)*torch.cos(c) + torch.sin(a)*torch.sin(c)
 
-			new_nodes_1.append(np.mod(nodes[i].reshape(2,2) @ generators[0], n).reshape(1,-1))
-			new_nodes_2.append(np.mod(nodes[i].reshape(2,2) @ generators[1], n).reshape(1,-1))
+	rot[1,0] = torch.cos(b)*torch.sin(c)
+	rot[1,1] = torch.sin(a)*torch.sin(b)*torch.sin(c) + torch.cos(a)*torch.cos(c)
+	rot[1,2] = torch.cos(a)*torch.sin(b)*torch.sin(c) - torch.sin(a)*torch.cos(c)
 
-		new_nodes_1 = np.vstack(new_nodes_1) # has size nodes
-		new_nodes_2 = np.vstack(new_nodes_2)
-		new_nodes = np.unique(np.concatenate((new_nodes_1, new_nodes_2), axis = 0), axis = 0)
+	rot[2,0] = -torch.sin(b)
+	rot[2,1] = torch.sin(a)*torch.cos(b)
+	rot[2,2] = torch.cos(a)*torch.cos(b)
 
-		q = tree.query(new_nodes)[0]
-		inew = np.where(q > 0)[0]
-		new_nodes = new_nodes[inew]
+	return rot
 
-		if len(inew) == 0:
-			new = 0
-			continue # Break loop
+def rotation_matrix_full_precision(a, b, c):
 
-		## Now need to find which entries in new_nodes are linked for each input node
-		tree_new = cKDTree(new_nodes)
-		ip = tree_new.query(new_nodes_1)
-		ip1 = np.where(ip[0] == 0)[0] ## Points to current absolute node indices that are linked to new node
-		edges_new_1 = np.concatenate((ip1.reshape(-1,1), len_nodes + ip[1][ip1].reshape(-1,1)), axis = 1)
+	# a, b, c = vec
 
-		ip = tree_new.query(new_nodes_2)
-		ip1 = np.where(ip[0] == 0)[0] ## Points to current absolute node indices that are linked to new node
-		edges_new_2 = np.concatenate((ip1.reshape(-1,1), len_nodes + ip[1][ip1].reshape(-1,1)), axis = 1)
+	rot = np.zeros((3,3))
+	rot[0,0] = np.cos(b)*np.cos(c)
+	rot[0,1] = np.sin(a)*np.sin(b)*np.cos(c) - np.cos(a)*np.sin(c)
+	rot[0,2] = np.cos(a)*np.sin(b)*np.cos(c) + np.sin(a)*np.sin(c)
 
-		# edges.append(np.unique(np.concatenate((edges_new_1, edges_new_2), axis = 0), axis = 0))
-		nodes = np.concatenate((nodes, new_nodes), axis = 0)
-		
-		cnt += 1
+	rot[1,0] = np.cos(b)*np.sin(c)
+	rot[1,1] = np.sin(a)*np.sin(b)*np.sin(c) + np.cos(a)*np.cos(c)
+	rot[1,2] = np.cos(a)*np.sin(b)*np.sin(c) - np.sin(a)*np.cos(c)
 
-	## Find inverses to generators
-	inv_indices_1 = []
-	inv_indices_2 = []
-	for i in range(len(nodes)):
-		if np.abs(np.mod(generators[0] @ nodes[i].reshape(2,2), n) - np.eye(2)).max() == 0:
-			inv_indices_1.append(i)
-		if np.abs(np.mod(generators[1] @ nodes[i].reshape(2,2), n) - np.eye(2)).max() == 0:
-			inv_indices_2.append(i)
+	rot[2,0] = -np.sin(b)
+	rot[2,1] = np.sin(a)*np.cos(b)
+	rot[2,2] = np.cos(a)*np.cos(b)
 
-	assert(len(inv_indices_1) == 1)
-	assert(len(inv_indices_2) == 1)
+	return rot
 
-	generators_inverses = [nodes[inv_indices_1[0]].reshape(2,2), nodes[inv_indices_2[0]].reshape(2,2)]
+### K-means scripts
 
-	## Now must add missing edges between all previously created nodes. (can do this outside of the loop)
-	for i in range(len(nodes)):
-		for j in range(len(nodes)):
-			dist1 = np.abs(np.mod(nodes[i].reshape(2,2) @ generators[0], n) - nodes[j].reshape(2,2)).max()
-			dist2 = np.abs(np.mod(nodes[i].reshape(2,2) @ generators[1], n) - nodes[j].reshape(2,2)).max()
-			if ((dist1 == 0) + (dist2 == 0)) > 0:
-				edges.append(np.array([i,j]).reshape(1,-1))
-
-	for i in range(len(nodes)):
-		for j in range(len(nodes)):
-			dist1 = np.abs(np.mod(nodes[i].reshape(2,2) @ generators_inverses[0], n) - nodes[j].reshape(2,2)).max()
-			dist2 = np.abs(np.mod(nodes[i].reshape(2,2) @ generators_inverses[1], n) - nodes[j].reshape(2,2)).max()
-			if ((dist1 == 0) + (dist2 == 0)) > 0:
-				edges.append(np.array([i,j]).reshape(1,-1))
-
-	edges = np.unique(np.vstack(edges), axis = 0)
-	## Check for all edges, if each node is really linked to the declared nodes.
-	for i in range(len(edges)):
-		dist1 = np.abs(np.mod(nodes[edges[i,0]].reshape(2,2) @ generators[0], n) - nodes[edges[i,1]].reshape(2,2)).max()
-		dist2 = np.abs(np.mod(nodes[edges[i,0]].reshape(2,2) @ generators[1], n) - nodes[edges[i,1]].reshape(2,2)).max()
-		dist3 = np.abs(np.mod(nodes[edges[i,0]].reshape(2,2) @ generators_inverses[0], n) - nodes[edges[i,1]].reshape(2,2)).max()
-		dist4 = np.abs(np.mod(nodes[edges[i,0]].reshape(2,2) @ generators_inverses[1], n) - nodes[edges[i,1]].reshape(2,2)).max()
-		assert(((dist1 == 0) + (dist2 == 0) + (dist3 == 0) + (dist4 == 0)) > 0)
-		# print(i)
-
-	return edges
-
-## This global_mean_pool function is taken from 
-## TORCH_GEOMETRIC.GRAPHGYM.MODELS.POOLING
-## It relies on scatter.
-def global_mean_pool(x, batch, size=None):
-	"""
-	Globally pool node embeddings into graph embeddings, via elementwise mean.
-	Pooling function takes in node embedding [num_nodes x emb_dim] and
-	batch (indices) and outputs graph embedding [num_graphs x emb_dim].
-
-	Args:
-		x (torch.tensor): Input node embeddings
-		batch (torch.tensor): Batch tensor that indicates which node
-		belongs to which graph
-		size (optional): Total number of graphs. Can be auto-inferred.
-
-	Returns: Pooled graph embeddings
-
-	"""
-	size = batch.max().item() + 1 if size is None else size
-	return scatter(x, batch, dim=0, dim_size=size, reduce='mean')
-
-# def batch_inputs(signal_slice, query_slice, edges_slice, edges_c_slice, pos_slice, trgt_slice, node_ind_max, device):
-
-# 	inpt_batch = torch.vstack(signal_slice).to(device)
-# 	mask_batch = inpt_batch[:,3::] # Only select non-position points for mask
-# 	pos_batch = inpt_batch[:,0:3]
-# 	query_batch = torch.Tensor(np.vstack(query_slice)).to(device)
-# 	edges_batch = torch.cat([edges_slice[j] + j*node_ind_max for j in range(len(edges_slice))], dim = 1).to(device)
-# 	edges_batch_c = torch.cat([edges_c_slice[j] + j*node_ind_max for j in range(len(edges_c_slice))], dim = 1).to(device)
-# 	trgt_batch = torch.Tensor(np.vstack(trgt_slice)).to(device)
-
-# 	return inpt_batch, mask_batch, pos_batch, query_batch, edges_batch, edges_batch_c, trgt_batch
-
-def batch_inputs(signal_slice, query_slice, edges_slice, edges_c_slice, pos_slice, trgt_slice, node_ind_max):
-
-	inpt_batch = torch.vstack(signal_slice) # .to(device)
-	mask_batch = inpt_batch[:,3::] # Only select non-position points for mask
-	pos_batch = inpt_batch[:,0:3]
-	query_batch = torch.vstack(query_slice) # .to(device)
-	edges_batch = torch.cat([edges_slice[j] + j*node_ind_max for j in range(len(edges_slice))], dim = 1) # .to(device)
-	edges_batch_c = torch.cat([edges_c_slice[j] + j*node_ind_max for j in range(len(edges_c_slice))], dim = 1) # .to(device)
-	trgt_batch = torch.vstack(trgt_slice) # .to(device)
-
-	return inpt_batch, mask_batch, pos_batch, query_batch, edges_batch, edges_batch_c, trgt_batch
-
-def kmeans_packing_logarithmic(scale_x, offset_x, ndim, n_clusters, n_batch = 3000, n_steps = 1000, n_sim = 1, lr = 0.01):
+def kmeans_packing(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1, lr = 0.01):
 
 	V_results = []
 	Losses = []
-
-	center_x = ((offset_x[0,0:2] + scale_x[0,0:2]/2.0)).reshape(1,-1)
-
-	a_param = 3.0
-	num_thresh = 0.1 # 3.0
-	n_up_sample = 10
-
 	for n in range(n_sim):
 
 		losses, rz = [], []
@@ -188,19 +147,9 @@ def kmeans_packing_logarithmic(scale_x, offset_x, ndim, n_clusters, n_batch = 30
 			if i == 0:
 				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
 
-			tree = cKDTree(v)
+			tree = cKDTree(ftrns1(v))
 			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
-			x_r = np.random.pareto(a_param, size = 100000)
-			ifind = np.where(x_r < num_thresh)[0]
-			ifind = np.random.choice(ifind, size = n_up_sample*n_batch)
-			x_r = x_r[ifind].reshape(-1,1)/num_thresh
-			x_theta = np.random.rand(n_up_sample*n_batch)*2.0*np.pi
-			x_xy = x_r*np.concatenate((np.cos(x_theta[:,None]), np.sin(x_theta[:,None])), axis = 1)*(scale_x[:,0:2]/2.0)
-			x_xy = np.concatenate((x_xy + center_x, np.random.rand(n_up_sample*n_batch,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
-			x = np.concatenate((x, x_xy), axis = 0)
-			x = x[np.random.choice(x.shape[0], size = n_batch, replace = False)]
-
-			q, ip = tree.query(x)
+			q, ip = tree.query(ftrns1(x))
 
 			rs = []
 			ipu = np.unique(ip)
@@ -227,174 +176,364 @@ def kmeans_packing_logarithmic(scale_x, offset_x, ndim, n_clusters, n_batch = 30
 
 	return V_results[ibest], V_results, Losses, losses, rz
 
-def kmeans_packing_logarithmic_parallel(num_cores, scale_x_list, offset_x_list, ndim, n_clusters, n_batch = 3000, n_steps = 1000, n_sim = 1, lr = 0.01):
+def kmeans_packing_weight_vector(weight_vector, scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1, lr = 0.01):
 
-	def step_test(args):
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
 
-		scale_x, offset_x, ndim, n_clusters = args
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
 
-		V_results = []
-		Losses = []
+			tree = cKDTree(ftrns1(v)*weight_vector)
+			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
+			q, ip = tree.query(ftrns1(x)*weight_vector)
 
-		center_x = ((offset_x[0,0:2] + scale_x[0,0:2]/2.0)).reshape(1,-1)
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
 
-		a_param = 3.0
-		num_thresh = 0.1 # 3.0
-		n_up_sample = 10
+			rz.append(np.mean(rs)) # record average update size.
 
-		for n in range(n_sim):
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
 
-			losses, rz = [], []
-			for i in range(n_steps):
-				if i == 0:
-					v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
+		# Evaluate loss (5 times batch size)
+		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
+		q, ip = tree.query(x)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
 
-				tree = cKDTree(v)
-				x = np.random.rand(n_batch, ndim)*scale_x + offset_x
-				x_r = np.random.pareto(a_param, size = 100000)
-				ifind = np.where(x_r < num_thresh)[0]
-				ifind = np.random.choice(ifind, size = n_up_sample*n_batch)
-				x_r = x_r[ifind].reshape(-1,1)/num_thresh
-				x_theta = np.random.rand(n_up_sample*n_batch)*2.0*np.pi
-				x_xy = x_r*np.concatenate((np.cos(x_theta[:,None]), np.sin(x_theta[:,None])), axis = 1)*(scale_x[:,0:2]/2.0)
-				x_xy = np.concatenate((x_xy + center_x, np.random.rand(n_up_sample*n_batch,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
-				x = np.concatenate((x, x_xy), axis = 0)
-				x = x[np.random.choice(x.shape[0], size = n_batch, replace = False)]
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
 
-				q, ip = tree.query(x)
+	return V_results[ibest], V_results, Losses, losses, rz
+	
+def kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 1000, n_sim = 1, frac = 0.75, lr = 0.01):
 
-				rs = []
-				ipu = np.unique(ip)
-				for j in range(len(ipu)):
-					ipz = np.where(ip == ipu[j])[0]
-					# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
-					update = (x[ipz,:] - v[ipu[j],:]).mean(0)
-					v[ipu[j],:] = v[ipu[j],:] + lr*update
-					rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+	## Frac specifies how many of the random samples are from the density versus background
 
-				rz.append(np.mean(rs)) # record average update size.
+	n1 = int(n_clusters*frac) ## Number to sample from density
+	n2 = n_clusters - n1 ## Number to sample uniformly
 
-				if np.mod(i, 10) == 0:
-					print('%d %f'%(i, rz[-1]))
+	n1_sample = int(n_batch*frac)
+	n2_sample = n_batch - n1_sample
 
-			# Evaluate loss (5 times batch size)
-			x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
-			q, ip = tree.query(x)
-			Losses.append(q.mean())
-			V_results.append(np.copy(v))
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
 
-		Losses = np.array(Losses)
-		ibest = np.argmin(Losses)
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v1 = m_density.sample(n1)
+				v1 = np.concatenate((v1, np.random.rand(n1).reshape(-1,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
+				v2 = np.random.rand(n2, ndim)*scale_x + offset_x
+				v = np.concatenate((v1, v2), axis = 0)
 
-		return V_results[ibest] # , ind
+				iremove = np.where(((v[:,0] > (offset_x[0,0] + scale_x[0,0])) + ((v[:,1] > (offset_x[0,1] + scale_x[0,1]))) + (v[:,0] < offset_x[0,0]) + (v[:,1] < offset_x[0,1])) > 0)[0]
+				if len(iremove) > 0:
+					v[iremove] = np.random.rand(len(iremove), ndim)*scale_x + offset_x
 
-	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [ scale_x_list[i], offset_x_list[i], ndim, n_clusters] ) for i in range(num_cores))
+			tree = cKDTree(ftrns1(v)*weight_vector)
+			x1 = m_density.sample(n1)
+			x1 = np.concatenate((x1, np.random.rand(n1).reshape(-1,1)*scale_x[0,2] + offset_x[0,2]), axis = 1)
+			x2 = np.random.rand(n2, ndim)*scale_x + offset_x
+			x = np.concatenate((x1, x2), axis = 0)
+			iremove = np.where(((x[:,0] > (offset_x[0,0] + scale_x[0,0])) + ((x[:,1] > (offset_x[0,1] + scale_x[0,1]))) + (x[:,0] < offset_x[0,0]) + (x[:,1] < offset_x[0,1])) > 0)[0]
+			if len(iremove) > 0:
+				x[iremove] = np.random.rand(len(iremove), ndim)*scale_x + offset_x
 
-	pos_grid_l = []
-	for i in range(num_cores):
-		pos_grid_l.append(results[i])
+			q, ip = tree.query(ftrns1(x)*weight_vector)
 
-	return pos_grid_l
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
+		q, ip = tree.query(x)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return V_results[ibest], V_results, Losses, losses, rz
+
+def kmeans_packing_sampling_points(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 1000, n_sim = 3, lr = 0.01):
+
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v = np.random.rand(n_clusters, ndim)*scale_x + offset_x
+
+			tree = cKDTree(ftrns1(v))
+			x = np.random.rand(n_batch, ndim)*scale_x + offset_x
+			q, ip = tree.query(ftrns1(x))
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = np.random.rand(n_batch*5, ndim)*scale_x + offset_x
+		q, ip = tree.query(x)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return V_results[ibest], V_results, Losses, losses, rz
+
+### TRAVEL TIMES ###
+
+def interp_3D_return_function_adaptive(X, Xmin, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
+
+	nsta = Tp.shape[1]
+	i1 = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1], [1,1,0], [1,0,1], [0,1,1], [1,1,1]])
+	x10, x20, x30 = Xmin
+	Xv = X - np.array([x10,x20,x30])[None,:] 
+
+	def evaluate_func(y, x):
+
+		xv = x - np.array([x10,x20,x30])[None,:]
+		nx = np.shape(x)[0] # nx is the number of query points in x
+		nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
+		nz_vals1 = np.minimum(nz_vals, N - 2)
+
+		nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
+		val_p = Tp[nz,:]
+		val_s = Ts[nz,:]
+
+		x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
+		x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
+
+		val_p = np.sum(val_p*x0[:,:,None], axis = 0)
+		val_s = np.sum(val_s*x0[:,:,None], axis = 0)
+
+		return np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)
+
+	return lambda y, x: evaluate_func(y, ftrns1(x))
+
+def interp_1D_velocity_model_to_3D_travel_times(X, locs, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
+
+	i1 = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1], [1,1,0], [1,0,1], [0,1,1], [1,1,1]])
+	x10, x20, x30 = Xmin
+	Xv = X - np.array([x10,x20,x30])[None,:]
+	depth_grid = np.copy(locs[:,2]).reshape(1,-1)
+	mask = np.array([1.0,1.0,0.0]).reshape(1,-1)
+
+	print('Check way X0 is used')
+
+	def evaluate_func(y, x):
+
+		y, x = y.cpu().detach().numpy(), x.cpu().detach().numpy()
+
+		ind_depth = np.tile(np.argmin(np.abs(y[:,2].reshape(-1,1) - depth_grid), axis = 1), x.shape[0])
+		rel_pos = (np.expand_dims(x, axis = 1) - np.expand_dims(y*mask, axis = 0)).reshape(-1,3)
+		rel_pos[:,0:2] = np.abs(rel_pos[:,0:2]) ## Postive relative pos, relative to X0.
+		x_relative = X0 + rel_pos
+
+		xv = x_relative - Xmin[None,:]
+		nx = np.shape(rel_pos)[0] # nx is the number of query points in x
+		nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
+		nz_vals1 = np.minimum(nz_vals, N - 2)
+
+		nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
+
+		val_p = Tp[nz,ind_depth]
+		val_s = Ts[nz,ind_depth]
+
+		x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
+		x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
+
+		val_p = np.sum(val_p*x0, axis = 0).reshape(-1, y.shape[0])
+		val_s = np.sum(val_s*x0, axis = 0).reshape(-1, y.shape[0])
+
+		return torch.Tensor(np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)).to(device)
+
+	return lambda y, x: evaluate_func(y, x)
 
 
-def make_graph_from_mesh(mesh):
-	## Input is T
+### PREP INPUTS ###
+def assemble_time_pointers_for_stations(trv_out, dt = 1.0, k = 10, win = 10.0, tbuffer = 10.0):
 
-	## Check if these edges are correctly defined. E.g.,
-	## are incoming and outgoing edges correctly defined?
+	n_temp, n_sta = trv_out.shape[0:2]
+	dt_partition = np.arange(-win, win + trv_out.max() + dt + tbuffer, dt)
 
-	data = Data()
-	data.face = mesh
-	trns = FaceToEdge()
-	edges = trns(data).edge_index
+	edges_p = []
+	edges_s = []
+	for i in range(n_sta):
+		tree_p = cKDTree(trv_out[:,i,0][:,np.newaxis])
+		tree_s = cKDTree(trv_out[:,i,1][:,np.newaxis])
+		q_p, ip_p = tree_p.query(dt_partition[:,np.newaxis], k = k)
+		q_s, ip_s = tree_s.query(dt_partition[:,np.newaxis], k = k)
+		# ip must project to Lg indices.
+		edges_p.append((ip_p*n_sta + i).reshape(-1)) # Lg indices are each source x n_sta + sta_ind. The reshape places each subsequence of k, per time step, per station.
+		edges_s.append((ip_s*n_sta + i).reshape(-1)) # Lg indices are each source x n_sta + sta_ind. The reshape places each subsequence of k, per time step, per station.
+		# Overall, each station, each time step, each k sets of edges.
+	edges_p = np.hstack(edges_p)
+	edges_s = np.hstack(edges_s)
 
-	return edges
+	return edges_p, edges_s, dt_partition
 
-def make_spatial_graph(pos, k_pos = 15, device = 'cuda'):
+def assemble_time_pointers_for_stations_multiple_grids(trv_out, max_t, dt = 1.0, k = 10, win = 10.0):
 
-	## For every mesh node, link to k pos nodes
-	## Note: we could attach all spatial nodes to
-	## the nearest mesh nodes, though this seems
-	## less natural (as it would introduce
-	## very long range connections, linking to
-	## a small part of the mesh grid. It could
-	## potentially make learning the mapping
-	## easier).
+	n_temp, n_sta = trv_out.shape[0:2]
+	dt_partition = np.arange(-win, win + max_t + dt, dt)
 
-	## Can give absolute node locations as features
+	edges_p = []
+	edges_s = []
+	for i in range(n_sta):
+		tree_p = cKDTree(trv_out[:,i,0][:,np.newaxis])
+		tree_s = cKDTree(trv_out[:,i,1][:,np.newaxis])
+		q_p, ip_p = tree_p.query(dt_partition[:,np.newaxis], k = k)
+		q_s, ip_s = tree_s.query(dt_partition[:,np.newaxis], k = k)
+		# ip must project to Lg indices.
+		edges_p.append((ip_p*n_sta + i).reshape(-1))
+		edges_s.append((ip_s*n_sta + i).reshape(-1))
+		# Overall, each station, each time step, each k sets of edges.
+	edges_p = np.hstack(edges_p)
+	edges_s = np.hstack(edges_s)
 
-	n_pos = pos.shape[0]
+	return edges_p, edges_s, dt_partition
 
-	# A_edges_mesh = knn(mesh, mesh, k = k + 1).flip(0).contiguous()[0].to(device)
 
-	## transfer
-	A_edges = remove_self_loops(knn(pos, pos, k = k_pos + 1).flip(0).contiguous())[0] # .to(device)
-	# edges_offset = pos[A_edges[1]] - pos[A_edges[0]]
+## ACTUAL UTILS
+def remove_mean(x, axis):
+	
+	return x - np.nanmean(x, axis = axis, keepdims = True)
 
-	return A_edges # , edges_offset
+## From https://stackoverflow.com/questions/16750618/whats-an-efficient-way-to-find-if-a-point-lies-in-the-convex-hull-of-a-point-cl
+def in_hull(p, hull):
+	"""
+	Test if points in `p` are in `hull`
+	`p` should be a `NxK` coordinates of `N` points in `K` dimensions
+	`hull` is either a scipy.spatial.Delaunay object or the `MxK` array of the 
+	coordinates of `M` points in `K`dimensions for which Delaunay triangulation
+	will be computed
+	"""
+	from scipy.spatial import Delaunay
+	if not isinstance(hull,Delaunay):
+		hull = Delaunay(hull)
 
-def load_logarithmic_grids(ext_type, n_ver):
+	return hull.find_simplex(p)>=0
 
-	if ext_type == 'local':
-		
-		pos_grid_l = np.load('D:/Projects/Laplace/ApplyHeterogenous/Grids/spatial_grid_logarithmic_heterogenous_ver_%d.npz'%n_ver)['pos_grid_l']
-		pos_grid_l = [torch.Tensor(pos_grid_l[j]) for j in range(pos_grid_l.shape[0])]
 
-	elif ext_type == 'remote':
+## Load Files
+def load_files(path_to_file, name_of_project, template_ver, vel_model_ver):
 
-		pos_grid_l = np.load('/work/wavefront/imcbrear/Laplace/ApplyHeterogenous/Grids/spatial_grid_logarithmic_heterogenous_ver_%d.npz'%n_ver)['pos_grid_l']
-		pos_grid_l = [torch.Tensor(pos_grid_l[j]) for j in range(pos_grid_l.shape[0])]
+	# Load region
+	z = np.load(path_to_file + '%s_region.npz' % name_of_project)
+	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
+	z.close()
 
-	elif ext_type == 'server':
+	# Load templates
+	z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz' % (name_of_project, template_ver))
+	x_grids = z['x_grids']
+	z.close()
 
-		pos_grid_l = np.load('/oak/stanford/schools/ees/beroza/imcbrear/Laplace/ApplyHeterogenous/Grids/spatial_grid_logarithmic_heterogenous_ver_%d.npz'%n_ver)['pos_grid_l']
-		pos_grid_l = [torch.Tensor(pos_grid_l[j]) for j in range(pos_grid_l.shape[0])]
+	# Load stations
+	z = np.load(path_to_file + '%s_stations.npz' % name_of_project)
+	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
+	z.close()
 
-	return pos_grid_l
+	# Load travel times
+	z = np.load(path_to_file + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz' % (name_of_project, vel_model_ver))
+	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+	z.close()
+	
+	# You can extract further variables from z if needed here
 
-def apply_models_make_displacement_prediction_heterogeneous(inpt, queries, m, m1, m2, pos_grid, A_edges, A_edges_c, norm_vals, scale_val, device = 'cpu'):
+	# Create path to write files
+	write_training_file = path_to_file + 'GNN_TrainedModels/' + name_of_project + '_'
 
-	## Based on inpt, create the (scaled) input and mask vectors, batch and batch query vectors,
-	## Then apply predictions.
+	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs
 
-	## Lh, Lv, dz_val, queries all given in absolute unit scale, and use scale_val to normalize
+def load_files_with_travel_times(path_to_file, name_of_project, template_ver, vel_model_ver):
 
-	n_nodes_grid = pos_grid.shape[0]
-	batch_index = torch.zeros(n_nodes_grid).long().to(device) # *j for j in range(n_batch)]).long().to(device)
-	batch_index_query = torch.zeros(queries.shape[0]).long().to(device) # *j for j in range(n_batch)]).long().to(device)
+	# Load region
+	z = np.load(path_to_file + '%s_region.npz' % name_of_project)
+	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
+	z.close()
 
-	# Ra_val, Rb_val, ra2d_val, dz_val, thetax_val, thetaz_val = inpt
+	# Load templates
+	z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz' % (name_of_project, template_ver))
+	x_grids = z['x_grids']
+	z.close()
 
-	# Lh_val, Lv_val = Lhv_scale
- 
-	one_vec = np.ones(75).reshape(1,-1)
-	one_vec[0,0] = scale_val ## Have to divide the first entry, dz, by scale_val
+	# Load stations
+	z = np.load(path_to_file + '%s_stations.npz' % name_of_project)
+	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
+	z.close()
 
-	# signal_val = torch.Tensor(np.array([Ra_val, Rb_val, ra2d_val, dz_val/scale_val, thetax_val, thetaz_val]).reshape(1,-1)/norm_vals).to(device)
+	# Load travel times
+	z = np.load(path_to_file + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz' % (name_of_project, vel_model_ver))
+	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+	
+	Tp = z['Tp_interp']
+	Ts = z['Ts_interp']
 
-	queries_inpt = torch.Tensor(queries/scale_val).to(device)
+	locs_ref = z['locs_ref']
+	X = z['X']
+	z.close()
+	
+	# You can extract further variables from z if needed here
 
-	signal_inpt_unscaled = torch.cat((pos_grid, torch.Tensor((inpt.reshape(1,-1)/one_vec)/norm_vals).to(device)*torch.ones(n_nodes_grid,75).to(device)), dim = 1)
+	# Create path to write files
+	write_training_file = path_to_file + 'GNN_TrainedModels/' + name_of_project + '_'
 
-	mask_inpt = signal_inpt_unscaled[:,3::]
+	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
 
-	# Predict Lh and Lv
-	pred_lhv = m2(signal_inpt_unscaled, mask_inpt, queries_inpt, A_edges, A_edges_c, pos_grid, batch_index, batch_index_query, n_nodes_grid).cpu().detach().numpy()
+def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
 
-	pos = torch.Tensor(np.array([pred_lhv[0,0]/2.0, pred_lhv[0,0]/2.0, pred_lhv[0,1]]).reshape(1,-1)).to(device) # *pos_grid
+	from module import TravelTimes
 
-	# pred = m(inpt_batch.contiguous(), mask_batch.contiguous(), query_batch, edges_batch, edges_c_batch, pos_batch, batch_index, batch_index_query, n_nodes_grid)
+	z = np.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+	n_phases = z['out1'].shape[1]
+	scale_val = float(z['scale_val'])
+	trav_val = float(z['trav_val'])
+	z.close()
+	
+	m = TravelTimes(ftrns1, ftrns2, scale_val = scale_val, trav_val = trav_val, n_phases = n_phases, device = device).to(device)
+	m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
+	m.eval()
 
-	# signal_inpt = torch.cat((pos*pos_grid, signal_val*torch.ones(n_nodes_grid,6).to(device)), dim = 1)
+	if method == 'relative pairs':
 
-	signal_inpt = torch.cat((pos*pos_grid, torch.Tensor((inpt.reshape(1,-1)/one_vec)/norm_vals).to(device)*torch.ones(n_nodes_grid,75).to(device)), dim = 1)
+		trv = lambda sta_pos, src_pos: m.forward_relative(sta_pos, src_pos, method = 'pairs')
 
-	A_edges_scaled = make_spatial_graph(pos*pos_grid)
-
-	# Predict displacement
-	pred = m(signal_inpt, mask_inpt, queries_inpt, A_edges_scaled, A_edges_c, pos*pos_grid, batch_index, batch_index_query, n_nodes_grid).cpu().detach().numpy()
-
-	# Predict norm
-	pred_norm = m1(signal_inpt, mask_inpt, queries_inpt, A_edges_scaled, A_edges_c, pos*pos_grid, batch_index, batch_index_query, n_nodes_grid).cpu().detach().numpy()
-
-	return pred*np.power(10.0, pred_norm) # .cpu().detach().numpy()
+	return trv
