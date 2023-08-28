@@ -616,6 +616,8 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 		ax[1,1].scatter(lp_times[ind], lp_stations[ind], c = out[3][ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'predictions_associated_p_and_s_phases_%d_ver_%d.png'%(ind, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
+	## Add plot to show multiple nearby source association predictions (using different colors for either source)
+	
 	map_view_associated_stations = True
 	if map_view_associated_stations == True:
 
@@ -638,7 +640,7 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 		ax[1].scatter(Locs[ind][:,1], Locs[ind][:,0], c = 'grey', marker = '^')
 		ax[1].scatter(Locs[ind][ipred_picks,1], Locs[ind][ipred_picks,0], c = 'red', marker = '^')
 		fig.savefig(ext_save + 'predictions_map_view_associated_phases_%d_ver_%d.png'%(ind, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
-
+	
 	if close_plots == True:
 
 		plt.close('all')
