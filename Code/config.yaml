@@ -1,73 +1,28 @@
-name_of_project: 'Mayotte'
-num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost)
 
-latitude_range: [18.8, 20.3] # Latitude range of the region that will be processed
-longitude_range: [-156.1, -154.7] # Longitude range of the region that will be processed
-depth_range: [-40000, 5000] # Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
-time_range:
-  start: '2018-01-01'
-  end: '2023-01-01'
+name_of_project: 'Laplace'
+num_cores: 5 # How many cores would you like to use for travel time calculations? (it will increase memory cost)
 
-client : 'IRIS'
-network: 'HV'
-
-degree_padding: 0.25 # This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
+extend_grids: True
+degree_padding: 0.1 # This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
 number_of_grids: 5 # Number of distinct spatial graphs to create (this reduced slight bias that can result from only using one spatial graph)
-number_of_spatial_nodes: 500 # Number of nodes per spatial graph
+number_of_spatial_nodes: 1000 # Number of nodes per spatial graph
+n_features: 45
+n_cayley: 11
 
-load_initial_files: [False]
-use_pretrained_model: [None]
-
-velocity_model:
-  Depths: [-40000, -35000, -30000, -25000, -20000, -15000, -10000, -5000, 0, 5000]
-  Vp: [8200, 8200, 8150, 8100, 8050, 7400, 6800, 6100, 2900, 2900]
-  Vs: [4700, 4700, 4650, 4600, 4600, 4200, 3800, 3400, 1800, 1800]
-
-### ASSEMBLE NETWORK DATA ###
-with_density: False
-use_spherical: False ## Should only set to true if travel time model also has spherical projection (to be added soon)
-depth_importance_weighting_value_for_spatial_graphs: 2.5 # up scale the depth importance of node positions when creating spatial graph if using a large horizontally extended domain
-fix_nominal_depth: True
-number_of_update_steps: 5000
-
-### TRAVEL TIMES ###
-depth_steps:
-  min_elevation: -500 # meters
-  max_elevation: 4000 # meters
-  elevation_step: 150 # meters
-
-dx: 500.0 # Cartesian distance between nodes in FMM computation
-d_deg: 0.005 # Degree distance between saved interpolation query points
-dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved query points
-
-save_dense_travel_time_data: True # Save the dense travel times (only necessary if not training travel time neural network)
-train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
-using_3D: False
-using_1D: True
-
-### TRAIN ###
+## TRAIN
+n_samples: 2000
+scale_val: 50000
+norm_version: 2
+max_val: 0.1
+min_val: -3.5
+n_ver_save: 1
+device: 'cuda' # or 'cpu'
 
 ## Graph params
-k_sta_edges: 8
 k_spc_edges: 15
-k_time_edges: 10
 
 ## Training params
-n_batch: 75
-n_epochs: 20001 # add 1, so it saves on last iteration (since it saves every 100 steps)
-n_spc_query: 4500 # Number of src queries per sample
-n_src_query: 300 # Number of src-arrival queries per sample
-dist_range: [15000, 500000] ## The spatial window over which to sample max distance of 
-## source-station moveouts in m, per event. E.g., 15 - 500 km. Should set slightly lower if using small region.
-
-## Prediction params
-kernel_sig_t: 5.0 # Kernel to embed arrival time - theoretical time misfit (s)
-src_t_kernel: 6.5 # Kernel or origin time label (s)
-src_t_arv_kernel: 6.5 # Kernel for arrival association time label (s)
-src_x_kernel: 15000. # Kernel for source label, horizontal distance (m)
-src_x_arv_kernel: 15000. # Kernel for arrival-source association label, horizontal distance (m)
-src_depth_kernel: 15000. # Kernel of Cartesian projection, vertical distance (m)
-t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
-## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
-
-max_number_pick_association_labels_per_sample: 2000 # Max numbef of picks to compute associations for during training
+n_batch: 100
+n_epochs: 150000 # add 1, so it saves on last iteration (since it saves every 100 steps)
+use_only_complex: True
+path_to_data: '/scratch/users/taiyi/ForIan/complex_08162023/'
