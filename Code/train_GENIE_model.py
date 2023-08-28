@@ -903,7 +903,7 @@ for i in range(n_restart_step, n_epochs):
 		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 
 		n_visualize_step = 0
-		make_visualize_predictions = True
+		make_visualize_predictions = False
 		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0):
 			save_plots_path = path_to_file + seperator + 'Plots' + seperator
 			visualize_predictions(i0, save_plots_path)
