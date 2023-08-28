@@ -1,1 +1,0 @@
-find  /scratch/users/taiyi/ForIan/complex_08162023/complex/ -name "*.mat" -exec scp "{}" imcbrear@wavefront.geo.berkeley.edu:/work/wavefront/imcbrear/Laplace/Heterogeneous_TrainingData/complex/ \;
