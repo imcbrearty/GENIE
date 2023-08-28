@@ -606,12 +606,12 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 	associated_p_and_s_phases = True
 	if associated_p_and_s_phases == True:
 
-		ind_max = np.argmax(pick_lbls.sum(2).sum(1))
-		norm_scale = Normalize(0, pick_lbls[ind_max,:,:].max())
+		ind_max = np.argmax(pick_lbls.sum(2).sum(1).cpu().detach().numpy())
+		norm_scale = Normalize(0, pick_lbls[ind_max,:,:].max().cpu().detach().numpy())
 
 		fig, ax = plt.subplots(2,2, figsize = [12,10])
-		ax[0,0].scatter(lp_times[ind], lp_stations[ind], c = pick_lbls[ind_max,:,0], norm = norm_scale)
-		ax[0,1].scatter(lp_times[ind], lp_stations[ind], c = pick_lbls[ind_max,:,1], norm = norm_scale)
+		ax[0,0].scatter(lp_times[ind], lp_stations[ind], c = pick_lbls[ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
+		ax[0,1].scatter(lp_times[ind], lp_stations[ind], c = pick_lbls[ind_max,:,1].cpu().detach().numpy(), norm = norm_scale)
 		ax[1,0].scatter(lp_times[ind], lp_stations[ind], c = out[2][ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
 		ax[1,1].scatter(lp_times[ind], lp_stations[ind], c = out[3][ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'associated_p_and_s_phases_%d_ver_%d.png'%(ind, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
@@ -620,9 +620,9 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 	if map_view_associated_stations == True:
 
 		ipred_sources = np.where(out[1][:,5].cpu().detach().numpy() > thresh_source)[0]
-		ind_max = np.argmax(pick_lbls.sum(2).sum(1))
+		ind_max = np.argmax(pick_lbls.sum(2).sum(1).cpu().detach().numpy())
 
-		itrue_picks = np.where(pick_lbls[ind_max,:,:].max(1) > thresh_picks)[0]
+		itrue_picks = np.where(pick_lbls[ind_max,:,:].cpu().detach().numpy().max(1) > thresh_picks)[0]
 		ipred_picks = np.where(np.concatenate((out[2][ind_max,:,0].cpu().detach().numpy().reshape(1,-1), out[3][ind_max,:,0].cpu().detach().numpy().reshape(1,-1)), axis = 0).max(0) > thresh_picks)[0]
 
 		itrue_picks = lp_stations[ind][itrue_picks.astype('int')].astype('int')
