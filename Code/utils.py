@@ -582,7 +582,7 @@ def visualize_predictions(ind_of_batch, ext_save, depth_window = 10e3, deg_windo
 			fig.savefig(ext_save + 'map_view_fixed_depth_%d_ver_%d.npz'%(ind, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 		cross_section_fixed_lat = True
-		if cross_section_fixed_lat == True
+		if cross_section_fixed_lat == True:
 
 			i1 = np.where(np.abs(X_query[ind][:,0] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),0]) < deg_window)[0]
 
@@ -593,7 +593,7 @@ def visualize_predictions(ind_of_batch, ext_save, depth_window = 10e3, deg_windo
 			fig.savefig(ext_save + 'cross_section_fixed_lat_%d_ver_%d.npz'%(ind, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 		cross_section_fixed_lon = True
-		if cross_section_fixed_lon == True
+		if cross_section_fixed_lon == True:
 
 			i1 = np.where(np.abs(X_query[ind][:,1] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),1]) < deg_window)[0]
 
