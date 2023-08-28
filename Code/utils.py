@@ -619,6 +619,7 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 	map_view_associated_stations = True
 	if map_view_associated_stations == True:
 
+		itrue_sources = np.where(Lbls_query[ind][:,5] > thresh_source)[0]
 		ipred_sources = np.where(out[1][:,5].cpu().detach().numpy() > thresh_source)[0]
 		ind_max = np.argmax(pick_lbls.sum(2).sum(1).cpu().detach().numpy())
 
@@ -629,6 +630,7 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 		ipred_picks = lp_stations[ind][ipred_picks.astype('int')].astype('int')
 
 		fig, ax = plt.subplots(1,2, sharex = True, sharey = True)
+		ax[0].scatter(X_query[ind][itrue_sources,1], X_query[ind][itrue_sources,1], c = Lbls_query[ind][itrue_sources,5], alpha = 0.2)
 		ax[0].scatter(Locs[ind][:,1], Locs[ind][:,0], c = 'grey', marker = '^')
 		ax[0].scatter(Locs[ind][itrue_picks,1], Locs[ind][itrue_picks,0], c = 'red', marker = '^')
 
