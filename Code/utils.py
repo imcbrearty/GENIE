@@ -538,7 +538,7 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 
 	return trv
 
-def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, thresh_source = 0.2, thresh_picks = 0.2, n_step = 0, n_ver = 1, close_plots = True):
+def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, thresh_source = 0.2, thresh_picks = 0.2, n_step = 0, n_ver = 1, min_norm_val = 0.3, close_plots = True):
 
 	from matplotlib.colors import Normalize
 
@@ -565,7 +565,7 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 	if map_view_all_depths == True:
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
-		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), out[1][:,5,0].cpu().detach().numpy().max()))
+		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), min_norm_val))
 		ax[0].scatter(X_query[ind][:,1], X_query[ind][:,0], c = Lbls_query[ind][:,5], norm = norm_scale)
 		ax[1].scatter(X_query[ind][:,1], X_query[ind][:,0], c = out[1][:,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'predictions_map_view_all_depths_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
@@ -576,7 +576,7 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 		i1 = np.where(np.abs(X_query[ind][:,2] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),2]) < depth_window)[0]
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
-		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), out[1][:,5,0].cpu().detach().numpy().max()))
+		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), min_norm_val))
 		ax[0].scatter(X_query[ind][i1,1], X_query[ind][i1,0], c = Lbls_query[ind][i1,5], norm = norm_scale)
 		ax[1].scatter(X_query[ind][i1,1], X_query[ind][i1,0], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'predictions_map_view_fixed_depth_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
@@ -587,7 +587,7 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 		i1 = np.where(np.abs(X_query[ind][:,0] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),0]) < deg_window)[0]
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
-		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), out[1][:,5,0].cpu().detach().numpy().max()))
+		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), min_norm_val))
 		ax[0].scatter(X_query[ind][i1,1], X_query[ind][i1,2], c = Lbls_query[ind][i1,5], norm = norm_scale)
 		ax[1].scatter(X_query[ind][i1,1], X_query[ind][i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'predictions_cross_section_fixed_lat_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
@@ -598,7 +598,7 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 		i1 = np.where(np.abs(X_query[ind][:,1] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),1]) < deg_window)[0]
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
-		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), out[1][:,5,0].cpu().detach().numpy().max()))
+		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), min_norm_val))
 		ax[0].scatter(X_query[ind][i1,0], X_query[ind][i1,2], c = Lbls_query[ind][i1,5], norm = norm_scale)
 		ax[1].scatter(X_query[ind][i1,0], X_query[ind][i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'predictions_cross_section_fixed_lon_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
