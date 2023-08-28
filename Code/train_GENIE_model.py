@@ -646,8 +646,8 @@ mn_cuda = torch.Tensor(mn).to(device)
 if config['use_spherical'] == True:
 
 	earth_radius = 6371e3
-	ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T
-	ftrns2 = lambda x, rbest, mn: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius)
+	ftrns1 = lambda x: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T
+	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius)
 
 	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, e = 0.0, a = earth_radius, device = device) - mn_cuda).T).T
 	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, e = 0.0, a = earth_radius, device = device)
@@ -655,8 +655,8 @@ if config['use_spherical'] == True:
 else:
 
 	earth_radius = 6378137.0
-	ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef(x) - mn).T).T
-	ftrns2 = lambda x, rbest, mn: ecef2lla((rbest.T @ x.T).T + mn)
+	ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T
+	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)
 
 	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T
 	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device)
