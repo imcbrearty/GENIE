@@ -71,4 +71,4 @@ t_win: 10.0 ## This is the time window over which predictions are made. Shouldn'
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
 
 max_number_pick_association_labels_per_sample: 2000 # Max numbef of picks to compute associations for during training
-make_visualize_predictions: True # Plot example predictions during training
+make_visualize_predictions: False # Plot example predictions during training (note: creates a lot of files currently)
