@@ -537,3 +537,94 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		trv = lambda sta_pos, src_pos: m.forward_relative(sta_pos, src_pos, method = 'pairs')
 
 	return trv
+
+def visualize_predictions(ind_of_batch, depth_window = 10e3, deg_window = 1.0, thresh_source = 0.2, thresh_picks = 0.2):
+
+	from matplotlib.colors import Normalize
+
+	for ind in ind_of_batch:
+
+		raw_picks = True
+		if raw_picks == True:
+
+			fig, ax = plt.subplots(2,1, figsize = [12,8], sharex = True)
+			ax[0].scatter(data[0][:,0], data[0][:,1])
+			ax[1].scatter(data[0][:,0], data[0][:,1], c = (data[:,2] > -1))
+
+		## Add theoretical moveout curves to this
+
+		raw_picks_permuted = True
+		if raw_picks_permuted == True:
+
+			fig, ax = plt.subplots(1, figsize = [8,5], sharex = True)
+			ax.scatter(lp_times[ind], lp_stations[ind])
+
+		map_view_all_depths = True
+		if map_view_all_depths == True:
+
+			fig, ax = plt.subplots(1,2, figsize = [12,8])
+			norm_scale = Normalize(0, Lbls_query[ind][:,5].max())
+			ax[0].scatter(X_query[ind][:,1], X_query[ind][:,0], c = Lbls_query[ind][:,5], norm = norm_scale)
+			ax[1].scatter(X_query[ind][:,1], X_query[ind][:,0], c = out[1][:,5,0].cpu().detach().numpy(), norm = norm_scale)
+
+		cross_section_fixed_depth = True
+		if cross_section_fixed_depth == True:
+
+			i1 = np.where(np.abs(X_query[ind][:,2] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),2]) < depth_window)[0]
+
+			fig, ax = plt.subplots(1,2, figsize = [12,8])
+			norm_scale = Normalize(0, Lbls_query[ind][:,5].max())
+			ax[0].scatter(X_query[ind][i1,1], X_query[ind][i1,0], c = Lbls_query[ind][i1,5], norm = norm)
+			ax[1].scatter(X_query[ind][i1,1], X_query[ind][i1,0], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm)
+
+		cross_section_fixed_lat = True
+		if cross_section_fixed_lat == True
+
+			i1 = np.where(np.abs(X_query[ind][:,0] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),0]) < deg_window)[0]
+
+			fig, ax = plt.subplots(1,2, figsize = [12,8])
+			norm_scale = Normalize(0, Lbls_query[ind][:,5].max())
+			ax[0].scatter(X_query[ind][i1,1], X_query[ind][i1,2], c = Lbls_query[ind][i1,5], norm = norm)
+			ax[1].scatter(X_query[ind][i1,1], X_query[ind][i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm)
+
+		cross_section_fixed_lon = True
+		if cross_section_fixed_lon == True
+
+			i1 = np.where(np.abs(X_query[ind][:,1] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),1]) < deg_window)[0]
+
+			fig, ax = plt.subplots(1,2, figsize = [12,8])
+			norm_scale = Normalize(0, Lbls_query[ind][:,5].max())
+			ax[0].scatter(X_query[ind][i1,0], X_query[ind][i1,2], c = Lbls_query[ind][i1,5], norm = norm)
+			ax[1].scatter(X_query[ind][i1,0], X_query[ind][i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm)
+
+		associated_p_and_s_phases = True
+		if associated_p_and_s_phases == True:
+
+			ind_max = np.argmax(pick_lbls.sum(2).sum(1))
+			norm_scale = Normalize(0, pick_lbls[ind_max,:,:].max())
+
+			fig, ax = plt.subplots(2,2, figsize = [12,10])
+			ax[0,0].scatter(lp_times[ind], lp_stations[ind], c = pick_lbls[ind_max,:,0], norm = norm_scale)
+			ax[0,1].scatter(lp_times[ind], lp_stations[ind], c = pick_lbls[ind_max,:,1], norm = norm_scale)
+			ax[1,0].scatter(lp_times[ind], lp_stations[ind], c = out[2][ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
+			ax[1,1].scatter(lp_times[ind], lp_stations[ind], c = out[3][ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
+
+		map_view_associated_stations = True
+		if map_view_associated_stations == True:
+
+			ipred_sources = np.where(out[1][:,5].cpu().detach().numpy() > thresh_source)[0]
+			ind_max = np.argmax(pick_lbls.sum(2).sum(1))
+
+			itrue_picks = np.where(pick_lbls[ind_max,:,:].max(1) > thresh_picks)[0]
+			ipred_picks = np.where(np.concatenate((out[2][ind_max,:,0].cpu().detach().numpy().reshape(1,-1), out[3][ind_max,:,0].cpu().detach().numpy().reshape(1,-1)), axis = 0).max(0) > thresh_picks)[0]
+
+			itrue_picks = lp_stations[ind][itrue_picks.astype('int')].astype('int')
+			ipred_picks = lp_stations[ind][ipred_picks.astype('int')].astype('int')
+
+			fig, ax = plt.subplots(1,2, sharex = True, sharey = True)
+			ax[0].scatter(Locs[ind][:,1], Locs[ind][:,0], c = 'grey', marker = '^')
+			ax[0].scatter(Locs[ind][itrue_picks,1], Locs[ind][itrue_picks,0], c = 'red', marker = '^')
+
+			ax[1].scatter(X_query[ind][ipred_sources,1], X_query[ind][ipred_sources,1], c = out[1][ipred_sources,5,0].cpu().detach().numpy(), alpha = 0.2)
+			ax[1].scatter(Locs[ind][:,1], Locs[ind][:,0], c = 'grey', marker = '^')
+			ax[1].scatter(Locs[ind][ipred_picks,1], Locs[ind][ipred_picks,0], c = 'red', marker = '^')
