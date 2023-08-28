@@ -544,7 +544,7 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 
 	# Note: ind is the ind of the batch in train_GENIE_model.py
 	
-	raw_picks = True
+	raw_picks = False ## Only add this if we zoom in on the relevant part of data
 	if raw_picks == True:
 
 		fig, ax = plt.subplots(2,1, figsize = [12,8], sharex = True)
