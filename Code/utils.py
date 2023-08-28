@@ -547,7 +547,7 @@ def visualize_predictions(ind_of_batch, ext_save, depth_window = 10e3, deg_windo
 
 		fig, ax = plt.subplots(2,1, figsize = [12,8], sharex = True)
 		ax[0].scatter(data[0][:,0], data[0][:,1])
-		ax[1].scatter(data[0][:,0], data[0][:,1], c = (data[:,2] > -1))
+		ax[1].scatter(data[0][:,0], data[0][:,1], c = (data[0][:,2] > -1))
 		fig.savefig(ext_save + 'raw_picks_%d_ver_%d.npz'%(ind, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 	## Add theoretical moveout curves to this
