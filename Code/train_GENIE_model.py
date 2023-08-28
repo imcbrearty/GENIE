@@ -906,8 +906,12 @@ for i in range(n_restart_step, n_epochs):
 		make_visualize_predictions = False
 		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0):
 			save_plots_path = path_to_file + seperator + 'Plots' + seperator
-			visualize_predictions(i0, save_plots_path)
-		
+
+			if Lbls_query[i0][:,5].max() > 0.2: # Plot all true sources
+				visualize_predictions(i0, save_plots_path)
+			elif np.random.rand() > 0.8: # Plot a fraction of false sources
+				visualize_predictions(i0, save_plots_path)
+
 		if i0 != (n_batch - 1):
 			loss.backward(retain_graph = True)
 		else:
