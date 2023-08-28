@@ -904,7 +904,7 @@ for i in range(n_restart_step, n_epochs):
 		n_visualize_step = 0
 		visualize_predictions = False
 		if (visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0):
-			visualize_predictions(np.arange(n_batch))
+			visualize_predictions(i0)
 		
 		if i0 != (n_batch - 1):
 			loss.backward(retain_graph = True)
