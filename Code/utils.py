@@ -577,8 +577,8 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
 		norm_scale = Normalize(0, Lbls_query[ind][:,5].max())
-		ax[0].scatter(X_query[ind][i1,1], X_query[ind][i1,0], c = Lbls_query[ind][i1,5], norm = norm)
-		ax[1].scatter(X_query[ind][i1,1], X_query[ind][i1,0], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm)
+		ax[0].scatter(X_query[ind][i1,1], X_query[ind][i1,0], c = Lbls_query[ind][i1,5], norm = norm_scale)
+		ax[1].scatter(X_query[ind][i1,1], X_query[ind][i1,0], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'map_view_fixed_depth_%d_ver_%d.png'%(ind, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 	cross_section_fixed_lat = True
@@ -588,8 +588,8 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
 		norm_scale = Normalize(0, Lbls_query[ind][:,5].max())
-		ax[0].scatter(X_query[ind][i1,1], X_query[ind][i1,2], c = Lbls_query[ind][i1,5], norm = norm)
-		ax[1].scatter(X_query[ind][i1,1], X_query[ind][i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm)
+		ax[0].scatter(X_query[ind][i1,1], X_query[ind][i1,2], c = Lbls_query[ind][i1,5], norm = norm_scale)
+		ax[1].scatter(X_query[ind][i1,1], X_query[ind][i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'cross_section_fixed_lat_%d_ver_%d.png'%(ind, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 	cross_section_fixed_lon = True
@@ -599,8 +599,8 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
 		norm_scale = Normalize(0, Lbls_query[ind][:,5].max())
-		ax[0].scatter(X_query[ind][i1,0], X_query[ind][i1,2], c = Lbls_query[ind][i1,5], norm = norm)
-		ax[1].scatter(X_query[ind][i1,0], X_query[ind][i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm)
+		ax[0].scatter(X_query[ind][i1,0], X_query[ind][i1,2], c = Lbls_query[ind][i1,5], norm = norm_scale)
+		ax[1].scatter(X_query[ind][i1,0], X_query[ind][i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'cross_section_fixed_lon_%d_ver_%d.png'%(ind, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 	associated_p_and_s_phases = True
