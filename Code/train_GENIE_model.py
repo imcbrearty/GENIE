@@ -796,7 +796,8 @@ for i in range(n_restart_step, n_epochs):
 		mx_pred_1[0:n_restart_step] = zlosses['mx_pred_1'][0:n_restart_step]; mx_pred_2[0:n_restart_step] = zlosses['mx_pred_2'][0:n_restart_step]
 		mx_pred_3[0:n_restart_step] = zlosses['mx_pred_3'][0:n_restart_step]; mx_pred_4[0:n_restart_step] = zlosses['mx_pred_4'][0:n_restart_step]
 		print('loaded model for restart on step %d ver %d \n'%(n_restart_step, n_ver))
-
+		zlosses.close()
+	
 	optimizer.zero_grad()
 
 	cwork = 0
