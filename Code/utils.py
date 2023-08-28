@@ -542,6 +542,8 @@ def visualize_predictions(ind_of_batch, ext_save, depth_window = 10e3, deg_windo
 
 	from matplotlib.colors import Normalize
 
+	ind = ind_of_batch
+	
 	raw_picks = True
 	if raw_picks == True:
 
