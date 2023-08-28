@@ -538,11 +538,11 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 
 	return trv
 
-def visualize_predictions(ind_of_batch, ext_save, depth_window = 10e3, deg_window = 1.0, thresh_source = 0.2, thresh_picks = 0.2, n_ver = 1, close_plots = True):
+def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, thresh_source = 0.2, thresh_picks = 0.2, n_ver = 1, close_plots = True):
 
 	from matplotlib.colors import Normalize
 
-	ind = ind_of_batch
+	# Note: ind is the ind of the batch in train_GENIE_model.py
 	
 	raw_picks = True
 	if raw_picks == True:
