@@ -734,7 +734,8 @@ x_grids_trv_pointers_s = []
 x_grids_trv_refs = []
 x_grids_edges = []
 
-ts_max_val = Ts.max()
+if config['train_travel_time_neural_network'] == False:
+	ts_max_val = Ts.max()
 
 for i in range(len(x_grids)):
 
@@ -742,8 +743,9 @@ for i in range(len(x_grids)):
 	x_grids_trv.append(trv_out.cpu().detach().numpy())
 	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(trv_out.cpu().detach().numpy(), k = k_time_edges)
 
-	assert(trv_out.min() > 0.0)
-	assert(trv_out.max() < (ts_max_val + 3.0))
+	if config['train_travel_time_neural_network'] == False:
+		assert(trv_out.min() > 0.0)
+		assert(trv_out.max() < (ts_max_val + 3.0))
 
 	x_grids_trv_pointers_p.append(A_edges_time_p)
 	x_grids_trv_pointers_s.append(A_edges_time_s)
