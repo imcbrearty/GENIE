@@ -72,3 +72,6 @@ t_win: 10.0 ## This is the time window over which predictions are made. Shouldn'
 
 max_number_pick_association_labels_per_sample: 2000 # Max numbef of picks to compute associations for during training
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
+## Processing
+use_differential_evolution_location: True # otherwise use particle swarm to locate, which tends to converge less well (especially in depth)
