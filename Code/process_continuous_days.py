@@ -59,8 +59,6 @@ from module import *
 
 ### Settings: ###
 
-t0_init = UTCDateTime(2019, 1, 1) ## Choose this day, add (day_select), or (day_select + offset_select*offset_increment)
-
 argvs = sys.argv
 if len(argvs) < 2:
 	argvs.append(0) # choose day 0, if no other day chosen.
@@ -85,6 +83,7 @@ n_ver_picks = process_config['n_ver_picks']
 
 template_ver = process_config['template_ver']
 vel_model_ver = process_config['vel_model_ver']
+process_days_ver = process_config['process_days_ver']
 
 offset_increment = process_config['offset_increment']
 n_rand_query = process_config['n_rand_query']
@@ -127,6 +126,14 @@ with open('config.yaml', 'r') as file:
 
 path_to_file = str(pathlib.Path().absolute())
 seperator = '\\' if '\\' in path_to_file else '/'
+path_to_file = path_to_file + seperator
+
+# Load day to process
+z = open(path_to_file + '%s_process_days_list_ver_%d.txt', 'r')
+lines = z.readlines()
+date = line[day_select].split('/')
+date = np.array([int(date[0]), int(date[1]), int(date[2])])
+z.close()
 
 # Load region
 z = np.load(path_to_file + '%s_region.npz'%name_of_project)
@@ -300,8 +307,7 @@ tq_sample = torch.rand(n_src_query)*t_win - t_win/2.0 # Note this part!
 tq_sample = torch.zeros(1)
 tq = torch.arange(-t_win/2.0, t_win/2.0 + 1.0).reshape(-1,1).float()
 
-date = t0_init + day_select*day_len
-yr, mo, dy = date.year, date.month, date.day
+yr, mo, dy = date[0], date[1], date[2]
 date = np.array([yr, mo, dy])
 
 P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
