@@ -25,6 +25,9 @@ d_win: 0.25 ## Lat and lon window to re-locate initial source detetections with 
 d_win_depth: 10e3 ## Depth window to re-locate initial source detetections with refined sampling over
 dx_depth: 50.0 ## Depth resolution to locate events with travel time based re-location
 
+step: 2.0
+step_abs: 1.0
+
 use_expanded_competitive_assignment: True
 cost_value: 3.0 # If use expanded competitve assignment, then this is the fixed cost applied per source
 ## when optimizing joint source-arrival assignments between nearby sources. The value is in terms of the 
