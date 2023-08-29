@@ -1,3 +1,4 @@
+# Note: this code is not in use yet. It is just a re-written version of what directly appears in train_GENIE_model.py
 
 ## Training params list 2
 # spc_random = 30e3
