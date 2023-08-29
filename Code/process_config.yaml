@@ -6,6 +6,8 @@ n_ver_picks: 1
 
 template_ver: 1
 vel_model_ver: 1
+process_days_ver: 1 
+## Put the list of days you want to process in file process_days_list_ver_%d.txt
 
 offset_increment: 500
 n_rand_query: 112000
