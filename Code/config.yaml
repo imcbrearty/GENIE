@@ -69,9 +69,12 @@ src_x_arv_kernel: 15000. # Kernel for arrival-source association label, horizont
 src_depth_kernel: 15000. # Kernel of Cartesian projection, vertical distance (m)
 t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
-
 max_number_pick_association_labels_per_sample: 2000 # Max numbef of picks to compute associations for during training
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
 
 ## Processing
 use_differential_evolution_location: True # otherwise use particle swarm to locate, which tends to converge less well (especially in depth)
+n_ver_load: 1
+n_step_load: 20000
+n_save_ver: 1
+n_ver_picks: 1
