@@ -57,6 +57,8 @@ from module import *
 ## Need to update how extract_inputs_from_data_fixed_grids_with_phase_type uses a variable t_win parammeter, 
 ## and also adding inputs of training_params, graph_params, pred_params
 
+### Settings: ###
+
 t0_init = UTCDateTime(2019, 1, 1) ## Choose this day, add (day_select), or (day_select + offset_select*offset_increment)
 
 argvs = sys.argv
@@ -72,1247 +74,77 @@ offset_select = int(argvs[2])
 print('name of program is %s'%argvs[0])
 print('day is %s'%argvs[1])
 
-template_ver = 1
-vel_model_ver = 1
+with open('process_config.yaml', 'r') as file:
+    process_config = yaml.safe_load(file)
 
-n_ver_load = 1
-n_step_load = 20000
-n_save_ver = 1
-n_ver_picks = 1
+## Load Processing settings
+n_ver_load = process_config['n_ver_load']
+n_step_load = process_config['n_step_load']
+n_save_ver = process_config['n_save_ver']
+n_ver_picks = process_config['n_ver_picks']
 
-offset_increment = 500
-n_rand_query = 112000
-n_query_grid = 5000
+template_ver = process_config['template_ver']
+vel_model_ver = process_config['vel_model_ver']
 
-thresh = 0.125 # Threshold to declare detection
-thresh_assoc = 0.125 # Threshold to declare src-arrival association
-spr = 1 # Sampling rate to save temporal predictions
-tc_win = 5.0 # Temporal window (s) to link events in Local Marching
-sp_win = 15e3 # Distance (m) to link events in Local Marching
-break_win = 15.0 # Temporal window to find disjoint groups of sources, 
+offset_increment = process_config['offset_increment']
+n_rand_query = process_config['n_rand_query']
+n_query_grid = process_config['n_query_grid']
+
+thresh = process_config['thresh'] # Threshold to declare detection
+thresh_assoc = process_config['thresh_assoc'] # Threshold to declare src-arrival association
+spr = process_config['spr'] # Sampling rate to save temporal predictions
+tc_win = process_config['tc_win'] # Temporal window (s) to link events in Local Marching
+sp_win = process_config['sp_win'] # Distance (m) to link events in Local Marching
+break_win = process_config['break_win'] # Temporal window to find disjoint groups of sources, 
 ## so can run Local Marching without memory issues.
-spr_picks = 100 # Assumed sampling rate of picks 
+spr_picks = process_config['spr_picks'] # Assumed sampling rate of picks 
 ## (can be 1 if absolute times are used for pick time values)
 
-d_win = 0.25 ## Lat and lon window to re-locate initial source detetections with refined sampling over
-d_win_depth = 10e3 ## Depth window to re-locate initial source detetections with refined sampling over
-dx_depth = 50.0 ## Depth resolution to locate events with travel time based re-location
+d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
+d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
+dx_depth = process_config['dx_depth'] ## Depth resolution to locate events with travel time based re-location
 
-use_expanded_competitive_assignment = True
-cost_value = 3.0 # If use expanded competitve assignment, then this is the fixed cost applied per source
+step = process_config['step']
+step_abs = process_config['step_abs']
+
+cost_value = process_config['cost_value'] # If use expanded competitve assignment, then this is the fixed cost applied per source
 ## when optimizing joint source-arrival assignments between nearby sources. The value is in terms of the 
 ## `sum' over the predicted source-arrival assignment for each pick. Ideally could make this number more
 ## adpative, potentially with number of stations or number of possible observing picks for each event. 
 
-device = torch.device('cpu') ## Right now, this isn't updated to work with cuda, since
+device = torch.device(process_config['device']) ## Right now, this isn't updated to work with cuda, since
 ## the necessary variables do not have .to(device) at the right places
 
+use_expanded_competitive_assignment = process_config['use_expanded_competitive_assignment']
+use_differential_evolution_location = process_config['use_differential_evolution_location']
 
-def download_catalog(lat_range, lon_range, min_magnitude, startime, endtime, t0 = UTCDateTime(2000, 1, 1), client = 'NCEDC', include_arrivals = False):
+print('Beginning processing')
+### Begin automated processing ###
 
-	client = Client(client)
-	cat_l = client.get_events(starttime = startime, endtime = endtime, minlatitude = lat_range[0], maxlatitude = lat_range[1], minlongitude = lon_range[0], maxlongitude = lon_range[1], minmagnitude = min_magnitude, includearrivals = include_arrivals, orderby = 'time-asc')
+# Load configuration from YAML
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
 
-	# t0 = UTCDateTime(2021,4,1) ## zero time, for relative processing.
-	time = np.array([cat_l[i].origins[0].time - t0 for i in np.arange(len(cat_l))])
-	latitude = np.array([cat_l[i].origins[0].latitude for i in np.arange(len(cat_l))])
-	longitude = np.array([cat_l[i].origins[0].longitude for i in np.arange(len(cat_l))])
-	depth = np.array([cat_l[i].origins[0].depth for i in np.arange(len(cat_l))])
-	mag = np.array([cat_l[i].magnitudes[0].mag for i in np.arange(len(cat_l))])
-	event_type = np.array([cat_l[i].event_type for i in np.arange(len(cat_l))])
-
-	cat = np.hstack([latitude.reshape(-1,1), longitude.reshape(-1,1), -1.0*depth.reshape(-1,1), time.reshape(-1,1), mag.reshape(-1,1)])
-
-	return cat, cat_l, event_type
-
-class LocalMarching(MessagePassing): # make equivelent version with sum operations.
-	def __init__(self, device = 'cpu'):
-		super(LocalMarching, self).__init__(aggr = 'max') # node dim
-
-	## Changed dt to 5 s
-	def forward(self, srcs, tc_win = 5, sp_win = 35e3, n_steps_max = 100, tol = 1e-4, use_directed = True, device = 'cpu'):
-
-		srcs_tensor = torch.Tensor(srcs).to(device)
-		tree_t = cKDTree(srcs[:,3].reshape(-1,1))
-		tree_x = cKDTree(ftrns1(srcs[:,0:3]))
-		lp_t = tree_t.query_ball_point(srcs[:,3].reshape(-1,1), r = tc_win)
-		lp_x = tree_x.query_ball_point(ftrns1(srcs[:,0:3]), r = sp_win)
-		cedges = [np.array(list(set(lp_t[i]).intersection(lp_x[i]))) for i in range(len(lp_t))]
-		cedges1 = np.hstack([i*np.ones(len(cedges[i])) for i in range(len(cedges))])
-		edges = torch.Tensor(np.concatenate((np.hstack(cedges).reshape(1,-1), cedges1.reshape(1,-1)), axis = 0)).long().to(device)
-
-		Data_obj = Data(edge_index = to_undirected(edges)) # undirected
-		nx_g = to_networkx(Data_obj).to_undirected()
-		lp = list(nx.connected_components(nx_g))
-		clen = [len(list(lp[i])) for i in range(len(lp))]
-		## Remove disconnected points with only 1 maxima.
-
-		if use_directed == True:
-
-			max_val = torch.where(srcs_tensor[edges[1],-1] <= srcs_tensor[edges[0],-1])[0]
-			edges = edges[:,max_val]
-
-		srcs_keep = []
-		for i in range(len(lp)):
-			nodes = np.sort(np.array(list(lp[i])))
-
-			if (len(nodes) == 1):
-				srcs_keep.append(nodes.reshape(-1))
-
-			else:
-
-				edges_need = subgraph(torch.Tensor(nodes).long().to(device), edges, relabel_nodes = True)[0]
-
-				vals = torch.Tensor(srcs[nodes,4]).view(-1,1).to(device)
-				vals_initial = torch.Tensor(srcs[nodes,4]).view(-1,1).to(device)
-				vtol = 1e9
-				nt = 0
-
-				while (vtol > tol) and (nt < n_steps_max):
-					vals0 = 1.0*vals + 0.0 # copy vals
-					vals = self.propagate(edges_need, x = vals)
-					vtol = abs(vals - vals0).max().item()
-					nt += 1
-
-				ip_slice = torch.where(torch.isclose(vals_initial[:,0], vals[:,0], rtol = tol) == 1)[0] ## Keep nodes with final values similar to starting values
-				srcs_keep.append(nodes[ip_slice.cpu().detach().numpy()])
-
-		if len(srcs_keep) > 0:
-			srcs_keep = srcs[np.hstack(srcs_keep)]
-
-		return srcs_keep	
-
-
-def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut = None, use_quantile = None, permute_indices = False, min_amplitude = None, n_ver = 1, spr_picks = 100):
-
-	if '\\' in path_to_file:
-		z = np.load(path_to_file + '\\Picks\\%d\\%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
-	elif '/' in path_to_file:
-		z = np.load(path_to_file + '/Picks/%d/%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
-
-	yr, mn, dy = date[0], date[1], date[2]
-	t0 = UTCDateTime(yr, mn, dy)
-	P, sta_names_use, sta_ind_use = z['P'], z['sta_names_use'], z['sta_ind_use']
-	
-	if use_quantile is not None:
-		iz = np.where(P[:,3] > np.quantile(P[:,3], use_quantile))[0]
-		P = P[iz]
-
-	if thresh_cut is not None:
-		iz = np.where(P[:,3] > thresh_cut)[0]
-		P = P[iz]
-
-	if min_amplitude is not None:
-		iz = np.where(P[:,2] < min_amplitude)[0]
-		P = np.delete(P, iz, axis = 0) # remove picks with amplitude less than min possible amplitude
-
-	P_l = []
-	locs_use = []
-	sta_use = []
-	ind_use = []
-	sc = 0
-	for i in range(len(sta_names_use)):
-		iz = np.where(sta_names_use[i] == stas)[0]
-		if len(iz) == 0:
-			# print('no match')
-			continue
-		iz1 = np.where(P[:,1] == sta_ind_use[i])[0]
-		if len(iz1) == 0:
-			# print('no picks')
-			continue		
-		p_select = P[iz1]
-		if permute_indices == True:
-			p_select[:,1] = sc ## New indices
-		else:
-			p_select[:,1] = iz ## Absolute indices
-		P_l.append(p_select)
-		locs_use.append(locs[iz])
-		sta_use.append(stas[iz])
-		ind_use.append(iz)
-		sc += 1
-
-	P_l = np.vstack(P_l)
-	P_l[:,0] = P_l[:,0]/spr_picks ## Convert pick indices to time (note: if spr_picks = 1, then picks are already in absolute time)
-	locs_use = np.vstack(locs_use)
-	sta_use = np.hstack(sta_use)
-	ind_use = np.hstack(ind_use)
-
-	## Make sure ind_use is unique set. Then re-select others.
-	ind_use = np.sort(np.unique(ind_use))
-	locs_use = locs[ind_use]
-	sta_use = stas[ind_use]
-
-	if permute_indices == True:
-		argsort = np.argsort(ind_use)
-		P_l_1 = []
-		sc = 0
-		for i in range(len(argsort)):
-			iz1  = np.where(P_l[:,1] == argsort[i])[0]
-			p_slice = P_l[iz1]
-			p_slice[:,1] = sc
-			P_l_1.append(p_slice)
-			sc += 1
-		P_l = np.vstack(P_l)
-
-	# julday = int((UTCDateTime(yr, mn, dy) - UTCDateTime(yr, 1, 1))/(3600*24.0) + 1)
-
-	if download_catalog == True:
-		cat, _, event_type = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24.0, t0 = t0)
-	else:
-		cat, event_type = [], []
-
-	z.close()
-
-	return P_l, ind_use # Note: this permutation of locs_use.
-
-def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, phase_labels, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, ftrns1, ftrns2, n_queries = 3000, n_batch = 75, max_rate_events = 5000, max_miss_events = 3500, max_false_events = 2000, T = 3600.0*24.0, dt = 30, tscale = 3600.0, n_sta_range = [0.25, 1.0], plot_on = False, verbose = False):
-
-	if verbose == True:
-		st = time.time()
-
-	## Can simplify, and only focus on one network (could even re-create the correct x_grids_trv_pointers_p for specific network?)
-	## This would speed up inference application
-
-	scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-	offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
-	n_sta = locs.shape[0]
-	n_spc = x_grid.shape[0]
-	locs_tensor = torch.Tensor(locs)
-	# grid_select = np.random.randint(0, high = len(x_grids))
-	# time_samples = np.copy(srcs[:,3])
-
-	## Removing this concatenate step, since now passing all information with arrivals
-	# arrivals = np.concatenate((arrivals, 0*np.ones((arrivals.shape[0],3))), axis = 1) # why append 0's?
-
-	# n_sta = locs.shape[0]
-	# n_spc = x_grid.shape[0]
-	# n_sta_slice = len(ind_use)
-
-	# perm_vec = -1*np.ones(locs.shape[0])
-	# perm_vec[ind_use] = np.arange(len(ind_use))
-
-	t_win = 10.0
-	scale_vec = np.array([1,2*t_win]).reshape(1,-1)
-	n_batch = len(time_samples)
-
-	## Max_t is dependent on x_grids_trv. Else, can pass max_t as an input.
-	# max_t = float(np.ceil(max([x_grids_trv[j].max() for j in range(len(x_grids_trv))])))
-
-	src_t_kernel = 8.0 # change these kernels
-	src_x_kernel = 30e3
-	src_depth_kernel = 5e3
-	min_sta_arrival = 0
-
-	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
-
-	tree = cKDTree(arrivals[:,0][:,None]) ## It might be expensive to keep re-creating this every time step
-	lp = tree.query_ball_point(time_samples.reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0) 
-
-	lp_concat = np.hstack([np.array(list(lp[j])) for j in range(n_batch)]).astype('int')
-	arrivals_select = arrivals[lp_concat]
-	phase_labels_select = phase_labels[lp_concat]
-	tree_select = cKDTree(arrivals_select[:,0:2]*scale_vec)
-
-	Trv_subset_p = []
-	Trv_subset_s = []
-	Station_indices = []
-	# Grid_indices = []
-	Batch_indices = []
-	Sample_indices = []
-	sc = 0
-
-	## Note, this loop could be vectorized
-	for i in range(n_batch):
-		# i0 = np.random.randint(0, high = len(x_grids)) ## Will be fixed grid, if x_grids is length 1.
-		# n_spc = x_grids[i0].shape[0]
-
-		ind_sta_select = np.unique(ind_use) ## Subset of locations, from total set.
-		n_sta_select = len(ind_sta_select)
-
-		# Not, trv_subset_p and trv_subset_s only differ in the last entry, for all iterations of the loop.
-		## In other wors, what's the point of this costly duplication of Trv_subset_p and s? Why not more
-		## effectively use this data.
-
-		Trv_subset_p.append(np.concatenate((x_grid_trv[:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
-		Trv_subset_s.append(np.concatenate((x_grid_trv[:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
-		Station_indices.append(ind_sta_select) # record subsets used
-		Batch_indices.append(i*np.ones(len(ind_sta_select)*n_spc))
-		# Grid_indices.append(i0)
-		Sample_indices.append(np.arange(len(ind_sta_select)*n_spc) + sc)
-		sc += len(Sample_indices[-1])
-
-	# sc += len(Sample_indices[-1])
-	Trv_subset_p = np.vstack(Trv_subset_p)
-	Trv_subset_s = np.vstack(Trv_subset_s)
-	Batch_indices = np.hstack(Batch_indices)
-
-	offset_per_batch = 1.5*max_t
-	offset_per_station = 1.5*n_batch*offset_per_batch
-
-	arrivals_offset = np.hstack([-time_samples[i] + i*offset_per_batch + offset_per_station*arrivals[lp[i],1] for i in range(n_batch)]) ## Actually, make disjoint, both in station axis, and in batch number.
-	one_vec = np.concatenate((np.ones(1), np.zeros(4)), axis = 0).reshape(1,-1)
-	arrivals_select = np.vstack([arrivals[lp[i]] for i in range(n_batch)]) + arrivals_offset.reshape(-1,1)*one_vec
-	n_arvs = arrivals_select.shape[0]
-
-	iargsort = np.argsort(arrivals_select[:,0])
-	arrivals_select = arrivals_select[iargsort]
-	phase_labels_select = phase_labels_select[iargsort]
-
-	## If len(arrivals_select) == 0, this breaks. However, if len(arrivals_select) == 0; then clearly there is no data here...
-
-	query_time_p = Trv_subset_p[:,0] + Batch_indices*offset_per_batch + Trv_subset_p[:,1]*offset_per_station
-	query_time_s = Trv_subset_s[:,0] + Batch_indices*offset_per_batch + Trv_subset_s[:,1]*offset_per_station
-
-	ip_p = np.searchsorted(arrivals_select[:,0], query_time_p)
-	ip_s = np.searchsorted(arrivals_select[:,0], query_time_s)
-
-	ip_p_pad = ip_p.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
-	ip_s_pad = ip_s.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
-	ip_p_pad = np.minimum(np.maximum(ip_p_pad, 0), n_arvs - 1) 
-	ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
-
-	if len(arrivals_select) > 0:
-		## See how much we can "skip", when len(arrivals_select) == 0. 
-		rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-		rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
-	
-	iwhere_p = np.where(phase_labels_select == 0)[0]
-	iwhere_s = np.where(phase_labels_select == 1)[0]
-	n_arvs_p = len(iwhere_p)
-	n_arvs_s = len(iwhere_s)
-
-	if len(iwhere_p) > 0:
-		ip_p1 = np.searchsorted(arrivals_select[iwhere_p,0], query_time_p)
-		ip_p1_pad = ip_p1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
-		ip_p1_pad = np.minimum(np.maximum(ip_p1_pad, 0), n_arvs_p - 1) 
-		rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-
-	if len(iwhere_s) > 0:
-		ip_s1 = np.searchsorted(arrivals_select[iwhere_s,0], query_time_s)
-		ip_s1_pad = ip_s1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
-		ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
-		rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
-
-	kernel_sig_t = 5.0 # Can speed up by only using matches.
-	k_sta_edges = 8
-	k_spc_edges = 15
-	k_time_edges = 10 ## Make sure is same as in train_regional_GNN.py
-	time_vec_slice = np.arange(k_time_edges)
-
-	# X_fixed = [] # fixed
-	# X_query = [] # fixed
-	# Locs = [] # fixed
-	# Trv_out = [] # fixed
-
-	Inpts = [] # duplicate
-	Masks = [] # duplicate
-	lp_times = [] # duplicate
-	lp_stations = [] # duplicate
-	lp_phases = [] # duplicate
-	lp_meta = [] # duplicate
-	# lp_srcs = [] # duplicate
-
-	thresh_mask = 0.01
-	for i in range(n_batch):
-		# Create inputs and mask
-		# grid_select = Grid_indices[i]
-		ind_select = Sample_indices[i]
-		sta_select = Station_indices[i]
-		n_spc = x_grid.shape[0]
-		n_sta_slice = len(sta_select)
-
-		inpt = np.zeros((x_grid.shape[0], n_sta, 4)) # Could make this smaller (on the subset of stations), to begin with.
-		if len(arrivals_select) > 0:
-			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
-			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
-
-		if len(iwhere_p) > 0:
-			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
-		
-		if len(iwhere_s) > 0:  
-			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
-
-		trv_out = x_grid_trv[:,sta_select,:] ## Subsetting, into sliced indices.
-
-		## Note adding reshape here, rather than down-stream.
-		Inpts.append(inpt[:,sta_select,:].reshape(-1,4)) # sub-select, subset of stations.
-		Masks.append((1.0*(inpt[:,sta_select,:] > thresh_mask)).reshape(-1,4))
-
-		## Assemble pick datasets
-		perm_vec = -1*np.ones(n_sta)
-		perm_vec[sta_select] = np.arange(len(sta_select))
-		meta = arrivals[lp[i],:]
-		phase_vals = phase_labels[lp[i]]
-		times = meta[:,0]
-		indices = perm_vec[meta[:,1].astype('int')]
-		ineed = np.where(indices > -1)[0]
-		times = times[ineed] ## Overwrite, now. Double check if this is ok.
-		indices = indices[ineed]
-		phase_vals = phase_vals[ineed]
-		meta = meta[ineed]	
-
-		# ind_src_unique = np.unique(meta[meta[:,2] > -1.0,2]).astype('int') # ignore -1.0 entries.
-		lex_sort = np.lexsort((times, indices)) ## Make sure lexsort doesn't cause any problems
-		lp_times.append(times[lex_sort] - time_samples[i])
-		lp_stations.append(indices[lex_sort])
-		lp_phases.append(phase_vals[lex_sort])
-		lp_meta.append(meta[lex_sort]) # final index of meta points into 
-		# lp_srcs.append(src_subset)
-
-	# Trv_out.append(trv_out)
-	# Locs.append(locs[sta_select])
-	# X_fixed.append(x_grid)
-
-	# assert(A_edges_time_p.max() < n_spc*n_sta_slice) ## Can remove these, after a bit of testing.
-	# assert(A_edges_time_s.max() < n_spc*n_sta_slice)
-
-	if verbose == True:
-		print('batch gen time took %0.2f'%(time.time() - st))
-
-	return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
-## Return the adjacencies for a set of inputs.
-def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_trv_ref, x_grid_trv_pointers_p, x_grid_trv_pointers_s, graph_params, verbose = False):
-
-	if verbose == True:
-		st = time.time()
-
-	k_sta_edges, k_spc_edges, k_time_edges = graph_params
-
-	n_sta = locs.shape[0]
-	n_spc = x_grid.shape[0]
-	n_sta_slice = len(ind_use)
-
-	k_sta_edges = np.minimum(k_sta_edges, len(ind_use) - 2)
-
-	perm_vec = -1*np.ones(locs.shape[0])
-	perm_vec[ind_use] = np.arange(len(ind_use))
-
-	A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[ind_use])), torch.Tensor(ftrns1(locs[ind_use])), k = k_sta_edges + 1).flip(0).contiguous())[0]
-	A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)), torch.Tensor(ftrns1(x_grid)), k = k_spc_edges + 1).flip(0).contiguous())[0]
-	A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1)).contiguous()
-	A_prod_src_src = (n_sta_slice*A_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1)).contiguous()	
-	A_src_in_prod = torch.cat((torch.arange(n_sta_slice*n_spc).view(1,-1), torch.arange(n_spc).repeat_interleave(n_sta_slice).view(1,-1)), dim = 0).contiguous()
-	len_dt = len(x_grid_trv_ref)
-	A_edges_time_p = x_grid_trv_pointers_p[np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*ind_use.repeat(k_time_edges*len_dt)]
-	A_edges_time_s = x_grid_trv_pointers_s[np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*ind_use.repeat(k_time_edges*len_dt)]
-	one_vec = np.repeat(ind_use*np.ones(n_sta_slice), k_time_edges*len_dt).astype('int') # also used elsewhere
-	A_edges_time_p = (n_sta_slice*(A_edges_time_p - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
-	A_edges_time_s = (n_sta_slice*(A_edges_time_s - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
-	A_edges_ref = x_grid_trv_ref*1 + 0
-
-	assert(A_edges_time_p.max() < n_spc*n_sta_slice) ## Can remove these, after a bit of testing.
-	assert(A_edges_time_s.max() < n_spc*n_sta_slice)
-
-	if verbose == True:
-		print('batch gen time took %0.2f'%(time.time() - st))
-
-	return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
-
-def load_templates_region(trv, x_grids, training_params, graph_params, pred_params, dt_embed = 1.0):
-
-	k_sta_edges, k_spc_edges, k_time_edges = graph_params
-
-	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
-
-	x_grids_trv = []
-	x_grids_trv_pointers_p = []
-	x_grids_trv_pointers_s = []
-	x_grids_trv_refs = []
-	x_grids_edges = []
-
-	for i in range(len(x_grids)):
-
-		trv_out = trv(torch.Tensor(locs), torch.Tensor(x_grids[i]))
-		x_grids_trv.append(trv_out.cpu().detach().numpy())
-
-		edge_index = knn(torch.Tensor(ftrns1(x_grids[i])).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device), k = k_spc_edges).flip(0).contiguous()
-		edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
-		x_grids_edges.append(edge_index)
-
-	max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # + 10.0
-
-	for i in range(len(x_grids)):
-
-		A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations_multiple_grids(x_grids_trv[i], max_t)
-		x_grids_trv_pointers_p.append(A_edges_time_p)
-		x_grids_trv_pointers_s.append(A_edges_time_s)
-		x_grids_trv_refs.append(dt_partition) # save as cuda tensor, or no?
-
-	return x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t
-
-def competitive_assignment(w, sta_inds, cost, min_val = 0.02, restrict = None, force_n_sources = None, verbose = False):
-
-	# w is the edges, or weight matrix between sources and arrivals.
-	# It's a list of 2d numpy arrays, w = [w1, w2, w3...], where each wi is the
-	# weight matrix for phase type i. So usually, w = [wp, ws] (actually, algorithm will probably not work unless it is exactly this!)
-	# and wp and ws are shape n_srcs, n_arvs = w[0].shape
-
-	# sta_inds, is the list of station indices, for each of the arrivals, corresponding to entries in the w matrices.
-	# E.g., each row of w[0] is the set of all arrivals edge weights to the source for that row of w[0] (using P-wave moveouts)
-	# Hence, each row is always referencing the same set of picks (which have arbitrary ordering). But, we need to know which arrivals
-	# of this list are associated with each station. So sta_inds just records the index for each arrival. (You could group all arrivals
-	# of a given station to be sequential, or not, it doesn't make a difference as long as sta_inds is correct). 
-
-	# The supplemental of Earthquake Arrival Association with Backprojection and Graph Theory explains the
-	# pseudocode for making all of the constraint matrices.
-
-	if verbose == True:
-		start_time = time()
-
-	n_unique_stations = len(np.unique(sta_inds))
-	unique_stations = np.unique(sta_inds)
-	n_phases = len(w)
-
-	# Create cost vector c by concatenating all (arrival-source-phase) fitness weight matrices together
-
-	np.random.seed(0)
-
-	for i in range(n_phases):
-
-		w[i][w[i] < min_val] = -1.0*min_val
-
-	n_srcs, n_arvs = w[0].shape
-
-	c = np.concatenate(((-1.0*np.concatenate(w, axis = 0).T).reshape(-1), cost*np.ones(n_srcs)), axis = 0)
-
-	# Initilize constraints A1 - A3, b1 - b3
-	# Constraint (1) force each arrival assigned to <= one phase
-	# Constraint (2) force each station to have <= 1 phase to each source
-	# Constraint (3) force source to be activates if has >= 1 assignment
-
-	A1 = np.zeros((n_arvs, n_phases*n_srcs*n_arvs + n_srcs))
-	A2 = np.zeros((n_unique_stations*n_phases*n_srcs, n_phases*n_srcs*n_arvs + n_srcs))
-	A3 = np.zeros((n_srcs, n_phases*n_srcs*n_arvs + n_srcs))
-
-	b1 = np.ones((n_arvs, 1))
-	b2 = np.ones((n_unique_stations*n_phases*n_srcs, 1))
-	b3 = np.zeros((n_srcs, 1))
-
-	# Constraint A1
-
-	for j in range(n_arvs):
-
-		A1[j, j*n_phases*n_srcs:(j + 1)*n_phases*n_srcs] = 1
-
-	# Constraint A2
-
-	sc = 0
-	step = n_phases*n_srcs
-
-	for j in range(n_unique_stations):
-
-		ip = np.where(sta_inds == unique_stations[j])[0]
-		vec = ip*n_srcs*n_phases
-
-		for k in range(n_srcs):
-
-			for l in range(n_phases):
-
-				for n in range(len(ip)):
-
-					A2[sc, ip[n]*n_srcs*n_phases + k + l*n_srcs] = 1
-
-				sc += 1
-
-	# Constraint A3
-
-	activation_term = -n_phases*n_unique_stations
-
-	vec = np.arange(0, n_phases*n_srcs*n_arvs, n_srcs)
-
-	for j in range(n_srcs):
-
-		A3[j, vec + j] = 1
-		A3[j, n_phases*n_srcs*n_arvs + j] = activation_term
-
-	# Concatenate Constraints together
-
-	A = np.concatenate((A1, A2, A3), axis = 0)
-	b = np.concatenate((b1, b2, b3), axis = 0)
-
-	# Optional constraints:
-	# (1) Restrict activations between pairs of source to <= 1 (this can be used to force a spatio-temporal seperation between active sources)
-	# (2) Force a certain number of sources to be active simultaneously
-
-	# Optional Constraint 1
-
-	if restrict is not None:
-
-		O1 = []
-
-		for j in range(len(restrict)):
-
-			vec = np.zeros((1, n_phases*n_srcs*n_arvs + n_srcs))
-			vec[0, restrict[j] + n_phases*n_srcs*n_arvs] = 1
-			O1.append(vec)
-
-		O1 = np.vstack(O1)
-		b1 = np.ones((len(restrict),1))
-
-		A = np.concatenate((A, O1), axis = 0)
-		b = np.concatenate((b, b1), axis = 0)
-
-	# Optional Constraint 2
-
-	if force_n_sources is not None:
-
-		O1 = np.zeros((1,n_phases*n_srcs*n_arvs + n_srcs))
-		O1[0, n_phases*n_srcs*n_arvs::] = -1
-		b1 = -force_n_sources*np.ones((1,1))
-
-		A = np.concatenate((A, O1), axis = 0)
-		b = np.concatenate((b, b1), axis = 0)
-
-	# Solve ILP
-
-	x = cp.Variable(n_phases*n_srcs*n_arvs + n_srcs, integer = True)
-
-	prob = cp.Problem(cp.Minimize(c.T@x), constraints = [A@x <= b.reshape(-1), 0 <= x, x <= 1])
-
-	prob.solve()
-
-	assert prob.status == 'optimal', 'competitive assignment solution is not optimal'
-
-	# read result
-	# (1) find active sources
-	# (2) find arrivals assigned to each source
-	# (3) determine arrival phase types
-
-	solution = np.round(x.value)
-	
-	# (1) find active sources
-	
-	sources_active = np.where(solution[n_phases*n_srcs*n_arvs::])[0]
-
-	# (2,3) find arrival assignments and phase types
-
-	assignments = solution[0:n_phases*n_srcs*n_arvs].reshape(n_arvs,-1)
-	lists = [[] for j in range(len(sources_active))]
-
-	for j in range(len(sources_active)):
-
-		for k in range(n_phases):
-
-			ip = np.where(assignments[:,sources_active[j] + n_srcs*k])[0]
-
-			lists[j].append(ip)
-
-	assignments = lists
-
-	if verbose == True:
-		print('competitive assignment took: %0.2f'%(time() - start_time))
-		print('CA inferred number of sources: %d'%(len(sources_active)))
-		print('CA took: %f seconds \n'%(time() - start_time))
-
-	return assignments, sources_active
-
-def competitive_assignment_split(w, sta_inds, cost, min_val = 0.02, restrict = None, force_n_sources = None, verbose = False):
-
-	# w is the edges, or weight matrix between sources and arrivals.
-	# It's a list of 2d numpy arrays, w = [w1, w2, w3...], where each wi is the
-	# weight matrix for phase type i. So usually, w = [wp, ws] (actually, algorithm will probably not work unless it is exactly this!)
-	# and wp and ws are shape n_srcs, n_arvs = w[0].shape
-
-	# sta_inds, is the list of station indices, for each of the arrivals, corresponding to entries in the w matrices.
-	# E.g., each row of w[0] is the set of all arrivals edge weights to the source for that row of w[0] (using P-wave moveouts)
-	# Hence, each row is always referencing the same set of picks (which have arbitrary ordering). But, we need to know which arrivals
-	# of this list are associated with each station. So sta_inds just records the index for each arrival. (You could group all arrivals
-	# of a given station to be sequential, or not, it doesn't make a difference as long as sta_inds is correct). 
-
-	# The supplemental of Earthquake Arrival Association with Backprojection and Graph Theory explains the
-	# pseudocode for making all of the constraint matrices.
-
-	if verbose == True:
-		start_time = time()
-
-	n_unique_stations = len(np.unique(sta_inds))
-	unique_stations = np.unique(sta_inds)
-	n_phases = len(w)
-
-	# Create cost vector c by concatenating all (arrival-source-phase) fitness weight matrices together
-
-	np.random.seed(0)
-
-	for i in range(n_phases):
-
-		w[i][w[i] < min_val] = -1.0*min_val
-
-	n_srcs, n_arvs = w[0].shape
-
-	c = np.concatenate(((-1.0*np.concatenate(w, axis = 0).T).reshape(-1), cost*np.ones(n_srcs)), axis = 0)
-
-	# Initilize constraints A1 - A3, b1 - b3
-	# Constraint (1) force each arrival assigned to <= one phase
-	# Constraint (2) force each station to have <= 1 phase to each source
-	# Constraint (3) force source to be activates if has >= 1 assignment
-
-	A1 = np.zeros((n_arvs, n_phases*n_srcs*n_arvs + n_srcs))
-	A2 = np.zeros((n_unique_stations*n_phases*n_srcs, n_phases*n_srcs*n_arvs + n_srcs))
-	A3 = np.zeros((n_srcs, n_phases*n_srcs*n_arvs + n_srcs))
-
-	b1 = np.ones((n_arvs, 1))
-	b2 = np.inf*np.ones((n_unique_stations*n_phases*n_srcs, 1)) ## Allow muliple picks per station, in split phase
-	b3 = np.zeros((n_srcs, 1))
-
-	# Constraint A1
-
-	for j in range(n_arvs):
-
-		A1[j, j*n_phases*n_srcs:(j + 1)*n_phases*n_srcs] = 1
-
-	# Constraint A2
-
-	sc = 0
-	step = n_phases*n_srcs
-
-	for j in range(n_unique_stations):
-
-		ip = np.where(sta_inds == unique_stations[j])[0]
-		vec = ip*n_srcs*n_phases
-
-		for k in range(n_srcs):
-
-			for l in range(n_phases):
-
-				for n in range(len(ip)):
-
-					A2[sc, ip[n]*n_srcs*n_phases + k + l*n_srcs] = 1
-
-				sc += 1
-
-	# Constraint A3
-
-	activation_term = -n_phases*n_unique_stations
-
-	vec = np.arange(0, n_phases*n_srcs*n_arvs, n_srcs)
-
-	for j in range(n_srcs):
-
-		A3[j, vec + j] = 1
-		A3[j, n_phases*n_srcs*n_arvs + j] = activation_term
-
-	# Concatenate Constraints together
-
-	A = np.concatenate((A1, A2, A3), axis = 0)
-	b = np.concatenate((b1, b2, b3), axis = 0)
-
-	# Optional constraints:
-	# (1) Restrict activations between pairs of source to <= 1 (this can be used to force a spatio-temporal seperation between active sources)
-	# (2) Force a certain number of sources to be active simultaneously
-
-	# Optional Constraint 1
-
-	if restrict is not None:
-
-		O1 = []
-
-		for j in range(len(restrict)):
-
-			vec = np.zeros((1, n_phases*n_srcs*n_arvs + n_srcs))
-			vec[0, restrict[j] + n_phases*n_srcs*n_arvs] = 1
-			O1.append(vec)
-
-		O1 = np.vstack(O1)
-		b1 = np.ones((len(restrict),1))
-
-		A = np.concatenate((A, O1), axis = 0)
-		b = np.concatenate((b, b1), axis = 0)
-
-	# Optional Constraint 2
-
-	if force_n_sources is not None:
-
-		O1 = np.zeros((1,n_phases*n_srcs*n_arvs + n_srcs))
-		O1[0, n_phases*n_srcs*n_arvs::] = -1
-		b1 = -force_n_sources*np.ones((1,1))
-
-		A = np.concatenate((A, O1), axis = 0)
-		b = np.concatenate((b, b1), axis = 0)
-
-	# Solve ILP
-
-	x = cp.Variable(n_phases*n_srcs*n_arvs + n_srcs, integer = True)
-
-	prob = cp.Problem(cp.Minimize(c.T@x), constraints = [A@x <= b.reshape(-1), 0 <= x, x <= 1])
-
-	prob.solve()
-
-	assert prob.status == 'optimal', 'competitive assignment solution is not optimal'
-
-	# read result
-	# (1) find active sources
-	# (2) find arrivals assigned to each source
-	# (3) determine arrival phase types
-
-	solution = np.round(x.value)
-	
-	# (1) find active sources
-	
-	sources_active = np.where(solution[n_phases*n_srcs*n_arvs::])[0]
-
-	# (2,3) find arrival assignments and phase types
-
-	assignments = solution[0:n_phases*n_srcs*n_arvs].reshape(n_arvs,-1)
-	lists = [[] for j in range(len(sources_active))]
-
-	for j in range(len(sources_active)):
-
-		for k in range(n_phases):
-
-			ip = np.where(assignments[:,sources_active[j] + n_srcs*k])[0]
-
-			lists[j].append(ip)
-
-	assignments = lists
-
-	if verbose == True:
-		print('competitive assignment took: %0.2f'%(time() - start_time))
-		print('CA inferred number of sources: %d'%(len(sources_active)))
-		print('CA took: %f seconds \n'%(time() - start_time))
-
-	return assignments, sources_active
-
-def MLE_particle_swarm_location_one_mean_stable_depth(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, ftrns1, ftrns2, sig_t = 3.0, dx_depth = 50.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
-
-	if (len(arv_p) + len(arv_s)) == 0:
-		return np.nan*np.ones((1,3)), np.nan, []
-
-	def likelihood_estimate(x):
-
-		## Assumes constant diagonal covariance matrix
-		pred = trv(locs_use_cuda, torch.Tensor(x).to(device)).cpu().detach().numpy()
-		sig_arv = np.concatenate((f_linear(pred[:,ind_p,0]), f_linear(pred[:,ind_s,1])), axis = 1)
-		det_vals = np.prod(sig_arv, axis = 1) # *np.prod(sig_s, axis = 1)
-		det_vals = 0.0 # np.prod(sig_p, axis = 1) # *np.prod(sig_s, axis = 1)
-		pred_vals = remove_mean(np.concatenate((pred[:,ind_p,0], pred[:,ind_s,1]), axis = 1), 1)
-		logprob = (-(len(ind_p) + len(ind_s))/2.0)*(2*np.pi) - 0.5*det_vals - 0.5*np.sum(((trgt - pred_vals)/sig_arv)**2, axis = 1)
-
-		return logprob
-
-	scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-	offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
-	x0 = np.random.rand(n, 3)*scale_x + offset_x
-	locs_use_cuda = torch.Tensor(locs_use).to(device)
-
-	trgt = remove_mean(np.concatenate((arv_p, arv_s), axis = 0).reshape(1, -1), 1)
-
-	## Make sig_t adaptive to average distance of stations..
-	f_linear = lambda t: sig_t*np.ones(t.shape)
-
-	logprob_init = likelihood_estimate(x0)
-	x0_argmax = np.argmax(logprob_init)
-	x0_max = x0[x0_argmax].reshape(1,-1)
-	x0_max_val = logprob_init.max()
-	x0cart_max = ftrns1(x0_max)
-
-	xcart = ftrns1(np.copy(x0)) ## Need to do momentum, in Cartesian domain.
-	xcart_best = np.copy(xcart) ## List of best positions for each particle.
-	xcart_best_val = np.copy(logprob_init)
-	xvel = np.random.randn(n,3)
-	xvel = init_vel*xvel/np.linalg.norm(xvel, axis = 1, keepdims = True)
-
-	w, c1, c2 = 0.4, 0.4, 0.4 ## Check this parameters!
-	## Run particle-swarm.
-	diffs = np.inf*np.ones(eps_steps) ## Save update increments in here. (roll, and overwrite).
-	## If triangle distance of diff vector is less than threshold, then can terminate updates.
-	Swarm = []
-
-	converged_val, ninc = np.inf, 0
-	while (converged_val > eps_thresh)*(ninc < max_steps):
-
-		# find new positions, and velocities
-		xvel_new = w*xvel + c1*np.random.rand(n,1)*(xcart_best - xcart) + c2*np.random.rand(n,1)*(x0cart_max - xcart)
-		xcart_new = xcart + xvel_new ## New X is updated with "new" velocity
-		# comput new likelihoods.
-		logprob_sample = likelihood_estimate(ftrns2(xcart_new))
-		max_sample = logprob_sample.max()
-		max_sample_argmax = np.argmax(logprob_sample)
-
-		## Increment, and update differential position measure
-		## of best coordinate.
-		diffs = np.roll(diffs, 1) ## Roll array one increment.
-		diffs[0] = np.linalg.norm(x0cart_max - xcart_new[max_sample_argmax].reshape(1,-1))
-
-		if max_sample > x0_max_val: ## Update global maximum
-			x0_argmax = np.argmax(logprob_sample)
-			x0_max = ftrns2(xcart_new[x0_argmax].reshape(1,-1))
-			x0_max_val = max_sample*1.0
-			x0cart_max = xcart_new[x0_argmax].reshape(1,-1)
-		ineed_update = np.where(logprob_sample > xcart_best_val)[0]
-		if len(ineed_update) > 0: ## Update individual particle maxima
-			xcart_best[ineed_update] = xcart_new[ineed_update]
-			xcart_best_val[ineed_update] = logprob_sample[ineed_update]
-		xcart = np.copy(xcart_new) ## Update positions and velocities
-		xvel = np.copy(xvel_new)
-
-		## Update converged val
-		converged_val = np.sqrt(np.sum(diffs**2)) ## Triangle sum, to bound max update over a sequence.
-		ninc += 1
-
-		if save_swarm == True:
-			Swarm.append(np.concatenate((ftrns2(xcart), logprob_sample.reshape(-1,1)), axis = 1))
-
-	# dx_depth = 50.0
-	max_elev = float(depth_range[1])
-	xdepth_query = np.arange(depth_range[0]*1.0, max_elev, dx_depth)
-	xdepth_query = np.sort(np.minimum(np.maximum(xdepth_query + dx_depth*np.random.randn(len(xdepth_query)), float(depth_range[0])), max_elev))
-
-	x0_max_query = np.copy(x0_max).repeat(len(xdepth_query), axis = 0)
-	x0_max_query[:,2] = xdepth_query
-	logprob_depths = likelihood_estimate(x0_max_query)
-	iargmax = np.argmax(logprob_depths)
-	x0_max = x0_max_query[iargmax].reshape(1,-1)
-	x0_max_val = logprob_depths[iargmax]
-
-	return x0_max, x0_max_val, Swarm
-
-def MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
-
-	if (len(arv_p) + len(arv_s)) == 0:
-		return np.nan*np.ones((1,3)), np.nan, []
-
-	def likelihood_estimate(x):
-
-		## Assumes constant diagonal covariance matrix and 
-		pred = trv(locs_use_cuda, torch.Tensor(x).to(device)).cpu().detach().numpy()
-		sig_arv = np.concatenate((f_linear(pred[:,ind_p,0]), f_linear(pred[:,ind_s,1])), axis = 1)
-		det_vals = np.prod(sig_arv, axis = 1) # *np.prod(sig_s, axis = 1)
-		det_vals = 0.0 # np.prod(sig_p, axis = 1) # *np.prod(sig_s, axis = 1)
-		pred_vals = remove_mean(np.concatenate((pred[:,ind_p,0], pred[:,ind_s,1]), axis = 1), 1)
-		logprob = (-(len(ind_p) + len(ind_s))/2.0)*(2*np.pi) - 0.5*det_vals - 0.5*np.sum(((trgt - pred_vals)/sig_arv)**2, axis = 1)
-
-		return logprob
-
-	scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-	offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
-	x0 = np.random.rand(n, 3)*scale_x + offset_x
-	locs_use_cuda = torch.Tensor(locs_use).to(device)
-
-	trgt = remove_mean(np.concatenate((arv_p, arv_s), axis = 0).reshape(1, -1), 1)
-
-	## Make sig_t adaptive to average distance of stations..
-	f_linear = lambda t: sig_t*np.ones(t.shape)
-
-	logprob_init = likelihood_estimate(x0)
-	# logprob_sample = np.copy()
-	x0_argmax = np.argmax(logprob_init)
-	x0_max = x0[x0_argmax].reshape(1,-1)
-	x0_max_val = logprob_init.max()
-	x0cart_max = ftrns1(x0_max)
-	# val_global_best = logprob_init.max()
-
-	xcart = ftrns1(np.copy(x0)) ## Need to do momentum, in Cartesian domain.
-	xcart_best = np.copy(xcart) ## List of best positions for each particle.
-	xcart_best_val = np.copy(logprob_init)
-	xvel = np.random.randn(n,3)
-	xvel = init_vel*xvel/np.linalg.norm(xvel, axis = 1, keepdims = True)
-
-	w, c1, c2 = 0.4, 0.4, 0.4 ## Check this parameters!
-	## Run particle-swarm.
-	diffs = np.inf*np.ones(eps_steps) ## Save update increments in here. (roll, and overwrite).
-	## If triangle distance of diff vector is less than threshold, then can terminate updates.
-	Swarm = []
-
-	converged_val, ninc = np.inf, 0
-	while (converged_val > eps_thresh)*(ninc < max_steps):
-
-		# find new positions, and velocities
-		xvel_new = w*xvel + c1*np.random.rand(n,1)*(xcart_best - xcart) + c2*np.random.rand(n,1)*(x0cart_max - xcart)
-		xcart_new = xcart + xvel_new ## New X is updated with "new" velocity
-
-		## Check if points outside hull; if so, re-initilize.
-		in_hull_val = in_hull(ftrns2(xcart_new), hull) # Double check this
-		ioutside = np.where(in_hull_val == False)[0]
-		if len(ioutside) > 0:
-			xcart_new[ioutside] = ftrns1(np.random.rand(len(ioutside), 3)*scale_x + offset_x)
-			xvel_new[ioutside] = np.random.randn(len(ioutside),3)
-			xvel_new[ioutside] = init_vel*xvel_new[ioutside]/np.linalg.norm(xvel_new[ioutside], axis = 1, keepdims = True)
-
-		# comput new likelihoods.
-		logprob_sample = likelihood_estimate(ftrns2(xcart_new))
-		max_sample = logprob_sample.max()
-		max_sample_argmax = np.argmax(logprob_sample)
-
-		## Increment, and update differential position measure
-		## of best coordinate.
-		diffs = np.roll(diffs, 1) ## Roll array one increment.
-		diffs[0] = np.linalg.norm(x0cart_max - xcart_new[max_sample_argmax].reshape(1,-1))
-
-		if max_sample > x0_max_val: ## Update global maximum
-			x0_argmax = np.argmax(logprob_sample)
-			x0_max = ftrns2(xcart_new[x0_argmax].reshape(1,-1))
-			x0_max_val = max_sample*1.0
-			x0cart_max = xcart_new[x0_argmax].reshape(1,-1)
-		ineed_update = np.where(logprob_sample > xcart_best_val)[0]
-		if len(ineed_update) > 0: ## Update individual particle maxima
-			xcart_best[ineed_update] = xcart_new[ineed_update]
-			xcart_best_val[ineed_update] = logprob_sample[ineed_update]
-		xcart = np.copy(xcart_new) ## Update positions and velocities
-		xvel = np.copy(xvel_new)
-
-		## Update converged val
-		converged_val = np.sqrt(np.sum(diffs**2)) ## Triangle sum, to bound max update over a sequence.
-		ninc += 1
-
-		if save_swarm == True:
-			Swarm.append(np.concatenate((ftrns2(xcart), logprob_sample.reshape(-1,1)), axis = 1))
-
-	# dx_depth = 50.0
-	max_elev = float(depth_range[1])
-	xdepth_query = np.arange(depth_range[0]*1.0, max_elev, dx_depth)
-	xdepth_query = np.sort(np.minimum(np.maximum(xdepth_query + dx_depth*np.random.randn(len(xdepth_query)), float(depth_range[0])), max_elev))
-
-	x0_max_query = np.copy(x0_max).repeat(len(xdepth_query), axis = 0)
-	x0_max_query[:,2] = xdepth_query
-	logprob_depths = likelihood_estimate(x0_max_query)
-	iargmax = np.argmax(logprob_depths)
-	x0_max = x0_max_query[iargmax].reshape(1,-1)
-	x0_max_val = logprob_depths[iargmax]
-
-	return x0_max, x0_max_val, Swarm
-
-def sample_random_spatial_query(lat_range, lon_range, depth_range, n):
-
-	scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-	offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
-	X_query = np.random.rand(n, 3)*scale_x + offset_x
-	X_query_cart = torch.Tensor(ftrns1(X_query))
-
-	return X_query, X_query_cart
-
-def maximize_bipartite_assignment(cat, srcs, ftrns1, ftrns2, temporal_win = 10.0, spatial_win = 75e3):
-
-	tree_t = cKDTree(srcs[:,3].reshape(-1,1))
-	tree_s = cKDTree(ftrns1(srcs[:,0:3]))
-
-	lp_t = tree_t.query_ball_point(cat[:,3].reshape(-1,1), r = temporal_win)
-	lp_s = tree_s.query_ball_point(ftrns1(cat[:,0:3]), r = spatial_win)
-
-	edges_cat_to_srcs = [np.array(list(set(lp_t[j]).intersection(lp_s[j]))) for j in range(cat.shape[0])]
-	edges_cat_non_zero = np.where(np.array([len(edges_cat_to_srcs[j]) for j in range(cat.shape[0])]) > 0)[0]
-
-	if sum([len(edges_cat_to_srcs[j]) for j in range(cat.shape[0])]) == 0:
-		return np.array([]), [], [], [], []
-
-	edges_cat_to_srcs = np.hstack([np.concatenate((j*np.ones(len(edges_cat_to_srcs[j])).reshape(1,-1), edges_cat_to_srcs[j].reshape(1,-1)), axis = 0) for j in edges_cat_non_zero]).astype('int')
-
-	unique_cat_ind = np.sort(np.unique(edges_cat_to_srcs[0,:]))
-	unique_src_ind = np.sort(np.unique(edges_cat_to_srcs[1,:]))
-
-	nunique_cat = len(unique_cat_ind)
-	nunique_src = len(unique_src_ind)
-
-	temporal_diffs = cat[unique_cat_ind,3].reshape(-1,1) - srcs[unique_src_ind,3].reshape(1,-1)
-	spatial_diffs = np.linalg.norm(ftrns1(cat[unique_cat_ind,0:3]).reshape(-1,1,3) - ftrns1(srcs[unique_src_ind,0:3]).reshape(1,-1,3), axis = 2)
-
-	temporal_diffs[abs(temporal_diffs) > temporal_win] = np.inf
-	spatial_diffs[abs(spatial_diffs) > spatial_win] = np.inf
-
-	weights = np.exp(-0.5*(temporal_diffs**2)/(temporal_win**2))*np.exp(-0.5*(spatial_diffs**2)/(spatial_win**2))
-
-	weights_unravel = weights.reshape(-1)
-	weights_unravel[weights_unravel < 0.01] = -0.01 # This way, non-matches, are left unassigned
-
-	## Make constraint matrix.
-	# Each cat, assignment vector to at most one other sources.
-	A1 = np.zeros((nunique_cat, len(weights_unravel)))
-	for i in range(nunique_cat):
-		A1[i,np.arange(nunique_src) + nunique_src*i] = 1.0
-
-	## Make constraint matrix.
-	# Each src, assignment vector to at most one other cat.
-	A2 = np.zeros((nunique_src, len(weights_unravel)))
-	for i in range(nunique_src):
-		A2[i,np.arange(nunique_cat)*nunique_src + i] = 1.0
-
-	A = np.concatenate((A1, A2), axis = 0)
-	b = np.ones((A.shape[0],1))
-
-	x = cp.Variable(A.shape[1], integer = True)
-	prob = cp.Problem(cp.Minimize(-weights_unravel.T@x), constraints = [A@x <= b.reshape(-1), 0 <= x, x <= 1])
-	prob.solve()
-	assert prob.status == 'optimal', 'competitive assignment solution is not optimal'
-	solution = np.round(x.value)
-
-	assignment_vectors = solution.reshape(nunique_cat, nunique_src)
-	assert(abs(assignment_vectors.sum(1) <= 1).min() == 1)
-	assert(abs(assignment_vectors.sum(0) <= 1).min() == 1)
-
-	results = []
-	res = []
-	for i in range(nunique_cat):
-		i1 = np.where(assignment_vectors[i,:] > 0)[0]
-
-		# print('temporal diff %0.4f'%temporal_diffs[i, i1[0]])
-		# print('spatial diff %0.4f'%spatial_diffs[i, i1[0]])
-
-		if len(i1) > 0:
-			results.append(np.array([unique_cat_ind[i], unique_src_ind[i1[0]]]).reshape(1,-1))
-			res.append((cat[unique_cat_ind[i],0:4] - srcs[unique_src_ind[i1[0]],0:4]).reshape(1,-1))
-
-			print('temporal diff %0.4f'%temporal_diffs[i, i1[0]])
-			print('spatial diff %0.4f'%spatial_diffs[i, i1[0]])
-
-	results = np.vstack(results)
-	res = np.vstack(res)
-
-	return results, res, assignment_vectors, unique_cat_ind, unique_src_ind
-
-# class MagPred(nn.Module):
-# 	def __init__(self, locs, grid, ftrns1_diff, ftrns2_diff, k = 1, device = 'cpu'):
-# 		# super(MagPred, self).__init__(aggr = 'max') # node dim
-# 		super(MagPred, self).__init__() # node dim
-
-# 		## Predict magnitudes with trainable coefficients,
-# 		## and spatial-reciver biases (with knn interp k)
-
-# 		## If necessary, could make the bias parameters, and mag, epicentral, and depth parameters, all stochastic?
-# 		## Hence, the entire forward model becomes stochastic, and we optimize the entire thing with the score function.
-
-# 		# In elliptical coordinates
-# 		self.locs = locs
-# 		self.grid = grid
-# 		self.grid_cart = ftrns1_diff(grid)
-# 		self.ftrns1 = ftrns1_diff
-# 		self.ftrns2 = ftrns2_diff
-# 		self.k = k
-# 		self.device = device
-
-# 		## Setup like regular log_amp = C1 * Mag + C2 * log_dist_depths_0 + C3 * log_dist_depths + Bias (for each phase type)
-# 		self.mag_coef = nn.Parameter(torch.ones(2))
-# 		self.epicenter_spatial_coef = nn.Parameter(-torch.ones(2))
-# 		self.depth_spatial_coef = nn.Parameter(torch.zeros(2))
-# 		# self.bias = nn.Parameter(torch.zeros(locs.shape[0], grid.shape[0], 2), requires_grad = True).to(device)
-# 		self.bias = nn.Parameter(torch.zeros(grid.shape[0], locs.shape[0], 2))
-
-# 		self.grid_save = nn.Parameter(grid, requires_grad = False)
-
-# 		self.zvec = torch.Tensor([1.0,1.0,0.0]).reshape(1,-1).to(device)
-
-# 	def log_amplitudes(self, src, ind, mag, phase):
-
-# 		## Input src: n_srcs x 3;
-# 		## ind: indices into absolute locs array (can repeat, for phase types)
-# 		## log_amp (base 10), for each ind
-# 		## phase type for each ind 
-
-# 		fudge = 1.0 # add before log10, to avoid log10(0)
-
-# 		# Compute pairwise distances;
-# 		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1(src*self.zvec).unsqueeze(1) - self.ftrns1(self.locs[ind]*self.zvec).unsqueeze(0), dim = 2) + fudge)
-# 		pw_log_dist_depths = torch.log10(abs(src[:,2].view(-1,1) - self.locs[ind,2].view(1,-1)) + fudge)
-
-# 		inds = knn(self.grid_cart, self.ftrns1(src), k = self.k)[1].reshape(-1,self.k) ## for each of the second one, find indices in the first
-# 		## Can directly use torch_scatter to coalesce the data?
-
-# 		bias = self.bias[inds][:,:,ind,phase].mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
-
-# 		log_amp = mag*torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device)) + self.epicenter_spatial_coef[phase]*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
-
-# 		return log_amp
-
-# 	def batch_log_amplitudes(self, ind, mag, log_dist, log_dist_d, phase):
-
-# 		## Efficient version for training:
-# 		## Inputs are just point-wise; indices of stations,
-# 		## magnitudes of events, and phase types
-
-# 		# Compute pairwise distances;
-# 		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1(src*self.zvec).unsqueeze(1) - self.ftrns1(self.locs[ind]*self.zvec).unsqueeze(0), dim = 2))
-# 		pw_log_dist_depths = torch.log10(abs(src[:,2].view(-1,1) - self.locs[ind,2].view(1,-1)))
-
-# 		inds = knn(self.grid_cart, self.ftrns1(src), k = self.k)[1].reshape(-1,self.k) ## for each of the second one, find indices in the first
-# 		## Can directly use torch_scatter to coalesce the data?
-
-# 		bias = self.bias[inds][:,:,ind,phase].mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
-
-# 		log_amp = mag*torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device)) + self.epicenter_spatial_coef[phase]*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
-
-# 		return log_amp
-
-# 	## Note, closer between amplitudes and forward
-# 	def forward(self, src, ind, log_amp, phase):
-
-# 		## Input src: n_srcs x 3;
-# 		## ind: indices into absolute locs array (can repeat, for phase types)
-# 		## log_amp (base 10), for each ind
-# 		## phase type for each ind
-
-# 		fudge = 1.0 # add before log10, to avoid log10(0)
-
-# 		# Compute pairwise distances;
-# 		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1(src*self.zvec).unsqueeze(1) - self.ftrns1(self.locs[ind]*self.zvec).unsqueeze(0), dim = 2) + fudge)
-# 		pw_log_dist_depths = torch.log10(abs(src[:,2].view(-1,1) - self.locs[ind,2].view(1,-1)) + fudge)
-
-# 		inds = knn(self.grid_cart, self.ftrns1(src), k = self.k)[1].reshape(-1,self.k) ## for each of the second one, find indices in the first
-# 		## Can directly use torch_scatter to coalesce the data?
-
-# 		bias = self.bias[inds][:,:,ind,phase].mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
-
-# 		mag = (log_amp - self.epicenter_spatial_coef[phase]*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device))
-
-# 		return mag
-
-## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
 path_to_file = str(pathlib.Path().absolute())
+seperator = '\\' if '\\' in path_to_file else '/'
 
-## Load Files
+# Load region
+z = np.load(path_to_file + '%s_region.npz'%name_of_project)
+lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
+z.close()
 
-if '\\' in path_to_file: ## Windows
+# Load templates
+z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
+x_grids = z['x_grids']
+z.close()
 
-	# Load region
-	name_of_project = path_to_file.split('\\')[-1] ## Windows
-	z = np.load(path_to_file + '\\%s_region.npz'%name_of_project)
-	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-	z.close()
+# Load stations
+z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
+locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
+z.close()
 
-	# Load templates
-	z = np.load(path_to_file + '\\Grids\\%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-	x_grids, corr1, corr2 = z['x_grids'], z['corr1'], z['corr2']
-	z.close()
-
-	# Load stations
-	z = np.load(path_to_file + '\\%s_stations.npz'%name_of_project)
-	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-	z.close()
-
-	# Load trained model
-	z = np.load(path_to_file + '\\GNN_TrainedModels\\%s_trained_gnn_model_step_%d_ver_%d_losses.npz'%(name_of_project, n_step_load, n_ver_load))
-	training_params, graph_params, pred_params = z['training_params'], z['graph_params'], z['pred_params']
-	t_win = pred_params[0]
-	z.close()
-
-	## Load travel times
-	z = np.load(path_to_file + '\\1D_Velocity_Models_Regional\\%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
-
-else: ## Linux or Unix
-
-	# Load region
-	name_of_project = path_to_file.split('/')[-1] ## Windows
-	z = np.load(path_to_file + '/%s_region.npz'%name_of_project)
-	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-	z.close()
-
-	# Load templates
-	z = np.load(path_to_file + '/Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-	x_grids, corr1, corr2 = z['x_grids'], z['corr1'], z['corr2']
-	z.close()
-
-	# Load stations
-	z = np.load(path_to_file + '/%s_stations.npz'%name_of_project)
-	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-	z.close()
-
-	# Load trained model
-	z = np.load(path_to_file + '/GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d_losses.npz'%(name_of_project, n_step_load, n_ver_load))
-	training_params, graph_params, pred_params = z['training_params'], z['graph_params'], z['pred_params']
-	t_win = pred_params[0]
-	z.close()
-
-	## Load travel times
-	z = np.load(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
-
-locs = locs - corr1 + corr2
+## Create path to write files
+write_training_file = path_to_file + 'GNN_TrainedModels/' + name_of_project + '_'
 
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
@@ -1322,36 +154,65 @@ offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
 scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
 
-ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
-ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)  # invert ftrns1
 rbest_cuda = torch.Tensor(rbest).to(device)
 mn_cuda = torch.Tensor(mn).to(device)
-ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x) - mn_cuda).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
-ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda)
 
-Tp = z['Tp_interp']
-Ts = z['Ts_interp']
+# use_spherical = False
+if config['use_spherical'] == True:
 
-locs_ref = z['locs_ref']
-X = z['X']
-z.close()
+	earth_radius = 6371e3
+	ftrns1 = lambda x: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T # just subtract mean
+	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius) # just subtract mean
 
-x1 = np.unique(X[:,0])
-x2 = np.unique(X[:,1])
-x3 = np.unique(X[:,2])
-assert(len(x1)*len(x2)*len(x3) == X.shape[0])
+	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, e = 0.0, a = earth_radius, device = device) - mn_cuda).T).T # just subtract mean
+	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, e = 0.0, a = earth_radius, device = device) # just subtract mean
 
-## Load fixed grid for velocity models
-Xmin = X.min(0)
-Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
-Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
-N = np.array([len(x1), len(x2), len(x3)])
-X0 = np.array([locs_ref[0,0], locs_ref[0,1], 0.0]).reshape(1,-1)
+else:
 
-trv = interp_1D_velocity_model_to_3D_travel_times(X, locs_ref, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2) # .to(device)
+	earth_radius = 6378137.0
+	ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # just subtract mean
+	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn) # just subtract mean
 
-hull = ConvexHull(X)
-hull = hull.points[hull.vertices]
+	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T # just subtract mean
+	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device) # just subtract mean
+
+if config['train_travel_time_neural_network'] == False:
+
+	## Load travel times
+	z = np.load(path_to_file + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
+	
+	Tp = z['Tp_interp']
+	Ts = z['Ts_interp']
+	
+	locs_ref = z['locs_ref']
+	X = z['X']
+	z.close()
+	
+	x1 = np.unique(X[:,0])
+	x2 = np.unique(X[:,1])
+	x3 = np.unique(X[:,2])
+	assert(len(x1)*len(x2)*len(x3) == X.shape[0])
+	
+	
+	## Load fixed grid for velocity models
+	Xmin = X.min(0)
+	Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
+	Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
+	N = np.array([len(x1), len(x2), len(x3)])
+	X0 = np.array([locs_ref[0,0], locs_ref[0,1], 0.0]).reshape(1,-1)
+	
+	trv = interp_1D_velocity_model_to_3D_travel_times(X, locs_ref, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2) # .to(device)
+
+elif config['train_travel_time_neural_network'] == True:
+
+	n_ver_trv_time_model_load = 1
+	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load)
+
+if (config['use_differential_evolution_location'] == False)*(config['train_travel_time_neural_network'] == False):
+	hull = ConvexHull(X)
+	hull = hull.points[hull.vertices]
+else:
+	hull = []
 
 x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t = load_templates_region(trv, x_grids, training_params, graph_params, pred_params)
 x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])) for i in range(len(x_grids))]
@@ -1373,8 +234,6 @@ plot_on = False
 
 print('Doing 1 s steps, to avoid issue of repeating time samples')
 
-step = 2.0 # 10
-step_abs = 1
 day_len = 3600*24
 tsteps = np.arange(0, day_len, step) ## Fixed solution grid.
 tsteps_abs = np.arange(-t_win/2.0, day_len + t_win/2.0 + 1, step_abs) ## Fixed solution grid, assume 1 second
@@ -1849,11 +708,6 @@ for cnt, strs in enumerate([0]):
 
 				matched_src_arrival_indices.append(np.concatenate((matched_arv_indices[ifind].reshape(1,-1), i*np.ones(len(ifind)).reshape(1,-1), np.concatenate((Out_p_save[i][ifind].reshape(1,-1), Out_s_save[i][ifind].reshape(1,-1)), axis = 0).max(0, keepdims = True)), axis = 0))
 
-
-		## Are we adding all edges, not just edges above a threshold?
-
-		## Then, remove sources with less than min number of pick assignments.
-
 		## From this, we may not have memory issues with competitive assignment. If so,
 		## can still reduce the size of disjoint groups.
 
@@ -1867,8 +721,6 @@ for cnt, strs in enumerate([0]):
 		wp_edges = np.concatenate((matched_src_arrival_indices_p[0,:][None,:], matched_src_arrival_indices_p[1,:][None,:] + len_unique_picks, matched_src_arrival_indices_p[2,:].reshape(1,-1)), axis = 0)
 		ws_edges = np.concatenate((matched_src_arrival_indices_s[0,:][None,:], matched_src_arrival_indices_s[1,:][None,:] + len_unique_picks, matched_src_arrival_indices_s[2,:].reshape(1,-1)), axis = 0)
 		assert(np.abs(wp_edges[0:2,:] - ws_edges[0:2,:]).max() == 0)
-		# w_edges = np.copy(wp_edges)
-		# w_edges[2,:] = np.maximum(wp_edges[2,:], ws_edges[2,:])
 
 		## w_edges: first row are unique arrival indices
 		## w_edges: second row are unique src indices (with index 0 being the len(unique_picks))
@@ -1888,18 +740,12 @@ for cnt, strs in enumerate([0]):
 
 		discon_components = list(nx.connected_components(G_nx))
 		discon_components = [np.sort(np.array(list(discon_components[i])).astype('int')) for i in range(len(discon_components))]
-		# tree_srcs = cKDTree(w_edges[0:2,:].T)
-
 
 		finish_splits = False
 		max_sources = 15 ## per competitive assignment run
 		max_splits = 30
 		num_splits = 0
 		while finish_splits == False:
-
-			# trgt_clusters = [] # Store the source indices and the target clusters
-			# flag_disconnected = []
-			# cnt_clusters = 0
 
 			remove_edges_from = []
 
@@ -1945,26 +791,10 @@ for cnt, strs in enumerate([0]):
 
 					pass
 
-					# trgt_clusters.append(np.concatenate((ifind_src_inds.reshape(1,-1), cnt_clusters*np.ones(len(ifind_src_inds)).reshape(1,-1)), axis = 0))
-					# cnt_clusters = cnt_clusters + 1
-					# flag_disconnected.append(np.ones(len(ifind_src_inds)))
-
 				elif len(ifind_src_inds) > max_sources:
 
 					## Create a source-source index graph, based on how much they "share" arrivals. Then find min-cut on this graph,
 					## to seperate sources. Modify the discon_components so the sources are split.
-					## See if either can directly modify the disconnected components, or use "remove edges" on the graph to
-					## directly change disconnected components, and re-compute disconnected components (e.g., like was originally
-					## tried). Need to decide how to partition picks between either source, since don't want to duplicate sources
-					## once re-computing the solution for either seperately. Also don't want to miss events because of a bad split
-					## of picks to either group. The duplicate events may be less problematic due to the remove duplicate event
-					## script at the end.
-
-					## If disconnected graphs doesn't work, can also try finding optimal split points by counting origin times or picks
-					## in time, and finding min cuts based on minimum rates of origin times or picks
-
-					# subset_edges = G_nx.subgraph(discon_components[i])
-					# adj_matrix = nx.adjacency_matrix(subset_edges, nodelist = discon_components[i]).toarray() # nodelist = np.arange(len(discon_components[i]))).toarray()
 
 					w_slice = adj_matrix[len_arv_slice::,0:len_arv_slice] # np.zeros((len(arv_src_slice), len(arv_ind_slice)))
 					wp_slice = adj_matrix_p[len_arv_slice::,0:len_arv_slice] # np.zeros((len(arv_src_slice), len(arv_ind_slice)))
@@ -1979,8 +809,7 @@ for cnt, strs in enumerate([0]):
 
 					## Note: could concievably use MCL on these graphs, just like in original association application.
 					## May want to use MCL even on the original source-time graphs as well.
-					## Why is memory overloading for recent runs?
-
+					
 					w_src_adj = np.zeros((len(ifind_src_inds), len(ifind_src_inds)))
 
 					for j in range(len(ifind_src_inds)):
@@ -1990,35 +819,14 @@ for cnt, strs in enumerate([0]):
 							if (len(lp_src_ind[j]) > 0)*(len(lp_src_ind[k]) > 0):
 								w_src_adj[j,k] = len(list(set(iarv[lp_src_ind[j]]).intersection(iarv[lp_src_ind[k]])))
 
-					## Try to implement mincut
-
-					# inode1, inode2 = np.where(w_src_adj > 0)
-
-					# _, partition = nx.minimum_cut(G_nx.subgraph(discon_components[i]), discon_components[i][ifind_src_inds[0]], discon_components[i][ifind_src_inds[-1]])
-					# g_src = nx.Graph() ## Need to specify the number of sources
-					# g_src.add_weighted_edges_from(np.concatenate((inode1.reshape(-1,1), inode2.reshape(-1,1), w_src_adj[inode1, inode2].reshape(-1,1)), axis = 1))
-					# cutset = nx.minimum_edge_cut(g_src) # , s = 0, t = discon_components[i][ifind_src_inds[-1]]
-					# cutset = nx.minimum_edge_cut(g_src, s = 0, t = len(ifind_src_inds) - 1)
-					# cutset = list(cutset)
-
 					## Simply split sources into groups of two (need to make sure this rarely cuts off indidual sources)
 					clusters = SpectralClustering(n_clusters = 2, affinity = 'precomputed').fit_predict(w_src_adj)
 
 					i1, i2 = np.where(clusters == 0)[0], np.where(clusters == 1)[0]
 
-					# if len(i1) > 0:
-					# 	trgt_clusters.append(np.concatenate((ifind_src_inds[i1].reshape(1,-1), cnt_clusters*np.ones(len(i1)).reshape(1,-1)), axis = 0))
-					# 	cnt_clusters = cnt_clusters + 1
-
-					# if len(i2) > 0:
-					# 	trgt_clusters.append(np.concatenate((ifind_src_inds[i2].reshape(1,-1), cnt_clusters*np.ones(len(i2)).reshape(1,-1)), axis = 0))
-					# 	cnt_clusters = cnt_clusters + 1
-
 					## Optimize all (union) of picks between split sources, so can determine which edges (between arrivals and sources) to delete
 					## This should `trim' the source-arrival graphs and increase amount of disconnected components.
 
-					## Which srcs in clusters 1 need to be cut from sources in clusters 2 to disconnect graphs?
-					## Can use min-cut with the last source in cluster 1 against the first source in cluster 2.
 					# min_time1, min_time2 = srcs_refined[ifind_src_inds[i1],3].min(), srcs_refined[ifind_src_inds[i2],3].min()
 					min_time1, min_time2 = srcs_refined[arv_src_slice[i1],3].min(), srcs_refined[arv_src_slice[i2],3].min()
 
@@ -2029,7 +837,6 @@ for cnt, strs in enumerate([0]):
 						i3 = np.copy(i1)
 						i1 = np.copy(i2)
 						i2 = np.copy(i3)
-
 
 					## Instead of cut-set, find all sources that "link" across the two groups. Use these as reference sources.
 					## In bad cases, could this set also be too big?
@@ -2043,8 +850,6 @@ for cnt, strs in enumerate([0]):
 					cutset_left = np.unique(np.hstack(cutset_left))	
 					cutset_right = np.unique(np.hstack(cutset_right))	
 					cutset = np.unique(np.concatenate((cutset_left, cutset_right), axis = 0))
-
-					# cutset = nx.minimum_edge_cut(g_src, s = max(i1), t = min(i2))
 
 					## Extract the arrival-source weights from w_edges for these nodes
 					## Then "take max value" of these picks across these sources
@@ -2074,9 +879,7 @@ for cnt, strs in enumerate([0]):
 
 					if len(assignment_picks) > 0:
 						assign_picks_1 = np.unique(np.hstack(assignment_picks[0]))
-						# node_arrival_1 = arv_ind_slice[arv_indices_sliced[assign_picks_1]]
 					else:
-						# node_arrival_1 = np.array([])
 						assign_picks_1 = np.array([])
 
 					## Cut these arrivals from sources in group 1
@@ -2099,20 +902,7 @@ for cnt, strs in enumerate([0]):
 					node_src_2_repeat = np.tile(node_src_2, len(node_arrival_2_del))
 					remove_edges_from.append(np.concatenate((node_arrival_2_repeat.reshape(1,-1), node_src_2_repeat.reshape(1,-1)), axis = 0))
 
-					# for j in range(2):
-						## Delete the opposite groups (not assigned) pick edges from all graphs, w, wp, ws.
-						## Then update graphs and iterate
-
-					# if len(node_arrival_2) > 0:
-						## Remove from opposite set of sources
-
-					# if len(node_arrival_1) > 0:
-						## Remove from opposite set of sources
-
-					# flag_disconnected.append(np.zeros(len(ifind_src_inds)))
-
 					print('%d %d %d'%(len(arv_ind_slice), sum(clusters == 0), sum(clusters == 1)))
-
 
 			if len(remove_edges_from) > 0:
 				remove_edges_from = np.hstack(remove_edges_from)
@@ -2123,8 +913,6 @@ for cnt, strs in enumerate([0]):
 				Gs_nx.remove_edges_from(remove_edges_from.T)
 
 			num_splits = num_splits + 1
-
-
 
 		srcs_retained = []
 		cnt_src = 0
@@ -2143,8 +931,6 @@ for cnt, strs in enumerate([0]):
 			subset_edges = Gs_nx.subgraph(discon_components[i])
 			adj_matrix_s = nx.adjacency_matrix(subset_edges, nodelist = discon_components[i]).toarray() # nodelist = np.arange(len(discon_components[i]))).toarray()
 
-			# ifind_matched_inds = tree_srcs.query(w_edges[0:2,discon_components[i]].T)[1]
-
 			## Apply CA to the subset of sources/picks in a disconnected component
 			ifind_src_inds = np.where(discon_components[i] > (len_unique_picks - 1))[0]
 			ifind_arv_inds = np.delete(np.arange(len(discon_components[i])), ifind_src_inds, axis = 0)
@@ -2161,11 +947,6 @@ for cnt, strs in enumerate([0]):
 
 			## Now do assignments, on the stacked association predictions (over grids)
 
-			# ipick, tpick = Save_picks[i][:,1].astype('int'), Save_picks[i][:,0]
-
-			# wp = np.zeros((1,len(tpick))); wp[0,:] = Out_p_save[i]
-			# ws = np.zeros((1,len(tpick))); ws[0,:] = Out_s_save[i]
-
 			if (len(ipick) == 0) or (len(arv_src_slice) == 0):
 				continue
 
@@ -2176,21 +957,12 @@ for cnt, strs in enumerate([0]):
 			assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
 
 			if len(srcs_active) > 0:
-				# srcs_retained.append(arv_src_slice[srcs_active])
 
 				for j in range(len(srcs_active)):
 
 
 					srcs_retained.append(srcs_refined[arv_src_slice[srcs_active[j]]].reshape(1,-1))
 
-
-					# ind_p = ipick[assignments[0][0]]
-					# ind_s = ipick[assignments[0][1]]
-					# arv_p = tpick[assignments[0][0]]
-					# arv_s = tpick[assignments[0][1]]
-
-					# Assigned_picks.append(np.concatenate((arv_p.reshape(-1,1) + srcs_refined[i,3], ind_p.reshape(-1,1), np.zeros(len(assignments[0][0])).reshape(-1,1), i*np.ones(len(assignments[0][0])).reshape(-1,1)), axis = 1))
-					# Assigned_picks.append(np.concatenate((arv_s.reshape(-1,1) + srcs_refined[i,3], ind_s.reshape(-1,1), np.ones(len(assignments[0][1])).reshape(-1,1), i*np.ones(len(assignments[0][1])).reshape(-1,1)), axis = 1))
 					p_assign = np.concatenate((unique_picks[arv_ind_slice[assignments[j][0]],:], cnt_src*np.ones(len(assignments[j][0])).reshape(-1,1)), axis = 1) ## Note: could concatenate ip_picks, if desired here, so all picks in Picks_P lists know the index of the absolute pick index.
 					s_assign = np.concatenate((unique_picks[arv_ind_slice[assignments[j][1]],:], cnt_src*np.ones(len(assignments[j][1])).reshape(-1,1)), axis = 1)
 					p_assign_perm = np.copy(p_assign)
@@ -2204,7 +976,6 @@ for cnt, strs in enumerate([0]):
 
 					cnt_src += 1
 
-
 			print('%d : %d of %d'%(i, len(srcs_active), len(arv_src_slice)))
 
 			## Find unique set of arrival indices, write to subset of matrix weights
@@ -2214,10 +985,6 @@ for cnt, strs in enumerate([0]):
 			## of picks per event, and (ii). It still identifies "good" fit and "bad" fit source-arrival pairs,
 			## based on the source-arrival weights.
 
-			print('add relocation!')
-
-			## Implemente CA, to deal with mixing events (nearby in time, with shared arrival association assignments)
-
 		srcs_refined = np.vstack(srcs_retained)
 
 	# Count number of P and S picks
@@ -2226,10 +993,17 @@ for cnt, strs in enumerate([0]):
 		cnt_p[i] = Picks_P[i].shape[0]
 		cnt_s[i] = Picks_S[i].shape[0]
 
-
 	srcs_trv = []
 	for i in range(srcs_refined.shape[0]):
-		xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use, Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int'), lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
+
+		if use_differential_evolution_location == True:
+
+			xmle, logprob = differential_evolution_location(trv, locs_use, Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int'), lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2)
+		
+		else:
+		
+			xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use, Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int'), lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
+		
 		if np.isnan(xmle).sum() > 0:
 			srcs_trv.append(np.nan*np.ones((1, 4)))
 			continue
@@ -2240,7 +1014,6 @@ for cnt, strs in enumerate([0]):
 
 		res_p = pred_out[0,ind_p,0] - arv_p
 		res_s = pred_out[0,ind_s,1] - arv_s
-
 
 		mean_shift = 0.0
 		cnt_phases = 0
@@ -2262,71 +1035,68 @@ for cnt, strs in enumerate([0]):
 
 	## Compute magnitudes.
 
-	mag_r = np.nan*np.ones(srcs_trv.shape[0])
-	mag_trv = np.nan*np.ones(srcs_trv.shape[0])
+	if compute_magnitudes == True:
+	
+		mag_r = []
+		mag_trv = []
+		quant_range = [0.1, 0.9]
+	
+		for i in range(srcs_refined.shape[0]):
 
-	# mag_r = []
-	# mag_trv = []
-	# quant_range = [0.1, 0.9]
+			if (len(Picks_P[i]) + len(Picks_S[i])) > 0: # Does this fail on one pick?
 
-	# if load_magnitude_model == True:
+				ind_p = torch.Tensor(Picks_P[i][:,1]).long()
+				ind_s = torch.Tensor(Picks_S[i][:,1]).long()
+				log_amp_p = torch.Tensor(np.log10(Picks_P[i][:,2]))
+				log_amp_s = torch.Tensor(np.log10(Picks_S[i][:,2]))
 
-	# 	for i in range(srcs_refined.shape[0]):
+				src_r_val = torch.Tensor(srcs_refined[i,0:3].reshape(-1,3))
+				src_trv_val = torch.Tensor(srcs_trv[i,0:3].reshape(-1,3))
 
-	# 		if (len(Picks_P[i]) + len(Picks_S[i])) > 0: # Does this fail on one pick?
+				ind_val = torch.cat((ind_p, ind_s), dim = 0)
+				log_amp_val = torch.cat((log_amp_p, log_amp_s), dim = 0)
 
-	# 			ind_p = torch.Tensor(Picks_P[i][:,1]).long()
-	# 			ind_s = torch.Tensor(Picks_S[i][:,1]).long()
-	# 			log_amp_p = torch.Tensor(np.log10(Picks_P[i][:,2]))
-	# 			log_amp_s = torch.Tensor(np.log10(Picks_S[i][:,2]))
+				log_amp_val[log_amp_val < -2.0] = -torch.Tensor([np.inf]) # This measurments are artifacts
 
-	# 			src_r_val = torch.Tensor(srcs_refined[i,0:3].reshape(-1,3))
-	# 			src_trv_val = torch.Tensor(srcs_trv[i,0:3].reshape(-1,3))
+				phase_val = torch.Tensor(np.concatenate((np.zeros(len(Picks_P[i])), np.ones(len(Picks_S[i]))), axis = 0)).long()
 
-	# 			ind_val = torch.cat((ind_p, ind_s), dim = 0)
-	# 			log_amp_val = torch.cat((log_amp_p, log_amp_s), dim = 0)
+				inot_zero = np.where(np.isinf(log_amp_val.cpu().detach().numpy()) == 0)[0]
+				if len(inot_zero) == 0:
+					mag_r.append(np.nan)
+					mag_trv.append(np.nan)
+					continue
 
-	# 			log_amp_val[log_amp_val < -2.0] = -torch.Tensor([np.inf]) # This measurments are artifacts
-
-	# 			phase_val = torch.Tensor(np.concatenate((np.zeros(len(Picks_P[i])), np.ones(len(Picks_S[i]))), axis = 0)).long()
-
-	# 			inot_zero = np.where(np.isinf(log_amp_val.cpu().detach().numpy()) == 0)[0]
-	# 			if len(inot_zero) == 0:
-	# 				mag_r.append(np.nan)
-	# 				mag_trv.append(np.nan)
-	# 				continue
-
-	# 			pred_r_val = mags(torch.Tensor(srcs_refined[i,0:3]).reshape(1,-1), ind_val[inot_zero], log_amp_val[inot_zero], phase_val[inot_zero]).cpu().detach().numpy().reshape(-1)
-	# 			pred_trv_val = mags(torch.Tensor(srcs_trv[i,0:3]).reshape(1,-1), ind_val[inot_zero], log_amp_val[inot_zero], phase_val[inot_zero]).cpu().detach().numpy().reshape(-1)
+				pred_r_val = mags(torch.Tensor(srcs_refined[i,0:3]).reshape(1,-1), ind_val[inot_zero], log_amp_val[inot_zero], phase_val[inot_zero]).cpu().detach().numpy().reshape(-1)
+				pred_trv_val = mags(torch.Tensor(srcs_trv[i,0:3]).reshape(1,-1), ind_val[inot_zero], log_amp_val[inot_zero], phase_val[inot_zero]).cpu().detach().numpy().reshape(-1)
 
 
-	# 			if len(ind_val) > 3:
-	# 				qnt_vals = np.quantile(pred_r_val, [quant_range[0], quant_range[1]])
-	# 				iwhere_val = np.where((pred_r_val > qnt_vals[0])*(pred_r_val < qnt_vals[1]))[0]
-	# 				mag_r.append(np.median(pred_r_val[iwhere_val]))
+				if len(ind_val) > 3:
+					qnt_vals = np.quantile(pred_r_val, [quant_range[0], quant_range[1]])
+					iwhere_val = np.where((pred_r_val > qnt_vals[0])*(pred_r_val < qnt_vals[1]))[0]
+					mag_r.append(np.median(pred_r_val[iwhere_val]))
 
-	# 				qnt_vals = np.quantile(pred_trv_val, [quant_range[0], quant_range[1]])
-	# 				iwhere_val = np.where((pred_trv_val > qnt_vals[0])*(pred_trv_val < qnt_vals[1]))[0]
-	# 				mag_trv.append(np.median(pred_trv_val[iwhere_val]))
+					qnt_vals = np.quantile(pred_trv_val, [quant_range[0], quant_range[1]])
+					iwhere_val = np.where((pred_trv_val > qnt_vals[0])*(pred_trv_val < qnt_vals[1]))[0]
+					mag_trv.append(np.median(pred_trv_val[iwhere_val]))
 
-	# 			else:
+				else:
 
-	# 				mag_r.append(np.median(pred_r_val))
-	# 				mag_trv.append(np.median(pred_trv_val))
+					mag_r.append(np.median(pred_r_val))
+					mag_trv.append(np.median(pred_trv_val))
 
-	# 		else:
+			else:
 
-	# 			# No picks to estimate magnitude.
-	# 			mag_r.append(np.nan)
-	# 			mag_trv.append(np.nan)
+				# No picks to estimate magnitude.
+				mag_r.append(np.nan)
+				mag_trv.append(np.nan)
 
-	# 	mag_r = np.hstack(mag_r)
-	# 	mag_trv = np.hstack(mag_trv)
+		mag_r = np.hstack(mag_r)
+		mag_trv = np.hstack(mag_trv)
 
-	# else:
+	else:
 
-	# 	mag_r = np.nan*np.ones(srcs_refined.shape[0])
-	# 	mag_trv = np.nan*np.ones(srcs_refined.shape[0])
+		mag_r = np.nan*np.ones(srcs_trv.shape[0])
+		mag_trv = np.nan*np.ones(srcs_trv.shape[0])		
 
 	trv_out1 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
 	# trv_out2 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[:,0:3])).cpu().detach().numpy() + srcs_trv[:,3].reshape(-1,1,1) 
@@ -2335,10 +1105,15 @@ for cnt, strs in enumerate([0]):
 	ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
 	trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 
-	srcs_refined[:,0:3] = srcs_refined[:,0:3] + corr1 - corr2
-	srcs_trv[:,0:3] = srcs_trv[:,0:3] + corr1 - corr2
+	if ('corr1' in globals())*('corr2' in globals()):
+		# corr1 and corr2 can be used to "shift" a processing region
+		# into the physical space of a pre-trained model for processing,
+		# and then un-shifting the solution, so that earthquakes are obtained
+		# using a pre-trained model in a new area.
+		srcs_refined[:,0:3] = srcs_refined[:,0:3] + corr1 - corr2
+		srcs_trv[:,0:3] = srcs_trv[:,0:3] + corr1 - corr2
 
-	extra_save = True
+	extra_save = False
 	save_on = True
 	if save_on == True:
 
