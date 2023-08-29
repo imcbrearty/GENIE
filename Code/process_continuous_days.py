@@ -1133,45 +1133,42 @@ for cnt, strs in enumerate([0]):
 	save_on = True
 	if save_on == True:
 
-		if '\\' in path_to_file:
-			ext_save = path_to_file + '\\Catalog\\%d\\%s_results_continuous_days_%d_%d_%d_ver_%d.hdf5'%(yr, name_of_project, date[0], date[1], date[2], n_save_ver)
-		elif '/' in path_to_file:
-			ext_save = path_to_file + '/Catalog/%d/%s_results_continuous_days_%d_%d_%d_ver_%d.hdf5'%(yr, name_of_project, date[0], date[1], date[2], n_save_ver)
+		ext_save = path_to_file + 'Catalog' + seperator + '%d'%yr + seperator + '%s_results_continuous_days_%d_%d_%d_ver_%d.hdf5'%(name_of_project, date[0], date[1], date[2], n_save_ver)
 
 		file_save = h5py.File(ext_save, 'w')
 
 		julday = int((UTCDateTime(date[0], date[1], date[2]) - UTCDateTime(date[0], 1, 1))/(day_len)) + 1
 
-		file_save['%d_%d_%d_%d_P'%(date[0], date[1], date[2], julday)] = P
-		file_save['%d_%d_%d_%d_srcs'%(date[0], date[1], date[2], julday)] = srcs_refined
-		file_save['%d_%d_%d_%d_srcs_trv'%(date[0], date[1], date[2], julday)] = srcs_trv
-		file_save['%d_%d_%d_%d_locs_use'%(date[0], date[1], date[2], julday)] = locs_use
-		file_save['%d_%d_%d_%d_ind_use'%(date[0], date[1], date[2], julday)] = ind_use
-		file_save['%d_%d_%d_%d_date'%(date[0], date[1], date[2], julday)] = date
+		file_save['P'] = P
+		file_save['srcs'] = srcs_refined
+		file_save['srcs_trv'] = srcs_trv
+		file_save['locs_use'] = locs_use
+		file_save['ind_use'] = ind_use
+		file_save['date'] = np.array([date[0], date[1], date[2], julday])
 		# file_save['%d_%d_%d_%d_res1'%(date[0], date[1], date[2], julday)] = res1
 		# file_save['%d_%d_%d_%d_res2'%(date[0], date[1], date[2], julday)] = res2
 		# file_save['%d_%d_%d_%d_izmatch1'%(date[0], date[1], date[2], julday)] = matches1
 		# file_save['%d_%d_%d_%d_izmatch2'%(date[0], date[1], date[2], julday)] = matches2
-		file_save['%d_%d_%d_%d_cnt_p'%(date[0], date[1], date[2], julday)] = cnt_p
-		file_save['%d_%d_%d_%d_cnt_s'%(date[0], date[1], date[2], julday)] = cnt_s
-		file_save['%d_%d_%d_%d_tsteps_abs'%(date[0], date[1], date[2], julday)] = tsteps_abs
-		file_save['%d_%d_%d_%d_X_query'%(date[0], date[1], date[2], julday)] = X_query
-		file_save['%d_%d_%d_%d_mag_r'%(date[0], date[1], date[2], julday)] = mag_r
-		file_save['%d_%d_%d_%d_mag_trv'%(date[0], date[1], date[2], julday)] = mag_trv
-		file_save['%d_%d_%d_%d_x_grid_ind_list'%(date[0], date[1], date[2], julday)] = x_grid_ind_list
-		file_save['%d_%d_%d_%d_x_grid_ind_list_1'%(date[0], date[1], date[2], julday)] = x_grid_ind_list_1
-		file_save['%d_%d_%d_%d_trv_out1'%(date[0], date[1], date[2], julday)] = trv_out1
-		file_save['%d_%d_%d_%d_trv_out2'%(date[0], date[1], date[2], julday)] = trv_out2
+		file_save['cnt_p'] = cnt_p
+		file_save['cnt_s'] = cnt_s
+		file_save['tsteps_abs'] = tsteps_abs
+		file_save['X_query'] = X_query
+		file_save['mag_r'] = mag_r
+		file_save['mag_trv'] = mag_trv
+		file_save['x_grid_ind_list'] = x_grid_ind_list
+		file_save['x_grid_ind_list_1'] = x_grid_ind_list_1
+		file_save['trv_out1'] = trv_out1
+		file_save['trv_out2'] = trv_out2
 
 		if extra_save == False: # mem_save == True implies don't save these fields
-			file_save['%d_%d_%d_%d_Out'%(date[0], date[1], date[2], julday)] = Out_2_sparse ## Is this heavy?
+			file_save['Out'] = Out_2_sparse ## Is this heavy?
 
 		for j in range(len(Picks_P)):
 
-			file_save['%d_%d_%d_%d_Picks/%d_Picks_P'%(date[0], date[1], date[2], julday, j)] = Picks_P[j] ## Since these are lists, but they be appended seperatley?
-			file_save['%d_%d_%d_%d_Picks/%d_Picks_S'%(date[0], date[1], date[2], julday, j)] = Picks_S[j]
-			file_save['%d_%d_%d_%d_Picks/%d_Picks_P_perm'%(date[0], date[1], date[2], julday, j)] = Picks_P_perm[j]
-			file_save['%d_%d_%d_%d_Picks/%d_Picks_S_perm'%(date[0], date[1], date[2], julday, j)] = Picks_S_perm[j]
+			file_save['Picks/%d_Picks_P'%(j)] = Picks_P[j] ## Since these are lists, but they be appended seperatley?
+			file_save['Picks/%d_Picks_S'%(j)] = Picks_S[j]
+			file_save['Picks/%d_Picks_P_perm'%(j)] = Picks_P_perm[j]
+			file_save['Picks/%d_Picks_S_perm'%(j)] = Picks_S_perm[j]
 
 		success_count = success_count + 1
 		file_save.close()
