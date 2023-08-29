@@ -652,8 +652,14 @@ def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut 
 
 	return P_l, ind_use # Note: this permutation of locs_use.
 
-def download_catalog(lat_range, lon_range, min_magnitude, startime, endtime, t0 = UTCDateTime(2000, 1, 1), client = 'NCEDC', include_arrivals = False):
+def download_catalog(lat_range, lon_range, min_magnitude, startime, endtime, t0 = None, client = 'NCEDC', include_arrivals = False):
 
+	from obspy.core import UTCDateTime
+	from obspy.clients.fdsn import Client	
+	
+	if t0 is None:
+		t0 = UTCDateTime(2000, 1, 1)
+	
 	client = Client(client)
 	cat_l = client.get_events(starttime = startime, endtime = endtime, minlatitude = lat_range[0], maxlatitude = lat_range[1], minlongitude = lon_range[0], maxlongitude = lon_range[1], minmagnitude = min_magnitude, includearrivals = include_arrivals, orderby = 'time-asc')
 
