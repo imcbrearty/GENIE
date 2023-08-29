@@ -651,6 +651,23 @@ def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut 
 	z.close()
 
 	return P_l, ind_use # Note: this permutation of locs_use.
+
+def download_catalog(lat_range, lon_range, min_magnitude, startime, endtime, t0 = UTCDateTime(2000, 1, 1), client = 'NCEDC', include_arrivals = False):
+
+	client = Client(client)
+	cat_l = client.get_events(starttime = startime, endtime = endtime, minlatitude = lat_range[0], maxlatitude = lat_range[1], minlongitude = lon_range[0], maxlongitude = lon_range[1], minmagnitude = min_magnitude, includearrivals = include_arrivals, orderby = 'time-asc')
+
+	# t0 = UTCDateTime(2021,4,1) ## zero time, for relative processing.
+	time = np.array([cat_l[i].origins[0].time - t0 for i in np.arange(len(cat_l))])
+	latitude = np.array([cat_l[i].origins[0].latitude for i in np.arange(len(cat_l))])
+	longitude = np.array([cat_l[i].origins[0].longitude for i in np.arange(len(cat_l))])
+	depth = np.array([cat_l[i].origins[0].depth for i in np.arange(len(cat_l))])
+	mag = np.array([cat_l[i].magnitudes[0].mag for i in np.arange(len(cat_l))])
+	event_type = np.array([cat_l[i].event_type for i in np.arange(len(cat_l))])
+
+	cat = np.hstack([latitude.reshape(-1,1), longitude.reshape(-1,1), -1.0*depth.reshape(-1,1), time.reshape(-1,1), mag.reshape(-1,1)])
+
+	return cat, cat_l, event_type
 	
 def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stations, locs_slice, data, ind, ext_save, depth_window = 10e3, deg_window = 1.0, thresh_source = 0.2, thresh_picks = 0.2, n_step = 0, n_ver = 1, min_norm_val = 0.3, close_plots = True):
 
