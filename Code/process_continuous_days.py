@@ -57,7 +57,7 @@ from module import *
 ## Need to update how extract_inputs_from_data_fixed_grids_with_phase_type uses a variable t_win parammeter, 
 ## and also adding inputs of training_params, graph_params, pred_params
 
-# The first system argument (after the file name) is an integer used to select which
+# The first system argument (after the file name; e.g., argvs[1]) is an integer used to select which
 # day in the %s_process_days_list_ver_%d.txt file each call of this script will compute
 argvs = sys.argv
 if len(argvs) < 2: 
@@ -65,6 +65,9 @@ if len(argvs) < 2:
 
 if len(argvs) < 3:
 	argvs.append(0)
+# This index can also be incremented by the larger value: argvs[2]*offset_increment (defined in process_config)
+# to help process very large pick lists with a combinations of using job arrays
+# to increment argvs[1], and seperate sbatch scripts incrementing argvs[2]
 
 day_select = int(argvs[1])
 offset_select = int(argvs[2])
