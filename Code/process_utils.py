@@ -657,6 +657,44 @@ def competitive_assignment_split(w, sta_inds, cost, min_val = 0.02, restrict = N
 
 	return assignments, sources_active
 
+def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, sig_t = 1.5, weight = [1.0,1.0], popsize = 100, maxiter = 1000, disp = True, vectorized = True):
+
+	if (len(arv_p) + len(arv_s)) == 0:
+		return np.nan*np.ones((1,3)), np.nan, []
+
+	def likelihood_estimate(x):
+
+		# x = x.reshape(-1,3)
+		if x.ndim == 1:
+			x = x.reshape(-1,1)
+
+		pred = trv(torch.Tensor(locs_use).to(device), torch.Tensor(x.T).to(device)).cpu().detach().numpy()
+		# sig_arv = np.concatenate((f_linear(pred[:,ind_p,0]), f_linear(pred[:,ind_s,1])), axis = 1)
+		# det_vals = np.prod(sig_arv, axis = 1) # *np.prod(sig_s, axis = 1)
+		# det_vals = 0.0 # np.prod(sig_p, axis = 1) # *np.prod(sig_s, axis = 1)
+		pred_vals = remove_mean(np.concatenate((pred[:,ind_p,0], pred[:,ind_s,1]), axis = 1), 1)
+		logprob = -0.5*np.sum(((trgt - pred_vals)**2)*weight_vec/(f_linear(pred_vals)**2), axis = 1)/n_picks
+
+		return -1.0*logprob
+
+	n_loc = locs_use.shape[1]
+	n_picks = len(arv_p) + len(arv_s)
+	trgt = remove_mean(np.concatenate((arv_p, arv_s), axis = 0).reshape(1, -1), 1)
+	if len(weight) == n_picks:
+		weight_vec = np.copy(np.array(weight)).reshape(1,-1)
+	else:
+		weight_vec = np.concatenate((weight[0]*np.ones(len(ind_p)), weight[1]*np.ones(len(ind_s))), axis = 0).reshape(1,-1)
+
+	print(weight_vec)
+
+	## Make sig_t adaptive to average distance of stations..
+	f_linear = lambda t: sig_t*np.ones(t.shape)
+
+	bounds = [(lat_range[0], lat_range[1]), (lon_range[0], lon_range[1]), (depth_range[0], depth_range[1])]
+	optim = scipy.optimize.differential_evolution(likelihood_estimate, bounds, popsize = popsize, maxiter = maxiter, disp = disp, vectorized = vectorized)
+
+	return optim.x, likelihood_estimate(optim.x)
+
 def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
 
 	if (len(arv_p) + len(arv_s)) == 0:
