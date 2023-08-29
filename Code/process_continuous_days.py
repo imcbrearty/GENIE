@@ -57,11 +57,11 @@ from module import *
 ## Need to update how extract_inputs_from_data_fixed_grids_with_phase_type uses a variable t_win parammeter, 
 ## and also adding inputs of training_params, graph_params, pred_params
 
-### Settings: ###
-
+# The first system argument (after the file name) is an integer used to select which
+# day in the %s_process_days_list_ver_%d.txt file each call of this script will compute
 argvs = sys.argv
-if len(argvs) < 2:
-	argvs.append(0) # choose day 0, if no other day chosen.
+if len(argvs) < 2: 
+	argvs.append(0) 
 
 if len(argvs) < 3:
 	argvs.append(0)
@@ -71,6 +71,8 @@ offset_select = int(argvs[2])
 
 print('name of program is %s'%argvs[0])
 print('day is %s'%argvs[1])
+
+### Settings: ###
 
 with open('process_config.yaml', 'r') as file:
     process_config = yaml.safe_load(file)
