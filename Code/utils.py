@@ -538,7 +538,7 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 
 	return trv
 
-def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, thresh_source = 0.2, thresh_picks = 0.2, n_step = 0, n_ver = 1, min_norm_val = 0.3, close_plots = True):
+def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stations, locs_slice, data, ind, ext_save, depth_window = 10e3, deg_window = 1.0, thresh_source = 0.2, thresh_picks = 0.2, n_step = 0, n_ver = 1, min_norm_val = 0.3, close_plots = True):
 
 	from matplotlib.colors import Normalize
 
@@ -558,49 +558,49 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 	if raw_picks_permuted == True:
 
 		fig, ax = plt.subplots(1, figsize = [8,5], sharex = True)
-		ax.scatter(lp_times[ind], lp_stations[ind])
+		ax.scatter(lp_times, lp_stations)
 		fig.savefig(ext_save + 'predictions_raw_picks_sorted_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 	map_view_all_depths = True
 	if map_view_all_depths == True:
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
-		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), min_norm_val))
-		ax[0].scatter(X_query[ind][:,1], X_query[ind][:,0], c = Lbls_query[ind][:,5], norm = norm_scale)
-		ax[1].scatter(X_query[ind][:,1], X_query[ind][:,0], c = out[1][:,5,0].cpu().detach().numpy(), norm = norm_scale)
+		norm_scale = Normalize(0, np.maximum(lbls_query[:,5].max(), min_norm_val))
+		ax[0].scatter(x_query[:,1], x_query[:,0], c = lbls_query[:,5], norm = norm_scale)
+		ax[1].scatter(x_query[:,1], x_query[:,0], c = out[1][:,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'predictions_map_view_all_depths_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 	cross_section_fixed_depth = True
 	if cross_section_fixed_depth == True:
 
-		i1 = np.where(np.abs(X_query[ind][:,2] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),2]) < depth_window)[0]
+		i1 = np.where(np.abs(x_query[:,2] - x_query[np.argmax(lbls_query[:,5]),2]) < depth_window)[0]
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
-		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), min_norm_val))
-		ax[0].scatter(X_query[ind][i1,1], X_query[ind][i1,0], c = Lbls_query[ind][i1,5], norm = norm_scale)
-		ax[1].scatter(X_query[ind][i1,1], X_query[ind][i1,0], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
+		norm_scale = Normalize(0, np.maximum(lbls_query[:,5].max(), min_norm_val))
+		ax[0].scatter(x_query[i1,1], x_query[i1,0], c = lbls_query[i1,5], norm = norm_scale)
+		ax[1].scatter(x_query[i1,1], x_query[i1,0], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'predictions_map_view_fixed_depth_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 	cross_section_fixed_lat = True
 	if cross_section_fixed_lat == True:
 
-		i1 = np.where(np.abs(X_query[ind][:,0] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),0]) < deg_window)[0]
+		i1 = np.where(np.abs(x_query[:,0] - x_query[np.argmax(lbls_query[:,5]),0]) < deg_window)[0]
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
-		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), min_norm_val))
-		ax[0].scatter(X_query[ind][i1,1], X_query[ind][i1,2], c = Lbls_query[ind][i1,5], norm = norm_scale)
-		ax[1].scatter(X_query[ind][i1,1], X_query[ind][i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
+		norm_scale = Normalize(0, np.maximum(lbls_query[:,5].max(), min_norm_val))
+		ax[0].scatter(x_query[i1,1], x_query[i1,2], c = lbls_query[i1,5], norm = norm_scale)
+		ax[1].scatter(x_query[i1,1], x_query[i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'predictions_cross_section_fixed_lat_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 	cross_section_fixed_lon = True
 	if cross_section_fixed_lon == True:
 
-		i1 = np.where(np.abs(X_query[ind][:,1] - X_query[ind][np.argmax(Lbls_query[ind][:,5]),1]) < deg_window)[0]
+		i1 = np.where(np.abs(x_query[:,1] - x_query[np.argmax(lbls_query[:,5]),1]) < deg_window)[0]
 
 		fig, ax = plt.subplots(1,2, figsize = [12,8])
-		norm_scale = Normalize(0, np.maximum(Lbls_query[ind][:,5].max(), min_norm_val))
-		ax[0].scatter(X_query[ind][i1,0], X_query[ind][i1,2], c = Lbls_query[ind][i1,5], norm = norm_scale)
-		ax[1].scatter(X_query[ind][i1,0], X_query[ind][i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
+		norm_scale = Normalize(0, np.maximum(lbls_query[:,5].max(), min_norm_val))
+		ax[0].scatter(x_query[i1,0], x_query[i1,2], c = lbls_query[i1,5], norm = norm_scale)
+		ax[1].scatter(x_query[i1,0], x_query[i1,2], c = out[1][i1,5,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'predictions_cross_section_fixed_lon_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 	associated_p_and_s_phases = True
@@ -610,10 +610,10 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 		norm_scale = Normalize(0, pick_lbls[ind_max,:,:].max().cpu().detach().numpy())
 
 		fig, ax = plt.subplots(2,2, figsize = [12,10])
-		ax[0,0].scatter(lp_times[ind], lp_stations[ind], c = pick_lbls[ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
-		ax[0,1].scatter(lp_times[ind], lp_stations[ind], c = pick_lbls[ind_max,:,1].cpu().detach().numpy(), norm = norm_scale)
-		ax[1,0].scatter(lp_times[ind], lp_stations[ind], c = out[2][ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
-		ax[1,1].scatter(lp_times[ind], lp_stations[ind], c = out[3][ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
+		ax[0,0].scatter(lp_times, lp_stations, c = pick_lbls[ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
+		ax[0,1].scatter(lp_times, lp_stations, c = pick_lbls[ind_max,:,1].cpu().detach().numpy(), norm = norm_scale)
+		ax[1,0].scatter(lp_times, lp_stations, c = out[2][ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
+		ax[1,1].scatter(lp_times, lp_stations, c = out[3][ind_max,:,0].cpu().detach().numpy(), norm = norm_scale)
 		fig.savefig(ext_save + 'predictions_associated_p_and_s_phases_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 
 	## Add plot to show multiple nearby source association predictions (using different colors for either source)
@@ -621,24 +621,24 @@ def visualize_predictions(ind, ext_save, depth_window = 10e3, deg_window = 1.0, 
 	map_view_associated_stations = True
 	if map_view_associated_stations == True:
 
-		itrue_sources = np.where(Lbls_query[ind][:,5] > thresh_source)[0]
+		itrue_sources = np.where(lbls_query[:,5] > thresh_source)[0]
 		ipred_sources = np.where(out[1][:,5].cpu().detach().numpy() > thresh_source)[0]
 		ind_max = np.argmax(pick_lbls.sum(2).sum(1).cpu().detach().numpy())
 
 		itrue_picks = np.where(pick_lbls[ind_max,:,:].cpu().detach().numpy().max(1) > thresh_picks)[0]
 		ipred_picks = np.where(np.concatenate((out[2][ind_max,:,0].cpu().detach().numpy().reshape(1,-1), out[3][ind_max,:,0].cpu().detach().numpy().reshape(1,-1)), axis = 0).max(0) > thresh_picks)[0]
 
-		itrue_picks = lp_stations[ind][itrue_picks.astype('int')].astype('int')
-		ipred_picks = lp_stations[ind][ipred_picks.astype('int')].astype('int')
+		itrue_picks = lp_stations[itrue_picks.astype('int')].astype('int')
+		ipred_picks = lp_stations[ipred_picks.astype('int')].astype('int')
 
 		fig, ax = plt.subplots(1,2, sharex = True, sharey = True)
-		ax[0].scatter(X_query[ind][itrue_sources,1], X_query[ind][itrue_sources,0], c = Lbls_query[ind][itrue_sources,5], alpha = 0.2)
-		ax[0].scatter(Locs[ind][:,1], Locs[ind][:,0], c = 'grey', marker = '^')
-		ax[0].scatter(Locs[ind][itrue_picks,1], Locs[ind][itrue_picks,0], c = 'red', marker = '^')
+		ax[0].scatter(x_query[itrue_sources,1], x_query[itrue_sources,0], c = lbls_query[itrue_sources,5], alpha = 0.2)
+		ax[0].scatter(locs_slice[:,1], locs_slice[:,0], c = 'grey', marker = '^')
+		ax[0].scatter(locs_slice[itrue_picks,1], locs_slice[itrue_picks,0], c = 'red', marker = '^')
 
-		ax[1].scatter(X_query[ind][ipred_sources,1], X_query[ind][ipred_sources,0], c = out[1][ipred_sources,5,0].cpu().detach().numpy(), alpha = 0.2)
-		ax[1].scatter(Locs[ind][:,1], Locs[ind][:,0], c = 'grey', marker = '^')
-		ax[1].scatter(Locs[ind][ipred_picks,1], Locs[ind][ipred_picks,0], c = 'red', marker = '^')
+		ax[1].scatter(x_query[ipred_sources,1], x_query[ipred_sources,0], c = out[1][ipred_sources,5,0].cpu().detach().numpy(), alpha = 0.2)
+		ax[1].scatter(locs_slice[:,1], locs_slice[:,0], c = 'grey', marker = '^')
+		ax[1].scatter(locs_slice[ipred_picks,1], locs_slice[ipred_picks,0], c = 'red', marker = '^')
 		fig.savefig(ext_save + 'predictions_map_view_associated_phases_%d_step_%d_ver_%d.png'%(ind, n_step, n_ver), bbox_inches = 'tight', pad_inches = 0.2)
 	
 	if close_plots == True:
