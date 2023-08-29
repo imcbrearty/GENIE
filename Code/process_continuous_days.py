@@ -133,9 +133,14 @@ path_to_file = path_to_file + seperator
 # Load day to process
 z = open(path_to_file + '%s_process_days_list_ver_%d.txt', 'r')
 lines = z.readlines()
-date = line[day_select].split('/')
-date = np.array([int(date[0]), int(date[1]), int(date[2])])
 z.close()
+if '/' in date[day_select]:
+	date = line[day_select].split('/')
+elif ',' in date[day_select]:
+	date = line[day_select].split(',')
+else:
+	date = line[day_select].split(' ')	
+date = np.array([int(date[0]), int(date[1]), int(date[2])])
 
 # Load region
 z = np.load(path_to_file + '%s_region.npz'%name_of_project)
