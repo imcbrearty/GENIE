@@ -538,6 +538,38 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 
 	return trv
 
+def load_templates_region(trv, x_grids, training_params, graph_params, pred_params, dt_embed = 1.0):
+
+	k_sta_edges, k_spc_edges, k_time_edges = graph_params
+
+	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
+
+	x_grids_trv = []
+	x_grids_trv_pointers_p = []
+	x_grids_trv_pointers_s = []
+	x_grids_trv_refs = []
+	x_grids_edges = []
+
+	for i in range(len(x_grids)):
+
+		trv_out = trv(torch.Tensor(locs), torch.Tensor(x_grids[i]))
+		x_grids_trv.append(trv_out.cpu().detach().numpy())
+
+		edge_index = knn(torch.Tensor(ftrns1(x_grids[i])).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device), k = k_spc_edges).flip(0).contiguous()
+		edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
+		x_grids_edges.append(edge_index)
+
+	max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # + 10.0
+
+	for i in range(len(x_grids)):
+
+		A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations_multiple_grids(x_grids_trv[i], max_t)
+		x_grids_trv_pointers_p.append(A_edges_time_p)
+		x_grids_trv_pointers_s.append(A_edges_time_s)
+		x_grids_trv_refs.append(dt_partition) # save as cuda tensor, or no?
+
+	return x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t
+
 def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stations, locs_slice, data, ind, ext_save, depth_window = 10e3, deg_window = 1.0, thresh_source = 0.2, thresh_picks = 0.2, n_step = 0, n_ver = 1, min_norm_val = 0.3, close_plots = True):
 
 	from matplotlib.colors import Normalize
