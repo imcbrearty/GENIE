@@ -1042,7 +1042,7 @@ for cnt, strs in enumerate([0]):
 
 		if use_differential_evolution_location == True:
 
-			xmle, logprob = differential_evolution_location(trv, locs_use, Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int'), lat_range_extend, lon_range_extend, depth_range)
+			xmle, logprob = differential_evolution_location(trv, locs_use, Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int'), lat_range_extend, lon_range_extend, depth_range, device = device)
 		
 		else:
 		
