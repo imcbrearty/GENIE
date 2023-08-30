@@ -128,6 +128,7 @@ cost_value = process_config['cost_value'] # If use expanded competitve assignmen
 device = torch.device(process_config['device']) ## Right now, this isn't updated to work with cuda, since
 ## the necessary variables do not have .to(device) at the right places
 
+compute_magnitudes = process_config['compute_magnitudes']
 use_expanded_competitive_assignment = process_config['use_expanded_competitive_assignment']
 use_differential_evolution_location = process_config['use_differential_evolution_location']
 
