@@ -22,6 +22,7 @@ from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from torch_scatter import scatter
 from numpy.matlib import repmat
+import networkx as nx
 import cvxpy as cp
 import itertools
 import pathlib
