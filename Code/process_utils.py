@@ -698,7 +698,7 @@ def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, l
 	bounds = [(lat_range[0], lat_range[1]), (lon_range[0], lon_range[1]), (depth_range[0], depth_range[1])]
 	optim = scipy.optimize.differential_evolution(likelihood_estimate, bounds, popsize = popsize, maxiter = maxiter, disp = disp, vectorized = vectorized)
 
-	return optim.x, likelihood_estimate(optim.x.reshape(1,-1))
+	return optim.x.reshape(1,-1), likelihood_estimate(optim.x.reshape(-1,1))
 
 def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
 
