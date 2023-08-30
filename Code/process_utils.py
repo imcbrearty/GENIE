@@ -31,7 +31,7 @@ class LocalMarching(MessagePassing): # make equivelent version with sum operatio
 		super(LocalMarching, self).__init__(aggr = 'max') # node dim
 
 	## Changed dt to 5 s
-	def forward(self, srcs, tc_win = 5, sp_win = 35e3, n_steps_max = 100, tol = 1e-4, use_directed = True, device = 'cpu'):
+	def forward(self, srcs, ftrns1, tc_win = 5, sp_win = 35e3, n_steps_max = 100, tol = 1e-4, use_directed = True, device = 'cpu'):
 
 		srcs_tensor = torch.Tensor(srcs).to(device)
 		tree_t = cKDTree(srcs[:,3].reshape(-1,1))
