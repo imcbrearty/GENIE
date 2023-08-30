@@ -481,7 +481,7 @@ for cnt, strs in enumerate([0]):
 			srcs_l.append(srcs_groups_l[i])
 		else:
 			mp = LocalMarching()
-			srcs_out = mp(srcs_groups_l[i], tc_win = tc_win, sp_win = sp_win)
+			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win)
 			if len(srcs_out) > 0:
 				srcs_l.append(srcs_out)
 	srcs = np.vstack(srcs_l)
