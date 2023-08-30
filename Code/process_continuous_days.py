@@ -131,7 +131,7 @@ with open('config.yaml', 'r') as file:
 
 path_to_file = str(pathlib.Path().absolute())
 seperator = '\\' if '\\' in path_to_file else '/'
-path_to_file = path_to_file + seperator
+path_to_file += seperator
 
 # Load day to process
 z = open(path_to_file + '%s_process_days_list_ver_%d.txt'%(name_of_project, n_ver_), 'r')
@@ -242,7 +242,7 @@ if load_model == True:
 	mz_list = []
 	for i in range(len(x_grids)):
 		mz_slice = GCN_Detection_Network_extended_fixed_adjacencies(ftrns1_diff, ftrns2_diff)
-		mz_slice.load_state_dict(torch.load(path_to_file + '/GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, n_step_load, n_ver_load), map_location = torch.device('cpu')))
+		mz_slice.load_state_dict(torch.load(path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, n_step_load, n_ver_load), map_location = torch.device('cpu')))
 		mz_slice.eval()
 		mz_list.append(mz_slice)
 		
