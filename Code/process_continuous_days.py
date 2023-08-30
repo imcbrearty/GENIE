@@ -282,9 +282,9 @@ print('Going to compute sources only in interior region')
 x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
 x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
 
-use_irregular_reference_grid = True
+use_irregular_reference_grid = True ## Could add a different function to create the initial grid sampling points
 if use_irregular_reference_grid == True:
-	X_query = kmeans_packing_sampling_points(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1)[0]
+	X_query = kmeans_packing_sampling_points(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 3000, n_sim = 1)[0]
 	X_query_cart = torch.Tensor(ftrns1(np.copy(X_query)))
 else:
 	x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
