@@ -1188,7 +1188,7 @@ for cnt, strs in enumerate([0]):
 		file_save['trv_out1'] = trv_out1
 		file_save['trv_out2'] = trv_out2
 
-		if (process_known_events == True)*(len(known_events) > 0):
+		if (process_known_events == True)*(len(srcs_known) > 0):
 			file_save['srcs_known'] = srcs_known
 		
 		if extra_save == False: # mem_save == True implies don't save these fields
