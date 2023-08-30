@@ -38,5 +38,7 @@ cost_value: 3.0 # If use expanded competitve assignment, then this is the fixed 
 device: 'cpu' ## Right now, this isn't updated to work with cuda, since
 ## the necessary variables do not have .to(device) at the right places
 
+compute_magnitudes: False # Uses local magnitude and will be un-calibrated by default, or can calibrate for a particular study site
+
 use_expanded_competitive_assignment: True
 use_differential_evolution_location: True # otherwise use particle swarm to locate, which tends to converge less well (especially in depth)
