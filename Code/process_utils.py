@@ -309,8 +309,8 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 	perm_vec = -1*np.ones(locs.shape[0])
 	perm_vec[ind_use] = np.arange(len(ind_use))
 
-	A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[ind_use])), torch.Tensor(ftrns1(locs[ind_use])), k = k_sta_edges + 1).flip(0).contiguous())[0]
-	A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)), torch.Tensor(ftrns1(x_grid)), k = k_spc_edges + 1).flip(0).contiguous())[0]
+	A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0), torch.Tensor(ftrns1(locs[ind_use])/1000.0), k = k_sta_edges + 1).flip(0).contiguous())[0]
+	A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)/1000.0), torch.Tensor(ftrns1(x_grid)/1000.0), k = k_spc_edges + 1).flip(0).contiguous())[0]
 	A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1)).contiguous()
 	A_prod_src_src = (n_sta_slice*A_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1)).contiguous()	
 	A_src_in_prod = torch.cat((torch.arange(n_sta_slice*n_spc).view(1,-1), torch.arange(n_spc).repeat_interleave(n_sta_slice).view(1,-1)), dim = 0).contiguous()
