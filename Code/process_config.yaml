@@ -13,8 +13,8 @@ offset_increment: 500
 n_rand_query: 112000
 n_query_grid: 5000
 
-thresh: 0.125 # Threshold to declare detection
-thresh_assoc: 0.125 # Threshold to declare src-arrival association
+thresh: 0.15 # Threshold to declare detection
+thresh_assoc: 0.15 # Threshold to declare src-arrival association
 spr: 1 # Sampling rate to save temporal predictions
 tc_win: 5.0 # Temporal window (s) to link events in Local Marching
 sp_win: 15000.0 # Distance (m) to link events in Local Marching
