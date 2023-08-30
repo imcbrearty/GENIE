@@ -233,6 +233,12 @@ if (use_differential_evolution_location == False)*(config['train_travel_time_neu
 else:
 	hull = []
 
+z = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_step_load, n_ver_load))
+training_params = z['training_params']
+graph_params = z['graph_params']
+pred_params = z['pred_params']
+z.close()
+
 x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t = load_templates_region(trv, x_grids, training_params, graph_params, pred_params)
 x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])) for i in range(len(x_grids))]
 
@@ -247,12 +253,6 @@ if load_model == True:
 		mz_slice.load_state_dict(torch.load(path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, n_step_load, n_ver_load), map_location = torch.device('cpu')))
 		mz_slice.eval()
 		mz_list.append(mz_slice)
-
-z = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_step_load, n_ver_load))
-training_params = z['training_params']
-graph_params = z['graph_params']
-pred_params = z['pred_params']
-z.close()
 
 failed = []
 plot_on = False
