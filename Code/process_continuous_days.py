@@ -139,10 +139,10 @@ name_of_project = config['name_of_project']
 z = open(path_to_file + '%s_process_days_list_ver_%d.txt'%(name_of_project, process_days_ver), 'r')
 lines = z.readlines()
 z.close()
-if '/' in date[day_select]:
-	date = line[day_select].split('/')
-elif ',' in date[day_select]:
-	date = line[day_select].split(',')
+if '/' in lines[day_select]:
+	date = lines[day_select].split('/')
+elif ',' in lines[day_select]:
+	date = lines[day_select].split(',')
 else:
 	date = line[day_select].split(' ')	
 date = np.array([int(date[0]), int(date[1]), int(date[2])])
