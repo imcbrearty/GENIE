@@ -247,14 +247,14 @@ z.close()
 x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params)
 x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])) for i in range(len(x_grids))]
 
-mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff)
+# mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff)
 
 load_model = True
 if load_model == True:
 
 	mz_list = []
 	for i in range(len(x_grids)):
-		mz_slice = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff)
+		mz_slice = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, device = device).to(device)
 		mz_slice.load_state_dict(torch.load(path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, n_step_load, n_ver_load), map_location = torch.device('cpu')))
 		mz_slice.eval()
 		mz_list.append(mz_slice)
