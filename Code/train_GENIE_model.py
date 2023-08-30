@@ -259,8 +259,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	use_stable_association_labels = True
 	## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
-	if use_stable_association_labels == True:
-		thresh_noise_max = 1.5
+	if use_stable_association_labels == True: ## It turns out association results are fairly sensitive to this choice
+		thresh_noise_max = 3.0 # 1.5
 		iz = np.where(arrivals[:,4] >= 0)[0]
 		noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 		iexcess_noise = np.where(np.abs(noise_values) > thresh_noise_max*sig_t*arrivals[iz,0])[0]
