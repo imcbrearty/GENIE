@@ -573,9 +573,9 @@ def load_templates_region(trv, x_grids, training_params, graph_params, pred_para
 def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut = None, use_quantile = None, permute_indices = False, min_amplitude = None, n_ver = 1, spr_picks = 100):
 
 	if '\\' in path_to_file:
-		z = np.load(path_to_file + '\\Picks\\%d\\%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
+		z = np.load(path_to_file + 'Picks\\%d\\%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
 	elif '/' in path_to_file:
-		z = np.load(path_to_file + '/Picks/%d/%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
+		z = np.load(path_to_file + 'Picks/%d/%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
 
 	yr, mn, dy = date[0], date[1], date[2]
 	t0 = UTCDateTime(yr, mn, dy)
