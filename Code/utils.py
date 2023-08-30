@@ -538,7 +538,7 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 
 	return trv
 
-def load_templates_region(trv, x_grids, training_params, graph_params, pred_params, dt_embed = 1.0):
+def load_templates_region(trv, locs, x_grids, training_params, graph_params, pred_params, dt_embed = 1.0):
 
 	k_sta_edges, k_spc_edges, k_time_edges = graph_params
 
