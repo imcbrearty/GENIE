@@ -7,6 +7,7 @@ from matplotlib import pyplot as plt
 import torch
 from torch import nn, optim
 import h5py
+import scipy
 from torch.optim.lr_scheduler import StepLR
 from sklearn.metrics import pairwise_distances as pd
 from scipy.signal import fftconvolve
