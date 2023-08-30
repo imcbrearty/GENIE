@@ -28,6 +28,8 @@ import itertools
 import pathlib
 import yaml
 
+from utils import remove_mean
+
 class LocalMarching(MessagePassing): # make equivelent version with sum operations.
 	def __init__(self, device = 'cpu'):
 		super(LocalMarching, self).__init__(aggr = 'max') # node dim
