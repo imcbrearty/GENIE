@@ -1196,10 +1196,10 @@ for cnt, strs in enumerate([0]):
 
 		for j in range(len(Picks_P)):
 
-			file_save['Picks/%d_Picks_P'%(j)] = Picks_P[j] ## Since these are lists, but they be appended seperatley?
-			file_save['Picks/%d_Picks_S'%(j)] = Picks_S[j]
-			file_save['Picks/%d_Picks_P_perm'%(j)] = Picks_P_perm[j]
-			file_save['Picks/%d_Picks_S_perm'%(j)] = Picks_S_perm[j]
+			file_save['Picks/%d_Picks_P'%j] = Picks_P[j] ## Since these are lists, but they be appended seperatley?
+			file_save['Picks/%d_Picks_S'%j] = Picks_S[j]
+			file_save['Picks/%d_Picks_P_perm'%j] = Picks_P_perm[j]
+			file_save['Picks/%d_Picks_S_perm'%j] = Picks_S_perm[j]
 
 		success_count = success_count + 1
 		file_save.close()
