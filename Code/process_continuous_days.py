@@ -248,7 +248,6 @@ if load_model == True:
 		mz_slice.eval()
 		mz_list.append(mz_slice)
 
-# Load training params, graph params, and pred params
 z = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_step_load, n_ver_load))
 training_params = z['training_params']
 graph_params = z['graph_params']
