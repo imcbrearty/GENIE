@@ -17,14 +17,14 @@ thresh: 0.125 # Threshold to declare detection
 thresh_assoc: 0.125 # Threshold to declare src-arrival association
 spr: 1 # Sampling rate to save temporal predictions
 tc_win: 5.0 # Temporal window (s) to link events in Local Marching
-sp_win: 15e3 # Distance (m) to link events in Local Marching
+sp_win: 15000.0 # Distance (m) to link events in Local Marching
 break_win: 15.0 # Temporal window to find disjoint groups of sources, 
 ## so can run Local Marching without memory issues.
 spr_picks: 100 # Assumed sampling rate of picks 
 ## (can be 1 if absolute times are used for pick time values)
 
 d_win: 0.25 ## Lat and lon window to re-locate initial source detetections with refined sampling over
-d_win_depth: 10e3 ## Depth window to re-locate initial source detetections with refined sampling over
+d_win_depth: 10000.0 ## Depth window to re-locate initial source detetections with refined sampling over
 dx_depth: 50.0 ## Depth resolution to locate events with travel time based re-location
 
 step: 2.0
