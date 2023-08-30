@@ -305,7 +305,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		time_samples = src_times_active[np.sort(np.random.choice(len(src_times_active), size = n_batch))]
 
 	l_src_times_active = len(src_times_active)
-	if (use_preferential_sampling == True)*(len(src_times_active) > 1):
+	if (use_preferential_sampling == True)*(len(src_times_active) > 1): # Should the second condition just be (len(src_times_active) > 0) ?
 		for j in range(n_batch):
 			if np.random.rand() > 0.5: # 30% of samples, re-focus time. # 0.7
 				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*src_t_kernel*np.random.laplace()
