@@ -467,9 +467,11 @@ if load_initial_files == True:
 		skip_making_grid = True
 
 if skip_making_grid == False:
+  
 	x_grids = assemble_grids(scale_x_extend, offset_x_extend, num_grids, n_spatial_nodes, n_steps = num_steps, with_density = with_density)
 
 	np.savez_compressed(path_to_file + 'Grids/%s_seismic_network_templates_ver_1.npz'%config["name_of_project"], x_grids = [x_grids[i] for i in range(len(x_grids))], corr1 = corr1, corr2 = corr2)
+
 
 print("All files saved successfully!")
 print("✔ Script execution: Done")
