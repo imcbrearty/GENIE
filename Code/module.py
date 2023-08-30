@@ -250,13 +250,14 @@ class DataAggregationAssociationPhase(MessagePassing): # make equivelent version
 		return tr # the new embedding.
 
 class LocalSliceLgCollapse(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = 15.0):
+	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = 15.0, device = 'cuda'):
 		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
 		self.fc1 = nn.Linear(ndim_in + n_edge, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
 		self.fc2 = nn.Linear(n_hidden, ndim_out)
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
 		self.eps = eps
+		self.device = device
 
 	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, inpt, tlatent, n_temp, n_sta): # reference k nearest spatial points
 
@@ -268,10 +269,10 @@ class LocalSliceLgCollapse(MessagePassing):
 		M = n_arvs# M is target
 		dt = dt_partition[1] - dt_partition[0]
 
-		t_index = torch.floor((tpick - dt_partition[0])/torch.Tensor([dt]).to(device)).long() # index into A_edges, which is each station, each dt_point, each k.
-		t_index = ((ipick*l_dt*k_infer + t_index*k_infer).view(-1,1) + torch.arange(k_infer).view(1,-1).to(device)).reshape(-1).long() # check this
+		t_index = torch.floor((tpick - dt_partition[0])/torch.Tensor([dt]).to(self.device)).long() # index into A_edges, which is each station, each dt_point, each k.
+		t_index = ((ipick*l_dt*k_infer + t_index*k_infer).view(-1,1) + torch.arange(k_infer).view(1,-1).to(self.device)).reshape(-1).long() # check this
 
-		src_index = torch.arange(n_arvs).view(-1,1).repeat(1,k_infer).view(1,-1).to(device)
+		src_index = torch.arange(n_arvs).view(-1,1).repeat(1,k_infer).view(1,-1).to(self.device)
 		sliced_edges = torch.cat((A_edges[t_index].view(1,-1), src_index), dim = 0).long()
 		t_rel = tpick[sliced_edges[1]] - tlatent[sliced_edges[0],0] # Breaks here?
 
@@ -286,7 +287,7 @@ class LocalSliceLgCollapse(MessagePassing):
 		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
 
 class StationSourceAttentionMergedPhases(MessagePassing):
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = 15.0):
+	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = 15.0, device = device):
 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
 		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6, n_hidden) # add edge data (observed arrival - theoretical arrival)
@@ -312,6 +313,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		self.activate3 = nn.PReLU()
 		self.activate4 = nn.PReLU()
 		# self.activate5 = nn.PReLU()
+		self.device = device
 
 	def forward(self, src, stime, src_embed, trv_src, arrival_p, arrival_s, tpick, ipick, phase_label): # reference k nearest spatial points
 
@@ -322,21 +324,21 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		tree_indices = cKDTree(ipick.float().cpu().detach().numpy().reshape(-1,1))
 		unique_sta_lists = tree_indices.query_ball_point(ip_unique.reshape(-1,1), r = 0)
 
-		arrival_p = torch.cat((arrival_p, torch.zeros(1,arrival_p.shape[1]).to(device)), dim = 0) # add null arrival, that all arrivals link too. This acts as a "stabalizer" in the inner-product space, and allows softmax to not blow up for arrivals with only self loops. May not be necessary.
-		arrival_s = torch.cat((arrival_s, torch.zeros(1,arrival_s.shape[1]).to(device)), dim = 0) # add null arrival, that all arrivals link too. This acts as a "stabalizer" in the inner-product space, and allows softmax to not blow up for arrivals with only self loops. May not be necessary.
+		arrival_p = torch.cat((arrival_p, torch.zeros(1,arrival_p.shape[1]).to(self.device)), dim = 0) # add null arrival, that all arrivals link too. This acts as a "stabalizer" in the inner-product space, and allows softmax to not blow up for arrivals with only self loops. May not be necessary.
+		arrival_s = torch.cat((arrival_s, torch.zeros(1,arrival_s.shape[1]).to(self.device)), dim = 0) # add null arrival, that all arrivals link too. This acts as a "stabalizer" in the inner-product space, and allows softmax to not blow up for arrivals with only self loops. May not be necessary.
 		arrival = torch.cat((arrival_p, arrival_s), dim = 1) # Concatenate across feature axis
 
-		edges = torch.Tensor(np.copy(np.flip(np.hstack([np.ascontiguousarray(np.array(list(zip(itertools.product(unique_sta_lists[j], np.concatenate((unique_sta_lists[j], np.array([n_arv])), axis = 0)))))[:,0,:].T) for j in range(len(unique_sta_lists))]), axis = 0))).long().to(device) # note: preferably could remove loop here.
+		edges = torch.Tensor(np.copy(np.flip(np.hstack([np.ascontiguousarray(np.array(list(zip(itertools.product(unique_sta_lists[j], np.concatenate((unique_sta_lists[j], np.array([n_arv])), axis = 0)))))[:,0,:].T) for j in range(len(unique_sta_lists))]), axis = 0))).long().to(self.device) # note: preferably could remove loop here.
 		n_edge = edges.shape[1]
 
 		## Now must duplicate edges, for each unique source. (different accumulation points)
-		edges = (edges.repeat(1, n_src) + torch.cat((torch.zeros(1, n_src*n_edge).to(device), (torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(device)), dim = 0)).long()
-		src_index = torch.arange(n_src).repeat_interleave(n_edge).long()
+		edges = (edges.repeat(1, n_src) + torch.cat((torch.zeros(1, n_src*n_edge).to(self.device), (torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device)), dim = 0)).long()
+		src_index = torch.arange(n_src).repeat_interleave(n_edge).long().to(self.device)
 
 		N = n_arv + 1 # still correct?
 		M = n_arv*n_src
 
-		out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = arrival, sembed = src_embed, stime = stime, tsrc_p = torch.cat((trv_src[:,:,0], -self.eps*torch.ones(n_src,1).to(device)), dim = 1).detach(), tsrc_s = torch.cat((trv_src[:,:,1], -self.eps*torch.ones(n_src,1).to(device)), dim = 1).detach(), sindex = src_index, stindex = torch.cat((ipick, torch.Tensor([n_sta]).long().to(device)), dim = 0), atime = torch.cat((tpick, torch.Tensor([-self.eps]).to(device)), dim = 0), phase = torch.cat((phase_label, torch.Tensor([-1.0]).reshape(1,1).to(device)), dim = 0), size = (N, M)).mean(1)))) # M is output. Taking mean over heads
+		out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = arrival, sembed = src_embed, stime = stime, tsrc_p = torch.cat((trv_src[:,:,0], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach(), tsrc_s = torch.cat((trv_src[:,:,1], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach(), sindex = src_index, stindex = torch.cat((ipick, torch.Tensor([n_sta]).long().to(self.device)), dim = 0), atime = torch.cat((tpick, torch.Tensor([-self.eps]).to(self.device)), dim = 0), phase = torch.cat((phase_label, torch.Tensor([-1.0]).reshape(1,1).to(self.device)), dim = 0), size = (N, M)).mean(1)))) # M is output. Taking mean over heads
 
 		return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
 
@@ -383,9 +385,9 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
 		self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
-		self.LocalSliceLgCollapseP = LocalSliceLgCollapse(30, 15).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
-		self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
-		self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3).to(device)
+		self.LocalSliceLgCollapseP = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
+		self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
+		self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3, device = device).to(device)
 		# self.ArrivalS = StationSourceAttention(30, 15, 1, 15, n_heads = 3).to(device)
 
 		self.ftrns1 = ftrns1
