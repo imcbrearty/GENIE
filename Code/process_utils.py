@@ -690,8 +690,6 @@ def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, l
 	else:
 		weight_vec = np.concatenate((weight[0]*np.ones(len(ind_p)), weight[1]*np.ones(len(ind_s))), axis = 0).reshape(1,-1)
 
-	print(weight_vec)
-
 	## Make sig_t adaptive to average distance of stations..
 	f_linear = lambda t: sig_t*np.ones(t.shape)
 
