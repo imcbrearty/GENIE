@@ -247,7 +247,14 @@ if load_model == True:
 		mz_slice.load_state_dict(torch.load(path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, n_step_load, n_ver_load), map_location = torch.device('cpu')))
 		mz_slice.eval()
 		mz_list.append(mz_slice)
-		
+
+# Load training params, graph params, and pred params
+z = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_step_load, n_ver_load))
+training_params = z['training_params']
+graph_params = z['graph_params']
+pred_params = z['pred_params']
+z.close()
+
 failed = []
 plot_on = False
 
