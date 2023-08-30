@@ -309,6 +309,7 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 	perm_vec = -1*np.ones(locs.shape[0])
 	perm_vec[ind_use] = np.arange(len(ind_use))
 
+	
 	A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), k = k_sta_edges + 1).flip(0).contiguous())[0]
 	A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
 	A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1)).contiguous()
@@ -318,6 +319,11 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 	A_edges_time_p = x_grid_trv_pointers_p[np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*ind_use.repeat(k_time_edges*len_dt)]
 	A_edges_time_s = x_grid_trv_pointers_s[np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*ind_use.repeat(k_time_edges*len_dt)]
 	one_vec = np.repeat(ind_use*np.ones(n_sta_slice), k_time_edges*len_dt).astype('int') # also used elsewhere
+
+	## Note: is there an issue in this code? Why is n_sta used here when only locs_use (based on locs[ind_use] is used to define A_edges_time_p and A_edges_time_s?)
+	## is it because x_grid_trv_pointers_p and x_grid_trv_pointers_s is based on all of locs? Can check by seeing if for each arrival, A_edges_time_p references the k nearest
+	## sources with moveouts nearby that arrival, for any choice of locs_use and picks.
+	
 	A_edges_time_p = (n_sta_slice*(A_edges_time_p - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
 	A_edges_time_s = (n_sta_slice*(A_edges_time_s - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
 	A_edges_ref = x_grid_trv_ref*1 + 0
