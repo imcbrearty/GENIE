@@ -2,11 +2,11 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
+import yaml
 import numpy as np
 from matplotlib import pyplot as plt
 import torch
 from torch import nn, optim
-import h5py
 from sklearn.metrics import pairwise_distances as pd
 from scipy.signal import fftconvolve
 from scipy.spatial import cKDTree
@@ -19,32 +19,54 @@ from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from torch_scatter import scatter
 from numpy.matlib import repmat
-import itertools
 import pathlib
 
+from utils import *
+from module import *
+# from generate_synthetic_data import generate_synthetic_data 
+## For now not using the seperate files definition of generate_synthetic_data
+
+use_wandb_logging = False
+if use_wandb_logging == True:
+
+	import wandb
+	# Initialize wandb run 
+	wandb.init(project="GENIE")
+
+
+# Load configuration from YAML
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
+
+name_of_project = config['name_of_project']
+
+path_to_file = str(pathlib.Path().absolute())
+path_to_file += '\\' if '\\' in path_to_file else '/'
+
 ## Graph params
-k_sta_edges = 8
-k_spc_edges = 15
-k_time_edges = 10
+k_sta_edges = config['k_sta_edges']
+k_spc_edges = config['k_spc_edges']
+k_time_edges = config['k_time_edges']
+
 graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
 ## Training params
-n_batch = 75
-n_epochs = 20000 + 1 # add 1, so it saves on last iteration (since it saves every 100 steps)
-n_spc_query = 4500 # Number of src queries per sample
-n_src_query = 300 # Number of src-arrival queries per sample
+n_batch = config['n_batch']
+n_epochs = config['n_epochs'] # add 1, so it saves on last iteration (since it saves every 100 steps)
+n_spc_query = config['n_spc_query'] # Number of src queries per sample
+n_src_query = config['n_src_query'] # Number of src-arrival queries per sample
 training_params = [n_spc_query, n_src_query]
 
 ## Prediction params
-kernel_sig_t = 5.0 # Kernel to embed arrival time - theoretical time misfit (s)
-src_t_kernel = 6.5 # Kernel or origin time label (s)
-src_t_arv_kernel = 6.5 # Kernel for arrival association time label (s)
-src_x_kernel = 15e3 # Kernel for source label, horizontal distance (m)
-src_x_arv_kernel = 15e3 # Kernel for arrival-source association label, horizontal distance (m)
-src_depth_kernel = 15e3 # Kernel of Cartesian projection, vertical distance (m)
-t_win = 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
+kernel_sig_t = config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
+src_t_kernel = config['src_t_kernel'] # Kernel or origin time label (s)
+src_t_arv_kernel = config['src_t_arv_kernel'] # Kernel for arrival association time label (s)
+src_x_kernel = config['src_x_kernel'] # Kernel for source label, horizontal distance (m)
+src_x_arv_kernel = config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
+src_depth_kernel = config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
+t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
-dist_range = [15e3, 500e3] ## The spatial window over which to sample max distance of 
+dist_range = config['dist_range'] ## The spatial window over which to sample max distance of 
 ## source-station moveouts in m, per event. E.g., 15 - 500 km. Should set slightly lower if using small region.
 
 # File versions
@@ -59,73 +81,38 @@ pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel
 
 device = torch.device('cuda') ## or use cpu
 
-def lla2ecef(p, a = 6378137.0, e = 8.18191908426215e-2): # 0.0818191908426215, previous 8.1819190842622e-2
-	p = p.copy().astype('float')
-	p[:,0:2] = p[:,0:2]*np.array([np.pi/180.0, np.pi/180.0]).reshape(1,-1)
-	N = a/np.sqrt(1 - (e**2)*np.sin(p[:,0])**2)
-    # results:
-	x = (N + p[:,2])*np.cos(p[:,0])*np.cos(p[:,1])
-	y = (N + p[:,2])*np.cos(p[:,0])*np.sin(p[:,1])
-	z = ((1-e**2)*N + p[:,2])*np.sin(p[:,0])
-	return np.concatenate((x[:,None],y[:,None],z[:,None]), axis = 1)
 
-def ecef2lla(x, a = 6378137.0, e = 8.18191908426215e-2):
-	x = x.copy().astype('float')
-	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
-	b = np.sqrt((a**2)*(1 - e**2))
-	ep = np.sqrt((a**2 - b**2)/(b**2))
-	p = np.sqrt(x[:,0]**2 + x[:,1]**2)
-	th = np.arctan2(a*x[:,2], b*p)
-	lon = np.arctan2(x[:,1], x[:,0])
-	lat = np.arctan2((x[:,2] + (ep**2)*b*(np.sin(th)**3)), (p - (e**2)*a*(np.cos(th)**3)))
-	N = a/np.sqrt(1 - (e**2)*(np.sin(lat)**2))
-	alt = p/np.cos(lat) - N
-	# lon = np.mod(lon, 2.0*np.pi) # don't use!
-	k = (np.abs(x[:,0]) < 1) & (np.abs(x[:,1]) < 1)
-	alt[k] = np.abs(x[k,2]) - b
-	return np.concatenate((180.0*lat[:,None]/np.pi, 180.0*lon[:,None]/np.pi, alt[:,None]), axis = 1)
+## Extra train parameters
 
-def assemble_time_pointers_for_stations(trv_out, dt = 1.0, k = 10, win = 10.0, tbuffer = 10.0):
+spc_random = 30e3
+sig_t = 0.03 # 3 percent of travel time error on pick times
+spc_thresh_rand = 20e3
+min_sta_arrival = 4
+coda_rate = 0.035 # 5 percent arrival have code. Probably more than this? Increased from 0.035.
+coda_win = np.array([0, 25.0]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
+max_num_spikes = 80
+spike_time_spread = 0.15
+s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
+use_stable_association_labels = True
+thresh_noise_max = 1.5
+training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
 
-	n_temp, n_sta = trv_out.shape[0:2]
-	dt_partition = np.arange(-win, win + trv_out.max() + dt + tbuffer, dt)
-
-	edges_p = []
-	edges_s = []
-	for i in range(n_sta):
-		tree_p = cKDTree(trv_out[:,i,0][:,np.newaxis])
-		tree_s = cKDTree(trv_out[:,i,1][:,np.newaxis])
-		q_p, ip_p = tree_p.query(dt_partition[:,np.newaxis], k = k)
-		q_s, ip_s = tree_s.query(dt_partition[:,np.newaxis], k = k)
-		# ip must project to Lg indices.
-		edges_p.append((ip_p*n_sta + i).reshape(-1)) # Lg indices are each source x n_sta + sta_ind. The reshape places each subsequence of k, per time step, per station.
-		edges_s.append((ip_s*n_sta + i).reshape(-1)) # Lg indices are each source x n_sta + sta_ind. The reshape places each subsequence of k, per time step, per station.
-		# Overall, each station, each time step, each k sets of edges.
-	edges_p = np.hstack(edges_p)
-	edges_s = np.hstack(edges_s)
-
-	return edges_p, edges_s, dt_partition
-
-def assemble_time_pointers_for_stations_multiple_grids(trv_out, max_t, dt = 1.0, k = 10, win = 10.0):
-
-	n_temp, n_sta = trv_out.shape[0:2]
-	dt_partition = np.arange(-win, win + max_t + dt, dt)
-
-	edges_p = []
-	edges_s = []
-	for i in range(n_sta):
-		tree_p = cKDTree(trv_out[:,i,0][:,np.newaxis])
-		tree_s = cKDTree(trv_out[:,i,1][:,np.newaxis])
-		q_p, ip_p = tree_p.query(dt_partition[:,np.newaxis], k = k)
-		q_s, ip_s = tree_s.query(dt_partition[:,np.newaxis], k = k)
-		# ip must project to Lg indices.
-		edges_p.append((ip_p*n_sta + i).reshape(-1))
-		edges_s.append((ip_s*n_sta + i).reshape(-1))
-		# Overall, each station, each time step, each k sets of edges.
-	edges_p = np.hstack(edges_p)
-	edges_s = np.hstack(edges_s)
-
-	return edges_p, edges_s, dt_partition
+## Training params list 3
+n_batch = 75
+dist_range = [15e3, 500e3] # Should be chosen proportional to physical domain size
+max_rate_events = 5000/8
+max_miss_events = 3000/8
+max_false_events = 2000/8
+T = 3600.0*3.0
+dt = 30
+tscale = 3600.0
+n_sta_range = [0.35, 1.0] # n_sta_range[0]*locs.shape[0] must be >= the number of station edges chosen (k_sta_edges)
+use_sources = False
+use_full_network = False
+fixed_subnetworks = None
+use_preferential_sampling = False
+use_shallow_sources = False
+training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
 
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, n_batch = 75, dist_range = [15e3, 500e3], max_rate_events = 6000/8, max_miss_events = 2500/8, max_false_events = 2500/8, T = 3600.0*3.0, dt = 30, tscale = 3600.0, n_sta_range = [0.35, 1.0], use_sources = False, use_full_network = False, fixed_subnetworks = None, use_preferential_sampling = False, use_shallow_sources = False, plot_on = False, verbose = False):
 
@@ -149,7 +136,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	scale_x = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 	offset_x = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
 	n_sta = locs.shape[0]
-	locs_tensor = torch.Tensor(locs).to(device)
 
 	t_slice = np.arange(-t_win/2.0, t_win/2.0 + 1.0, 1.0)
 
@@ -158,7 +144,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	tvec_kernel = np.exp(-(tvec**2)/(2.0*(tscale**2)))
 
 	p_rate_events = fftconvolve(np.random.randn(2*locs.shape[0] + 3, len(tsteps)), tvec_kernel.reshape(1,-1).repeat(2*locs.shape[0] + 3,0), 'same', axes = 1)
-	c_cor = (p_rate_events@p_rate_events.T) ## Not slow!
 	global_event_rate, global_miss_rate, global_false_rate = p_rate_events[0:3,:]
 
 	# Process global event rate, to physical units.
@@ -204,10 +189,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		sample_random_depths = -sample_random_depths*(scale_x[0,2] - 2e3) + (offset_x[0,2] + scale_x[0,2] - 2e3) # Project along axis, going negative direction. Removing 2e3 on edges.
 		src_positions[:,2] = sample_random_depths
 
-	m1 = [0.5761163, -0.21916288]
-	m2 = 1.15
-
-	amp_thresh = 1.0
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
 	use_uniform_distance_threshold = False
@@ -220,7 +201,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		# dist_thresh = -1.0*np.log(np.sqrt(np.random.rand(n_src))) ## Sort of strange dist threshold set!
 		# dist_thresh = (dist_thresh*dist_range[1]/10.0 + dist_range[0]).reshape(-1,1)
 		dist_thresh = beta(2,5).rvs(size = n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-		
+		ireplace = np.random.choice(len(dist_thresh), size = int(0.15*len(dist_thresh)), replace = False)
+		dist_thresh[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
+	
 	# create different distance dependent thresholds.
 	dist_thresh_p = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None] # Increased sig from 20e3 to 25e3 # Decreased to 10 km
 	dist_thresh_s = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None]
@@ -296,13 +279,10 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	lp_backup = [lp[j] for j in range(len(lp))]
 	n_unique_station_counts = np.array([len(np.unique(arrivals[lp[j],1])) for j in range(n_events)])
 	active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] # subset of sources
-	non_active_sources = np.delete(np.arange(n_events), active_sources, axis = 0)
-	src_positions_active = src_positions[active_sources]
 	src_times_active = src_times[active_sources]
-	src_magnitude_active = src_magnitude[active_sources] ## Not currently used
 
 	inside_interior = ((src_positions[:,0] < lat_range[1])*(src_positions[:,0] > lat_range[0])*(src_positions[:,1] < lon_range[1])*(src_positions[:,1] > lon_range[0]))
-	
+
 	iwhere_real = np.where(arrivals[:,-1] > -1)[0]
 	iwhere_false = np.delete(np.arange(arrivals.shape[0]), iwhere_real)
 	phase_observed = np.copy(arrivals[:,-1]).astype('int')
@@ -315,10 +295,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		n_switch = int(np.random.rand()*(0.2*len(iwhere_real))) # switch up to 20% phases
 		iflip = np.random.choice(iwhere_real, size = n_switch, replace = False)
 		phase_observed[iflip] = np.mod(phase_observed[iflip] + 1, 2)
-
-	scale_vec = np.array([1,2*t_win]).reshape(1,-1)
-
 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
+	
 
 	if use_sources == False:
 		time_samples = np.sort(np.random.rand(n_batch)*T) ## Uniform
@@ -339,7 +317,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	tree_src_times_all = cKDTree(src_times[:,np.newaxis])
 	tree_src_times = cKDTree(src_times_active[:,np.newaxis])
 	lp_src_times_all = tree_src_times_all.query_ball_point(time_samples[:,np.newaxis], r = 3.0*src_t_kernel)
-	lp_src_times = tree_src_times.query_ball_point(time_samples[:,np.newaxis], r = 3.0*src_t_kernel)
 
 	st = time.time()
 	tree = cKDTree(arrivals[:,0][:,None])
@@ -365,8 +342,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		fixed_subnetworks_flag = 0		
 
 	active_sources_per_slice_l = []
-	src_positions_active_per_slice_l = []
-	src_times_active_per_slice_l = []
 
 	for i in range(n_batch):
 		i0 = np.random.randint(0, high = len(x_grids))
@@ -380,7 +355,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				isub_network = np.random.randint(0, high = len(fixed_subnetworks))
 				n_sta_select = len(fixed_subnetworks[isub_network])
 				ind_sta_select = np.copy(fixed_subnetworks[isub_network]) ## Choose one of specific networks.
-			
+
 			else:
 				n_sta_select = int(n_sta*(np.random.rand()*(n_sta_range[1] - n_sta_range[0]) + n_sta_range[0]))
 				ind_sta_select = np.sort(np.random.choice(n_sta, size = n_sta_select, replace = False))
@@ -448,7 +423,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
 	rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
 
-	time_vec_slice = np.arange(k_time_edges)
 
 	Inpts = []
 	Masks = []
@@ -473,7 +447,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	lp_phases = []
 	lp_meta = []
 	lp_srcs = []
-	lp_srcs_active = []
 
 	thresh_mask = 0.01
 	for i in range(n_batch):
@@ -524,7 +497,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			perm_vec_meta = np.arange(ind_src_unique.max() + 1)
 			perm_vec_meta[ind_src_unique] = np.arange(len(ind_src_unique))
 			meta = np.concatenate((meta, -1.0*np.ones((meta.shape[0],1))), axis = 1)
-			# ifind = np.where(meta[:,2] > -1.0)[0] ## Need to find picks with a source index inside the active_sources_per_slice
 			ifind = np.where([meta[j,2] in ind_src_unique for j in range(meta.shape[0])])[0]
 			meta[ifind,-1] = perm_vec_meta[meta[ifind,2].astype('int')] # save pointer to active source, for these picks (in new, local index, of subset of sources)
 		else:
@@ -562,7 +534,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		one_vec = np.repeat(sta_select*np.ones(n_sta_slice), k_time_edges*len_dt).astype('int') # also used elsewhere
 		A_edges_time_p = (n_sta_slice*(A_edges_time_p - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
 		A_edges_time_s = (n_sta_slice*(A_edges_time_s - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
-		# print('permute indices 1')
+
 		assert(A_edges_time_p.max() < n_spc*n_sta_slice) ## Can remove these, after a bit of testing.
 		assert(A_edges_time_s.max() < n_spc*n_sta_slice)
 
@@ -586,9 +558,30 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		else:
 			active_sources_per_slice = active_sources_per_slice.astype('int')
 
+			## Must move the .sum(2) in the below def to use this expanded version of labels
+			# lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
+			# Spatial component
+			# spatial_term1 = np.expand_dims(ftrns1(x_grids[grid_select]), axis=1)
+			# spatial_term2 = np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis=0)
+			# spatial_diff = spatial_term1 - spatial_term2
+			# spatial_exp_term = np.exp(-0.5 * (spatial_diff**2) / (src_spatial_kernel**2))
+
+			# # Temporal component
+			# temporal_term1 = (time_samples[i] + t_slice).reshape(1,-1,1)
+			# temporal_term2 = src_times[active_sources_per_slice].reshape(1,1,-1)
+			# temporal_diff = temporal_term1 - temporal_term2
+			# temporal_exp_term = np.exp(-0.5 * (temporal_diff**2) / (src_t_kernel**2))
+
+			# print('There is an error in these updated label definitions, since the first two targets should be of a similar value')
+			
+			# Combine components
+			# lbls_grid = (np.expand_dims(spatial_exp_term.sum(2), axis=1) * temporal_exp_term).max(2)
+			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
+
 			lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 			lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 
+		
 		X_query.append(x_query)
 		Lbls.append(lbls_grid)
 		Lbls_query.append(lbls_query)
@@ -600,6 +593,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		print('batch gen time took %0.2f'%(time.time() - st))
 
 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+
 
 def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
 
@@ -616,495 +610,31 @@ def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_
 
 	return lbl_trgt
 
-def interp_1D_velocity_model_to_3D_travel_times(X, locs, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
 
-	i1 = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1], [1,1,0], [1,0,1], [0,1,1], [1,1,1]])
-	x10, x20, x30 = Xmin
-	Xv = X - np.array([x10,x20,x30])[None,:]
-	depth_grid = np.copy(locs[:,2]).reshape(1,-1)
-	mask = np.array([1.0,1.0,0.0]).reshape(1,-1)
+# Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
 
-	print('Check way X0 is used')
+max_number_pick_association_labels_per_sample = config['max_number_pick_association_labels_per_sample']
+make_visualize_predictions = config['make_visualize_predictions']
 
-	def evaluate_func(y, x):
+# Load region
+z = np.load(path_to_file + '%s_region.npz'%name_of_project)
+lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
+z.close()
 
-		y, x = y.cpu().detach().numpy(), x.cpu().detach().numpy()
+# Load templates
+z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
+x_grids = z['x_grids']
+z.close()
 
-		ind_depth = np.tile(np.argmin(np.abs(y[:,2].reshape(-1,1) - depth_grid), axis = 1), x.shape[0])
-		rel_pos = (np.expand_dims(x, axis = 1) - np.expand_dims(y*mask, axis = 0)).reshape(-1,3)
-		rel_pos[:,0:2] = np.abs(rel_pos[:,0:2]) ## Postive relative pos, relative to X0.
-		x_relative = X0 + rel_pos
+# Load stations
+z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
+locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
+z.close()
 
-		xv = x_relative - Xmin[None,:]
-		nx = np.shape(rel_pos)[0] # nx is the number of query points in x
-		nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
-		nz_vals1 = np.minimum(nz_vals, N - 2)
+## Create path to write files
+seperator = '\\' if '\\' in path_to_file else '/'
+write_training_file = path_to_file + 'GNN_TrainedModels' + seperator + name_of_project + '_'
 
-		nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
-
-		val_p = Tp[nz,ind_depth]
-		val_s = Ts[nz,ind_depth]
-
-		x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
-		x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
-
-		val_p = np.sum(val_p*x0, axis = 0).reshape(-1, y.shape[0])
-		val_s = np.sum(val_s*x0, axis = 0).reshape(-1, y.shape[0])
-
-		return torch.Tensor(np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)).to(device)
-
-	return lambda y, x: evaluate_func(y, x)
-
-class DataAggregation(MessagePassing): # make equivelent version with sum operations.
-	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4):
-		super(DataAggregation, self).__init__('mean') # node dim
-		## Use two layers of SageConv.
-		self.in_channels = in_channels
-		self.out_channels = out_channels
-		self.n_hidden = n_hidden
-
-		self.activate = nn.PReLU() # can extend to each channel
-		self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
-
-		self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
-		self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
-
-		self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
-		self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
-		self.activate11 = nn.PReLU() # can extend to each channel
-		self.activate12 = nn.PReLU() # can extend to each channel
-		self.activate1 = nn.PReLU() # can extend to each channel
-
-		self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
-
-		self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
-		self.activate21 = nn.PReLU() # can extend to each channel
-		self.activate22 = nn.PReLU() # can extend to each channel
-		self.activate2 = nn.PReLU() # can extend to each channel
-
-	def forward(self, tr, mask, A_in_sta, A_in_src):
-
-		tr = torch.cat((tr, mask), dim = -1)
-		tr = self.activate(self.init_trns(tr))
-
-		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr)), mask), dim = 1)) # could concatenate edge features here, and before.
-		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(tr)), mask), dim = 1))
-		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
-
-		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
-		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr))), mask), dim = 1))
-		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
-
-		return tr # the new embedding.
-
-class BipartiteGraphOperator(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, ndim_edges = 3):
-		super(BipartiteGraphOperator, self).__init__('add')
-		# include a single projection map
-		self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
-		self.fc2 = nn.Linear(ndim_in, ndim_out) # added additional layer
-
-		self.activate1 = nn.PReLU() # added activation.
-		self.activate2 = nn.PReLU() # added activation.
-
-	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
-
-		N = n_sta*n_temp
-		M = n_temp
-
-		return self.activate2(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = mask.max(1, keepdims = True)[0]*self.activate1(self.fc1(torch.cat((inpt, A_src_in_edges.x), dim = -1))))))
-
-class SpatialAggregation(MessagePassing):
-	def __init__(self, in_channels, out_channels, scale_rel = 30e3, n_dim = 3, n_global = 5, n_hidden = 30):
-		super(SpatialAggregation, self).__init__('mean') # node dim
-		## Use two layers of SageConv. Explictly or implicitly?
-		self.fc1 = nn.Linear(in_channels + n_dim + n_global, n_hidden)
-		self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
-		self.fglobal = nn.Linear(in_channels, n_global)
-		self.activate1 = nn.PReLU()
-		self.activate2 = nn.PReLU()
-		self.activate3 = nn.PReLU()
-		self.scale_rel = scale_rel
-
-	def forward(self, tr, A_src, pos):
-
-		return self.activate2(self.fc2(torch.cat((tr, self.propagate(A_src, x = tr, pos = pos/self.scale_rel)), dim = -1)))
-
-	def message(self, x_j, pos_i, pos_j):
-		
-		return self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j, self.activate3(self.fglobal(x_j)).mean(0, keepdims = True).repeat(x_j.shape[0], 1)), dim = -1))) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
-
-class SpatialDirect(nn.Module):
-	def __init__(self, inpt_dim, out_channels):
-		super(SpatialDirect, self).__init__() #  "Max" aggregation.
-
-		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
-		self.activate = nn.PReLU()
-
-	def forward(self, inpts):
-
-		return self.activate(self.f_direct(inpts))
-
-class SpatialAttention(MessagePassing):
-	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, scale_rel = 30e3, n_hidden = 30, n_heads = 5):
-		super(SpatialAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
-		# notice node_dim = 0.
-		self.param_vector = nn.Parameter(nn.init.xavier_uniform_(torch.Tensor(1, n_heads, n_latent)))
-		self.f_context = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
-		self.f_values = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
-		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
-		self.proj = nn.Linear(n_latent, out_channels) # can remove this layer possibly.
-		self.scale = np.sqrt(n_latent)
-		self.n_heads = n_heads
-		self.n_latent = n_latent
-		self.scale_rel = scale_rel
-		self.activate1 = nn.PReLU()
-		self.activate2 = nn.PReLU()
-		# self.activate3 = nn.PReLU()
-
-	def forward(self, inpts, x_query, x_context, k = 10): # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
-
-		edge_index = knn(x_context/1000.0, x_query/1000.0, k = k).flip(0)
-		edge_attr = (x_query[edge_index[1]] - x_context[edge_index[0]])/self.scale_rel # /scale_x
-
-		return self.activate2(self.proj(self.propagate(edge_index, x = inpts, edge_attr = edge_attr, size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
-
-	def message(self, x_j, index, edge_attr):
-
-		context_embed = self.f_context(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
-		value_embed = self.f_values(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
-		alpha = self.activate1((self.param_vector*context_embed).sum(-1)/self.scale)
-
-		alpha = softmax(alpha, index)
-
-		return alpha.unsqueeze(-1)*value_embed
-
-class TemporalAttention(MessagePassing): ## Hopefully replace this.
-	def __init__(self, inpt_dim, out_channels, n_latent, scale_t = 10.0, n_hidden = 30, n_heads = 5):
-		super(TemporalAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
-
-		self.temporal_query_1 = nn.Linear(1, n_hidden)
-		self.temporal_query_2 = nn.Linear(n_hidden, n_heads*n_latent)
-		self.f_context_1 = nn.Linear(inpt_dim, n_hidden) # add second layer transformation.
-		self.f_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
-
-		self.f_values_1 = nn.Linear(inpt_dim, n_hidden) # add second layer transformation.
-		self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
-
-		self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
-		self.proj_2 = nn.Linear(n_hidden, out_channels) # can remove this layer possibly.
-
-		self.scale = np.sqrt(n_latent)
-		self.n_heads = n_heads
-		self.n_latent = n_latent
-		self.scale_t = scale_t
-
-		self.activate1 = nn.PReLU()
-		self.activate2 = nn.PReLU()
-		self.activate3 = nn.PReLU()
-		self.activate4 = nn.PReLU()
-		self.activate5 = nn.PReLU()
-
-	def forward(self, inpts, t_query):
-
-		context = self.f_context_2(self.activate1(self.f_context_1(inpts))).view(-1, self.n_heads, self.n_latent) # add more non-linear transform here?
-		values = self.f_values_2(self.activate2(self.f_values_1(inpts))).view(-1, self.n_heads, self.n_latent) # add more non-linear transform here?
-		query = self.temporal_query_2(self.activate3(self.temporal_query_1(t_query/self.scale_t))).view(-1, self.n_heads, self.n_latent) # must repeat t output for all spatial coordinates.
-
-		return self.proj_2(self.activate5(self.proj_1(self.activate4((((context.unsqueeze(1)*query.unsqueeze(0)).sum(-1, keepdims = True)/self.scale)*values.unsqueeze(1)).mean(2))))) # linear.
-
-class BipartiteGraphReadOutOperator(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, ndim_edges = 3):
-		super(BipartiteGraphReadOutOperator, self).__init__('add')
-		# include a single projection map
-		self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
-		self.fc2 = nn.Linear(ndim_in, ndim_out) # added additional layer
-
-		self.activate1 = nn.PReLU() # added activation.
-		self.activate2 = nn.PReLU() # added activation.
-
-	def forward(self, inpt, A_Lg_in_srcs, mask, n_sta, n_temp):
-
-		N = n_temp
-		M = n_sta*n_temp
-
-		return self.activate2(self.fc2(self.propagate(A_Lg_in_srcs.edge_index, size = (N, M), x = inpt, edge_attr = A_Lg_in_srcs.x, mask = mask))), mask[A_Lg_in_srcs.edge_index[0]] # note: outputting multiple outputs
-
-	def message(self, x_j, mask_j, edge_attr):
-
-		return mask_j*self.activate1(self.fc1(torch.cat((x_j, edge_attr), dim = -1)))	
-
-class DataAggregationAssociationPhase(MessagePassing): # make equivelent version with sum operations.
-	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_latent = 30, n_dim_mask = 5):
-		super(DataAggregationAssociationPhase, self).__init__('mean') # node dim
-		## Use two layers of SageConv. Explictly or implicitly?
-		self.in_channels = in_channels
-		self.out_channels = out_channels
-		self.n_hidden = n_hidden
-
-		self.activate = nn.PReLU() # can extend to each channel
-		self.init_trns = nn.Linear(in_channels + n_dim_latent + n_dim_mask, n_hidden)
-
-		self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
-		self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
-
-		self.l1_t2_1 = nn.Linear(n_hidden, n_hidden)
-		self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
-		self.activate11 = nn.PReLU() # can extend to each channel
-		self.activate12 = nn.PReLU() # can extend to each channel
-		self.activate1 = nn.PReLU() # can extend to each channel
-
-		self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
-
-		self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
-		self.activate21 = nn.PReLU() # can extend to each channel
-		self.activate22 = nn.PReLU() # can extend to each channel
-		self.activate2 = nn.PReLU() # can extend to each channel
-
-	def forward(self, tr, latent, mask1, mask2, A_in_sta, A_in_src):
-
-		mask = torch.cat((mask1, mask2), dim = - 1)
-		tr = torch.cat((tr, latent, mask), dim = -1)
-		tr = self.activate(self.init_trns(tr)) # should tlatent appear here too? Not on first go..
-
-		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(self.l1_t1_1(tr))), mask), dim = 1)) # Supposed to use this layer. Now, using correct layer.
-		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(self.l1_t2_1(tr))), mask), dim = 1))
-		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
-
-		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
-		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr))), mask), dim = 1))
-		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
-
-		return tr # the new embedding.
-
-class LocalSliceLgCollapse(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = 15.0):
-		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
-		self.fc1 = nn.Linear(ndim_in + n_edge, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
-		self.fc2 = nn.Linear(n_hidden, ndim_out)
-		self.activate1 = nn.PReLU()
-		self.activate2 = nn.PReLU()
-		self.eps = eps
-
-	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, inpt, tlatent, n_temp, n_sta): # reference k nearest spatial points
-
-		## Assert is problem?
-		k_infer = int(len(A_edges)/(n_sta*len(dt_partition)))
-		assert(k_infer == 10)
-		n_arvs, l_dt = len(tpick), len(dt_partition)
-		N = n_sta*n_temp # Lg graph
-		M = n_arvs# M is target
-		dt = dt_partition[1] - dt_partition[0]
-
-		t_index = torch.floor((tpick - dt_partition[0])/torch.Tensor([dt]).to(device)).long() # index into A_edges, which is each station, each dt_point, each k.
-		t_index = ((ipick*l_dt*k_infer + t_index*k_infer).view(-1,1) + torch.arange(k_infer).view(1,-1).to(device)).reshape(-1).long() # check this
-
-		src_index = torch.arange(n_arvs).view(-1,1).repeat(1,k_infer).view(1,-1).to(device)
-		sliced_edges = torch.cat((A_edges[t_index].view(1,-1), src_index), dim = 0).long()
-		t_rel = tpick[sliced_edges[1]] - tlatent[sliced_edges[0],0] # Breaks here?
-
-		ikeep = torch.where(abs(t_rel) < self.eps)[0]
-		sliced_edges = sliced_edges[:,ikeep] # only use times within range. (need to specify target node cardinality)
-		out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), phase = phase_label, size = (N, M))))
-
-		return out
-
-	def message(self, x_j, pos_i, pos_j, phase_i):
-
-		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
-
-class StationSourceAttentionMergedPhases(MessagePassing):
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = 15.0):
-		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
-
-		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6, n_hidden) # add edge data (observed arrival - theoretical arrival)
-		self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
-		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + 2, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
-		self.f_src_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # only use single tranform layer for source embdding (which already has sufficient information)
-
-		self.f_values_1 = nn.Linear(2*ndim_arv_in + ndim_extra + 7, n_hidden) # add second layer transformation.
-		self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
-
-		self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
-		self.proj_2 = nn.Linear(n_hidden, ndim_out) # can remove this layer possibly.
-
-		self.scale = np.sqrt(n_latent)
-		self.n_heads = n_heads
-		self.n_latent = n_latent
-		self.eps = eps
-		self.t_kernel_sq = torch.Tensor([10.0]).to(device)**2
-		self.ndim_feat = ndim_arv_in + ndim_extra
-
-		self.activate1 = nn.PReLU()
-		self.activate2 = nn.PReLU()
-		self.activate3 = nn.PReLU()
-		self.activate4 = nn.PReLU()
-		# self.activate5 = nn.PReLU()
-
-	def forward(self, src, stime, src_embed, trv_src, arrival_p, arrival_s, tpick, ipick, phase_label): # reference k nearest spatial points
-
-		# src isn't used. Only trv_src is needed.
-		n_src, n_sta, n_arv = src.shape[0], trv_src.shape[1], len(tpick) # + 1 ## Note: adding 1 to size of arrivals!
-		# n_arv = len(tpick)
-		ip_unique = torch.unique(ipick).float().cpu().detach().numpy() # unique stations
-		tree_indices = cKDTree(ipick.float().cpu().detach().numpy().reshape(-1,1))
-		unique_sta_lists = tree_indices.query_ball_point(ip_unique.reshape(-1,1), r = 0)
-
-		arrival_p = torch.cat((arrival_p, torch.zeros(1,arrival_p.shape[1]).to(device)), dim = 0) # add null arrival, that all arrivals link too. This acts as a "stabalizer" in the inner-product space, and allows softmax to not blow up for arrivals with only self loops. May not be necessary.
-		arrival_s = torch.cat((arrival_s, torch.zeros(1,arrival_s.shape[1]).to(device)), dim = 0) # add null arrival, that all arrivals link too. This acts as a "stabalizer" in the inner-product space, and allows softmax to not blow up for arrivals with only self loops. May not be necessary.
-		arrival = torch.cat((arrival_p, arrival_s), dim = 1) # Concatenate across feature axis
-
-		edges = torch.Tensor(np.copy(np.flip(np.hstack([np.ascontiguousarray(np.array(list(zip(itertools.product(unique_sta_lists[j], np.concatenate((unique_sta_lists[j], np.array([n_arv])), axis = 0)))))[:,0,:].T) for j in range(len(unique_sta_lists))]), axis = 0))).long().to(device) # note: preferably could remove loop here.
-		n_edge = edges.shape[1]
-
-		## Now must duplicate edges, for each unique source. (different accumulation points)
-		edges = (edges.repeat(1, n_src) + torch.cat((torch.zeros(1, n_src*n_edge).to(device), (torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(device)), dim = 0)).long()
-		src_index = torch.arange(n_src).repeat_interleave(n_edge).long()
-
-		N = n_arv + 1 # still correct?
-		M = n_arv*n_src
-
-		out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = arrival, sembed = src_embed, stime = stime, tsrc_p = torch.cat((trv_src[:,:,0], -self.eps*torch.ones(n_src,1).to(device)), dim = 1).detach(), tsrc_s = torch.cat((trv_src[:,:,1], -self.eps*torch.ones(n_src,1).to(device)), dim = 1).detach(), sindex = src_index, stindex = torch.cat((ipick, torch.Tensor([n_sta]).long().to(device)), dim = 0), atime = torch.cat((tpick, torch.Tensor([-self.eps]).to(device)), dim = 0), phase = torch.cat((phase_label, torch.Tensor([-1.0]).reshape(1,1).to(device)), dim = 0), size = (N, M)).mean(1)))) # M is output. Taking mean over heads
-
-		return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
-
-	def message(self, x_j, edge_index, index, tsrc_p, tsrc_s, sembed, sindex, stindex, stime, atime, phase_j): # Can use phase_j, or directly call edge_index, like done for atime, stindex, etc.
-
-		assert(abs(edge_index[1] - index).max().item() == 0)
-
-		ifind = torch.where(edge_index[0] == edge_index[0].max())[0]
-
-		rel_t_p = (atime[edge_index[0]] - (tsrc_p[sindex, stindex[edge_index[0]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p), phase_j), dim = 1) # phase[edge_index[0]]
-
-		rel_t_s = (atime[edge_index[0]] - (tsrc_s[sindex, stindex[edge_index[0]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s), phase_j), dim = 1) # phase[edge_index[0]]
-
-		# Denote self-links by a feature.
-		self_link = (edge_index[0] == torch.remainder(edge_index[1], edge_index[0].max().item())).reshape(-1,1).detach().float() # Each accumulation index (an entry from src cross arrivals). The number of arrivals is edge_index.max() exactly (since tensor is composed of number arrivals + 1)
-		null_link = (edge_index[0] == edge_index[0].max().item()).reshape(-1,1).detach().float()
-		contexts = self.f_src_context_2(self.activate1(self.f_src_context_1(torch.cat((sembed[sindex], stime[sindex].reshape(-1,1).detach(), self_link, null_link), dim = 1)))).view(-1, self.n_heads, self.n_latent)
-		queries = self.f_arrival_query_2(self.activate2(self.f_arrival_query_1(torch.cat((x_j, rel_t_p, rel_t_s), dim = 1)))).view(-1, self.n_heads, self.n_latent)
-		values = self.f_values_2(self.activate3(self.f_values_1(torch.cat((x_j, rel_t_p, rel_t_s, self_link, null_link), dim = 1)))).view(-1, self.n_heads, self.n_latent)
-
-		assert(self_link.sum() == (len(atime) - 1)*tsrc_p.shape[0])
-
-		## Do computation
-		scores = (queries*contexts).sum(-1)/self.scale
-		alpha = softmax(scores, index)
-
-		return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
-
-class GCN_Detection_Network_extended(nn.Module):
-	def __init__(self, ftrns1, ftrns2, device = 'cuda'):
-		super(GCN_Detection_Network_extended, self).__init__()
-		# Define modules and other relavent fixed objects (scaling coefficients.)
-		# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
-		self.DataAggregation = DataAggregation(4, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
-		self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 3).to(device) # 30, 15
-		self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
-		self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
-		self.SpatialAggregation3 = SpatialAggregation(30, 30).to(device) # 15, 30
-		self.SpatialDirect = SpatialDirect(30, 30).to(device) # 15, 30
-		self.SpatialAttention = SpatialAttention(30, 30, 3, 15).to(device)
-		self.TemporalAttention = TemporalAttention(30, 1, 15).to(device)
-
-		self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
-		self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
-		self.LocalSliceLgCollapseP = LocalSliceLgCollapse(30, 15).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
-		self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
-		self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3).to(device)
-		# self.ArrivalS = StationSourceAttention(30, 15, 1, 15, n_heads = 3).to(device)
-
-		self.ftrns1 = ftrns1
-		self.ftrns2 = ftrns2
-
-	def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
-
-		n_line_nodes = Slice.shape[0]
-		mask_p_thresh = 0.01
-		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
-
-		x_latent = self.DataAggregation(Slice.view(n_line_nodes, -1), Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-		x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
-		x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
-		x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
-		x_spatial = self.SpatialAggregation3(x, A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
-		y_latent = self.SpatialDirect(x) # contains data on spatial solution.
-		y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
-		x = self.SpatialAttention(x_spatial, x_query_cart, x_temp_cuda_cart) # second slowest module (could use this embedding to seed source source attention vector).
-		x_src = self.SpatialAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart) # obtain spatial embeddings, source want to query associations for.
-		x = self.TemporalAttention(x, t_query) # on random queries
-
-		## Note below: why detach x_latent?
-		mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
-		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
-		s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
-		arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size
-		arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, s, tlatent[:,1].reshape(-1,1), n_temp, n_sta)
-		arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
-		
-		arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
-
-		return y, x, arv_p, arv_s
-
-## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
-path_to_file = str(pathlib.Path().absolute())
-
-
-## Load Files
-if '\\' in path_to_file: ## Windows
-
-	# Load region
-	name_of_project = path_to_file.split('\\')[-1] ## Windows
-	z = np.load(path_to_file + '\\%s_region.npz'%name_of_project)
-	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-	z.close()
-
-	# Load templates
-	z = np.load(path_to_file + '\\Grids\\%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-	x_grids = z['x_grids']
-	z.close()
-
-	# Load stations
-	z = np.load(path_to_file + '\\%s_stations.npz'%name_of_project)
-	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-	z.close()
-
-	## Load travel times
-	z = np.load(path_to_file + '\\1D_Velocity_Models_Regional\\%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
-
-	## Create path to write files
-	write_training_file = path_to_file + '\\GNN_TrainedModels\\' + name_of_project + '_'
-	
-else: ## Linux or Unix
-
-	# Load region
-	name_of_project = path_to_file.split('/')[-1] ## Windows
-	z = np.load(path_to_file + '/%s_region.npz'%name_of_project)
-	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-	z.close()
-
-	# Load templates
-	z = np.load(path_to_file + '/Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-	x_grids = z['x_grids']
-	z.close()
-
-	# Load stations
-	z = np.load(path_to_file + '/%s_stations.npz'%name_of_project)
-	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-	z.close()
-
-	## Load travel times
-	z = np.load(path_to_file + '/1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
-
-	## Create path to write files
-	write_training_file = path_to_file + '/GNN_TrainedModels/' + name_of_project + '_'
-	
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
 
@@ -1113,35 +643,60 @@ offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
 scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
 
-ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
-ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)  # invert ftrns1
 rbest_cuda = torch.Tensor(rbest).to(device)
 mn_cuda = torch.Tensor(mn).to(device)
-ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x) - mn_cuda).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
-ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda)
 
-Tp = z['Tp_interp']
-Ts = z['Ts_interp']
+# use_spherical = False
+if config['use_spherical'] == True:
 
-locs_ref = z['locs_ref']
-X = z['X']
-z.close()
+	earth_radius = 6371e3
+	ftrns1 = lambda x: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T
+	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius)
 
-x1 = np.unique(X[:,0])
-x2 = np.unique(X[:,1])
-x3 = np.unique(X[:,2])
-assert(len(x1)*len(x2)*len(x3) == X.shape[0])
+	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, e = 0.0, a = earth_radius, device = device) - mn_cuda).T).T
+	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, e = 0.0, a = earth_radius, device = device)
 
-## Load fixed grid for velocity models
-Xmin = X.min(0)
-Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
-Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
-N = np.array([len(x1), len(x2), len(x3)])
-X0 = np.array([locs_ref[0,0], locs_ref[0,1], 0.0]).reshape(1,-1)
+else:
 
+	earth_radius = 6378137.0
+	ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T
+	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)
 
-trv = interp_1D_velocity_model_to_3D_travel_times(X, locs_ref, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2) # .to(device)
+	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T
+	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device)
 
+if config['train_travel_time_neural_network'] == False:
+
+	## Load travel times
+	z = np.load(path_to_file + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
+	
+	Tp = z['Tp_interp']
+	Ts = z['Ts_interp']
+	
+	locs_ref = z['locs_ref']
+	X = z['X']
+	z.close()
+	
+	x1 = np.unique(X[:,0])
+	x2 = np.unique(X[:,1])
+	x3 = np.unique(X[:,2])
+	assert(len(x1)*len(x2)*len(x3) == X.shape[0])
+	
+	
+	## Load fixed grid for velocity models
+	Xmin = X.min(0)
+	Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
+	Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
+	N = np.array([len(x1), len(x2), len(x3)])
+	X0 = np.array([locs_ref[0,0], locs_ref[0,1], 0.0]).reshape(1,-1)
+	
+	
+	trv = interp_1D_velocity_model_to_3D_travel_times(X, locs_ref, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2) # .to(device)
+
+elif config['train_travel_time_neural_network'] == True:
+
+	n_ver_trv_time_model_load = 1
+	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load)
 
 load_subnetworks = False
 if load_subnetworks == True:
@@ -1189,7 +744,8 @@ x_grids_trv_pointers_s = []
 x_grids_trv_refs = []
 x_grids_edges = []
 
-ts_max_val = Ts.max()
+if config['train_travel_time_neural_network'] == False:
+	ts_max_val = Ts.max()
 
 for i in range(len(x_grids)):
 
@@ -1197,8 +753,9 @@ for i in range(len(x_grids)):
 	x_grids_trv.append(trv_out.cpu().detach().numpy())
 	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(trv_out.cpu().detach().numpy(), k = k_time_edges)
 
-	assert(trv_out.min() > 0.0)
-	assert(trv_out.max() < (ts_max_val + 3.0))
+	if config['train_travel_time_neural_network'] == False:
+		assert(trv_out.min() > 0.0)
+		assert(trv_out.max() < (ts_max_val + 3.0))
 
 	x_grids_trv_pointers_p.append(A_edges_time_p)
 	x_grids_trv_pointers_s.append(A_edges_time_s)
@@ -1243,20 +800,21 @@ for i in range(n_restart_step, n_epochs):
 		mx_pred_1[0:n_restart_step] = zlosses['mx_pred_1'][0:n_restart_step]; mx_pred_2[0:n_restart_step] = zlosses['mx_pred_2'][0:n_restart_step]
 		mx_pred_3[0:n_restart_step] = zlosses['mx_pred_3'][0:n_restart_step]; mx_pred_4[0:n_restart_step] = zlosses['mx_pred_4'][0:n_restart_step]
 		print('loaded model for restart on step %d ver %d \n'%(n_restart_step, n_ver))
-
+		zlosses.close()
+	
 	optimizer.zero_grad()
 
 	cwork = 0
 	inc_c = 0
-	while cwork == 0:
-		try: ## Does this actually ever through an exception? Probably not.
+	while (cwork == 0)*(inc_c < 10):
+		# try: ## Does this actually ever through an exception? Probably not.
 
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, fixed_subnetworks = Ind_subnetworks, use_preferential_sampling = True, n_batch = n_batch, verbose = True, dist_range = dist_range)
+		[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, fixed_subnetworks = Ind_subnetworks, use_preferential_sampling = True, n_batch = n_batch, verbose = True, dist_range = dist_range)
 
-			cwork = 1
-		except:
-			inc_c += 1
-			print('Failed data gen! %d'%inc_c)
+		cwork = 1
+		# except:
+		# 	inc_c += 1
+		# 	print('Failed data gen! %d'%inc_c)
 
 		## To look at the synthetic data, do:
 		## plt.scatter(data[0][:,0], data[0][:,1])
@@ -1272,7 +830,7 @@ for i in range(n_restart_step, n_epochs):
 		np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
 		print('saved model %s %d'%(n_ver, i))
 		print('saved model at step %d'%i)		
-
+	
 	for i0 in range(n_batch):
 
 		## Adding skip... to skip samples with zero input picks
@@ -1280,6 +838,8 @@ for i in range(n_restart_step, n_epochs):
 			print('skip a sample!') ## If this skips, and yet i0 == (n_batch - 1), is it a problem?
 			continue ## Skip this!
 
+		## Should add increased samples in x_src_query around places of coherency
+		## and true labels
 		x_src_query = np.random.rand(n_src_query,3)*scale_x_extend + offset_x_extend
 
 		if len(lp_srcs[i0]) > 0:
@@ -1297,10 +857,62 @@ for i in range(n_restart_step, n_epochs):
 
 		spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(X_fixed[i0], axis = 1), Locs[i0].shape[0], axis = 1) - np.repeat(np.expand_dims(Locs[i0], axis = 0), X_fixed[i0].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
 
-		out = mz(torch.Tensor(Inpts[i0]).to(device).reshape(-1,4), torch.Tensor(Masks[i0]).to(device).reshape(-1,4), torch.Tensor(A_prod_sta_sta_l[i0]).long().to(device), torch.Tensor(A_prod_src_src_l[i0]).long().to(device), Data(x = spatial_vals, edge_index = torch.Tensor(A_src_in_prod_l[i0]).long().to(device)), Data(x = spatial_vals, edge_index = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod_l[i0], axis = 0))).long().to(device)), torch.Tensor(A_src_src_l[i0]).long().to(device), torch.Tensor(A_edges_time_p_l[i0]).long().to(device), torch.Tensor(A_edges_time_s_l[i0]).long().to(device), torch.Tensor(A_edges_ref_l[i0]).to(device), trv_out, torch.Tensor(lp_times[i0]).to(device), torch.Tensor(lp_stations[i0]).long().to(device), torch.Tensor(lp_phases[i0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(Locs[i0])).to(device), torch.Tensor(ftrns1(X_fixed[i0])).to(device), torch.Tensor(ftrns1(X_query[i0])).to(device), torch.Tensor(x_src_query_cart).to(device), tq, tq_sample, trv_out_src)
+		# Pre-process tensors for Inpts and Masks
+		input_tensor_1 = torch.Tensor(Inpts[i0]).to(device).reshape(-1, 4)
+		input_tensor_2 = torch.Tensor(Masks[i0]).to(device).reshape(-1, 4)
 
+		# Process tensors for A_prod and A_src arrays
+		A_prod_sta_tensor = torch.Tensor(A_prod_sta_sta_l[i0]).long().to(device)
+		A_prod_src_tensor = torch.Tensor(A_prod_src_src_l[i0]).long().to(device)
+
+		# Process edge index data
+		edge_index_1 = torch.Tensor(A_src_in_prod_l[i0]).long().to(device)
+		flipped_edge = np.ascontiguousarray(np.flip(A_src_in_prod_l[i0], axis=0))
+		edge_index_2 = torch.Tensor(flipped_edge).long().to(device)
+
+		data_1 = Data(x=spatial_vals, edge_index=edge_index_1)
+		data_2 = Data(x=spatial_vals, edge_index=edge_index_2)
+
+		if len(lp_times[i0]) > max_number_pick_association_labels_per_sample:
+			isample_picks = np.sort(np.random.choice(len(lp_times[i0]), size = max_number_pick_association_labels_per_sample, replace = False))
+			lp_times[i0] = lp_times[i0][isample_picks]
+			lp_stations[i0] = lp_stations[i0][isample_picks]
+			lp_phases[i0] = lp_phases[i0][isample_picks]
+			lp_meta[i0] = lp_meta[i0][isample_picks]
+		
+		# Continue processing the rest of the inputs
+		input_tensors = [
+			input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor,
+			data_1, data_2,
+			torch.Tensor(A_src_src_l[i0]).long().to(device),
+			torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
+			torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
+			torch.Tensor(A_edges_ref_l[i0]).to(device),
+			trv_out,
+			torch.Tensor(lp_times[i0]).to(device),
+			torch.Tensor(lp_stations[i0]).long().to(device),
+			torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
+			torch.Tensor(ftrns1(Locs[i0])).to(device),
+			torch.Tensor(ftrns1(X_fixed[i0])).to(device),
+			torch.Tensor(ftrns1(X_query[i0])).to(device),
+			torch.Tensor(x_src_query_cart).to(device),
+			tq, tq_sample, trv_out_src
+		]
+
+		# Call the model with pre-processed tensors
+		out = mz(*input_tensors)
+		
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+
+		n_visualize_step = 1000
+		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0):
+			save_plots_path = path_to_file + seperator + 'Plots' + seperator
+
+			if Lbls_query[i0][:,5].max() > 0.2: # Plot all true sources
+				visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i)
+			elif np.random.rand() > 0.8: # Plot a fraction of false sources
+				visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i)
 
 		if i0 != (n_batch - 1):
 			loss.backward(retain_graph = True)
@@ -1329,7 +941,11 @@ for i in range(n_restart_step, n_epochs):
 	mx_pred_3[i] = mx_pred_val_3/n_batch
 	mx_pred_4[i] = mx_pred_val_4/n_batch
 
-	print('%d %0.8f'%(i, loss_val))
+	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
+
+	# Log losses
+	if use_wandb_logging == True:
+		wandb.log({"loss": loss_val})
 
 	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
 		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
