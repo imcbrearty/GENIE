@@ -136,7 +136,7 @@ with open('config.yaml', 'r') as file:
 name_of_project = config['name_of_project']
 
 # Load day to process
-z = open(path_to_file + '%s_process_days_list_ver_%d.txt'%(name_of_project, n_ver_), 'r')
+z = open(path_to_file + '%s_process_days_list_ver_%d.txt'%(name_of_project, process_days_ver), 'r')
 lines = z.readlines()
 z.close()
 if '/' in date[day_select]:
@@ -158,7 +158,7 @@ x_grids = z['x_grids']
 z.close()
 
 # Load stations
-z = np.load(path_to_file + '%s_stations.npz'%(name_of_project, process_days_ver))
+z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
 locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
 z.close()
 
