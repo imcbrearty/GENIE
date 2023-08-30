@@ -696,7 +696,7 @@ if config['train_travel_time_neural_network'] == False:
 elif config['train_travel_time_neural_network'] == True:
 
 	n_ver_trv_time_model_load = 1
-	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load)
+	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, device = device)
 
 load_subnetworks = False
 if load_subnetworks == True:
