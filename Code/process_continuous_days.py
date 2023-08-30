@@ -260,6 +260,7 @@ plot_on = False
 print('Doing 1 s steps, to avoid issue of repeating time samples')
 
 day_len = 3600*24
+t_win = config['t_win']
 tsteps = np.arange(0, day_len, step) ## Fixed solution grid.
 tsteps_abs = np.arange(-t_win/2.0, day_len + t_win/2.0 + 1, step_abs) ## Fixed solution grid, assume 1 second
 tree_tsteps = cKDTree(tsteps_abs.reshape(-1,1))
