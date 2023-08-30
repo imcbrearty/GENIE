@@ -59,6 +59,10 @@ path_to_file = str(pathlib.Path().absolute())
 seperator = '\\' if '\\' in path_to_file else '/'
 path_to_file += seperator
 
+## Note, parameters d_deg (multiple re-uses), n_batch, n_segment, min_picks, 
+## and max_sources (per connected graph), max_splits can be moved to config
+## Also replace "iz1, iz2 = np.where(Out_2 > 0.0025)" with specified thresh
+
 ## Need to update how extract_inputs_from_data_fixed_grids_with_phase_type uses a variable t_win parammeter, 
 ## and also adding inputs of training_params, graph_params, pred_params
 
