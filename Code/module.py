@@ -419,7 +419,49 @@ class GCN_Detection_Network_extended(nn.Module):
 		arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
 
 		return y, x, arv_p, arv_s
+
+	def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+
+		n_line_nodes = Slice.shape[0]
+		mask_p_thresh = 0.01
+		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
+
+		# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
+		# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
+		x_latent = self.DataAggregation(Slice.view(n_line_nodes, -1), Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
+		x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
+		x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
+		x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		y_latent = self.SpatialDirect(x) # contains data on spatial solution.
+		y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
+		x = self.SpatialAttention(x_spatial, x_query_cart, x_temp_cuda_cart) # second slowest module (could use this embedding to seed source source attention vector).
+		x_src = self.SpatialAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart) # obtain spatial embeddings, source want to query associations for.
+		x = self.TemporalAttention(x, t_query) # on random queries
+
+		## Note below: why detach x_latent?
+		mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
+		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
+		s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
+		arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta)
+		arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+		arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+		
+		arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
+
+		return y, x, arv_p, arv_s
 	
+	def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src, A_edges_p, A_edges_s, dt_partition, tlatent):
+
+		self.A_in_sta = A_in_sta
+		self.A_in_src = A_in_src
+		self.A_src_in_edges = A_src_in_edges
+		self.A_Lg_in_src = A_Lg_in_src
+		self.A_src = A_src
+		self.A_edges_p = A_edges_p
+		self.A_edges_s = A_edges_s
+		self.dt_partition = dt_partition
+		self.tlatent = tlatent	
 
 
 
