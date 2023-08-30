@@ -54,6 +54,10 @@ from module import *
 ## sbatch or a bash script can call this file for a parallel set of cpu threads
 ## (each for a different n, or, day).
 
+path_to_file = str(pathlib.Path().absolute())
+seperator = '\\' if '\\' in path_to_file else '/'
+path_to_file += seperator
+
 ## Need to update how extract_inputs_from_data_fixed_grids_with_phase_type uses a variable t_win parammeter, 
 ## and also adding inputs of training_params, graph_params, pred_params
 
@@ -129,9 +133,7 @@ print('Beginning processing')
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
-path_to_file = str(pathlib.Path().absolute())
-seperator = '\\' if '\\' in path_to_file else '/'
-path_to_file += seperator
+name_of_project = config['name_of_project']
 
 # Load day to process
 z = open(path_to_file + '%s_process_days_list_ver_%d.txt'%(name_of_project, n_ver_), 'r')
