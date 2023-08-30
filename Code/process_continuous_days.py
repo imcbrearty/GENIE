@@ -333,6 +333,11 @@ date = np.array([yr, mo, dy])
 P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
 locs_use = locs[ind_use]
 
+process_known_events = False
+if process_known_events == True: ## If true, only process around times of known events
+	t0 = UTCDateTime(date[0], date[1], date[2])
+	srcs_known = download_catalog(lat_range, lon_range, 1.0, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
+
 for cnt, strs in enumerate([0]):
 
 	trv_out_src = trv(torch.Tensor(locs[ind_use]), torch.Tensor(x_src_query)).detach()
@@ -358,8 +363,15 @@ for cnt, strs in enumerate([0]):
 	perm_vec[ind_use] = np.arange(len(ind_use))
 	P_perm[:,1] = perm_vec[P_perm[:,1].astype('int')]
 
-	times_need_l = np.copy(tsteps) # 5 sec overlap, more or less
-
+	if process_known_events == False: # If false, process continuous days
+		times_need_l = np.copy(tsteps)
+	else:  # If true, process around times of known events
+		srcs_known_times = np.copy(srcs_known[:,3])
+		tree_srcs_known_times = cKDTree(tsteps.reshape(-1,1))
+		ip_nearest_srcs_known_times = tree_srcs_known_times.query(srcs_known_times.reshape(-1,1))[1]
+		srcs_known_times = tsteps[ip_nearest_srcs_known_times]
+		times_need_l = np.unique((srcs_known_times.reshape(-1,1) + np.arange(-pred_params[0]*3, pred_params[0]*3 + step, step).reshape(1,-1)).reshape(-1))
+		
 	## Double check this.
 	n_batches = int(np.floor(len(times_need_l)/n_batch))
 	times_need = [times_need_l[j*n_batch:(j + 1)*n_batch] for j in range(n_batches)]
@@ -1170,6 +1182,9 @@ for cnt, strs in enumerate([0]):
 		file_save['trv_out1'] = trv_out1
 		file_save['trv_out2'] = trv_out2
 
+		if (process_known_events == True)*(len(known_events) > 0):
+			file_save['srcs_known'] = srcs_known
+		
 		if extra_save == False: # mem_save == True implies don't save these fields
 			file_save['Out'] = Out_2_sparse ## Is this heavy?
 
