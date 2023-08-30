@@ -239,7 +239,7 @@ graph_params = z['graph_params']
 pred_params = z['pred_params']
 z.close()
 
-x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t = load_templates_region(trv, x_grids, training_params, graph_params, pred_params)
+x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t = load_templates_region(trv, locs, x_grids, training_params, graph_params, pred_params)
 x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])) for i in range(len(x_grids))]
 
 mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff)
