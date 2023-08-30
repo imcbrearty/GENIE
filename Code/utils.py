@@ -571,6 +571,8 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 
 def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut = None, use_quantile = None, permute_indices = False, min_amplitude = None, n_ver = 1, spr_picks = 100):
 
+	from obspy.core import UTCDateTime
+	
 	if '\\' in path_to_file:
 		z = np.load(path_to_file + 'Picks\\%d\\%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
 	elif '/' in path_to_file:
