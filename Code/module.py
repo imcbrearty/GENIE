@@ -420,6 +420,18 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		return y, x, arv_p, arv_s
 
+	def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src, A_edges_p, A_edges_s, dt_partition, tlatent):
+
+		self.A_in_sta = A_in_sta
+		self.A_in_src = A_in_src
+		self.A_src_in_edges = A_src_in_edges
+		self.A_Lg_in_src = A_Lg_in_src
+		self.A_src = A_src
+		self.A_edges_p = A_edges_p
+		self.A_edges_s = A_edges_s
+		self.dt_partition = dt_partition
+		self.tlatent = tlatent	
+	
 	def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 
 		n_line_nodes = Slice.shape[0]
@@ -450,20 +462,6 @@ class GCN_Detection_Network_extended(nn.Module):
 		arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
 
 		return y, x, arv_p, arv_s
-	
-	def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src, A_edges_p, A_edges_s, dt_partition, tlatent):
-
-		self.A_in_sta = A_in_sta
-		self.A_in_src = A_in_src
-		self.A_src_in_edges = A_src_in_edges
-		self.A_Lg_in_src = A_Lg_in_src
-		self.A_src = A_src
-		self.A_edges_p = A_edges_p
-		self.A_edges_s = A_edges_s
-		self.dt_partition = dt_partition
-		self.tlatent = tlatent	
-
-
 
 
 #### EXTRA
