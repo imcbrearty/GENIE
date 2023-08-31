@@ -907,7 +907,7 @@ for i in range(n_restart_step, n_epochs):
 
 		n_visualize_step = 1000
 		n_visualize_fraction = 0.2
-		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0)(i0 < n_visualize_fraction*n_batch):
+		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0)*(i0 < n_visualize_fraction*n_batch):
 			save_plots_path = path_to_file + seperator + 'Plots' + seperator
 
 			if Lbls_query[i0][:,5].max() > 0.2: # Plot all true sources
