@@ -553,6 +553,19 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		if len(lp_srcs[-1]) > 0:
 			x_query[0:len(lp_srcs[-1]),0:3] = lp_srcs[-1][:,0:3]
 
+		n_frac_focused_queries = 0.2
+		n_concentration_focused_queries = 0.05 # 5% of scale of domain
+		if (len(lp_srcs[-1]) > 0)*(n_frac_focused_queries > 0):
+			n_focused_queries = int(n_frac_focused_queries*n_spc_query)
+			ind_overwrite_focused_queries = np.sort(np.random.choice(n_spc_query, size = n_focused_queries, replace = False))
+			ind_source_focused = np.random.choice(len(lp_srcs[-1]), size = n_focused_queries)
+
+			x_query_focused = np.random.randn(n_focused_queries, 3)*scale_x*n_concentration_focused_queries
+			x_query_focused = x_query_focused + lp_srcs[-1][ind_source_focused,0:3]
+			x_query_focused = np.maximum(np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), x_query_focused)
+			x_query_focused = np.minimum(np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1), x_query_focused)
+			x_query[ind_overwrite_focused_queries] = x_query_focused
+		
 		if len(active_sources_per_slice) == 0:
 			lbls_grid = np.zeros((x_grids[grid_select].shape[0], len(t_slice)))
 			lbls_query = np.zeros((n_spc_query, len(t_slice)))
