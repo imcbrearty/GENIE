@@ -84,13 +84,13 @@ device = torch.device('cuda') ## or use cpu
 
 ## Extra train parameters
 
-spc_random = 30e3
+spc_random = 20e3
 sig_t = 0.03 # 3 percent of travel time error on pick times
 spc_thresh_rand = 20e3
 min_sta_arrival = 4
 coda_rate = 0.035 # 5 percent arrival have code. Probably more than this? Increased from 0.035.
 coda_win = np.array([0, 25.0]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
-max_num_spikes = 80
+max_num_spikes = 20
 spike_time_spread = 0.15
 s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
 use_stable_association_labels = True
@@ -99,8 +99,8 @@ training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_r
 
 ## Training params list 3
 n_batch = 75
-dist_range = [15e3, 500e3] # Should be chosen proportional to physical domain size
-max_rate_events = 5000/8
+dist_range = [15e3, 400e3] # Should be chosen proportional to physical domain size
+max_rate_events = 4000/8
 max_miss_events = 3000/8
 max_false_events = 2000/8
 T = 3600.0*3.0
@@ -114,7 +114,7 @@ use_preferential_sampling = False
 use_shallow_sources = False
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, n_batch = 75, dist_range = [15e3, 500e3], max_rate_events = 6000/8, max_miss_events = 2500/8, max_false_events = 2500/8, T = 3600.0*3.0, dt = 30, tscale = 3600.0, n_sta_range = [0.35, 1.0], use_sources = False, use_full_network = False, fixed_subnetworks = None, use_preferential_sampling = False, use_shallow_sources = False, plot_on = False, verbose = False):
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, n_batch = 75, dist_range = [15e3, 400e3], max_rate_events = 4000/8, max_miss_events = 3000/8, max_false_events = 2000/8, T = 3600.0*3.0, dt = 30, tscale = 3600.0, n_sta_range = [0.35, 1.0], use_sources = False, use_full_network = False, fixed_subnetworks = None, use_preferential_sampling = False, use_shallow_sources = False, plot_on = False, verbose = False):
 
 	if verbose == True:
 		st = time.time()
@@ -123,13 +123,13 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
 
 	n_spc_query, n_src_query = training_params
-	spc_random = 30e3
+	spc_random = 20e3
 	sig_t = 0.03 # 3 percent of travel time error on pick times
 	spc_thresh_rand = 20e3
 	min_sta_arrival = 4
 	coda_rate = 0.035 # 5 percent arrival have code. Probably more than this? Increased from 0.035.
 	coda_win = np.array([0, 25.0]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
-	max_num_spikes = 80
+	max_num_spikes = 20
 
 	assert(np.floor(n_sta_range[0]*locs.shape[0]) > k_sta_edges)
 
