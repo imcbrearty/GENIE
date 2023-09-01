@@ -35,13 +35,17 @@ class LocalMarching(MessagePassing): # make equivelent version with sum operatio
 		super(LocalMarching, self).__init__(aggr = 'max') # node dim
 
 	## Changed dt to 5 s
-	def forward(self, srcs, ftrns1, tc_win = 5, sp_win = 35e3, n_steps_max = 100, tol = 1e-4, use_directed = True, device = 'cpu'):
+	def forward(self, srcs, ftrns1, tc_win = 5, sp_win = 35e3, n_steps_max = 100, tol = 1e-4, scale_depth = 1.0, use_directed = True, device = 'cpu'):
 
+		scale_vec = np.array([1.0, 1.0, scale_depth]).reshape(1,-1) ## Use this to down-weight importance of depths
+		## which are sometimes highly seperated for nearby sources, since spatial graphs are usually sparsely populated
+		## along depth axis compared to horizontal axis.
+		
 		srcs_tensor = torch.Tensor(srcs).to(device)
 		tree_t = cKDTree(srcs[:,3].reshape(-1,1))
-		tree_x = cKDTree(ftrns1(srcs[:,0:3]))
+		tree_x = cKDTree(ftrns1(srcs[:,0:3])*scale_vec)
 		lp_t = tree_t.query_ball_point(srcs[:,3].reshape(-1,1), r = tc_win)
-		lp_x = tree_x.query_ball_point(ftrns1(srcs[:,0:3]), r = sp_win)
+		lp_x = tree_x.query_ball_point(ftrns1(srcs[:,0:3])*scale_vec, r = sp_win)
 		cedges = [np.array(list(set(lp_t[i]).intersection(lp_x[i]))) for i in range(len(lp_t))]
 		cedges1 = np.hstack([i*np.ones(len(cedges[i])) for i in range(len(cedges))])
 		edges = torch.Tensor(np.concatenate((np.hstack(cedges).reshape(1,-1), cedges1.reshape(1,-1)), axis = 0)).long().to(device)
