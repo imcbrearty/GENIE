@@ -476,12 +476,13 @@ for cnt, strs in enumerate([0]):
 		srcs_groups_l.append(srcs_init)
 
 	srcs_l = []
+	scale_depth_clustering = 0.2
 	for i in range(len(srcs_groups_l)):
 		if len(srcs_groups_l[i]) == 1:
 			srcs_l.append(srcs_groups_l[i])
 		else:
 			mp = LocalMarching()
-			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win)
+			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
 			if len(srcs_out) > 0:
 				srcs_l.append(srcs_out)
 	srcs = np.vstack(srcs_l)
@@ -569,6 +570,15 @@ for cnt, strs in enumerate([0]):
 		srcs_refined = np.vstack(srcs_refined)
 		srcs_refined = srcs_refined[np.argsort(srcs_refined[:,3])] # note, this
 
+		re_apply_local_marching = True
+		if re_apply_local_marching == True: ## This way, some events that were too far apart during initial LocalMarching
+			## routine can now be grouped into one, since they are closer after the srcs_refined relocation step.
+			## Note: ideally, this clustering should be done outside of the srcs_list loop, since nearby sources
+			## may be artificically cut into seperate groups in srcs_list. Can end the srcs_list loop, run this
+			## clustering, and then run the srcs_list group over the association results.
+			mp = LocalMarching()
+			srcs_refined = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
+		
 		## Can do multiple grids simultaneously, for a single source? (by duplicating the source?)
 		trv_out_srcs_slice = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)		
 
@@ -579,13 +589,13 @@ for cnt, strs in enumerate([0]):
 		d_deg = 0.1
 		x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
 		x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
-		x3 = np.array([srcs_refined[i,2]])
+		x3 = np.array([0.0]) # This value is overwritten in the next step
 		x11, x12, x13 = np.meshgrid(x1, x2, x3)
 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 		X_save = np.copy(xx)
 		X_save_cart = torch.Tensor(ftrns1(X_save))
 
-
+		
 		for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 
 			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], srcs_refined[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
