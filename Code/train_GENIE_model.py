@@ -212,6 +212,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ikeep_s1, ikeep_s2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_s))
 
 	arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
+
+	add_bias_scaled_travel_time_noise = True ## This way, some "true moveouts" will have travel time 
+	## errors that are from a velocity model different than used for sampling, training, and application, etc.
+	## Uses a different bias for both p and s waves, but constant for all stations, for each event
+	if add_bias_scaled_travel_time_noise == True:
+		total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error
+		scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
+		scale_bias = scale_bias + 1.0
+		arrivals_theoretical = arrivals_theoretical*scale_bias
+	
 	arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)
 	arrivals_indices = np.arange(n_sta).reshape(1,-1).repeat(n_src, 0)
 	src_indices = np.arange(n_src).reshape(-1,1).repeat(n_sta, 1)
