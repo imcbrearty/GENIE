@@ -859,6 +859,20 @@ for i in range(n_restart_step, n_epochs):
 		if len(lp_srcs[i0]) > 0:
 			x_src_query[0:len(lp_srcs[i0]),0:3] = lp_srcs[i0][:,0:3]
 
+		n_frac_focused_association_queries = 0.1 # concentrate 10% of association queries around true sources
+		n_concentration_focused_association_queries = 0.03 # 3% of scale of domain
+		if (len(lp_srcs[i0]) > 0)*(n_frac_focused_association_queries > 0):
+
+			n_focused_queries = int(n_frac_focused_association_queries*n_src_query)
+			ind_overwrite_focused_queries = np.sort(np.random.choice(n_src_query, size = n_focused_queries, replace = False))
+			ind_source_focused = np.random.choice(len(lp_srcs[i0]), size = n_focused_queries)
+
+			x_query_focused = np.random.randn(n_focused_queries, 3)*scale_x_extend*n_concentration_focused_association_queries
+			x_query_focused = x_query_focused + lp_srcs[i0][ind_source_focused,0:3]
+			x_query_focused = np.maximum(np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), x_query_focused)
+			x_query_focused = np.minimum(np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1), x_query_focused)
+			x_src_query[ind_overwrite_focused_queries] = x_query_focused
+		
 		x_src_query_cart = ftrns1(x_src_query)
 
 		trv_out = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(X_fixed[i0]).to(device)).detach().reshape(-1,2) ## Note: could also just take this from x_grids_trv
