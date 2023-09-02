@@ -537,7 +537,7 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 
 	return trv
 
-def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, dt_embed = 1.0):
+def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, dt_embed = 1.0, device = 'cpu'):
 
 	k_sta_edges, k_spc_edges, k_time_edges = graph_params
 
@@ -551,7 +551,7 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 
 	for i in range(len(x_grids)):
 
-		trv_out = trv(torch.Tensor(locs), torch.Tensor(x_grids[i]))
+		trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
 		x_grids_trv.append(trv_out.cpu().detach().numpy())
 
 		edge_index = knn(torch.Tensor(ftrns1(x_grids[i])).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device), k = k_spc_edges).flip(0).contiguous()
