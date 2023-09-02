@@ -1158,7 +1158,7 @@ for cnt, strs in enumerate([0]):
 	trv_out2 = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
 	ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
 	trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
-
+	
 	if ('corr1' in globals())*('corr2' in globals()):
 		# corr1 and corr2 can be used to "shift" a processing region
 		# into the physical space of a pre-trained model for processing,
@@ -1167,11 +1167,22 @@ for cnt, strs in enumerate([0]):
 		srcs_refined[:,0:3] = srcs_refined[:,0:3] + corr1 - corr2
 		srcs_trv[:,0:3] = srcs_trv[:,0:3] + corr1 - corr2
 
+	if process_known_events == True:
+		temporal_win_match = 10.0
+		spatial_win_match = 75e3
+		matches1 = maximize_bipartite_assignment(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)
+		matches2 = maximize_bipartite_assignment(srcs_known, srcs_trv, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)
+	
 	extra_save = False
 	save_on = True
 	if save_on == True:
 
-		ext_save = path_to_file + 'Catalog' + seperator + '%d'%yr + seperator + '%s_results_continuous_days_%d_%d_%d_ver_%d.hdf5'%(name_of_project, date[0], date[1], date[2], n_save_ver)
+		if process_known_events == True:
+			file_name_ext = 'known_events'
+		else:
+			file_name_ext = 'continuous_days'
+		
+		ext_save = path_to_file + 'Catalog' + seperator + '%d'%yr + seperator + '%s_results_%s_%d_%d_%d_ver_%d.hdf5'%(name_of_project, file_name_ext, date[0], date[1], date[2], n_save_ver)
 
 		file_save = h5py.File(ext_save, 'w')
 
@@ -1185,8 +1196,6 @@ for cnt, strs in enumerate([0]):
 		file_save['date'] = np.array([date[0], date[1], date[2], julday])
 		# file_save['%d_%d_%d_%d_res1'%(date[0], date[1], date[2], julday)] = res1
 		# file_save['%d_%d_%d_%d_res2'%(date[0], date[1], date[2], julday)] = res2
-		# file_save['%d_%d_%d_%d_izmatch1'%(date[0], date[1], date[2], julday)] = matches1
-		# file_save['%d_%d_%d_%d_izmatch2'%(date[0], date[1], date[2], julday)] = matches2
 		file_save['cnt_p'] = cnt_p
 		file_save['cnt_s'] = cnt_s
 		file_save['tsteps_abs'] = tsteps_abs
@@ -1200,6 +1209,8 @@ for cnt, strs in enumerate([0]):
 
 		if (process_known_events == True)*(len(srcs_known) > 0):
 			file_save['srcs_known'] = srcs_known
+			file_save['izmatch1'] = matches1
+			file_save['izmatch2'] = matches2
 		
 		if extra_save == False: # mem_save == True implies don't save these fields
 			file_save['Out'] = Out_2_sparse ## Is this heavy?
