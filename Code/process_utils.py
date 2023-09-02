@@ -551,7 +551,7 @@ def competitive_assignment_split(w, sta_inds, cost, min_val = 0.02, restrict = N
 	A3 = np.zeros((n_srcs, n_phases*n_srcs*n_arvs + n_srcs))
 
 	b1 = np.ones((n_arvs, 1))
-	b2 = np.inf*np.ones((n_unique_stations*n_phases*n_srcs, 1)) ## Allow muliple picks per station, in split phase
+	b2 = 1e5*np.ones((n_unique_stations*n_phases*n_srcs, 1)) ## Allow muliple picks per station, in split phase
 	b3 = np.zeros((n_srcs, 1))
 
 	# Constraint A1
