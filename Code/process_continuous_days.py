@@ -151,7 +151,7 @@ if '/' in lines[day_select_val]:
 elif ',' in lines[day_select_val]:
 	date = lines[day_select_val].split(',')
 else:
-	date = line[day_select_val].split(' ')	
+	date = lines[day_select_val].split(' ')	
 date = np.array([int(date[0]), int(date[1]), int(date[2])])
 
 # Load region
