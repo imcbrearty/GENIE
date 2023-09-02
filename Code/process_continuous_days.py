@@ -145,12 +145,13 @@ name_of_project = config['name_of_project']
 z = open(path_to_file + '%s_process_days_list_ver_%d.txt'%(name_of_project, process_days_ver), 'r')
 lines = z.readlines()
 z.close()
-if '/' in lines[day_select]:
-	date = lines[day_select].split('/')
-elif ',' in lines[day_select]:
-	date = lines[day_select].split(',')
+day_select_val = day_select + offset_select*offset_increment
+if '/' in lines[day_select_val]:
+	date = lines[day_select_val].split('/')
+elif ',' in lines[day_select_val]:
+	date = lines[day_select_val].split(',')
 else:
-	date = line[day_select].split(' ')	
+	date = line[day_select_val].split(' ')	
 date = np.array([int(date[0]), int(date[1]), int(date[2])])
 
 # Load region
