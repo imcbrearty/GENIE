@@ -522,7 +522,7 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 	from module import TravelTimes
 	seperator = '\\' if '\\' in path_to_file else '/'
 	
-	z = np.load(path_to_file + seperator + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+	z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_%s_losses_ver_%d.npz'%(phase, n_ver_load))
 	n_phases = z['out1'].shape[1]
 	scale_val = float(z['scale_val'])
 	trav_val = float(z['trav_val'])
