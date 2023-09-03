@@ -510,7 +510,7 @@ if train_travel_time_neural_network == True:
 		trgt = torch.Tensor(np.concatenate((travel_times_p.reshape(-1,1), travel_times_s.reshape(-1,1)), axis = 1)).to(device)
 
 		if using_3D == True:
-			out = m.forward_relative_train(sta_pos, src_pos, method = 'direct', p = 0.3)
+			out = m.forward_train(sta_pos, src_pos, method = 'direct', p = 0.3)
 
 		elif using_1D == True:
 			out = m.forward_relative(sta_pos, src_pos, method = 'direct')
