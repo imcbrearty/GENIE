@@ -129,6 +129,7 @@ device = torch.device(process_config['device']) ## Right now, this isn't updated
 ## the necessary variables do not have .to(device) at the right places
 
 compute_magnitudes = process_config['compute_magnitudes']
+process_known_events = process_config['process_known_events']
 use_expanded_competitive_assignment = process_config['use_expanded_competitive_assignment']
 use_differential_evolution_location = process_config['use_differential_evolution_location']
 
@@ -339,7 +340,6 @@ date = np.array([yr, mo, dy])
 P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
 locs_use = locs[ind_use]
 
-process_known_events = config['process_known_events']
 if process_known_events == True: ## If true, only process around times of known events
 	t0 = UTCDateTime(date[0], date[1], date[2])
 	srcs_known = download_catalog(lat_range, lon_range, 1.0, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
