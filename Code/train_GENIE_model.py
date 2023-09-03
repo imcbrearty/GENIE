@@ -192,7 +192,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
 	use_uniform_distance_threshold = False
-	## This previously sampled a skewed distribution by default, not it samples a uniform
+	## This previously sampled a uniform distribution by default, now it samples a skewed
 	## distribution of the maximum source-reciever distances allowed for each event.
 	if use_uniform_distance_threshold == True:
 		dist_thresh = np.random.rand(n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
