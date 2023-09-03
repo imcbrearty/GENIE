@@ -303,6 +303,18 @@ if train_travel_time_neural_network == True:
 				Ts_samples.append(Ts_interp[isample,n])
 				Locs_samples.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample), axis = 0))
 
+			n_per_station = 100000
+
+			for n in range(locs_ref.shape[0]):
+
+				p = (1.0/np.maximum(Tp_interp[:,n], 0.1))**2
+				isample = np.sort(np.random.choice(len(p), size = n_per_station, p = p/p.sum(), replace = False))
+
+				X_samples.append(X[isample])
+				Tp_samples.append(Tp_interp[isample,n])
+				Ts_samples.append(Ts_interp[isample,n])
+				Locs_samples.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample), axis = 0))
+		
 		grab_near_boundaries_samples = True
 		if grab_near_boundaries_samples == True:
 
