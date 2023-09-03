@@ -419,7 +419,7 @@ for cnt, strs in enumerate([0]):
 					print('%d %d %0.2f'%(n, i0, out[1].max().item()))
 
 
-	iz1, iz2 = np.where(Out_2 > 0.0025)
+	iz1, iz2 = np.where(Out_2 > 0.01) # Zeros out all values less than this
 	Out_2_sparse = np.concatenate((iz1.reshape(-1,1), iz2.reshape(-1,1), Out_2[iz1,iz2].reshape(-1,1)), axis = 1)
 
 	xq = np.copy(X_query)
