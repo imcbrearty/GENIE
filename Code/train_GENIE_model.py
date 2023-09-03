@@ -99,7 +99,7 @@ training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_r
 
 ## Training params list 3
 n_batch = 75
-dist_range = [15e3, 400e3] # Should be chosen proportional to physical domain size
+# dist_range = [15e3, 400e3] # Should be chosen proportional to physical domain size
 max_rate_events = 4000/8
 max_miss_events = 3000/8
 max_false_events = 2000/8
