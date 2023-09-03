@@ -1189,6 +1189,12 @@ for cnt, strs in enumerate([0]):
 
 		julday = int((UTCDateTime(date[0], date[1], date[2]) - UTCDateTime(date[0], 1, 1))/(day_len)) + 1
 
+		## Note: the solution is in srcs or srcs_trv (lat, lon, depth, origin time)
+		## (the GNN prediction location and travel-time based location based on the GNN prediction associations)
+
+		## The associated picks for each event are in Picks/{n}_Picks_P and Picks/{n}_Picks_S
+		## for each source index n
+		
 		file_save['P'] = P
 		file_save['srcs'] = srcs_refined
 		file_save['srcs_trv'] = srcs_trv
