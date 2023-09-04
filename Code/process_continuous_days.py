@@ -342,7 +342,8 @@ locs_use = locs[ind_use]
 
 if process_known_events == True: ## If true, only process around times of known events
 	t0 = UTCDateTime(date[0], date[1], date[2])
-	srcs_known = download_catalog(lat_range, lon_range, 1.0, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
+	min_magnitude = 1.0
+	srcs_known = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
 	print('Processing %d known events'%len(srcs_known))
 
 for cnt, strs in enumerate([0]):
