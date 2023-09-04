@@ -361,6 +361,31 @@ if train_travel_time_neural_network == True:
 		grab_near_station_samples = True
 		if grab_near_station_samples == True:
 
+			n_zero_inputs = 100000
+
+			for n in range(locs_ref.shape[0]):
+
+				p = np.ones(Tp_interp.shape[0])
+				isample = np.sort(np.random.choice(len(p), size = n_zero_inputs, p = p/p.sum(), replace = False))
+
+				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample]*one_vec
+				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
+				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
+				X_offset_sample = X_offset_sample + locs_rand
+				locs_rand[:,2] = locs_ref[n,2]
+				X_offset_sample[:,2] = X[isample,2]
+
+				iassign_locs = np.random.choice(2, size = isample)
+				iswitch1 = np.where(iassign_locs == 0)[0]
+				iswitch2 = np.where(iassign_locs == 1)[0]
+				X_offset_sample[iswitch1,0:3] = np.copy(locs_rand[iswitch1,0:3])
+				locs_rand[iswitch2,0:3] = np.copy(X_offset_sample[iswitch2,0:3])
+
+				X_samples.append(X_offset_sample)
+				Tp_samples.append(0.0*Tp_interp[isample,n])
+				Ts_samples.append(0.0*Ts_interp[isample,n])
+				Locs_samples.append(locs_rand)
+			
 			n_per_station = 150000
 
 			for n in range(locs_ref.shape[0]):
@@ -372,7 +397,7 @@ if train_travel_time_neural_network == True:
 				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
 				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
 				X_offset_sample = X_offset_sample + locs_rand
-				locs_rand[:,2] = locs_rand[n,2]
+				locs_rand[:,2] = locs_ref[n,2]
 				X_offset_sample[:,2] = X[isample,2]
 
 				X_samples.append(X_offset_sample)
@@ -391,7 +416,7 @@ if train_travel_time_neural_network == True:
 				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
 				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
 				X_offset_sample = X_offset_sample + locs_rand
-				locs_rand[:,2] = locs_rand[n,2]
+				locs_rand[:,2] = locs_ref[n,2]
 				X_offset_sample[:,2] = X[isample,2]
 
 				X_samples.append(X_offset_sample)
@@ -413,7 +438,7 @@ if train_travel_time_neural_network == True:
 				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
 				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
 				X_offset_sample = X_offset_sample + locs_rand
-				locs_rand[:,2] = locs_rand[n,2]
+				locs_rand[:,2] = locs_ref[n,2]
 				X_offset_sample[:,2] = X[isample,2]
 
 				X_samples.append(X_offset_sample)
@@ -436,7 +461,7 @@ if train_travel_time_neural_network == True:
 				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
 				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
 				X_offset_sample = X_offset_sample + locs_rand
-				locs_rand[:,2] = locs_rand[n,2]
+				locs_rand[:,2] = locs_ref[n,2]
 				X_offset_sample[:,2] = X[isample,2]
 
 				X_samples.append(X_offset_sample)
