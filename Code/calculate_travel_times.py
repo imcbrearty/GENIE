@@ -373,7 +373,7 @@ if train_travel_time_neural_network == True:
 				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
 				X_offset_sample = X_offset_sample + locs_rand
 				locs_rand[:,2] = locs_ref[n,2]
-				X_offset_sample[:,2] = X[isample,2]
+				X_offset_sample[:,2] = locs_ref[n,2]
 
 				iassign_locs = np.random.choice(2, size = n_zero_inputs)
 				iswitch1 = np.where(iassign_locs == 0)[0]
