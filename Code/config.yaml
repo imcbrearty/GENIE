@@ -1,6 +1,8 @@
 name_of_project: 'Mayotte'
 num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost)
 
+## Note, when running continuous days processing a number of parameters are also set in process_config
+
 latitude_range: [18.8, 20.3] # Latitude range of the region that will be processed
 longitude_range: [-156.1, -154.7] # Longitude range of the region that will be processed
 depth_range: [-40000, 5000] # Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
