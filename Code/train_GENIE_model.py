@@ -79,7 +79,7 @@ n_ver = 1 # GNN save version
 ## Should add src_x_arv_kernel and src_t_arv_kerne to pred_params, but need to check usage of this variable in this and later scripts
 pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
 
-device = torch.device('cuda') ## or use cpu
+device = torch.device(config['device']) ## or use cpu
 
 
 ## Extra train parameters
@@ -792,7 +792,7 @@ for i in range(len(x_grids)):
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # + 10.0
 
 ## Implement training.
-mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff).to(device)
+mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, device = device).to(device)
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
 loss_func = torch.nn.MSELoss()
 
