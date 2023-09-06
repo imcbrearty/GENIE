@@ -57,7 +57,7 @@ k_time_edges: 10
 
 ## Training params
 n_batch: 75
-n_epochs: 20001 # add 1, so it saves on last iteration (since it saves every 100 steps)
+n_epochs: 20001 # add 1, so it saves on last iteration (since it saves every 100 steps) [these are really update steps, rather than technically epochs]
 n_spc_query: 4500 # Number of src queries per sample
 n_src_query: 300 # Number of src-arrival queries per sample
 dist_range: [15000, 500000] ## The spatial window over which to sample max distance of 
