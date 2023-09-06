@@ -36,6 +36,7 @@ depth_steps:
   max_elevation: 4000 # meters
   elevation_step: 150 # meters
 
+# Can increase or decrease these as needed
 dx: 500.0 # Cartesian distance between nodes in FMM computation
 d_deg: 0.005 # Degree distance between saved interpolation query points
 dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved query points
@@ -48,7 +49,7 @@ using_1D: True
 ### TRAIN ###
 
 ## Graph params
-k_sta_edges: 8
+k_sta_edges: 10
 k_spc_edges: 15
 k_time_edges: 10
 
