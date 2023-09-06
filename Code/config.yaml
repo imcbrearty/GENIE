@@ -61,6 +61,7 @@ dist_range: [15000, 500000] ## The spatial window over which to sample max dista
 ## source-station moveouts in m, per event. E.g., 15 - 500 km. Should set slightly lower if using small region.
 
 ## Prediction params
+## These parameters should somewhat scale with the size of the application
 kernel_sig_t: 5.0 # Kernel to embed arrival time - theoretical time misfit (s)
 src_t_kernel: 6.5 # Kernel or origin time label (s)
 src_t_arv_kernel: 6.5 # Kernel for arrival association time label (s)
