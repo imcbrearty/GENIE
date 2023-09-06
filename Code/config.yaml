@@ -66,7 +66,7 @@ src_t_kernel: 6.5 # Kernel or origin time label (s)
 src_t_arv_kernel: 6.5 # Kernel for arrival association time label (s)
 src_x_kernel: 15000. # Kernel for source label, horizontal distance (m)
 src_x_arv_kernel: 15000. # Kernel for arrival-source association label, horizontal distance (m)
-src_depth_kernel: 15000. # Kernel of Cartesian projection, vertical distance (m)
+src_depth_kernel: 15000. # Kernel of source label in Cartesian projection, vertical distance (m)
 t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
 
