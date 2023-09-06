@@ -258,7 +258,7 @@ if load_model == True:
 	mz_list = []
 	for i in range(len(x_grids)):
 		mz_slice = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, device = device).to(device)
-		mz_slice.load_state_dict(torch.load(path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, n_step_load, n_ver_load), map_location = torch.device('cpu')))
+		mz_slice.load_state_dict(torch.load(path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, n_step_load, n_ver_load), map_location = device))
 		mz_slice.eval()
 		mz_list.append(mz_slice)
 
