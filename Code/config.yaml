@@ -42,7 +42,7 @@ dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved quer
 
 save_dense_travel_time_data: True # Save the dense travel times (only necessary if not training travel time neural network)
 train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
-using_3D: False
+using_3D: False # Not fully implemented yet, must adjust travel time calculations and load 3d travel time neural network
 using_1D: True
 
 ### TRAIN ###
