@@ -49,7 +49,7 @@ using_1D: True
 ### TRAIN ###
 
 ## Graph params
-k_sta_edges: 10
+k_sta_edges: 8 # or 10 are reasonable choices
 k_spc_edges: 15
 k_time_edges: 10
 
