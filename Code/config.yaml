@@ -4,7 +4,7 @@ num_cores: 1 # How many cores would you like to use for travel time calculations
 latitude_range: [18.8, 20.3] # Latitude range of the region that will be processed
 longitude_range: [-156.1, -154.7] # Longitude range of the region that will be processed
 depth_range: [-40000, 5000] # Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
-time_range:
+time_range: # This sets up the Catalog and Pick files to have these years initialized
   start: '2018-01-01'
   end: '2023-01-01'
 
