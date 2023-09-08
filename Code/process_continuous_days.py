@@ -808,6 +808,7 @@ for cnt, strs in enumerate([0]):
 			discon_components = list(nx.connected_components(G_nx))
 			discon_components = [np.sort(np.array(list(discon_components[i])).astype('int')) for i in range(len(discon_components))]
 
+			## Should the below line really use a where function? It seems like this is a "where" on a scalar velue everytime, so it is guarenteed to evaluate as 1
 			len_discon = np.array([len(np.where(discon_components[j] > (len_unique_picks - 1))[0]) for j in range(len(discon_components))])
 			print('Number discon components: %d \n'%(len(len_discon)))
 			print('Number large discon components: %d \n'%(len(np.where(len_discon > max_sources)[0])))
