@@ -135,6 +135,8 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 	lp = tree.query_ball_point(time_samples.reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0) 
 
 	lp_concat = np.hstack([np.array(list(lp[j])) for j in range(n_batch)]).astype('int')
+
+	## It is important that arrivals_select and phase_lebels_select remain "referencing the same picks" despite some transformations that occur to them (such as sorting)
 	arrivals_select = arrivals[lp_concat]
 	phase_labels_select = phase_labels[lp_concat]
 	tree_select = cKDTree(arrivals_select[:,0:2]*scale_vec)
@@ -180,6 +182,7 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 	arrivals_select = np.vstack([arrivals[lp[i]] for i in range(n_batch)]) + arrivals_offset.reshape(-1,1)*one_vec
 	n_arvs = arrivals_select.shape[0]
 
+	## It is important that arrivals_select and phase_lebels_select remain "referencing the same picks" despite some transformations that occur to them (such as sorting)
 	iargsort = np.argsort(arrivals_select[:,0])
 	arrivals_select = arrivals_select[iargsort]
 	phase_labels_select = phase_labels_select[iargsort]
