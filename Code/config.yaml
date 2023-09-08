@@ -66,7 +66,7 @@ dist_range: [15000, 500000] ## The spatial window over which to sample max dista
 ## Prediction params
 ## These parameters should somewhat scale with the size of the application
 kernel_sig_t: 5.0 # Kernel to embed arrival time - theoretical time misfit (s)
-src_t_kernel: 6.5 # Kernel or origin time label (s)
+src_t_kernel: 6.5 # Kernel of origin time label (s)
 src_t_arv_kernel: 6.5 # Kernel for arrival association time label (s)
 src_x_kernel: 15000. # Kernel for source label, horizontal distance (m)
 src_x_arv_kernel: 15000. # Kernel for arrival-source association label, horizontal distance (m)
@@ -75,5 +75,7 @@ t_win: 10.0 ## This is the time window over which predictions are made. Shouldn'
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
 
 device: 'cuda' # or 'cpu'
-max_number_pick_association_labels_per_sample: 2000 # Max numbef of picks to compute associations for during training
+max_number_pick_association_labels_per_sample: 1500 # Max number of picks to compute associations for during training 
+## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
+## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
