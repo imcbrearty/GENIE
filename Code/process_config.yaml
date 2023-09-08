@@ -17,7 +17,7 @@ thresh: 0.2 # Threshold to declare detection
 thresh_assoc: 0.2 # Threshold to declare src-arrival association
 spr: 1 # Sampling rate to save temporal predictions
 tc_win: 5.0 # Temporal window (s) to link events in Local Marching
-sp_win: 15000.0 # Distance (m) to link events in Local Marching
+sp_win: 15000.0 # Distance (m) to link events in Local Marching. Generally both of these on the order of training kernel sizes
 break_win: 15.0 # Temporal window to find disjoint groups of sources, 
 ## so can run Local Marching without memory issues.
 spr_picks: 100 # Assumed sampling rate of picks 
