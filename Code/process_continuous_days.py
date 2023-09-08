@@ -1221,7 +1221,7 @@ for cnt, strs in enumerate([0]):
 				file_save['izmatch1'] = matches1
 				file_save['izmatch2'] = matches2
 		
-		if extra_save == False: # mem_save == True implies don't save these fields
+		if extra_save == True: # This is the continuous space-time output, it can be useful for visualization/debugging, but is memory itensive
 			file_save['Out'] = Out_2_sparse ## Is this heavy?
 
 		for j in range(len(Picks_P)):
