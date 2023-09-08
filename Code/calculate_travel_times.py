@@ -525,9 +525,7 @@ if train_travel_time_neural_network == True:
 	# elif use_1D == True:
 	# 	method = 'direct relative'
 
-
-	# moi
-
+	
 	losses = []
 	losses_vald = []
 	vald_steps = 10
