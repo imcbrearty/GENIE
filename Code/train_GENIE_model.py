@@ -26,6 +26,9 @@ from module import *
 # from generate_synthetic_data import generate_synthetic_data 
 ## For now not using the seperate files definition of generate_synthetic_data
 
+## Note: you should try changing the synthetic data parameters and visualizing the 
+## results some, some values are better than others depending on region and stations
+
 use_wandb_logging = False
 if use_wandb_logging == True:
 
