@@ -9,9 +9,9 @@ vel_model_ver: 1
 process_days_ver: 1 
 ## Put the list of days you want to process in file process_days_list_ver_%d.txt
 
-offset_increment: 500
-n_rand_query: 112000
-n_query_grid: 5000
+offset_increment: 500 ## This only effects the choice of pick files used when submitting multiple jobs such as jobarrays
+n_rand_query: 112000 ## This is the number of spatial points to re-locate initial source locations with higher resolution (an efficient implementation)
+n_query_grid: 5000 ## This is the number of spatial points to save initial space-time continuous outputs over
 
 thresh: 0.2 # Threshold to declare detection
 thresh_assoc: 0.2 # Threshold to declare src-arrival association
@@ -25,10 +25,10 @@ spr_picks: 100 # Assumed sampling rate of picks
 
 d_win: 0.25 ## Lat and lon window to re-locate initial source detetections with refined sampling over
 d_win_depth: 10000.0 ## Depth window to re-locate initial source detetections with refined sampling over
-dx_depth: 50.0 ## Depth resolution to locate events with travel time based re-location
+dx_depth: 50.0 ## Depth resolution to locate events with travel time based re-location (unused, if using differential evolution location)
 
-step: 2.0
-step_abs: 1.0
+step: 2.0 ## Temporal step size to predict source outputs over, and stack overlapping portions (default source window prediction is 10 s)
+step_abs: 1.0 ## Time resolution to save the initial space-time predictions
 
 cost_value: 3.0 # If use expanded competitve assignment, then this is the fixed cost applied per source
 ## when optimizing joint source-arrival assignments between nearby sources. The value is in terms of the 
@@ -41,5 +41,5 @@ device: 'cpu' ## Right now, this isn't updated to work with cuda, since
 compute_magnitudes: False # Uses local magnitude and will be un-calibrated by default, or can calibrate for a particular study site
 
 process_known_events: False ## Only process times of known events in a reference catalog (default is USGS)
-use_expanded_competitive_assignment: True
+use_expanded_competitive_assignment: True ## This is advised, but the code is complex to avoid both memory issues and handling nearby or overlapping sources
 use_differential_evolution_location: True # otherwise use particle swarm to locate, which tends to converge less well (especially in depth)
