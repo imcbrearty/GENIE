@@ -84,6 +84,15 @@ pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel
 
 device = torch.device(config['device']) ## or use cpu
 
+## Load specific subsets of stations to train on in addition to random
+## subnetworks from the total set of possible stations
+load_subnetworks = False
+if load_subnetworks == True:
+	h_subnetworks = np.load(path_to_file + '%s_subnetworks.npz'%name_of_project, allow_pickle = True)
+	Ind_subnetworks = h_subnetworks['Sta_inds']
+	h_subnetworks.close()
+else:
+	Ind_subnetworks = None
 
 ## Extra train parameters
 
@@ -112,12 +121,12 @@ tscale = 3600.0
 n_sta_range = [0.35, 1.0] # n_sta_range[0]*locs.shape[0] must be >= the number of station edges chosen (k_sta_edges)
 use_sources = False
 use_full_network = False
-fixed_subnetworks = None
+fixed_subnetworks = Ind_subnetworks
 use_preferential_sampling = False
 use_shallow_sources = False
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, n_batch = 75, dist_range = [15e3, 400e3], max_rate_events = 4000/8, max_miss_events = 3000/8, max_false_events = 2000/8, T = 3600.0*3.0, dt = 30, tscale = 3600.0, n_sta_range = [0.35, 1.0], use_sources = False, use_full_network = False, fixed_subnetworks = None, use_preferential_sampling = False, use_shallow_sources = False, plot_on = False, verbose = False):
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False):
 
 	if verbose == True:
 		st = time.time()
@@ -126,13 +135,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
 
 	n_spc_query, n_src_query = training_params
-	spc_random = 20e3
-	sig_t = 0.03 # 3 percent of travel time error on pick times
-	spc_thresh_rand = 20e3
-	min_sta_arrival = 4
-	coda_rate = 0.035 # 5 percent arrival have code. Probably more than this? Increased from 0.035.
-	coda_win = np.array([0, 25.0]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
-	max_num_spikes = 20
+	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max = training_params_2
+	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources = training_params_3
+
+	# spc_random = 20e3
+	# sig_t = 0.03 # 3 percent of travel time error on pick times
+	# spc_thresh_rand = 20e3
+	# min_sta_arrival = 4
+	# coda_rate = 0.035 # 5 percent arrival have code. Probably more than this? Increased from 0.035.
+	# coda_win = np.array([0, 25.0]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
+	# max_num_spikes = 20
 
 	assert(np.floor(n_sta_range[0]*locs.shape[0]) > k_sta_edges)
 
@@ -235,7 +247,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), arrival_origin_times[ikeep_s1, ikeep_s2].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
 	arrivals = np.concatenate((arrivals_p, arrivals_s), axis = 0)
 
-	s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
+	# s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
 	t_inc = np.floor(arrivals[:,3]/dt).astype('int')
 	p_miss_rate = 0.5*station_miss_rate[arrivals[:,1].astype('int'), t_inc] + 0.5*global_miss_rate[t_inc]
 	idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < dt*p_miss_rate/T)[0]
@@ -267,12 +279,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		n_spikes_extent = np.random.randint(1, high = n_sta, size = n_spikes) ## This many stations per spike
 		time_spikes = np.random.rand(n_spikes)*T
 		sta_ind_spikes = np.hstack([np.random.choice(n_sta, size = n_spikes_extent[j], replace = False) for j in range(n_spikes)])
-		sta_time_spikes = np.hstack([time_spikes[j] + np.random.randn(n_spikes_extent[j])*0.15 for j in range(n_spikes)])
+		sta_time_spikes = np.hstack([time_spikes[j] + np.random.randn(n_spikes_extent[j])*spike_time_spread for j in range(n_spikes)])
 		false_arrivals_spikes = np.concatenate((sta_time_spikes.reshape(-1,1), sta_ind_spikes.reshape(-1,1), -1.0*np.ones((len(sta_ind_spikes),1)), np.zeros((len(sta_ind_spikes),1)), -1.0*np.ones((len(sta_ind_spikes),1))), axis = 1)
 		arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) ## Concatenate on spikes
 
 
-	use_stable_association_labels = True
+	# use_stable_association_labels = True
 	## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
 	if use_stable_association_labels == True: ## It turns out association results are fairly sensitive to this choice
 		thresh_noise_max = 2.5 # ratio of sig_t*travel time considered excess noise
@@ -727,17 +739,6 @@ elif config['train_travel_time_neural_network'] == True:
 	n_ver_trv_time_model_load = 1
 	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, device = device)
 
-load_subnetworks = False
-if load_subnetworks == True:
-
-	h_subnetworks = np.load(path_to_file + '%s_subnetworks.npz'%name_of_project, allow_pickle = True)
-	Ind_subnetworks = h_subnetworks['Sta_inds']
-	h_subnetworks.close()
-
-else:
-
-	Ind_subnetworks = None
-
 use_only_active_stations = False
 if use_only_active_stations == True:
 	unique_inds = np.unique(np.hstack(Ind_subnetworks))
@@ -833,21 +834,10 @@ for i in range(n_restart_step, n_epochs):
 	
 	optimizer.zero_grad()
 
-	cwork = 0
-	inc_c = 0
-	while (cwork == 0)*(inc_c < 10):
-		# try: ## Does this actually ever through an exception? Probably not.
-
-		[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, graph_params, pred_params, ftrns1, ftrns2, fixed_subnetworks = Ind_subnetworks, use_preferential_sampling = True, n_batch = n_batch, verbose = True, dist_range = dist_range)
-
-		cwork = 1
-		# except:
-		# 	inc_c += 1
-		# 	print('Failed data gen! %d'%inc_c)
-
-		## To look at the synthetic data, do:
-		## plt.scatter(data[0][:,0], data[0][:,1])
-		## (plots time of pick against station index; will need to use an interactive plot to see details)
+	## Generate batch of synthetic inputs. Note, if this is too slow to interleave with model updates, 
+	## you can  build these synthetic training data offline and then just load during training. The 
+	## dataset would likely have a large memory footprint if doing so (e.g. > 1 Tb)
+	[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
 
 	loss_val = 0
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
