@@ -106,7 +106,7 @@ max_num_spikes = 20
 spike_time_spread = 0.15
 s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
 use_stable_association_labels = True
-thresh_noise_max = 1.5
+thresh_noise_max = 2.5
 training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
 
 ## Training params list 3
