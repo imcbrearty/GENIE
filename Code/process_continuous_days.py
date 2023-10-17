@@ -328,7 +328,7 @@ success_count = 0
 
 ## Extra default parameters
 n_src_query = 1
-x_src_query = np.zeros((1,3)) # cat[i0,0:3].reshape(1,-1)
+x_src_query = locs.mean(0).reshape(1,-1) # arbitrary point to query source-arrival associations during initial processing pass
 x_src_query_cart = torch.Tensor(ftrns1(x_src_query))
 tq_sample = torch.rand(n_src_query)*t_win - t_win/2.0 # Note this part!
 tq_sample = torch.zeros(1)
