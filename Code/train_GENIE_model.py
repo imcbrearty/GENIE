@@ -41,6 +41,10 @@ if use_wandb_logging == True:
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
+# Load training configuration from YAML
+with open('train_config.yaml', 'r') as file:
+    train_config = yaml.safe_load(file)
+
 name_of_project = config['name_of_project']
 
 path_to_file = str(pathlib.Path().absolute())
@@ -94,36 +98,37 @@ if load_subnetworks == True:
 else:
 	Ind_subnetworks = False
 
-## Extra train parameters
+## Training synthic data parameters
 
-spc_random = 20e3
-sig_t = 0.03 # 3 percent of travel time error on pick times
-spc_thresh_rand = 20e3
-min_sta_arrival = 4
-coda_rate = 0.035 # 5 percent arrival have code. Probably more than this? Increased from 0.035.
-coda_win = np.array([0, 25.0]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
-max_num_spikes = 20
-spike_time_spread = 0.15
-s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
-use_stable_association_labels = True
-thresh_noise_max = 2.5 # ratio of sig_t*travel time considered excess noise
+## Training params list 2
+spc_random = train_config['spc_random']
+sig_t = train_config['sig_t'] # 3 percent of travel time error on pick times
+spc_thresh_rand = train_config['spc_thresh_rand']
+min_sta_arrival = train_config['min_sta_arrival']
+coda_rate = train_config['coda_rate'] # 5 percent arrival have code. Probably more than this? Increased from 0.035.
+coda_win = np.array([train_config['coda_win']]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
+max_num_spikes = train_config['max_num_spikes']
+spike_time_spread = train_config['spike_time_spread']
+s_extra = train_config['s_extra'] ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
+use_stable_association_labels = train_config['use_stable_association_labels']
+thresh_noise_max = train_config['thresh_noise_max'] # ratio of sig_t*travel time considered excess noise
 training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
 
 ## Training params list 3
-n_batch = 75
-# dist_range = [15e3, 400e3] # Should be chosen proportional to physical domain size
-max_rate_events = 4000/8
-max_miss_events = 3000/8
-max_false_events = 2000/8
-T = 3600.0*3.0
-dt = 30
-tscale = 3600.0
-n_sta_range = [0.35, 1.0] # n_sta_range[0]*locs.shape[0] must be >= the number of station edges chosen (k_sta_edges)
-use_sources = False
-use_full_network = False
-fixed_subnetworks = Ind_subnetworks
-use_preferential_sampling = False
-use_shallow_sources = False
+n_batch = train_config['n_batch']
+dist_range = train_config['dist_range'] # Should be chosen proportional to physical domain size
+max_rate_events = train_config['max_rate_events']
+max_miss_events = train_config['max_miss_events']
+max_false_events = train_config['max_false_events']
+T = train_config['T']
+dt = train_config['dt']
+tscale = train_config['tscale']
+n_sta_range = train_config['n_sta_range'] # n_sta_range[0]*locs.shape[0] must be >= the number of station edges chosen (k_sta_edges)
+use_sources = train_config['use_sources']
+use_full_network = train_config['use_full_network']
+fixed_subnetworks = train_config['fixed_subnetworks']
+use_preferential_sampling = train_config['use_preferential_sampling']
+use_shallow_sources = train_config['use_shallow_sources']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
 
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False):
