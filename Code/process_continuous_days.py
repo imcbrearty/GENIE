@@ -389,6 +389,37 @@ for cnt, strs in enumerate([0]):
 
 	assert(len(np.hstack(times_need)) == len(np.unique(np.hstack(times_need))))
 
+	skip_quiescent_intervals = True
+	if skip_quiescent_intervals == True:
+		min_pick_window = 1
+		times_ind_need = []
+		sc_inc = 0
+		## Find time window where < min_pick_window occur on the input set, and do not process
+		for i in range(len(times_need[i])):
+			lp = arrivals_tree.query_ball_point(times_need[i].reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0)
+			for j in range(len(times_need[i])):
+				if len(list(lp[j])) >= min_pick_window:
+					times_ind_need.append(sc_inc)
+				sc_inc += 1
+
+		## Subselect times_need_l
+		if len(times_ind_need) > 0:
+			times_need_l = times_need_l[np.array(times_ind_need)]
+
+			## Double check this.
+			n_batches = int(np.floor(len(times_need_l)/n_batch))
+			times_need = [times_need_l[j*n_batch:(j + 1)*n_batch] for j in range(n_batches)]
+			if n_batches*n_batch < len(times_need_l):
+				times_need.append(times_need_l[n_batches*n_batch::]) ## Add last few samples
+
+			assert(len(np.hstack(times_need)) == len(np.unique(np.hstack(times_need))))
+			print('Processing %d inputs in %d batches'%(len(times_need_l), len(times_need)))
+
+		else:
+			print('No windows with > %d picks (min_pick_window)'%min_pick_window)
+			print('Stopping processing')
+			continue
+	
 	# Out_1 = np.zeros((x_grids[x_grid_ind_list[0]].shape[0], len(tsteps_abs))) # assumes all grids have same cardinality
 	Out_2 = np.zeros((X_query_cart.shape[0], len(tsteps_abs)))
 
