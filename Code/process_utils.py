@@ -131,7 +131,7 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 
 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
 
-	arrivals_tree = cKDTree(arrivals[:,0][:,None]) ## It might be expensive to keep re-creating this every time step
+	# arrivals_tree = cKDTree(arrivals[:,0][:,None]) ## It might be expensive to keep re-creating this every time step
 	lp = arrivals_tree.query_ball_point(time_samples.reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0) 
 
 	lp_concat = np.hstack([np.array(list(lp[j])) for j in range(n_batch)]).astype('int')
