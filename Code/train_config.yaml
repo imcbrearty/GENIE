@@ -1,6 +1,23 @@
 
 ## Training synthic data parameters
 
+## Training params
+n_batch: 75
+n_epochs: 20001 # add 1, so it saves on last iteration (since it saves every 100 steps) [these are really update steps, rather than technically epochs]
+n_spc_query: 4500 # Number of src queries per sample
+n_src_query: 300 # Number of src-arrival queries per sample
+
+## Prediction params
+## These parameters should somewhat scale with the size of the application
+kernel_sig_t: 5.0 # Kernel to embed arrival time - theoretical time misfit (s)
+src_t_kernel: 6.5 # Kernel of origin time label (s)
+src_t_arv_kernel: 6.5 # Kernel for arrival association time label (s)
+src_x_kernel: 15000. # Kernel for source label, horizontal distance (m)
+src_x_arv_kernel: 15000. # Kernel for arrival-source association label, horizontal distance (m)
+src_depth_kernel: 15000. # Kernel of source label in Cartesian projection, vertical distance (m)
+t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
+## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
+
 ## Training params list 2
 spc_random : 20000
 sig_t : 0.03 # 3 percent of travel time error on pick times
@@ -16,7 +33,6 @@ thresh_noise_max : 2.5 # ratio of sig_t*travel time considered excess noise
 # training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
 
 ## Training params list 3
-n_batch : 75
 dist_range : [15000, 400000] # Should be chosen proportional to physical domain size
 max_rate_events : 500 
 max_miss_events : 375
