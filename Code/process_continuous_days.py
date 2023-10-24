@@ -333,7 +333,7 @@ print('Should change this to use all grids, potentially')
 x_grid_ind_list = np.sort(np.random.choice(len(x_grids), size = 1, replace = False)) # 15
 x_grid_ind_list_1 = np.sort(np.random.choice(len(x_grids), size = len(x_grids), replace = False)) # 15
 
-use_only_one_grid = False
+use_only_one_grid = process_config['use_only_one_grid']
 if use_only_one_grid == True:
 	# x_grid_ind_list_1 = np.array([x_grid_ind_list_1[np.random.choice(len(x_grid_ind_list_l))]])
 	x_grid_ind_list_1 = np.copy(x_grid_ind_list)
