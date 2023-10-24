@@ -57,6 +57,11 @@ k_time_edges = config['k_time_edges']
 
 graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
+# File versions
+template_ver = train_config['template_ver'] # spatial grid version
+vel_model_ver = train_config['vel_model_ver'] # velocity model version
+n_ver = train_config['n_ver'] # GNN save version
+
 ## Training params
 n_batch = train_config['n_batch']
 n_epochs = train_config['n_epochs'] # add 1, so it saves on last iteration (since it saves every 100 steps)
@@ -73,11 +78,6 @@ src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source 
 src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
 t_win = train_config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
-
-# File versions
-template_ver = 1 # spatial grid version
-vel_model_ver = 1 # velocity model version
-n_ver = 1 # GNN save version
 
 ## Will update to be adaptive soon. The step size of temporal prediction is fixed at 1 s right now.
 
