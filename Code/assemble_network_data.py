@@ -197,9 +197,10 @@ print(locs)
 # Region file
 # z = np.load(ext_dir + '%s_region.npz'%name_of_project)
 z = np.load(path_to_file + 'region.npz', allow_pickle = True)
-lat_range, lon_range, depth_range = z['lat_range'], z['lon_range'], z['depth_range'], 
-deg_pad, num_grids, years = z['deg_pad'], z['num_grids'], z['years']
-n_spatial_nodes = z['n_spatial_nodes']
+lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
+years = z['years']
+num_grids = config['number_of_grids']
+n_spatial_nodes = config['number_of_spatial_nodes']
 load_initial_files = z['load_initial_files'][0]
 use_pretrained_model = z['use_pretrained_model'][0]
 
