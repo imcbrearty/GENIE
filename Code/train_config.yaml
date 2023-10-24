@@ -1,6 +1,11 @@
 
 ## Training synthetic data parameters
 
+## File versions
+template_ver : 1 # source spatial grid version
+vel_model_ver : 1 # velocity model version
+n_ver : 1 # model save version
+
 ## Training params
 n_batch: 75
 n_epochs: 20001 # add 1, so it saves on last iteration (since it saves every 100 steps) [these are really update steps, rather than technically epochs]
