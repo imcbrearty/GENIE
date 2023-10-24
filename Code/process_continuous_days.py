@@ -1290,4 +1290,6 @@ for cnt, strs in enumerate([0]):
 
 		success_count = success_count + 1
 		file_save.close()
-		print('finished saving file %d %d %d'%(date[0], date[1], date[2]))
+		
+		print('Detected %d events'%(len(srcs_trv)))
+		print('Finished saving file %d %d %d'%(date[0], date[1], date[2]))
