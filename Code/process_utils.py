@@ -142,14 +142,14 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 	Sample_indices = []
 	sc = 0
 
+	ind_sta_select = np.unique(ind_use) ## Subset of locations, from total set.
+	n_sta_select = len(ind_sta_select)
+	
 	ivec = np.vstack([i*np.ones((n_spc*len(ind_sta_select),1)) for i in range(n_batch)])
 	tp1 = np.concatenate((x_grid_trv[:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1)), axis = 1)
 	ts1 = np.concatenate((x_grid_trv[:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1)), axis = 1)
 	Trv_subset_p = np.concatenate((np.tile(tp1, [n_batch, 1]), ivec), axis = 1)
 	Trv_subset_s = np.concatenate((np.tile(ts1, [n_batch, 1]), ivec), axis = 1)
-
-	ind_sta_select = np.unique(ind_use) ## Subset of locations, from total set.
-	n_sta_select = len(ind_sta_select)
 	
 	## Note, this loop could be vectorized
 	for i in range(n_batch):
