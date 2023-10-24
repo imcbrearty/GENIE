@@ -76,7 +76,7 @@ src_t_arv_kernel = train_config['src_t_arv_kernel'] # Kernel for arrival associa
 src_x_kernel = train_config['src_x_kernel'] # Kernel for source label, horizontal distance (m)
 src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
 src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
-t_win = train_config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
+t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
 
 ## Will update to be adaptive soon. The step size of temporal prediction is fixed at 1 s right now.
