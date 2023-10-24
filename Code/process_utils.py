@@ -89,9 +89,9 @@ class LocalMarching(MessagePassing): # make equivelent version with sum operatio
 		if len(srcs_keep) > 0:
 			srcs_keep = srcs[np.hstack(srcs_keep)]
 
-		return srcs_keep	
+		return srcs_keep
 
-def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, arrivals_tree, phase_labels, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, ftrns1, ftrns2, n_queries = 3000, n_batch = 75, max_rate_events = 5000, max_miss_events = 3500, max_false_events = 2000, T = 3600.0*24.0, dt = 30, tscale = 3600.0, n_sta_range = [0.25, 1.0], plot_on = False, verbose = False):
+def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, phase_labels, arrivals_tree, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, ftrns1, ftrns2, n_queries = 3000, n_batch = 75, max_rate_events = 5000, max_miss_events = 3500, max_false_events = 2000, T = 3600.0*24.0, dt = 30, tscale = 3600.0, n_sta_range = [0.25, 1.0], plot_on = False, verbose = False):
 
 	if verbose == True:
 		st = time.time()
