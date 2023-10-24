@@ -335,7 +335,8 @@ x_grid_ind_list_1 = np.sort(np.random.choice(len(x_grids), size = len(x_grids), 
 
 use_only_one_grid = False
 if use_only_one_grid == True:
-	x_grid_ind_list_1 = np.array([x_grid_ind_list_1[np.random.choice(len(x_grid_ind_list_l))]])
+	# x_grid_ind_list_1 = np.array([x_grid_ind_list_1[np.random.choice(len(x_grid_ind_list_l))]])
+	x_grid_ind_list_1 = np.copy(x_grid_ind_list)
 
 assert (max([abs(len(x_grids_trv_refs[0]) - len(x_grids_trv_refs[j])) for j in range(len(x_grids_trv_refs))]) == 0)
 
