@@ -58,23 +58,21 @@ k_time_edges = config['k_time_edges']
 graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
 ## Training params
-n_batch = config['n_batch']
-n_epochs = config['n_epochs'] # add 1, so it saves on last iteration (since it saves every 100 steps)
-n_spc_query = config['n_spc_query'] # Number of src queries per sample
-n_src_query = config['n_src_query'] # Number of src-arrival queries per sample
+n_batch = train_config['n_batch']
+n_epochs = train_config['n_epochs'] # add 1, so it saves on last iteration (since it saves every 100 steps)
+n_spc_query = train_config['n_spc_query'] # Number of src queries per sample
+n_src_query = train_config['n_src_query'] # Number of src-arrival queries per sample
 training_params = [n_spc_query, n_src_query]
 
 ## Prediction params
-kernel_sig_t = config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
-src_t_kernel = config['src_t_kernel'] # Kernel or origin time label (s)
-src_t_arv_kernel = config['src_t_arv_kernel'] # Kernel for arrival association time label (s)
-src_x_kernel = config['src_x_kernel'] # Kernel for source label, horizontal distance (m)
-src_x_arv_kernel = config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
-src_depth_kernel = config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
-t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
+kernel_sig_t = train_config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
+src_t_kernel = train_config['src_t_kernel'] # Kernel or origin time label (s)
+src_t_arv_kernel = train_config['src_t_arv_kernel'] # Kernel for arrival association time label (s)
+src_x_kernel = train_config['src_x_kernel'] # Kernel for source label, horizontal distance (m)
+src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
+src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
+t_win = train_config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
-dist_range = config['dist_range'] ## The spatial window over which to sample max distance of 
-## source-station moveouts in m, per event. E.g., 15 - 500 km. Should set slightly lower if using small region.
 
 # File versions
 template_ver = 1 # spatial grid version
