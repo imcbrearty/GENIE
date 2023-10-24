@@ -91,7 +91,7 @@ class LocalMarching(MessagePassing): # make equivelent version with sum operatio
 
 		return srcs_keep
 
-def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, phase_labels, arrivals_tree, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, ftrns1, ftrns2, n_queries = 3000, n_batch = 75, max_rate_events = 5000, max_miss_events = 3500, max_false_events = 2000, T = 3600.0*24.0, dt = 30, tscale = 3600.0, n_sta_range = [0.25, 1.0], plot_on = False, verbose = False):
+def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, phase_labels, arrivals_tree, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2):
 
 	if verbose == True:
 		st = time.time()
@@ -117,19 +117,14 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 	# perm_vec = -1*np.ones(locs.shape[0])
 	# perm_vec[ind_use] = np.arange(len(ind_use))
 
-	t_win = 10.0
+	k_sta_edges, k_spc_edges, k_time_edges = graph_params
+	t_win, kernel_sig_t = pred_params[0], pred_params[1]
+	
 	scale_vec = np.array([1,2*t_win]).reshape(1,-1)
 	n_batch = len(time_samples)
 
 	## Max_t is dependent on x_grids_trv. Else, can pass max_t as an input.
 	# max_t = float(np.ceil(max([x_grids_trv[j].max() for j in range(len(x_grids_trv))])))
-
-	src_t_kernel = 8.0 # change these kernels
-	src_x_kernel = 30e3
-	src_depth_kernel = 5e3
-	min_sta_arrival = 0
-
-	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
 
 	# arrivals_tree = cKDTree(arrivals[:,0][:,None]) ## It might be expensive to keep re-creating this every time step
 	lp = arrivals_tree.query_ball_point(time_samples.reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0) 
@@ -222,10 +217,10 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 		ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
 		rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
 
-	kernel_sig_t = 5.0 # Can speed up by only using matches.
-	k_sta_edges = 8
-	k_spc_edges = 15
-	k_time_edges = 10 ## Make sure is same as in train_regional_GNN.py
+	# kernel_sig_t = 5.0 # Can speed up by only using matches.
+	# k_sta_edges = 8
+	# k_spc_edges = 15
+	# k_time_edges = 10 ## Make sure is same as in train_regional_GNN.py
 	time_vec_slice = np.arange(k_time_edges)
 
 	# X_fixed = [] # fixed
