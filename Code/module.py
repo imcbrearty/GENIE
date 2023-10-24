@@ -21,6 +21,8 @@ from numpy.matlib import repmat
 import itertools
 import pathlib
 
+use_previous_model_definition = False
+
 device = torch.device('cuda') ## or use cpu
 
 class DataAggregation(MessagePassing): # make equivelent version with sum operations.
@@ -369,6 +371,8 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 
 		return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
 
+
+
 class GCN_Detection_Network_extended(nn.Module):
 	def __init__(self, ftrns1, ftrns2, device = 'cuda'):
 		super(GCN_Detection_Network_extended, self).__init__()
@@ -484,7 +488,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		x = self.TemporalAttention(x, t_query) # on random queries
 
 		return y, x
-
+  
 #### EXTRA
 class TravelTimes(nn.Module):
 

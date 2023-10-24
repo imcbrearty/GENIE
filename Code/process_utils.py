@@ -136,8 +136,6 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 	phase_labels_select = phase_labels[lp_concat]
 	tree_select = cKDTree(arrivals_select[:,0:2]*scale_vec)
 
-	Trv_subset_p = []
-	Trv_subset_s = []
 	Station_indices = []
 	# Grid_indices = []
 	Batch_indices = []
@@ -149,14 +147,14 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 	ts1 = np.concatenate((x_grid_trv[:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1)), axis = 1)
 	Trv_subset_p = np.concatenate((np.tile(tp1, [n_batch, 1]), ivec), axis = 1)
 	Trv_subset_s = np.concatenate((np.tile(ts1, [n_batch, 1]), ivec), axis = 1)
+
+	ind_sta_select = np.unique(ind_use) ## Subset of locations, from total set.
+	n_sta_select = len(ind_sta_select)
 	
 	## Note, this loop could be vectorized
 	for i in range(n_batch):
 		# i0 = np.random.randint(0, high = len(x_grids)) ## Will be fixed grid, if x_grids is length 1.
 		# n_spc = x_grids[i0].shape[0]
-
-		ind_sta_select = np.unique(ind_use) ## Subset of locations, from total set.
-		n_sta_select = len(ind_sta_select)
 
 		# Not, trv_subset_p and trv_subset_s only differ in the last entry, for all iterations of the loop.
 		## In other wors, what's the point of this costly duplication of Trv_subset_p and s? Why not more
