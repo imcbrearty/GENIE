@@ -144,6 +144,12 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 	Sample_indices = []
 	sc = 0
 
+	ivec = np.vstack([i*np.ones((n_spc*len(ind_sta_select),1)) for i in range(n_batch)])
+	tp1 = np.concatenate((x_grid_trv[:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1)), axis = 1)
+	ts1 = np.concatenate((x_grid_trv[:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1)), axis = 1)
+	Trv_subset_p = np.concatenate((np.tile(tp1, [n_batch, 1]), ivec), axis = 1)
+	Trv_subset_s = np.concatenate((np.tile(ts1, [n_batch, 1]), ivec), axis = 1)
+	
 	## Note, this loop could be vectorized
 	for i in range(n_batch):
 		# i0 = np.random.randint(0, high = len(x_grids)) ## Will be fixed grid, if x_grids is length 1.
@@ -156,8 +162,8 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 		## In other wors, what's the point of this costly duplication of Trv_subset_p and s? Why not more
 		## effectively use this data.
 
-		Trv_subset_p.append(np.concatenate((x_grid_trv[:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
-		Trv_subset_s.append(np.concatenate((x_grid_trv[:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
+		# Trv_subset_p.append(np.concatenate((x_grid_trv[:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
+		# Trv_subset_s.append(np.concatenate((x_grid_trv[:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
 		Station_indices.append(ind_sta_select) # record subsets used
 		Batch_indices.append(i*np.ones(len(ind_sta_select)*n_spc))
 		# Grid_indices.append(i0)
@@ -165,8 +171,8 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 		sc += len(Sample_indices[-1])
 
 	# sc += len(Sample_indices[-1])
-	Trv_subset_p = np.vstack(Trv_subset_p)
-	Trv_subset_s = np.vstack(Trv_subset_s)
+	# Trv_subset_p = np.vstack(Trv_subset_p)
+	# Trv_subset_s = np.vstack(Trv_subset_s)
 	Batch_indices = np.hstack(Batch_indices)
 
 	offset_per_batch = 1.5*max_t
