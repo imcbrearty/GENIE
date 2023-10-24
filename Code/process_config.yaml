@@ -7,7 +7,14 @@ n_ver_picks: 1
 template_ver: 1
 vel_model_ver: 1
 process_days_ver: 1 
-## Put the list of days you want to process in file process_days_list_ver_%d.txt
+## Put the list of days you want to process in file $ProjectName$_process_days_list_ver_%d.txt
+
+## Note: the default settings have some redundance and averaging built in, but speeds can be improved in a few ways.
+## To speed up processing, can increase step (e.g. step: 5 - 10), and use only one grid during location refinement step (use_only_one_grid: True)
+## Additionally, can decrease n_rand_query to loose some spatial resolution in favor of speed, and also increase thresh to reduce number of sources,
+## which reduces post-processing costs. The simplest way to process long intervals of time is just to call process_continuous_days.py on many different
+## input days (specified by the system argument argv[1] passed to the script: e.g., python process_continuous_days.py $n$ for any integer $n$, 
+## which selects the nth day given in $ProjectName$_process_days_list_ver_1.txt), so that many parallel days can be submitted to run on individual cores.
 
 offset_increment: 500 ## This only effects the choice of pick files used when submitting multiple jobs such as jobarrays
 n_rand_query: 112000 ## This is the number of spatial points to re-locate initial source locations with higher resolution (an efficient implementation)
