@@ -50,7 +50,6 @@ train_travel_time_neural_network: True # Fit a travel time neural network to the
 using_3D: False # Not fully implemented yet, must adjust travel time calculations and load 3d travel time neural network
 using_1D: True
 
-### TRAIN ###
 
 ## Graph params
 k_sta_edges: 8 # or 10 are reasonable choices
