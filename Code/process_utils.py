@@ -91,7 +91,7 @@ class LocalMarching(MessagePassing): # make equivelent version with sum operatio
 
 		return srcs_keep	
 
-def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, phase_labels, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, ftrns1, ftrns2, n_queries = 3000, n_batch = 75, max_rate_events = 5000, max_miss_events = 3500, max_false_events = 2000, T = 3600.0*24.0, dt = 30, tscale = 3600.0, n_sta_range = [0.25, 1.0], plot_on = False, verbose = False):
+def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, arrivals_tree, phase_labels, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, ftrns1, ftrns2, n_queries = 3000, n_batch = 75, max_rate_events = 5000, max_miss_events = 3500, max_false_events = 2000, T = 3600.0*24.0, dt = 30, tscale = 3600.0, n_sta_range = [0.25, 1.0], plot_on = False, verbose = False):
 
 	if verbose == True:
 		st = time.time()
@@ -131,8 +131,8 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 
 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
 
-	tree = cKDTree(arrivals[:,0][:,None]) ## It might be expensive to keep re-creating this every time step
-	lp = tree.query_ball_point(time_samples.reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0) 
+	arrivals_tree = cKDTree(arrivals[:,0][:,None]) ## It might be expensive to keep re-creating this every time step
+	lp = arrivals_tree.query_ball_point(time_samples.reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0) 
 
 	lp_concat = np.hstack([np.array(list(lp[j])) for j in range(n_batch)]).astype('int')
 
