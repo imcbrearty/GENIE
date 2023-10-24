@@ -414,7 +414,7 @@ for cnt, strs in enumerate([0]):
 		times_ind_need = []
 		sc_inc = 0
 		## Find time window where < min_pick_window occur on the input set, and do not process
-		for i in range(len(times_need[i])):
+		for i in range(len(times_need)):
 			lp = arrivals_tree.query_ball_point(times_need[i].reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0)
 			for j in range(len(times_need[i])):
 				if len(list(lp[j])) >= min_pick_window:
