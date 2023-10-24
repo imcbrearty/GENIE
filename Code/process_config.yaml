@@ -34,7 +34,7 @@ d_win: 0.25 ## Lat and lon window to re-locate initial source detetections with 
 d_win_depth: 10000.0 ## Depth window to re-locate initial source detetections with refined sampling over
 dx_depth: 50.0 ## Depth resolution to locate events with travel time based re-location (unused, if using differential evolution location)
 
-step: 2.0 ## Temporal step size to predict source outputs over, and stack overlapping portions (default source window prediction is 10 s)
+step: 5.0 ## (previously was 2 s by default) Temporal step size to predict source outputs over, and stack overlapping portions (must be less than default source window prediction is 10 s)
 step_abs: 1.0 ## Time resolution to save the initial space-time predictions
 
 cost_value: 2.5 # If use expanded competitve assignment, then this is the fixed cost applied per source
@@ -45,7 +45,7 @@ cost_value: 2.5 # If use expanded competitve assignment, then this is the fixed 
 device: 'cpu' ## Right now, this isn't updated to work with cuda, since
 ## the necessary variables do not have .to(device) at the right places
 
-use_only_one_grid: False # If True, processing can be ~2 - 4 times faster, while loosing a bit of accuracy gained from averaging over multiple spatial grids
+use_only_one_grid: True # (previously was False) If True, processing can be ~2 - 4 times faster, while loosing a bit of accuracy gained from averaging over multiple spatial grids
 compute_magnitudes: False # Uses local magnitude and will be un-calibrated by default, or can calibrate for a particular study site
 
 process_known_events: False ## Only process times of known events in a reference catalog (default is USGS)
