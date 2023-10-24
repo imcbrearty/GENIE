@@ -36,7 +36,7 @@ thresh_noise_max : 2.5 # ratio of sig_t*travel time considered excess noise when
 # training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
 
 ## Training params list 3
-dist_range : [15000, 400000] # This is the distance range over which to simulate theoretical moveouts of picks. Should scale with domain size.
+dist_range : [15000, 400000] # This is the distance range over which to simulate theoretical moveouts of picks per event. Should scale with domain size.
 max_rate_events : 500 # Average rate of events per T window of time (e.g., T = 3 hrs, so 500*8 = 4000 events/day)
 max_miss_events : 375 # Average rate of missed picks per station per T window of time (e.g., T = 3 hrs, so 375*8 = 3000 missed picks / station / day)
 max_false_events : 250 # Average rate of false picks per station per T window of time (e.g., T = 3 hrs, so 250*8 = 2000 false picks / station / day)
