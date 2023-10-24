@@ -1,3 +1,4 @@
+## Running model
 
 Follow order of scripts explained in "Applying the model" section. Most of the parameters can be changed in the config files (config.yaml, train_config.yaml, and process_config.yaml). Additional details for some of those scripts are given here. After training, to run an individual day of data, run process_continuous_days.py; the input format for the data is given below.
 
