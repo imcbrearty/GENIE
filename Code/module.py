@@ -465,6 +465,25 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		return y, x, arv_p, arv_s
 
+	def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use, x_temp_cuda_cart, x_query_cart, t_query):
+
+		n_line_nodes = Slice.shape[0]
+		mask_p_thresh = 0.01
+		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
+
+		# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
+		# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
+		x_latent = self.DataAggregation(Slice.view(n_line_nodes, -1), Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
+		x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
+		x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
+		x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		y_latent = self.SpatialDirect(x_spatial) # contains data on spatial solution.
+		y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
+		x = self.SpatialAttention(x_spatial, x_query_cart, x_temp_cuda_cart) # second slowest module (could use this embedding to seed source source attention vector).
+		x = self.TemporalAttention(x, t_query) # on random queries
+
+		return y, x
 
 #### EXTRA
 class TravelTimes(nn.Module):
