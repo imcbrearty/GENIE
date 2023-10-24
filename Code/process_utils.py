@@ -91,7 +91,7 @@ class LocalMarching(MessagePassing): # make equivelent version with sum operatio
 
 		return srcs_keep
 
-def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, phase_labels, arrivals_tree, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2):
+def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arrivals, phase_labels, arrivals_tree, time_samples, x_grid, x_grid_trv, lat_range, lon_range, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2, verbose = False):
 
 	if verbose == True:
 		st = time.time()
