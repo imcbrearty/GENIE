@@ -11,7 +11,7 @@ process_days_ver: 1
 
 offset_increment: 500 ## This only effects the choice of pick files used when submitting multiple jobs such as jobarrays
 n_rand_query: 112000 ## This is the number of spatial points to re-locate initial source locations with higher resolution (an efficient implementation)
-n_query_grid: 5000 ## This is the number of spatial points to save initial space-time continuous outputs over
+n_query_grid: 10000 ## This is the number of spatial points to save initial space-time continuous outputs over
 
 thresh: 0.3 # Threshold to declare detection (previously, ~0.15 - 0.2 was effective, but recent changes to synthetic data tend to make higher thresholds also effective (e.g., even ~0.5 - 0.8 may be usable))
 thresh_assoc: 0.3 # Threshold to declare src-arrival association
