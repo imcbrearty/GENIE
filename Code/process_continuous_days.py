@@ -545,7 +545,7 @@ for cnt, strs in enumerate([0]):
 		print('No sources detected, finishing script')
 		continue ## No sources, continue
 
-	print('Detected %d number of sources'%srcs.shape[0])
+	print('Detected %d number of initial local maxima'%srcs.shape[0])
 
 	srcs = srcs[np.argsort(srcs[:,3])]
 	trv_out_srcs = trv(torch.Tensor(locs_use), torch.Tensor(srcs[:,0:3])).cpu().detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)
