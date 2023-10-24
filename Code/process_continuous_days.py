@@ -441,7 +441,7 @@ for cnt, strs in enumerate([0]):
 	
 	# Out_1 = np.zeros((x_grids[x_grid_ind_list[0]].shape[0], len(tsteps_abs))) # assumes all grids have same cardinality
 	Out_2 = np.zeros((X_query_cart.shape[0], len(tsteps_abs)))
-
+  
 	with torch.no_grad():
 	
 		for n in range(len(times_need)):
@@ -470,7 +470,6 @@ for cnt, strs in enumerate([0]):
 	
 					if np.mod(i0, 50) == 0:
 						print('%d %d %0.2f'%(n, i0, out[1].max().item()))
-
 
 	iz1, iz2 = np.where(Out_2 > 0.01) # Zeros out all values less than this
 	Out_2_sparse = np.concatenate((iz1.reshape(-1,1), iz2.reshape(-1,1), Out_2[iz1,iz2].reshape(-1,1)), axis = 1)
@@ -613,7 +612,8 @@ for cnt, strs in enumerate([0]):
 					
 					# note, trv_out_sources, is already on cuda, may cause memory issue with too many sources
 					out = mz_list[x_grid_ind].forward_fixed(torch.Tensor(Inpts[i]), torch.Tensor(Masks[i]), torch.Tensor(lp_times[i]), torch.Tensor(lp_stations[i]).long(), torch.Tensor(lp_phases[i].reshape(-1,1)).float(), locs_use, x_grids_cart_torch[x_grid_ind], X_query_1_cart_list[i], torch.Tensor(ftrns1(srcs_slice[i,0:3].reshape(1,-1))), tq, torch.zeros(1), trv_out_srcs_slice[[i],:,:])
-					Out_refined[i] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
+
+          Out_refined[i] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 
 		srcs_refined = []
 		for i in range(srcs_slice.shape[0]):
