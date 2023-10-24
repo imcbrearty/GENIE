@@ -21,7 +21,7 @@ from numpy.matlib import repmat
 import itertools
 import pathlib
 
-use_previous_model_definition = False
+use_previous_model_definition = True
 
 device = torch.device('cuda') ## or use cpu
 
