@@ -33,6 +33,8 @@ fix_nominal_depth: True
 number_of_update_steps: 5000
 
 ### TRAVEL TIMES ###
+## These are the elevation ranges over which stations might vary
+## we compute travel times for a range of reciever elevations
 depth_steps:
   min_elevation: -500 # meters
   max_elevation: 4000 # meters
