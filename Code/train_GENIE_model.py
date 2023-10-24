@@ -113,7 +113,7 @@ thresh_noise_max = train_config['thresh_noise_max'] # ratio of sig_t*travel time
 training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
 
 ## Training params list 3
-n_batch = train_config['n_batch']
+# n_batch = train_config['n_batch']
 dist_range = train_config['dist_range'] # Should be chosen proportional to physical domain size
 max_rate_events = train_config['max_rate_events']
 max_miss_events = train_config['max_miss_events']
