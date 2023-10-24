@@ -92,7 +92,7 @@ if load_subnetworks == True:
 	Ind_subnetworks = h_subnetworks['Sta_inds']
 	h_subnetworks.close()
 else:
-	Ind_subnetworks = None
+	Ind_subnetworks = False
 
 ## Extra train parameters
 
@@ -364,7 +364,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	Sample_indices = []
 	sc = 0
 
-	if (fixed_subnetworks is not None):
+	if (fixed_subnetworks != False):
 		fixed_subnetworks_flag = 1
 	else:
 		fixed_subnetworks_flag = 0		
