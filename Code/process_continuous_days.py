@@ -184,6 +184,7 @@ offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_rang
 rbest_cuda = torch.Tensor(rbest).to(device)
 mn_cuda = torch.Tensor(mn).to(device)
 
+
 # use_spherical = False
 if config['use_spherical'] == True:
 
@@ -290,16 +291,30 @@ print('Going to compute sources only in interior region')
 x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
 x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
 
-use_irregular_reference_grid = True ## Could add a different function to create the initial grid sampling points
-if use_irregular_reference_grid == True:
-	X_query = kmeans_packing_sampling_points(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 3000, n_sim = 1)[0]
+load_prebuilt_sampling_grid = True
+n_ver_sampling_grid = 1
+if (load_prebuilt_sampling_grid == True)*(os.path.isfile(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid) == True):
+	
+	z = np.load(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid)
+	X_query = z['X_query']
 	X_query_cart = torch.Tensor(ftrns1(np.copy(X_query)))
-else:
-	x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
-	x11, x12, x13 = np.meshgrid(x1, x2, x3)
-	xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-	X_query = np.copy(xx)
-	X_query_cart = torch.Tensor(ftrns1(np.copy(xx)))
+	z.close()
+
+else:	
+
+	use_irregular_reference_grid = True ## Could add a different function to create the initial grid sampling points
+	if use_irregular_reference_grid == True:
+		X_query = kmeans_packing_sampling_points(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 3000, n_sim = 1)[0]
+		X_query_cart = torch.Tensor(ftrns1(np.copy(X_query)))
+	else:
+		x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
+		x11, x12, x13 = np.meshgrid(x1, x2, x3)
+		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+		X_query = np.copy(xx)
+		X_query_cart = torch.Tensor(ftrns1(np.copy(xx)))
+
+	if load_prebuilt_sampling_grid == True:
+		np.savez_compressed(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid, X_query = X_query)
 
 
 # Window over which to "relocate" each 
@@ -317,6 +332,10 @@ check_if_finished = False
 print('Should change this to use all grids, potentially')
 x_grid_ind_list = np.sort(np.random.choice(len(x_grids), size = 1, replace = False)) # 15
 x_grid_ind_list_1 = np.sort(np.random.choice(len(x_grids), size = len(x_grids), replace = False)) # 15
+
+use_only_one_grid = False
+if use_only_one_grid == True:
+	x_grid_ind_list_1 = np.array([x_grid_ind_list_1[np.random.choice(len(x_grid_ind_list_l))]])
 
 assert (max([abs(len(x_grids_trv_refs[0]) - len(x_grids_trv_refs[j])) for j in range(len(x_grids_trv_refs))]) == 0)
 
@@ -339,6 +358,7 @@ date = np.array([yr, mo, dy])
 
 P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
 locs_use = locs[ind_use]
+arrivals_tree = cKDTree(P[:,0][:,None])
 
 if process_known_events == True: ## If true, only process around times of known events
 	t0 = UTCDateTime(date[0], date[1], date[2])
@@ -388,6 +408,37 @@ for cnt, strs in enumerate([0]):
 
 	assert(len(np.hstack(times_need)) == len(np.unique(np.hstack(times_need))))
 
+	skip_quiescent_intervals = True
+	if skip_quiescent_intervals == True:
+		min_pick_window = 1
+		times_ind_need = []
+		sc_inc = 0
+		## Find time window where < min_pick_window occur on the input set, and do not process
+		for i in range(len(times_need)):
+			lp = arrivals_tree.query_ball_point(times_need[i].reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0)
+			for j in range(len(times_need[i])):
+				if len(list(lp[j])) >= min_pick_window:
+					times_ind_need.append(sc_inc)
+				sc_inc += 1
+
+		## Subselect times_need_l
+		if len(times_ind_need) > 0:
+			times_need_l = times_need_l[np.array(times_ind_need)]
+
+			## Double check this.
+			n_batches = int(np.floor(len(times_need_l)/n_batch))
+			times_need = [times_need_l[j*n_batch:(j + 1)*n_batch] for j in range(n_batches)]
+			if n_batches*n_batch < len(times_need_l):
+				times_need.append(times_need_l[n_batches*n_batch::]) ## Add last few samples
+
+			assert(len(np.hstack(times_need)) == len(np.unique(np.hstack(times_need))))
+			print('Processing %d inputs in %d batches'%(len(times_need_l), len(times_need)))
+
+		else:
+			print('No windows with > %d picks (min_pick_window)'%min_pick_window)
+			print('Stopping processing')
+			continue
+	
 	# Out_1 = np.zeros((x_grids[x_grid_ind_list[0]].shape[0], len(tsteps_abs))) # assumes all grids have same cardinality
 	Out_2 = np.zeros((X_query_cart.shape[0], len(tsteps_abs)))
 
@@ -399,7 +450,7 @@ for cnt, strs in enumerate([0]):
 		for x_grid_ind in x_grid_ind_list:
 
 			## It might be more efficient if Inpts, Masks, lp_times, and lp_stations were already on Tensor
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], tsteps_slice, x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, tsteps_slice, x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
 
 			for i0 in range(len(tsteps_slice)):
 
@@ -548,7 +599,7 @@ for cnt, strs in enumerate([0]):
 
 		for x_grid_ind in x_grid_ind_list_1:
 
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], srcs_slice[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, srcs_slice[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
 
 			for i in range(srcs_slice.shape[0]):
 
@@ -600,7 +651,7 @@ for cnt, strs in enumerate([0]):
 		
 		for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], srcs_refined[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, srcs_refined[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
 
 			if inc == 0:
 
