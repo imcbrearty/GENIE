@@ -184,6 +184,7 @@ offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_rang
 rbest_cuda = torch.Tensor(rbest).to(device)
 mn_cuda = torch.Tensor(mn).to(device)
 
+
 # use_spherical = False
 if config['use_spherical'] == True:
 
@@ -290,16 +291,30 @@ print('Going to compute sources only in interior region')
 x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
 x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
 
-use_irregular_reference_grid = True ## Could add a different function to create the initial grid sampling points
-if use_irregular_reference_grid == True:
-	X_query = kmeans_packing_sampling_points(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 3000, n_sim = 1)[0]
+load_prebuilt_sampling_grid = True
+n_ver_sampling_grid = 1
+if (load_prebuilt_sampling_grid == True)*(os.path.isfile(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid) == True):
+	
+	z = np.load(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid)
+	X_query = z['X_query']
 	X_query_cart = torch.Tensor(ftrns1(np.copy(X_query)))
-else:
-	x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
-	x11, x12, x13 = np.meshgrid(x1, x2, x3)
-	xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-	X_query = np.copy(xx)
-	X_query_cart = torch.Tensor(ftrns1(np.copy(xx)))
+	z.close()
+
+else:	
+
+	use_irregular_reference_grid = True ## Could add a different function to create the initial grid sampling points
+	if use_irregular_reference_grid == True:
+		X_query = kmeans_packing_sampling_points(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 3000, n_sim = 1)[0]
+		X_query_cart = torch.Tensor(ftrns1(np.copy(X_query)))
+	else:
+		x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
+		x11, x12, x13 = np.meshgrid(x1, x2, x3)
+		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+		X_query = np.copy(xx)
+		X_query_cart = torch.Tensor(ftrns1(np.copy(xx)))
+
+	if load_prebuilt_sampling_grid == True:
+		np.savez_compressed(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid, X_query = X_query)
 
 
 # Window over which to "relocate" each 
@@ -317,6 +332,10 @@ check_if_finished = False
 print('Should change this to use all grids, potentially')
 x_grid_ind_list = np.sort(np.random.choice(len(x_grids), size = 1, replace = False)) # 15
 x_grid_ind_list_1 = np.sort(np.random.choice(len(x_grids), size = len(x_grids), replace = False)) # 15
+
+use_only_one_grid = True
+if use_only_one_grid == True:
+	x_grid_ind_list_1 = [x_grid_ind_list_1[np.random.choice(len(x_grid_ind_list_l))]]
 
 assert (max([abs(len(x_grids_trv_refs[0]) - len(x_grids_trv_refs[j])) for j in range(len(x_grids_trv_refs))]) == 0)
 
