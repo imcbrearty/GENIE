@@ -536,6 +536,10 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 
 		trv = lambda sta_pos, src_pos: m.forward_relative(sta_pos, src_pos, method = 'pairs')
 
+	if method == 'direct':
+
+		trv = lambda sta_pos, src_pos: m.forward_relative(sta_pos, src_pos, method = 'direct')
+	
 	return trv
 
 def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, dt_embed = 1.0, device = 'cpu'):
