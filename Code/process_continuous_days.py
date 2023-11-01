@@ -469,7 +469,7 @@ for cnt, strs in enumerate([0]):
 	
 					# Out_1[:,ip_need[1]] += out[0][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
 					Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
-					out_cumulative_max += out[1].max().item()
+					out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
 					
 					if np.mod(i0, 50) == 0:
 						print('%d %d %0.2f'%(n, i0, out_cumulative_max))
