@@ -469,7 +469,7 @@ for cnt, strs in enumerate([0]):
 					# Out_1[:,ip_need[1]] += out[0][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
 					Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
 	
-					if np.mod(i0, 50) == 0:
+					if np.mod(i0, 5) == 0:
 						print('%d %d %0.2f'%(n, i0, out[1].max().item()))
 
 	iz1, iz2 = np.where(Out_2 > 0.01) # Zeros out all values less than this
