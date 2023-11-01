@@ -449,7 +449,7 @@ for cnt, strs in enumerate([0]):
 	
 			tsteps_slice = times_need[n]
 			tsteps_slice_indices = tree_tsteps.query(tsteps_slice.reshape(-1,1))[1]
-			out_cumulative_max = 0.0
+			# out_cumulative_max = 0.0
 			
 			for x_grid_ind in x_grid_ind_list:
 	
@@ -469,11 +469,11 @@ for cnt, strs in enumerate([0]):
 	
 					# Out_1[:,ip_need[1]] += out[0][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
 					Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
-					out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
+					# out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
 					
-					if np.mod(i0, 50) == 0:
-						print('%d %d %0.2f'%(n, i0, out_cumulative_max))
-						out_cumulative_max = 0.0 # Reset moving detection metric print output
+					if (np.mod(i0, 50) == 0) + ((np.mod(i0, 5) == 0)*(out[1].max().item() > 0.075)):
+						print('%d %d %0.2f'%(n, i0, out[1].max().item()))
+						# out_cumulative_max = 0.0 # Reset moving detection metric print output
 	
 	iz1, iz2 = np.where(Out_2 > 0.01) # Zeros out all values less than this
 	Out_2_sparse = np.concatenate((iz1.reshape(-1,1), iz2.reshape(-1,1), Out_2[iz1,iz2].reshape(-1,1)), axis = 1)
