@@ -435,8 +435,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ip_p = np.searchsorted(arrivals_select[:,0], query_time_p)
 	ip_s = np.searchsorted(arrivals_select[:,0], query_time_s)
 
-	ip_p_pad = ip_p.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
-	ip_s_pad = ip_s.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
+	ip_p_pad = ip_p.reshape(-1,1) + np.array([-1,0,1]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
+	ip_s_pad = ip_s.reshape(-1,1) + np.array([-1,0,1]).reshape(1,-1) 
 	ip_p_pad = np.minimum(np.maximum(ip_p_pad, 0), n_arvs - 1) 
 	ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
 
@@ -447,8 +447,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ip_p1 = np.searchsorted(arrivals_select[iwhere_p,0], query_time_p)
 	ip_s1 = np.searchsorted(arrivals_select[iwhere_s,0], query_time_s)
 
-	ip_p1_pad = ip_p1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
-	ip_s1_pad = ip_s1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
+	ip_p1_pad = ip_p1.reshape(-1,1) + np.array([-1,0,1]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
+	ip_s1_pad = ip_s1.reshape(-1,1) + np.array([-1,0,1]).reshape(1,-1) 
 	ip_p1_pad = np.minimum(np.maximum(ip_p1_pad, 0), n_arvs_p - 1) 
 	ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
 
