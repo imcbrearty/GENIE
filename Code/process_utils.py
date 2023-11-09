@@ -194,8 +194,8 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 	ip_p = np.searchsorted(arrivals_select[:,0], query_time_p)
 	ip_s = np.searchsorted(arrivals_select[:,0], query_time_s)
 
-	ip_p_pad = ip_p.reshape(-1,1) + np.array([-1,0,1]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
-	ip_s_pad = ip_s.reshape(-1,1) + np.array([-1,0,1]).reshape(1,-1) 
+	ip_p_pad = ip_p.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
+	ip_s_pad = ip_s.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
 	ip_p_pad = np.minimum(np.maximum(ip_p_pad, 0), n_arvs - 1) 
 	ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
 
@@ -211,13 +211,13 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 
 	if len(iwhere_p) > 0:
 		ip_p1 = np.searchsorted(arrivals_select[iwhere_p,0], query_time_p)
-		ip_p1_pad = ip_p1.reshape(-1,1) + np.array([-1,0,1]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
+		ip_p1_pad = ip_p1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
 		ip_p1_pad = np.minimum(np.maximum(ip_p1_pad, 0), n_arvs_p - 1) 
 		rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
 
 	if len(iwhere_s) > 0:
 		ip_s1 = np.searchsorted(arrivals_select[iwhere_s,0], query_time_s)
-		ip_s1_pad = ip_s1.reshape(-1,1) + np.array([-1,0,1]).reshape(1,-1) 
+		ip_s1_pad = ip_s1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
 		ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
 		rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
 
