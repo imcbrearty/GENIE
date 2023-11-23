@@ -25,12 +25,14 @@ first column is time since start of day (or can be in terms of a sampling rate, 
 second column is station index (corresponding to indices of stations in the NC_EHZ_network.npz file).   
 third column is maximum peak ground velocity from 1 s before to 2.5 s after each pick time.   
 fourth column is probability of PhaseNet pick.   
-fifth column is phase type (P waves, 0; S waves, 1), labeled by PhaseNet
+fifth column is phase type (P waves, 0; S waves, 1), labeled by PhaseNet    
 
 sta_names_use: used stations on this day (referenced to the absolute network file).   
 
 sta_ind_use: indices of stations used, corresponding to sta_names_use (referenced to the absolute network file).   
 
 Examples pick files in this format are given in: https://github.com/imcbrearty/GENIE/tree/main/BSSA/Datasets/500%20random%20day%20test. Note that, in these example picks, the pick times were specified in 100 Hz sampling, however the default behavior is now for picks to be specified in absolute time (the parameter spr_picks in process_config.yaml specifies whether absolute time or a given sampling rate is used).
+
+Note that by default, maximum peak ground velocity and probability of PhaseNet pick are not currently used by the model.
 
 Each of the scripts (i - vi). should run with minimal changes, though some hyperparemeters can be changed, and a few features are hard-coded. Increased documentation will be added.   
