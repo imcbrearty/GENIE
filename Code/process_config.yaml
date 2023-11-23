@@ -30,7 +30,7 @@ tc_win: 5.0 # Temporal window (s) to link events in Local Marching
 sp_win: 15000.0 # Distance (m) to link events in Local Marching. Generally both of these on the order of training kernel sizes
 break_win: 15.0 # Temporal window to find disjoint groups of sources, 
 ## so can run Local Marching without memory issues.
-spr_picks: 100 # Assumed sampling rate of picks 
+spr_picks: 1 # Assumed sampling rate of picks (e.g., spr_picks = 1 means absolute time, spr_picks = 100 means 100 Hz sampling rate). Note, previous default was spr_picks = 100.
 ## (can be 1 if absolute times are used for pick time values)
 
 d_win: 0.25 ## Lat and lon window to re-locate initial source detetections with refined sampling over
