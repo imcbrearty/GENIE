@@ -10,7 +10,7 @@ To train the model, the training parameters in "train_config.yaml" should be ada
 
 Specify which days of picks you want to run by creating the "Project name"_process_days_list_ver_1.txt file in the main directory.    
 
-Each row is a date specified by, e.g., (2000/1/1, for year, month, day). When calling process_continuous_days.py, the first system argument specifies which day, in the "Project name"_process_days_list_ver_1.txt is run. E.g., "python process_continuous_days.py 0" runs the first day in "Project name"_process_days_list_ver_1.txt", and "python process_continuous_days.py 1" runs the second day in "Project name"_process_days_list_ver_1.txt", etc.
+Each row is a date specified by, e.g., (2000/1/1; for year, month, day). When calling process_continuous_days.py, the first system argument specifies which day, in the "Project name"_process_days_list_ver_1.txt is run. E.g., "python process_continuous_days.py 0" runs the first day in "Project name"_process_days_list_ver_1.txt", and "python process_continuous_days.py 1" runs the second day in "Project name"_process_days_list_ver_1.txt", etc.
 
 
 To load picks, put the pick file in the directory:
