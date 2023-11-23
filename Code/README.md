@@ -31,6 +31,6 @@ sta_names_use: used stations on this day (referenced to the absolute network fil
 
 sta_ind_use: indices of stations used, corresponding to sta_names_use (referenced to the absolute network file).   
 
-Examples pick files in this format are given in: https://github.com/imcbrearty/GENIE/tree/main/BSSA/Datasets/500%20random%20day%20test   
+Examples pick files in this format are given in: https://github.com/imcbrearty/GENIE/tree/main/BSSA/Datasets/500%20random%20day%20test. Note that, in these example picks, the pick times were specified in 100 Hz sampling, however the default behavior is now for picks to be specified in absolute time (the parameter spr_picks in process_config.yaml specifies whether absolute time or a given sampling rate is used).
 
 Each of the scripts (i - vi). should run with minimal changes, though some hyperparemeters can be changed, and a few features are hard-coded. Increased documentation will be added.   
