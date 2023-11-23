@@ -111,7 +111,8 @@ s_extra = train_config['s_extra'] ## If this is non-zero, it can increase (or de
 use_stable_association_labels = train_config['use_stable_association_labels']
 thresh_noise_max = train_config['thresh_noise_max'] # ratio of sig_t*travel time considered excess noise
 min_misfit_allowed = train_config['min_misfit_allowed'] ## The minimum error on theoretical vs. observed travel times that beneath which, picks have positive associaton labels (the upper limit is set by a percentage of the travel time)
-training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed]
+total_bias = train_config['total_bias'] ## The total (uniform across stations) bias on travel times for each synthetic earthquake (helps add robustness to uncertainity on assumed and true velocity models)
+training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias]
 
 ## Training params list 3
 # n_batch = train_config['n_batch']
@@ -139,7 +140,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
 
 	n_spc_query, n_src_query = training_params
-	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed = training_params_2
+	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias = training_params_2
 	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources = training_params_3
 
 	# spc_random = 20e3
@@ -238,7 +239,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	## errors that are from a velocity model different than used for sampling, training, and application, etc.
 	## Uses a different bias for both p and s waves, but constant for all stations, for each event
 	if add_bias_scaled_travel_time_noise == True:
-		total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error
+		# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
 		scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
 		scale_bias = scale_bias + 1.0
 		arrivals_theoretical = arrivals_theoretical*scale_bias
