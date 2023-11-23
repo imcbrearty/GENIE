@@ -8,15 +8,19 @@ To train the model, the training parameters in "train_config.yaml" should be ada
 
 ## Running process_continuous_days.py
 
+Specify which days of picks you want to run by creating the "Project name"_process_days_list_ver_1.txt file in the main directory.
+Each row is a date specified by, e.g., (2000/1/1, for year, month, day). When calling process_continuous_days.py, the first system argument specifies which day, in the "Project name"_process_days_list_ver_1.txt is run. E.g., "python process_continuous_days.py 0" runs the first day in "Project name"_process_days_list_ver_1.txt", and "python process_continuous_days.py 1" runs the second day in "Project name"_process_days_list_ver_1.txt", etc.
+
+
 To load picks, put the pick file in the directory:
 
 path_file + Picks/%d_%d_%d_ver_%d.npz'%(date[0], date[1], date[2], n_ver))   
-date = [year, month, day] as integers   
+date = [year, month, day] as integers
 
-The file must have the three fields: P, sta_names_use, sta_ind_use   
+The pick files must have the three fields: P, sta_names_use, sta_ind_use   
 
 P: picks from PhaseNet, given to GENIE as input.    
-first column is time index from start of day (assuming 100 Hz sampling).   
+first column is time since start of day (or can be in terms of a sampling rate, e.g., 100 Hz sampling, specified by the spr_picks parameter in process_config.yaml). Previous default behavior assumed 100 Hz sampling.
 second column is station index (corresponding to indices of stations in the NC_EHZ_network.npz file).   
 third column is maximum peak ground velocity from 1 s before to 2.5 s after each pick time.   
 fourth column is probability of PhaseNet pick.   
