@@ -21,7 +21,7 @@ date = [year, month, day] as integers
 The pick files must have the three fields: P, sta_names_use, sta_ind_use   
 
 P: picks from PhaseNet, given to GENIE as input.    
-first column is time since start of day (or can be in terms of a sampling rate, e.g., 100 Hz sampling, specified by the spr_picks parameter in process_config.yaml). Previous default behavior assumed 100 Hz sampling.
+first column is time since start of day (or can be in terms of a sampling rate, e.g., 100 Hz sampling, specified by the spr_picks parameter in process_config.yaml). Previous default behavior assumed 100 Hz sampling.    
 second column is station index (corresponding to indices of stations in the NC_EHZ_network.npz file).   
 third column is maximum peak ground velocity from 1 s before to 2.5 s after each pick time.   
 fourth column is probability of PhaseNet pick.   
