@@ -34,6 +34,7 @@ s_extra : 0.0 # If this is non-zero, it can increase (or decrease) the total rat
 use_stable_association_labels : True # This flag only allows positive association labels that occur within thresh_noise_max ratio of true travel time
 thresh_noise_max : 2.5 # ratio of sig_t*travel time considered excess noise when using use_stable_association_labels
 min_misfit_allowed: 1.0 # The minimum time (in seconds), beneath which, differences in theoretical and observed arrival times have positive association labels (the upper limit set by ratio of travel times, given by thresh_noise_max)
+total_bias: 0.03 ## Total possible bias on travel times (uniform across stations) for each theoretical moveout curve (helps build in robustness to systematic differences between assumed and true velocity models). Default is 3%
 # training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
 
 ## Training params list 3
