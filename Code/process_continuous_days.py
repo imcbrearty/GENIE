@@ -316,6 +316,24 @@ else:
 	if load_prebuilt_sampling_grid == True:
 		np.savez_compressed(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid, X_query = X_query)
 
+loaded_mag_model = False
+if compute_magnitudes == True:
+
+	try:
+		n_mag_ver = 1
+		mags_supp = np.load(path_to_file + 'trained_magnitude_model_supplemental_ver_%d.npz'%n_mag_ver)
+		grid, kgrid = mags_supp['grid'], int(mags_supp['kgrid'])
+		mags = MagPred(torch.Tensor(locs).to(device), torch.Tensor(grid).to(device), ftrns1_diff, ftrns2_diff, k = kgrid, device = device)
+		mags.load_state_dict(torch.load(path_to_file + 'trained_magnitude_model_ver_%d.hdf5'%n_mag_ver, map_location = device))
+		loaded_mag_model = True
+		print('Will compute magnitudes since a magnitude model was loaded')
+	
+	except:
+		print('Will not compute magnitudes since no magnitude model was loaded')
+		loaded_mag_model = False
+
+else:
+	print('Will not compute magnitudes since compute_magnitudes = False')	
 
 # Window over which to "relocate" each 
 # event with denser sampling from GNN output
@@ -1150,9 +1168,9 @@ for cnt, strs in enumerate([0]):
 	srcs_trv_times[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 
 	## Compute magnitudes.
-
-	if compute_magnitudes == True:
 	
+	if (compute_magnitudes == True)*(loaded_mag_model == True):
+		
 		mag_r = []
 		mag_trv = []
 		quant_range = [0.1, 0.9]
