@@ -36,4 +36,6 @@ Examples pick files in this format are given in: https://github.com/imcbrearty/G
 
 Note that by default, maximum peak ground velocity and probability of PhaseNet pick are not currently used by the model.
 
-Each of the scripts (i - vi). should run with minimal changes, though some hyperparemeters can be changed, and a few features are hard-coded. Increased documentation will be added.   
+Each of the scripts (i - vi). should run with minimal changes, though some hyperparemeters can be changed, and a few features are hard-coded. Increased documentation will be added.
+
+The "process_continuous_days.py" script has some room for improvement, such as increasing the speed at which the input features are created, and simplifying the post-processing steps of obtaining discrete associations and numbers of sources.
