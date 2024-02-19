@@ -14,7 +14,7 @@ For now, the basic workflow is to (i). install dependencies in "install_dependen
 
 The config files can be used to adjust most parameters. Also, station, region, and 1D velocity model files can be created following the same format as shown in make_initial_files.py without actually having to run make_initial_files.py.
 
-Pre-trained GNN's, and pre-computed travel time fields will be supplied in the future, to faciliate easier use and allow users to only have to run steps (i-iii), and (vi). above. Additionally, the "process_continuous_days.py" script will be updated soon to improve the way the GNN is applied over continuous days and the resulting catalog that is built.
+Pre-trained GNN's, and pre-computed travel time fields will be supplied in the future, to faciliate easier use and allow users to only have to run steps (i-iii), and (vi). above. Running additional re-location techniques like NonLinLoc or HypoDD with the associated picks from this model can often improve location accuracies of events.
 
 
 ## Extra information
