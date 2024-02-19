@@ -23,4 +23,4 @@ The pre-print is given at https://arxiv.org/abs/2209.07086. The datasets used in
 
 For a description of a related GNN architecture applied to source localization from discrete pick datasets, see https://ieeexplore.ieee.org/document/9897468, https://arxiv.org/abs/2203.05144.
 
-Preliminary results of the method are shown here, https://www.scec.org/meetings/2021/am/poster/227.
+Preliminary results of the method are shown here, https://www.scec.org/meetings/2021/am/poster/227, https://www.scec.org/system/files/publication_13213.pdf
