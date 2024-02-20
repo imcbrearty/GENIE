@@ -1168,7 +1168,7 @@ for cnt, strs in enumerate([0]):
 	srcs_trv_times[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 
 	## Compute magnitudes.
-	
+	min_log_amplitude_val = -2.0 ## Choose this value to ignore very small amplitudes
 	if (compute_magnitudes == True)*(loaded_mag_model == True):
 		
 		mag_r = []
@@ -1190,7 +1190,7 @@ for cnt, strs in enumerate([0]):
 				ind_val = torch.cat((ind_p, ind_s), dim = 0)
 				log_amp_val = torch.cat((log_amp_p, log_amp_s), dim = 0)
 
-				log_amp_val[log_amp_val < -2.0] = -torch.Tensor([np.inf]) # This measurments are artifacts
+				log_amp_val[log_amp_val < min_log_amplitude_val] = -torch.Tensor([np.inf]) # This measurments are artifacts
 
 				phase_val = torch.Tensor(np.concatenate((np.zeros(len(Picks_P[i])), np.ones(len(Picks_S[i]))), axis = 0)).long()
 
