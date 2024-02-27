@@ -60,23 +60,31 @@ def save_files(base_path: str, locs, stas, config, years):
 if __name__ == '__main__':
     print("Loading configuration from 'config.yaml'...")
     config = load_config('config.yaml')
+    pre_load_stations = config['pre_load_stations']
 
     print("Setting up time range...")
     t0 = UTCDateTime(config['time_range']['start'])
     tf = UTCDateTime(config['time_range']['end'])
     years = list(range(t0.year, tf.year + 1))
 
+    print("Determining base path for saving files...")
+    base_path = str(pathlib.Path().absolute()) + ('\\' if '\\' in str(pathlib.Path().absolute()) else '/')
+    
     print(f"Connecting to {config['client']} client...")
     client = Client(config['client'])
 
-    print("Setting up region based on configuration...")
-    stations = setup_region(client, config, t0, tf)
+    if pre_load_stations == False:
+        print("Setting up region based on configuration...")
+        stations = setup_region(client, config, t0, tf)
 
-    print("Extracting station data...")
-    locs, stas = extract_station_data(stations)
+        print("Extracting station data...")
+        locs, stas = extract_station_data(stations)
 
-    print("Determining base path for saving files...")
-    base_path = str(pathlib.Path().absolute()) + ('\\' if '\\' in str(pathlib.Path().absolute()) else '/')
+    else:    
+        print('Loading pre-built station file')
+        z = np.load(base_path + 'stations.npz')
+        locs, stas = z['locs'], z['stas']
+        z.close()
     
     print("Saving files...")
     save_files(base_path, locs, stas, config, years)
