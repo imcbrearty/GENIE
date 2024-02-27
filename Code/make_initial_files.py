@@ -80,7 +80,7 @@ if __name__ == '__main__':
         print("Extracting station data...")
         locs, stas = extract_station_data(stations)
 
-    else:    
+    elif pre_load_stations == True:
         print('Loading pre-built station file')
         z = np.load(base_path + 'stations.npz')
         locs, stas = z['locs'], z['stas']
