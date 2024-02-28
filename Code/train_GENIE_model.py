@@ -90,8 +90,13 @@ device = torch.device(config['device']) ## or use cpu
 ## subnetworks from the total set of possible stations
 load_subnetworks = False
 if load_subnetworks == True:
-	h_subnetworks = np.load(path_to_file + '%s_subnetworks.npz'%name_of_project, allow_pickle = True)
-	Ind_subnetworks = h_subnetworks['Sta_inds']
+	min_sta_per_graph = int(k_sta_edges + 1)
+	h_subnetworks = h5py.File(path_to_file + '%s_subnetworks.hdf5'%name_of_project, 'r')
+	key_names = list(h_subnetworks.keys())
+	Ind_subnetworks = []
+	for s in key_names:
+		if len(h_subnetworks[s][:]) > min_sta_per_graph:
+			Ind_subnetworks.append(h_subnetworks[s][:].astype('int'))				
 	h_subnetworks.close()
 else:
 	Ind_subnetworks = False
