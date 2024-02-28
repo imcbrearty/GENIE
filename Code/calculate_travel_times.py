@@ -245,6 +245,7 @@ if num_cores == 1:
 		ms = RegularGridInterpolator((x1, x2, x3), Ts[:,j].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
 		Tp_interp[:,j] = mp(ftrns1(X))
 		Ts_interp[:,j] = ms(ftrns1(X))
+		print('Finished interpolation %d'%j)
 
 else:
 	Tp_interp, Ts_interp = compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = num_cores)
