@@ -233,6 +233,7 @@ else:
 	Ts = results[1]
 
 ## Interpolate onto regular elliptical grid
+num_cores = 1 ## This next routine is very expensive in parallel
 if num_cores == 1:
 
 	Tp_interp = np.zeros((X.shape[0], reciever_proj.shape[0]))
@@ -246,7 +247,6 @@ if num_cores == 1:
 		Ts_interp[:,j] = ms(ftrns1(X))
 
 else:
-
 	Tp_interp, Ts_interp = compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = num_cores)
 
 if ((train_travel_time_neural_network == False) + (save_dense_travel_time_data == True)) > 0:
