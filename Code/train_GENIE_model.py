@@ -88,7 +88,7 @@ device = torch.device(config['device']) ## or use cpu
 
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
-load_subnetworks = False
+load_subnetworks = train_config['fixed_subnetworks']
 if load_subnetworks == True:
 	min_sta_per_graph = int(k_sta_edges + 1)
 	h_subnetworks = h5py.File(path_to_file + '%s_subnetworks.hdf5'%name_of_project, 'r')
@@ -131,7 +131,10 @@ tscale = train_config['tscale']
 n_sta_range = train_config['n_sta_range'] # n_sta_range[0]*locs.shape[0] must be >= the number of station edges chosen (k_sta_edges)
 use_sources = train_config['use_sources']
 use_full_network = train_config['use_full_network']
-fixed_subnetworks = train_config['fixed_subnetworks']
+if Ind_subnetworks is not False:
+	fixed_subnetworks = Ind_subnetworks
+else:
+	fixed_subnetworks = train_config['fixed_subnetworks']
 use_preferential_sampling = train_config['use_preferential_sampling']
 use_shallow_sources = train_config['use_shallow_sources']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
