@@ -129,6 +129,7 @@ device = torch.device(process_config['device']) ## Right now, this isn't updated
 ## the necessary variables do not have .to(device) at the right places
 
 compute_magnitudes = process_config['compute_magnitudes']
+min_log_amplitude_val = process_config['min_log_amplitude_val']
 process_known_events = process_config['process_known_events']
 use_expanded_competitive_assignment = process_config['use_expanded_competitive_assignment']
 use_differential_evolution_location = process_config['use_differential_evolution_location']
@@ -1168,7 +1169,7 @@ for cnt, strs in enumerate([0]):
 	srcs_trv_times[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 
 	## Compute magnitudes.
-	min_log_amplitude_val = -2.0 ## Choose this value to ignore very small amplitudes
+	# min_log_amplitude_val = -2.0 ## Choose this value to ignore very small amplitudes
 	if (compute_magnitudes == True)*(loaded_mag_model == True):
 		
 		mag_r = []
