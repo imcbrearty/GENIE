@@ -1288,6 +1288,7 @@ for cnt, strs in enumerate([0]):
 		## for each source index n
 		
 		file_save['P'] = P
+		file_save['P_perm'] = P_perm
 		file_save['srcs'] = srcs_refined
 		file_save['srcs_trv'] = srcs_trv
 		file_save['locs_use'] = locs_use
