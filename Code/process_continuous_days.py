@@ -720,7 +720,7 @@ for cnt, strs in enumerate([0]):
 
 	Out_p_save = [Out_p_save_l[i] for i in ip_retained]
 	Out_s_save = [Out_s_save_l[i] for i in ip_retained]
-	lp_meta = [lp_meta_l[i] for i in ip_retained]
+	lp_meta_l = [lp_meta_l[i] for i in ip_retained]
 	Save_picks = [Save_picks[i] for i in ip_retained]
 	srcs_refined = srcs_refined[ip_retained]
 	
