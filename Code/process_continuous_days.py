@@ -715,8 +715,8 @@ for cnt, strs in enumerate([0]):
 	mp = LocalMarching()
 	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
 
-	tree_refined = cKDTree(srcs_refined)
-	ip_retained = tree_refined.query(srcs_refined_1)[1]
+	tree_refined = cKDTree(ftrns1(srcs_refined))
+	ip_retained = tree_refined.query(ftrns1(srcs_refined_1))[1]
 
 	Out_p_save = [Out_p_save_l[i] for i in ip_retained]
 	Out_s_save = [Out_s_save_l[i] for i in ip_retained]
