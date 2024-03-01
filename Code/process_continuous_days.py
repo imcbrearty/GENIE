@@ -277,7 +277,7 @@ tree_tsteps = cKDTree(tsteps_abs.reshape(-1,1))
 
 tsteps_abs_cat = cKDTree(tsteps.reshape(-1,1)) ## Make this tree, so can look up nearest time for all cat.
 
-n_batch = 150
+n_batch = 1
 n_batches = int(np.floor(len(tsteps)/n_batch))
 n_extra = len(tsteps) - n_batches*n_batch
 n_overlap = int(t_win/step) # check this
@@ -577,7 +577,7 @@ for cnt, strs in enumerate([0]):
 
 	## Refine this
 
-	n_segment = 100
+	n_segment = 1
 	srcs_list = []
 	n_intervals = int(np.floor(srcs.shape[0]/n_segment))
 
@@ -647,14 +647,14 @@ for cnt, strs in enumerate([0]):
 		srcs_refined = np.vstack(srcs_refined)
 		srcs_refined = srcs_refined[np.argsort(srcs_refined[:,3])] # note, this
 
-		re_apply_local_marching = True
-		if re_apply_local_marching == True: ## This way, some events that were too far apart during initial LocalMarching
-			## routine can now be grouped into one, since they are closer after the srcs_refined relocation step.
-			## Note: ideally, this clustering should be done outside of the srcs_list loop, since nearby sources
-			## may be artificically cut into seperate groups in srcs_list. Can end the srcs_list loop, run this
-			## clustering, and then run the srcs_list group over the association results.
-			mp = LocalMarching()
-			srcs_refined = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
+		# re_apply_local_marching = True
+		# if re_apply_local_marching == True: ## This way, some events that were too far apart during initial LocalMarching
+		# 	## routine can now be grouped into one, since they are closer after the srcs_refined relocation step.
+		# 	## Note: ideally, this clustering should be done outside of the srcs_list loop, since nearby sources
+		# 	## may be artificically cut into seperate groups in srcs_list. Can end the srcs_list loop, run this
+		# 	## clustering, and then run the srcs_list group over the association results.
+		# 	mp = LocalMarching()
+		# 	srcs_refined = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
 		
 		## Can do multiple grids simultaneously, for a single source? (by duplicating the source?)
 		trv_out_srcs_slice = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)		
@@ -709,10 +709,22 @@ for cnt, strs in enumerate([0]):
 			Out_s_save_l.append(Out_s_save[i])
 
 
+	
 	srcs_refined = np.vstack(srcs_refined_l)
+
+	mp = LocalMarching()
+	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
+
+	tree_refined = cKDTree(srcs_refined)
+	ip_retained = tree_refined.query(srcs_refined_1)[1]
+
+	Out_p_save = [Out_p_save_l[i] for i in ip_retained]
+	Out_s_save = [Out_s_save_l[i] for i in ip_retained]
+	lp_meta = [lp_meta_l[i] for i in ip_retained]
+	Save_picks = [Save_picks[i] for i in ip_retained]
+	srcs_refined = srcs_refined[ip_retained]
+	
 	trv_out_srcs = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach()
-	Out_p_save = Out_p_save_l
-	Out_s_save = Out_s_save_l
 
 	iargsort = np.argsort(srcs_refined[:,3])
 	srcs_refined = srcs_refined[iargsort]
