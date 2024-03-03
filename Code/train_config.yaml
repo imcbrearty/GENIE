@@ -7,8 +7,8 @@ vel_model_ver : 1 # velocity model version
 n_ver : 1 # model save version
 
 ## Training params
-n_batch: 75 # batch size
-n_epochs: 20001 # Number of update steps (not technically epochs)
+n_batch: 30 # 75 # batch size
+n_epochs: 15001 # Number of update steps (not technically epochs)
 n_spc_query: 4500 # Number of src queries per sample
 n_src_query: 300 # Number of src-arrival queries per sample
 
@@ -22,25 +22,25 @@ src_x_arv_kernel: 15000. # Kernel for arrival-source association label, horizont
 src_depth_kernel: 15000. # Kernel of source label in Cartesian projection, vertical distance (m)
 
 ## Training params list 2
-spc_random : 20000 # Spatial scale to randomly remove true picks from stations ontop of threshold distance per event
+spc_random : 15000 # Spatial scale to randomly remove true picks from stations ontop of threshold distance per event
 sig_t : 0.03 # Percent of travel time error on pick times (e.g., 3%)
-spc_thresh_rand : 20000 # Spatial scale to randomly shift threshold distance of P and S waves per event
+spc_thresh_rand : 15000 # Spatial scale to randomly shift threshold distance of P and S waves per event
 min_sta_arrival : 4 # Min number of unique stations required for a positive label source event
 coda_rate : 0.035 # Percent of picks with false coda picks (e.g., 3.5%)
-coda_win : [0, 25.0] # Window that code picks can occur over (e.g., 25 s)
+coda_win : [0, 20.0] # Window that code picks can occur over (e.g., 25 s)
 max_num_spikes : 20 # Number of possible network wide spikes per window T of synthetic data
 spike_time_spread : 0.15 # The temporal spread of the network wide spikes
 s_extra : 0.0 # If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
 use_stable_association_labels : True # This flag only allows positive association labels that occur within thresh_noise_max ratio of true travel time
 thresh_noise_max : 2.5 # ratio of sig_t*travel time considered excess noise when using use_stable_association_labels
-min_misfit_allowed: 1.0 # The minimum time (in seconds), beneath which, differences in theoretical and observed arrival times have positive association labels (the upper limit set by ratio of travel times, given by thresh_noise_max)
+min_misfit_allowed: 1.0 # The minimum time (in seconds), beneath which, differences in theoretical and observed arrival times for true sources have positive association labels (the upper limit set by ratio of travel times, given by thresh_noise_max)
 total_bias: 0.03 ## Total possible bias on travel times (uniform across stations) for each theoretical moveout curve (helps build in robustness to systematic differences between assumed and true velocity models). Default is 3%
 # training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
 
 ## Training params list 3
 dist_range : [15000, 400000] # This is the distance range over which to simulate theoretical moveouts of picks per event. Should scale with domain size.
-max_rate_events : 500 # Average rate of events per T window of time (e.g., T = 3 hrs, so 500*8 = 4000 events/day)
-max_miss_events : 375 # Average rate of missed picks per station per T window of time (e.g., T = 3 hrs, so 375*8 = 3000 missed picks / station / day)
+max_rate_events : 450 # Average rate of events per T window of time (e.g., T = 3 hrs, so 500*8 = 4000 events/day)
+max_miss_events : 325 # Average rate of missed picks per station per T window of time (e.g., T = 3 hrs, so 375*8 = 3000 missed picks / station / day)
 max_false_events : 250 # Average rate of false picks per station per T window of time (e.g., T = 3 hrs, so 250*8 = 2000 false picks / station / day)
 T : 10800 # Time window to simualate synthetic data. More variability occurs per-batch, when T is longer. Note that this parameter trades off with max_rate_events, max_miss_events and max_false_events.
 dt : 30 # Time resolution to allow synthetic data parameters to vary in time, during the T window of synthetic data
