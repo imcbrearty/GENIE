@@ -48,7 +48,7 @@ tscale : 3600 # Time scale that synthetic data parameters vary in time, during t
 n_sta_range : [0.35, 1.0] # The ratio of possible stations from full set considered per station graph input to GNN. Note that n_sta_range[0]*locs.shape[0] must be >= the number of station edges chosen (k_sta_edges)
 use_sources : False
 use_full_network : False
-fixed_subnetworks : False
+fixed_subnetworks : False ## If True, this uses realistic sets of stations available from the data saved in Picks. This can improve the model performance on real data (note: pick indices of each station must be saved in P[:,1] of pick files).
 use_preferential_sampling : False
 use_shallow_sources : False
 # training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
