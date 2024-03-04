@@ -113,7 +113,7 @@ if load_subnetworks == True:
 	
 	min_sta_per_graph = int(k_sta_edges + 1)
 
-	if os.path.exists(path_to_file + '%s_subnetworks.hdf5'%name_of_project) == True:
+	if (os.path.exists(path_to_file + '%s_subnetworks.hdf5'%name_of_project) == True)*(train_config['refresh_subnetworks'] == False):
 		
 		h_subnetworks = h5py.File(path_to_file + '%s_subnetworks.hdf5'%name_of_project, 'r')
 		key_names = list(h_subnetworks.keys())
