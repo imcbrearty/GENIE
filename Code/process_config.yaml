@@ -1,6 +1,6 @@
 ## Processing
 n_ver_load: 1
-n_step_load: 20000
+n_step_load: 15000
 n_save_ver: 1
 n_ver_picks: 1
 
