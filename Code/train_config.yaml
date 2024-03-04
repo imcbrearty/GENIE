@@ -51,4 +51,12 @@ use_full_network : False
 fixed_subnetworks : False ## If True, this uses realistic sets of stations available from the data saved in Picks. This can improve the model performance on real data (note: pick indices of each station must be saved in P[:,1] of pick files).
 use_preferential_sampling : False
 use_shallow_sources : False
+
+## Extra dataset parameters
+build_training_data : False ## Pre-build training data (rather than building inside training loop)
+load_training_data : False ## Load the pre-built training data during training
+path_to_data : '' ## Specify absolute path to the training data folder
+n_ver_training_data : 1 ## Training data version
+n_batches_per_job : 250 ## Number of batches of data to create per job array index when building dataset
+
 # training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
