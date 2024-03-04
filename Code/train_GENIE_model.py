@@ -21,6 +21,7 @@ from torch_scatter import scatter
 from numpy.matlib import repmat
 import pathlib
 import glob
+import sys
 
 from utils import *
 from module import *
@@ -78,6 +79,11 @@ src_x_kernel = train_config['src_x_kernel'] # Kernel for source label, horizonta
 src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
 src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
 t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
+
+## Dataset parameters
+load_training_data = train_config['load_training_data']
+build_training_data = train_config['build_training_data'] ## If try, will use system argument to build a set of data
+
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
 
 ## Will update to be adaptive soon. The step size of temporal prediction is fixed at 1 s right now.
@@ -86,6 +92,19 @@ t_win = config['t_win'] ## This is the time window over which predictions are ma
 pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
 
 device = torch.device(config['device']) ## or use cpu
+
+if torch.cuda.is_available() == False:
+	print('No GPU available')
+	device = torch.device('cpu')
+	if config['device'] == 'cuda':
+		print('Overwritting cuda to cpu since no gpu available')
+
+## Setup training folder parameters
+if (load_training_data == True) or (build_training_data == True):
+	path_to_data = train_config['path_to_data'] ## Path to training data files
+	n_ver_training_data = train_config['n_ver_training_data'] ## Version of training files
+	if (path_to_data[-1] != '/')*(path_to_data[-1] != '\\'):
+		path_to_data = path_to_data + seperator
 
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
@@ -125,6 +144,12 @@ if load_subnetworks == True:
 			for j in range(len(Ind_subnetworks)):
 				h_subnetworks['subnetwork_%d'%j] = Ind_subnetworks[j]
 			h_subnetworks.close()
+
+	if len(Ind_subnetworks) == 0:
+		print('Did not find any subnetwork configurations')
+		Ind_subnetworks = False
+		load_subnetworks = False
+
 else:
 	Ind_subnetworks = False
 
@@ -766,7 +791,6 @@ if config['train_travel_time_neural_network'] == False:
 	x3 = np.unique(X[:,2])
 	assert(len(x1)*len(x2)*len(x3) == X.shape[0])
 	
-	
 	## Load fixed grid for velocity models
 	Xmin = X.min(0)
 	Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
@@ -774,8 +798,9 @@ if config['train_travel_time_neural_network'] == False:
 	N = np.array([len(x1), len(x2), len(x3)])
 	X0 = np.array([locs_ref[0,0], locs_ref[0,1], 0.0]).reshape(1,-1)
 	
-	
 	trv = interp_1D_velocity_model_to_3D_travel_times(X, locs_ref, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2, device = device) # .to(device)
+
+	z.close()
 
 elif config['train_travel_time_neural_network'] == True:
 
@@ -838,6 +863,7 @@ for i in range(len(x_grids)):
 	edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
 	x_grids_edges.append(edge_index)
 
+## Check if this can cause an issue (can increase max_t to a bit larger than needed value)
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # + 10.0
 
 ## Implement training.
@@ -860,6 +886,80 @@ n_restart_step = 0
 if n_restart == False:
 	n_restart_step = 0 # overwrite to 0, if restart is off
 
+if load_training_data == True:
+
+	files_load = glob.glob(path_to_data + '*ver_%d.hdf5'%n_ver_training_data)
+	print('Number of found training files %d'%len(files_load))
+	if build_training_data == False:
+		assert(len(files_load) > 0)
+
+if build_training_data == True:
+
+	## If true, use this script to build the training data.
+	## For efficiency, each instance of this script (e.g., python train_GENIE_model.py $i$ for different integer $i$ calls)
+	## will build train_config['n_batches_per_job_training_data'] batches of training data and save them to train_config['path_to_data'].
+	## Call this script ~100's of times to build a large training dataset. Then set flag "build_training_data : False" in train_config.yaml
+	## and call this script with "load_training_data : True" to train with the available pre-built training data.
+
+	## If false, this script begins training the model, and builds a batch of data on the fly between each update step.
+
+	n_repeat = train_config['n_batches_per_job'] ## Number of batches to make per job
+
+	argvs = sys.argv
+	if len(argvs) < 2:
+		argvs.append(0)
+
+	job_number = int(argvs[1]) ## Choose job index
+
+	print('Build and save training data on job index %d'%job_number)
+
+	for n in range(n_repeat):
+
+		file_index = n_repeat*job_number + n ## Unique file index
+
+		[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
+
+		h = h5py.File(path_to_data + 'training_data_slice_%d_ver_%d.hdf5'%(file_index, n_ver_training_data), 'w')
+		h['data'] = data[0]
+		h['srcs'] = data[1]
+		h['srcs_active'] = data[2]
+
+		for i in range(n_batch):
+
+			h['Inpts_%d'%i] = Inpts[i]
+			h['Masks_%d'%i] = Masks[i]
+			h['X_fixed_%d'%i] = X_fixed[i]
+			h['X_query_%d'%i] = X_query[i]
+			h['Locs_%d'%i] = Locs[i]
+			h['Trv_out_%d'%i] = Trv_out[i]
+			h['Lbls_%d'%i] = Lbls[i]
+			h['Lbls_query_%d'%i] = Lbls_query[i]
+			h['lp_times_%d'%i] = lp_times[i]
+			h['lp_stations_%d'%i] = lp_stations[i]
+			h['lp_phases_%d'%i] = lp_phases[i]
+			h['lp_meta_%d'%i] = lp_meta[i]
+			h['lp_srcs_%d'%i] = lp_srcs[i]
+
+			h['A_sta_sta_%d'%i] = A_sta_sta_l[i]
+			h['A_src_src_%d'%i] = A_src_src_l[i]
+			h['A_prod_sta_sta_%d'%i] = A_prod_sta_sta_l[i]
+			h['A_prod_src_src_%d'%i] = A_prod_src_src_l[i]
+			h['A_src_in_prod_%d'%i] = A_src_in_prod_l[i]
+			# h['A_src_in_prod_x_%d'%i] = A_src_in_prod.x
+			# h['A_src_in_prod_edges_%d'%i] = A_src_in_prod.edge_index
+			# h['A_src_in_sta_%d'%i] = A_src_in_sta
+
+			h['A_edges_time_p_%d'%i] = A_edges_time_p_l[i]
+			h['A_edges_time_s_%d'%i] = A_edges_time_s_l[i]
+			h['A_edges_ref_%d'%i] = A_edges_ref_l[i]
+			h['dt_partition_%d'%i] = dt_partition # _l[i]
+
+		h.close()
+
+	print('Finished building training data for job %d'%job_number)
+
+	error('Data set built; call the training script again once all data has been built')
+
 for i in range(n_restart_step, n_epochs):
 
 	if (i == n_restart_step)*(n_restart == True):
@@ -880,7 +980,21 @@ for i in range(n_restart_step, n_epochs):
 	## Generate batch of synthetic inputs. Note, if this is too slow to interleave with model updates, 
 	## you can  build these synthetic training data offline and then just load during training. The 
 	## dataset would likely have a large memory footprint if doing so (e.g. > 1 Tb)
-	[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
+
+	if load_training_data == True:
+
+		file_choice = np.random.choice(files_load)
+
+		h = h5py.File(file_choice, 'r')
+		
+		data = [h['data'][:], h['srcs'][:], h['srcs_active'][:]]
+
+		# h.close()
+
+	else:
+
+		## Build a training batch on the fly
+		[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
 
 	loss_val = 0
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
@@ -893,7 +1007,62 @@ for i in range(n_restart_step, n_epochs):
 		print('saved model %s %d'%(n_ver, i))
 		print('saved model at step %d'%i)		
 	
-	for i0 in range(n_batch):
+	for inc, i0 in enumerate(range(n_batch)):
+
+		if load_training_data == True:
+
+			## Overwrite i0 and create length-1 lists for the training samples loaded from .hdf5 file
+			Inpts = []
+			Masks = []
+			X_fixed = []
+			X_query = []
+			Locs = []
+			Trv_out = []
+			Lbls = []
+			Lbls_query = []
+			lp_times = []
+			lp_stations = []
+			lp_phases = []
+			lp_meta = []
+			lp_srcs = []
+			A_sta_sta_l = []
+			A_src_src_l = []
+			A_prod_sta_sta_l = []
+			A_prod_src_src_l = []
+			A_src_in_prod_l = []
+			A_edges_time_p_l = []
+			A_edges_time_s_l = []
+			A_edges_ref_l = []
+
+			## Note: it would be more efficient (speed and memory) to pass 
+			## in each sample one at time, rather than appending batch to a list
+			
+			Inpts.append(h['Inpts_%d'%i0][:])
+			Masks.append(h['Masks_%d'%i0][:])
+			X_fixed.append(h['X_fixed_%d'%i0][:])
+			X_query.append(h['X_query_%d'%i0][:])
+			Locs.append(h['Locs_%d'%i0][:])
+			Trv_out.append(h['Trv_out_%d'%i0][:])
+			Lbls.append(h['Lbls_%d'%i0][:])
+			Lbls_query.append(h['Lbls_query_%d'%i0][:])
+			lp_times.append(h['lp_times_%d'%i0][:])
+			lp_stations.append(h['lp_stations_%d'%i0][:])
+			lp_phases.append(h['lp_phases_%d'%i0][:])
+			lp_meta.append(h['lp_meta_%d'%i0][:])
+			lp_srcs.append(h['lp_srcs_%d'%i0][:])
+			A_sta_sta_l.append(h['A_sta_sta_%d'%i0][:])
+			A_src_src_l.append(h['A_src_src_%d'%i0][:])
+			A_prod_sta_sta_l.append(h['A_prod_sta_sta_%d'%i0][:])
+			A_prod_src_src_l.append(h['A_prod_src_src_%d'%i0][:])
+			A_src_in_prod_l.append(h['A_src_in_prod_%d'%i0][:])
+			# A_src_in_prod_x = h['A_src_in_prod_x_%d'%i0][:]
+			# A_src_in_prod_edges = h['A_src_in_prod_edges_%d'%i0][:]
+
+			A_edges_time_p_l.append(h['A_edges_time_p_%d'%i0][:])
+			A_edges_time_s_l.append(h['A_edges_time_s_%d'%i0][:])
+			A_edges_ref_l.append(h['A_edges_ref_%d'%i0][:])
+
+			i0 = 0 ## Over-write, so below indexing 
 
 		## Adding skip... to skip samples with zero input picks
 		if len(lp_times[i0]) == 0:
@@ -991,7 +1160,7 @@ for i in range(n_restart_step, n_epochs):
 			elif np.random.rand() > 0.8: # Plot a fraction of false sources
 				visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i)
 
-		if i0 != (n_batch - 1):
+		if inc != (n_batch - 1):
 			loss.backward(retain_graph = True)
 		else:
 			loss.backward(retain_graph = False)
@@ -1005,6 +1174,9 @@ for i in range(n_restart_step, n_epochs):
 		mx_pred_val_2 += out[1].max().item()
 		mx_pred_val_3 += out[2].max().item()
 		mx_pred_val_4 += out[3].max().item()
+
+	if load_training_data == True:
+		h.close() ## Close training file
 
 	optimizer.step()
 	losses[i] = loss_val
@@ -1026,4 +1198,3 @@ for i in range(n_restart_step, n_epochs):
 
 	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
 		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
-
