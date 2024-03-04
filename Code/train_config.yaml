@@ -58,5 +58,6 @@ load_training_data : False ## Load the pre-built training data during training
 path_to_data : '' ## Specify absolute path to the training data folder
 n_ver_training_data : 1 ## Training data version
 n_batches_per_job : 250 ## Number of batches of data to create per job array index when building dataset
+refresh_subnetworks : True ## If true, always reload the subnetworks to be updated with subnetworks available in current pick files (else, load the pre-built subnetwork file)
 
 # training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
