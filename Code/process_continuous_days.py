@@ -1176,9 +1176,10 @@ for cnt, strs in enumerate([0]):
 
 	srcs_trv = np.vstack(srcs_trv)
 
-	srcs_trv_times = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
-	ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
-	srcs_trv_times[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
+	# srcs_trv_times = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
+	# ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
+	# if len(ifind_not_nan) > 0:
+	# 	srcs_trv_times[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 
 	## Compute magnitudes.
 	# min_log_amplitude_val = -2.0 ## Choose this value to ignore very small amplitudes
@@ -1247,10 +1248,11 @@ for cnt, strs in enumerate([0]):
 
 	trv_out1 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
 	# trv_out2 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[:,0:3])).cpu().detach().numpy() + srcs_trv[:,3].reshape(-1,1,1) 
-
+	
 	trv_out2 = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
 	ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
-	trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
+	if len(ifind_not_nan) > 0:
+		trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 	
 	if ('corr1' in globals())*('corr2' in globals()):
 		# corr1 and corr2 can be used to "shift" a processing region
