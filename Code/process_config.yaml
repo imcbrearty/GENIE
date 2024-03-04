@@ -18,6 +18,8 @@ process_days_ver: 1
 ## input days (specified by the system argument argv[1] passed to the script: e.g., python process_continuous_days.py $n$ for any integer $n$, 
 ## which selects the nth day given in $ProjectName$_process_days_list_ver_1.txt), so that many parallel days can be submitted to run on individual cores.
 
+## Note: for more accurate processing, set step = 2.0, and use_only_one_grid = False.
+## It is faster when using the default step = 5.0, and use_only_one_grid = True.
 
 offset_increment: 500 ## This only effects the choice of pick files used when submitting multiple jobs such as jobarrays
 n_rand_query: 112000 ## This is the number of spatial points to re-locate initial source locations with higher resolution (an efficient implementation)
