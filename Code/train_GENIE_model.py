@@ -20,6 +20,7 @@ from torch_geometric.utils import softmax
 from torch_scatter import scatter
 from numpy.matlib import repmat
 import pathlib
+import glob
 
 from utils import *
 from module import *
@@ -90,14 +91,40 @@ device = torch.device(config['device']) ## or use cpu
 ## subnetworks from the total set of possible stations
 load_subnetworks = train_config['fixed_subnetworks']
 if load_subnetworks == True:
+	
 	min_sta_per_graph = int(k_sta_edges + 1)
-	h_subnetworks = h5py.File(path_to_file + '%s_subnetworks.hdf5'%name_of_project, 'r')
-	key_names = list(h_subnetworks.keys())
-	Ind_subnetworks = []
-	for s in key_names:
-		if len(h_subnetworks[s][:]) > min_sta_per_graph:
-			Ind_subnetworks.append(h_subnetworks[s][:].astype('int'))				
-	h_subnetworks.close()
+
+	if os.path.exists(path_to_file + '%s_subnetworks.hdf5'%name_of_project) == True:
+		
+		h_subnetworks = h5py.File(path_to_file + '%s_subnetworks.hdf5'%name_of_project, 'r')
+		key_names = list(h_subnetworks.keys())
+		Ind_subnetworks = []
+		for s in key_names:
+			if len(h_subnetworks[s][:]) > min_sta_per_graph:
+				Ind_subnetworks.append(h_subnetworks[s][:].astype('int'))				
+		h_subnetworks.close()
+		
+	else:
+		print('Building subnetworks from pick data')
+		save_subnetwork_file = False
+		Ind_subnetworks = [] ## Check for subnetworks available in pick data
+		st1 = glob.glob(path_to_file + 'Picks/19*') ## Assuming years are 1900 and 2000's
+		st2 = glob.glob(path_to_file + 'Picks/20*')
+		st = np.concatenate((st1, st2), axis = 0)
+		for i in range(len(st)):
+			st1 = glob.glob(st[i] + '/*.npz')
+			for j in range(len(st1)):
+				z = np.load(st1[j])
+				ind_use = np.unique(z['P'][:,1]).astype('int')
+				z.close()
+				if len(ind_use) > min_sta_per_graph:
+					Ind_subnetworks.append(ind_use)
+					
+		if save_subnetwork_file == True:
+			h_subnetworks = h5py.File(path_to_file + '%s_subnetworks.hdf5'%name_of_project, 'w')
+			for j in range(len(Ind_subnetworks)):
+				h_subnetworks['subnetwork_%d'%j] = Ind_subnetworks[j]
+			h_subnetworks.close()
 else:
 	Ind_subnetworks = False
 
