@@ -734,7 +734,7 @@ for cnt, strs in enumerate([0]):
 	Save_picks = [Save_picks[i] for i in iargsort]
 	lp_meta = [lp_meta_l[i] for i in iargsort]
 
-	if use_expanded_competitive_assignment == False:
+	if (use_expanded_competitive_assignment == False) or (len(srcs_refined) <= 1):
 
 		Assigned_picks = []
 		Picks_P = []
