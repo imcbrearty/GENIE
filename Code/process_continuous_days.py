@@ -1266,7 +1266,12 @@ for cnt, strs in enumerate([0]):
 		temporal_win_match = 10.0
 		spatial_win_match = 75e3
 		matches1 = maximize_bipartite_assignment(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
-		matches2 = maximize_bipartite_assignment(srcs_known, srcs_trv, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
+
+		if len(ifind_not_nan) > 0:
+			matches2 = maximize_bipartite_assignment(srcs_known, srcs_trv[ifind_not_nan], ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
+			matches2[:,1] = ifind_not_nan[matches2[:,1]]
+		else:
+			matches2 = np.nan*np.zeros((0,2))
 	
 	extra_save = False
 	save_on = True
