@@ -713,7 +713,7 @@ def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, l
 def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
 
 	if (len(arv_p) + len(arv_s)) == 0:
-		return np.nan*np.ones((1,3)), np.nan
+		return np.nan*np.ones((1,3)), np.nan, []
 
 	def likelihood_estimate(x):
 
