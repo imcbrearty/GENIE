@@ -48,7 +48,7 @@ cost_value: 2.5 # If use expanded competitve assignment, then this is the fixed 
 device: 'cpu' ## Right now, this isn't updated to work with cuda, since
 ## the necessary variables do not have .to(device) at the right places
 
-use_only_one_grid: False # (for more efficient processing choose True) If True, processing can be ~2 - 4 times faster, while loosing a bit of accuracy gained from averaging over multiple spatial grids
+use_only_one_grid: False # (Use False for more accurate processing; for more efficient processing choose True. Accuracy is gained from averaging prediction over multiple spatial grids)
 compute_magnitudes: False # Uses local magnitude and will be un-calibrated by default, or can calibrate for a particular study site
 min_log_amplitude_val: -2 # If computing magnitudes, then this is the minimum amplitude (in log domain) considered (this helps avoid biasing magnitudes by amplitude measurements of only noise)
 ## Note: if using counts, -2 is reasonable for min_log_amplitude_val, but if using physical units of velocity/displacement, it will likely have to be much lower.
