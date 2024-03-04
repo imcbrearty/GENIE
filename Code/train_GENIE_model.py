@@ -106,7 +106,7 @@ if load_subnetworks == True:
 		
 	else:
 		print('Building subnetworks from pick data')
-		save_subnetwork_file = False
+		save_subnetwork_file = True
 		Ind_subnetworks = [] ## Check for subnetworks available in pick data
 		st1 = glob.glob(path_to_file + 'Picks/19*') ## Assuming years are 1900 and 2000's
 		st2 = glob.glob(path_to_file + 'Picks/20*')
