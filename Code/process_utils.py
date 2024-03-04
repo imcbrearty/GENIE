@@ -677,7 +677,7 @@ def competitive_assignment_split(w, sta_inds, cost, min_val = 0.02, restrict = N
 def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, sig_t = 1.5, weight = [1.0,1.0], popsize = 100, maxiter = 1000, device = 'cpu', disp = True, vectorized = True):
 
 	if (len(arv_p) + len(arv_s)) == 0:
-		return np.nan*np.ones((1,3)), np.nan, []
+		return np.nan*np.ones((1,3)), np.nan
 
 	def likelihood_estimate(x):
 
@@ -713,7 +713,7 @@ def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, l
 def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
 
 	if (len(arv_p) + len(arv_s)) == 0:
-		return np.nan*np.ones((1,3)), np.nan, []
+		return np.nan*np.ones((1,3)), np.nan
 
 	def likelihood_estimate(x):
 
@@ -813,7 +813,7 @@ def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, in
 	x0_max = x0_max_query[iargmax].reshape(1,-1)
 	x0_max_val = logprob_depths[iargmax]
 
-	return x0_max, x0_max_val, Swarm
+	return x0_max, x0_max_val
 
 def maximize_bipartite_assignment(cat, srcs, ftrns1, ftrns2, temporal_win = 10.0, spatial_win = 75e3):
 
