@@ -103,8 +103,8 @@ class InterpolateWeighted(MessagePassing):
 	def forward(self, x_context, x_query, x, ker_x):
 
 		# edges = knn(torch.Tensor(ftrns1(x_context)/1000.0).to(device), torch.Tensor(ftrns1(x_query)/1000.0).to(device), k = self.k).flip(0).long().contiguous().to(device)
-		pos1 = ftrns1_diff(x_context)/1000.0
-		pos2 = ftrns1_diff(x_query)/1000.0
+		pos1 = self.ftrns1_diff(x_context)/1000.0
+		pos2 = self.ftrns1_diff(x_query)/1000.0
 		edges = knn(pos1, pos2, k = self.k).flip(0).long().contiguous() # .to(device)
 		weight = torch.exp(-0.5*torch.norm(pos1[edges[0]] - pos2[edges[1]], dim = 1)**2/(self.sig**2)).reshape(-1,1)
 		weight_sum = global_sum_pool(weight, edges[1]).repeat_interleave(self.k, dim = 0)
@@ -130,8 +130,8 @@ class InterpolateAnisotropic(MessagePassing):
 	def forward(self, x_context, x_query, x, ker_x):
 
 		# edges = knn(torch.Tensor(ftrns1(x_context)/1000.0).to(device), torch.Tensor(ftrns1(x_query)/1000.0).to(device), k = self.k).flip(0).long().contiguous().to(device)
-		pos1 = ftrns1_diff(x_context)/1000.0
-		pos2 = ftrns1_diff(x_query)/1000.0
+		pos1 = self.ftrns1_diff(x_context)/1000.0
+		pos2 = self.ftrns1_diff(x_query)/1000.0
 		edges = knn(pos1, pos2, k = self.k).flip(0).long().contiguous() # .to(device)
 		# weight = torch.exp(-0.5*torch.norm(pos1[edges[0]] - pos2[edges[1]], dim = 1)**2/(self.sig**2)).reshape(-1,1)
 		weight = torch.exp(-0.5*(((pos1[edges[0]] - pos2[edges[1]])/self.Softplus(ker_x[edges[0], :]))**2).sum(1)).reshape(-1,1)
@@ -179,7 +179,7 @@ class TrvTimesCorrection(nn.Module):
 
 	def forward(self, sta, src):
 
-		sta_ind = knn(self.locs_ref_cart, ftrns1_diff(sta)/1000.0, k = 1).flip(0)[1].long().contiguous()
+		sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1).flip(0)[1].long().contiguous()
 
 		return self.trv(sta, src) + self.correction(sta_ind, src) # [:,knn_nearest,:]
 
