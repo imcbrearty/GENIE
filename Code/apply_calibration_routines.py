@@ -380,6 +380,8 @@ mag_levels = [1,2,3,4]
 for mag in mag_levels:
 	ip = np.where(srcs_ref[:,4] >= mag)[0]
 	ip1 = np.where(srcs_ref[Matches[:,0],4] >= mag)[0]
+	if (len(ip) == 0) or (len(ip1) == 0):
+		continue
 	res_slice = srcs[Matches[ip1,1],0:4] - srcs_ref[Matches[ip1,0], 0:4]
 	print('M > %0.2f'%mag)
 	print('Detected %d/%d (%0.2f) events'%(len(ip1), len(ip), len(ip1)/len(ip)))
