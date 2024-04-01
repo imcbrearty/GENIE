@@ -287,7 +287,7 @@ spatial_match = calibration_config['spatial_match'] ## spatial distance for matc
 min_picks = calibration_config['min_picks'] ## minimum number of total picks to use event in calibration
 min_threshold = calibration_config['min_threshold'] ## minimum detection threshold value to use event in calibration
 compute_relocations = calibration_config['compute_relocations'] ## Compute example event relocations with travel time corrections
-n_relocations = calibration_config['number_relocations'] ## Number of example event relocations with travel time corrections
+n_relocations = calibration_config['n_relocations'] ## Number of example event relocations with travel time corrections
 save_with_data = calibration_config['save_with_data'] ## Flag whether to save data with the calibration file
 
 ## Now load catalog and calibration catalog and find matched events
