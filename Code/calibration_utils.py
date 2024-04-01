@@ -54,6 +54,7 @@ class Laplacian(MessagePassing):
 		return edge_attr*x_j
 		
 def global_sum_pool(x, batch, size=None):
+	## From: "https://pytorch-geometric.readthedocs.io/en/latest/generated/torch_geometric.nn.pool.global_mean_pool.html"
 	"""
 	Globally pool node embeddings into graph embeddings, via elementwise mean.
 	Pooling function takes in node embedding [num_nodes x emb_dim] and
