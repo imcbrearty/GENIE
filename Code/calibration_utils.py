@@ -165,13 +165,13 @@ class TrvTimesCorrection(nn.Module):
 		self.locs_ref_cart = ftrns1_diff(torch.Tensor(self.locs_ref).to(device))/1000.0
 
 		if interp_type == 'mean':
-			self.Interp = Interpolate(k, device = device)
+			self.Interp = Interpolate(ftrns1_diff, k = k, device = device)
 
 		elif interp_type == 'weighted':
-			self.Interp = InterpolateWeighted(k, sig = sig, device = device)
+			self.Interp = InterpolateWeighted(ftrns1_diff, k = k, sig = sig, device = device)
 
 		elif interp_type == 'anisotropic':
-			self.Interp = InterpolateAnisotropic(k, sig = sig, device = device)
+			self.Interp = InterpolateAnisotropic(ftrns1_diff, k = k, sig = sig, device = device)
 
 		else:
 			error('no interp type')
