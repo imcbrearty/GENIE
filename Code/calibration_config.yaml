@@ -1,0 +1,23 @@
+n_ver_events: 1 ## Version detected events
+n_ver_save: 1 ## Version save calibrations
+n_ver_reference: 1 ## Version reference events
+interp_type: 'anisotropic' ## Type of spatial interpolation (mean, weighted, anisotropic)
+k_spc_lap: 30 ## k-nn value for laplacian smoothing
+k_spc_interp: 15 ## k-nn value for interpolation
+sig_ker: 10.0 ## spatial kernel (in km) of the weighting kernel (fixed for weighted, starting value for anisotropic) 
+grid_index: 0 ## grid index choice (of x_grids)
+n_batch: 300 ## 1000 earthquakes per batch
+n_updates: 1000 ## Find automatic convergence criteria
+use_lap: True ## laplacian penality on spatial coefficients
+use_norm: True ## norm penality on spatial coefficients
+use_ker: False ## laplacian penality on kernel of spatial coefficients (anisotropic case)
+lam: 30.0 ## weighting of laplacian regularization loss
+lam1: 0.1 ## weighting of norm loss
+lam2: 0.1 ## weighting of laplacian loss on kernel
+temporal_match: 10.0 ## window for matched events (seconds)
+spatial_match: 75000.0 ## spatial distance for matched events (m)
+min_picks: 5 ## minimum number of total picks to use event in calibration
+min_threshold: 0.3 ## minimum detection threshold value to use event in calibration
+compute_relocations: True ## Compute example event relocations with travel time corrections
+n_relocations: 1000 ## Number of example event relocations with travel time corrections
+save_with_data: True ## Save the data used for the calibration
