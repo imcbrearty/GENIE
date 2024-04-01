@@ -504,9 +504,9 @@ print('Saving calibration result (version %d)'%n_ver_save)
 print('Max corr: %0.2f'%coefs.max().item())
 print('Min corr: %0.2f'%coefs.min().item())
 if save_with_data == False:
-	np.savez_compressed(path_to_file + seperator + 'Grids/%s_calibrated_travel_time_corrections_%d.npz'%(name_of_project, n_ver_save), coefs = coefs.cpu().detach().numpy(), coefs_ker = coefs_ker.cpu().detach().numpy(), srcs = srcs, srcs_ref = srcs_ref, Matches = Matches, params = params, losses = losses, loss1 = loss1.item(), loss2 = loss2.item())
+	np.savez_compressed(path_to_file + seperator + 'Grids/%s_calibrated_travel_time_corrections_%d.npz'%(name_of_project, n_ver_save), coefs = coefs.cpu().detach().numpy(), coefs_ker = coefs_ker.cpu().detach().numpy(), x_grid = x_grid.cpu().detach().numpy(), srcs = srcs, srcs_ref = srcs_ref, Matches = Matches, params = params, losses = losses, loss1 = loss1.item(), loss2 = loss2.item())
 elif save_with_data == True:
-	np.savez_compressed(path_to_file + seperator + 'Grids/%s_calibrated_travel_time_corrections_%d.npz'%(name_of_project, n_ver_save), coefs = coefs.cpu().detach().numpy(), coefs_ker = coefs_ker.cpu().detach().numpy(), srcs = srcs, srcs_ref = srcs_ref, Matches = Matches, Picks_P = np.vstack(Picks_P), Picks_S = np.vstack(Picks_S), event_ind_p = event_ind_p, event_ind_s = event_ind_s, params = params, losses = losses, loss1 = loss1.item(), loss2 = loss2.item())
+	np.savez_compressed(path_to_file + seperator + 'Grids/%s_calibrated_travel_time_corrections_%d.npz'%(name_of_project, n_ver_save), coefs = coefs.cpu().detach().numpy(), coefs_ker = coefs_ker.cpu().detach().numpy(), x_grid = x_grid.cpu().detach().numpy(), srcs = srcs, srcs_ref = srcs_ref, Matches = Matches, Picks_P = np.vstack(Picks_P), Picks_S = np.vstack(Picks_S), event_ind_p = event_ind_p, event_ind_s = event_ind_s, params = params, losses = losses, loss1 = loss1.item(), loss2 = loss2.item())
 else:
 	error('Set save_with_data flag')
 
