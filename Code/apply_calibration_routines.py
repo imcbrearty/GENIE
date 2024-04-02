@@ -550,9 +550,9 @@ if compute_relocations == True:
 
 		## Update origin time
 
-		pred_out = trv_corr(torch.Tensor(locs), torch.Tensor(xmle)).cpu().detach().numpy() + srcs[srcs_ind,3]
-		res_p = pred_out[0,ind_p,0] - arv_p
-		res_s = pred_out[0,ind_s,1] - arv_s
+		pred_out = trv_corr(torch.Tensor(locs_slice), torch.Tensor(xmle)).cpu().detach().numpy() + srcs[srcs_ind,3]
+		res_p = pred_out[0,ind_p_perm,0] - arv_p
+		res_s = pred_out[0,ind_s_perm,1] - arv_s
 
 		mean_shift = 0.0
 		cnt_phases = 0
