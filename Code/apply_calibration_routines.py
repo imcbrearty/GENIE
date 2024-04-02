@@ -550,7 +550,7 @@ if compute_relocations == True:
 
 		## Update origin time
 
-		pred_out = trv(torch.Tensor(locs), torch.Tensor(xmle)).cpu().detach().numpy() + srcs[srcs_ind,3]
+		pred_out = trv_corr(torch.Tensor(locs), torch.Tensor(xmle)).cpu().detach().numpy() + srcs[srcs_ind,3]
 		res_p = pred_out[0,ind_p,0] - arv_p
 		res_s = pred_out[0,ind_s,1] - arv_s
 
