@@ -89,8 +89,14 @@ print('day is %s'%argvs[1])
 
 ### Settings: ###
 
+with open('calibration_config.yaml', 'r') as file:
+    calibration_config = yaml.safe_load(file)
+
 with open('process_config.yaml', 'r') as file:
     process_config = yaml.safe_load(file)
+
+## Load device
+device = calibration_config['device']
 
 ## Load Processing settings
 n_ver_load = process_config['n_ver_load']
@@ -128,7 +134,6 @@ cost_value = process_config['cost_value'] # If use expanded competitve assignmen
 ## `sum' over the predicted source-arrival assignment for each pick. Ideally could make this number more
 ## adpative, potentially with number of stations or number of possible observing picks for each event. 
 
-device = torch.device(process_config['device']) ## Right now, this isn't updated to work with cuda, since
 ## the necessary variables do not have .to(device) at the right places
 
 compute_magnitudes = process_config['compute_magnitudes']
