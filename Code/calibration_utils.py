@@ -94,7 +94,7 @@ class Interpolate(MessagePassing):
 class InterpolateWeighted(MessagePassing):
 
 	def __init__(self, ftrns1_diff, k = 15, sig = 10.0, device = 'cpu'):
-		super(Interpolate, self).__init__('sum', node_dim = 0) # consider mean
+		super(InterpolateWeighted, self).__init__('sum', node_dim = 0) # consider mean
 		self.ftrns1_diff = ftrns1_diff
 		self.device = device
 		self.k = k
