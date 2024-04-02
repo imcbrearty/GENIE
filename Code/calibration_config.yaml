@@ -10,7 +10,7 @@ n_batch: 300 ## 1000 earthquakes per batch
 n_updates: 1000 ## Find automatic convergence criteria
 use_lap: True ## laplacian penality on spatial coefficients
 use_norm: True ## norm penality on spatial coefficients
-use_ker: False ## laplacian penality on kernel of spatial coefficients (anisotropic case)
+use_ker: True ## laplacian penality on kernel of spatial coefficients (anisotropic case)
 lam: 30.0 ## weighting of laplacian regularization loss
 lam1: 0.1 ## weighting of norm loss
 lam2: 0.01 ## weighting of laplacian loss on kernel
