@@ -13,7 +13,7 @@ use_norm: True ## norm penality on spatial coefficients
 use_ker: False ## laplacian penality on kernel of spatial coefficients (anisotropic case)
 lam: 30.0 ## weighting of laplacian regularization loss
 lam1: 0.1 ## weighting of norm loss
-lam2: 0.1 ## weighting of laplacian loss on kernel
+lam2: 0.01 ## weighting of laplacian loss on kernel
 temporal_match: 10.0 ## window for matched events (seconds)
 spatial_match: 75000.0 ## spatial distance for matched events (m)
 min_picks: 5 ## minimum number of total picks to use event in calibration
