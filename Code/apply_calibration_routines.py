@@ -411,7 +411,7 @@ print('Retained %0.8f of matches'%(len(np.where(prob > 0)[0])/len(Matches)))
 ## Setup spatial graph and create laplacian
 
 x_grid = x_grids[grid_index]
-A_src_src = knn(torch.Tensor(ftrns1(x_grid)/1000.0), torch.Tensor(ftrns1(x_grid)/1000.0), k = k_spc_lap).flip(0).long().contiguous() # )[0]
+A_src_src = knn(torch.Tensor(ftrns1(x_grid)/1000.0), torch.Tensor(ftrns1(x_grid)/1000.0), k = k_spc_lap).flip(0).long().contiguous().to(device) # )[0]
 lap = get_laplacian(A_src_src, normalization = 'rw')
 x_grid = torch.Tensor(x_grid).to(device)
 
