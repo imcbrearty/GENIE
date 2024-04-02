@@ -179,7 +179,7 @@ class TrvTimesCorrection(nn.Module):
 
 	def forward(self, sta, src):
 
-		sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1)[0].long().contiguous()
+		sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1)[1].long().contiguous()
 		# sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1).flip(0)[1].long().contiguous()
 
 		return self.trv(sta, src) + self.correction(sta_ind, src) # [:,knn_nearest,:]
