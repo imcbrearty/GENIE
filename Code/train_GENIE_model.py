@@ -186,7 +186,7 @@ use_full_network = train_config['use_full_network']
 if Ind_subnetworks is not False:
 	fixed_subnetworks = Ind_subnetworks
 else:
-	fixed_subnetworks = train_config['fixed_subnetworks']
+	fixed_subnetworks = False # train_config['fixed_subnetworks']
 use_preferential_sampling = train_config['use_preferential_sampling']
 use_shallow_sources = train_config['use_shallow_sources']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
