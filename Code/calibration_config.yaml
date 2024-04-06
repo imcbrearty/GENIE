@@ -20,5 +20,5 @@ min_picks: 5 ## minimum number of total picks to use event in calibration
 min_threshold: 0.3 ## minimum detection threshold value to use event in calibration
 compute_relocations: True ## Compute example event relocations with travel time corrections
 n_relocations: 1000 ## Number of example event relocations with travel time corrections
-save_with_data: True ## Save the data used for the calibration
+save_with_data: False ## Save the data used for the calibration
 device: 'cuda' ## Device
