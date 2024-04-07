@@ -1,6 +1,22 @@
 
 ## Training synthetic data parameters
 
+## Note that there are some combinations of parameters for a given application that will result in essentially
+## "all zero" labels, and so the model will not be able to learn anything. This mainly happens when the number of
+## simulated events, and the total extent of their moveouts (dist_range) do not allow most events to be detectable
+## by stations. By checking the output file in GNN_TrainedModels/"project_name"_output_ver_1.txt, you can monitor
+## the "trgts" variable, which is the sum over the batch of the four labels of source predictions on
+## x_query_static, x_query, p_associations, s_associations. If these values are all zero, it will not learn;
+## a good area seems to be between ~5 - 30. Over time, the model should learn to roughly match these targets
+## in the "preds" column. If it does, it is generally well trained. Using preferential_sampling = True also
+## concentrates the sampled sources around times of active sources, which increases the positive label rate.
+
+## The synthetic data can also be inspected, as it's the last output of generate_synthetic_data,
+## where data[0][:,0] are pick times, data[0][:,1] are pick indices (w.r.t. the station.npz file ordering)
+## data[0][:,2] is the phase type. Also, data[1] are the sources, and data[2] are the "active source" indices 
+## (those with enough picks to be detectable). The theoretical moveouts can be computed with:
+## trv(torch.Tensor(locs).to(device), torch.Tensor(data[1][data[2]]).to(device)).cpu().detach().numpy() + srcs[:,3].reshape(-1,1,1)
+
 ## File versions
 template_ver : 1 # source spatial grid version
 vel_model_ver : 1 # velocity model version
@@ -49,7 +65,7 @@ n_sta_range : [0.35, 1.0] # The ratio of possible stations from full set conside
 use_sources : False
 use_full_network : False
 fixed_subnetworks : True ## If True, this uses realistic sets of stations available from the data saved in Picks. This can improve the model performance on real data (note: pick indices of each station must be saved in P[:,1] of pick files).
-use_preferential_sampling : False
+use_preferential_sampling : True ## This concentrates more of the samples around times of known events, so labels arn't too sparse (e.g., trgt values in "project_name"_output.txt in GNN_TrainedNModels should not be all zeros)
 use_shallow_sources : False
 
 ## Extra dataset parameters
