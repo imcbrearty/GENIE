@@ -9,7 +9,7 @@
 ## x_query_static, x_query, p_associations, s_associations. If these values are all zero, it will not learn;
 ## a good area seems to be between ~5 - 30. Over time, the model should learn to roughly match these targets
 ## in the "preds" column. If it does, it is generally well trained. Using preferential_sampling = True also
-## concentrates the sampled sources around times of active sources, which increases the positive label rate.
+## concentrates the sampled inputs around times of active sources, which increases the positive label rate.
 
 ## The synthetic data can also be inspected, as it's the last output of generate_synthetic_data,
 ## where data[0][:,0] are pick times, data[0][:,1] are pick indices (w.r.t. the station.npz file ordering)
