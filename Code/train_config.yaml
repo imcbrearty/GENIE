@@ -15,7 +15,7 @@
 ## where data[0][:,0] are pick times, data[0][:,1] are pick indices (w.r.t. the station.npz file ordering)
 ## data[0][:,2] is the phase type. Also, data[1] are the sources, and data[2] are the "active source" indices 
 ## (those with enough picks to be detectable). The theoretical moveouts can be computed with:
-## trv(torch.Tensor(locs).to(device), torch.Tensor(data[1][data[2]]).to(device)).cpu().detach().numpy() + srcs[:,3].reshape(-1,1,1)
+## trv(torch.Tensor(locs).to(device), torch.Tensor(data[1][data[2]]).to(device)).cpu().detach().numpy() + data[1][data[2]][:,3].reshape(-1,1,1)
 
 ## File versions
 template_ver : 1 # source spatial grid version
