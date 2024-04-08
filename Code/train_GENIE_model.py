@@ -177,6 +177,7 @@ dist_range = train_config['dist_range'] # Should be chosen proportional to physi
 max_rate_events = train_config['max_rate_events']
 max_miss_events = train_config['max_miss_events']
 max_false_events = train_config['max_false_events']
+miss_pick_fraction = train_config['miss_pick_fraction']
 T = train_config['T']
 dt = train_config['dt']
 tscale = train_config['tscale']
@@ -189,7 +190,7 @@ else:
 	fixed_subnetworks = False # train_config['fixed_subnetworks']
 use_preferential_sampling = train_config['use_preferential_sampling']
 use_shallow_sources = train_config['use_shallow_sources']
-training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
+training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
 
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False):
 
@@ -201,7 +202,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	n_spc_query, n_src_query = training_params
 	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias = training_params_2
-	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources = training_params_3
+	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources = training_params_3
 
 	# spc_random = 20e3
 	# sig_t = 0.03 # 3 percent of travel time error on pick times
@@ -315,7 +316,18 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	# s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
 	t_inc = np.floor(arrivals[:,3]/dt).astype('int')
 	p_miss_rate = 0.5*station_miss_rate[arrivals[:,1].astype('int'), t_inc] + 0.5*global_miss_rate[t_inc]
-	idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < dt*p_miss_rate/T)[0]
+
+	if miss_pick_fraction is not None: ## Scale random delete rates to min and max values (times inflate)
+		inflate = 1.5
+		p_miss_rate1 = np.copy(p_miss_rate)
+		p_miss_rate1 = (p_miss_rate - p_miss_rate.min())/(p_miss_rate.max() - p_miss_rate.min())
+		p_miss_rate1 = inflate*p_miss_rate1*(miss_pick_fraction[1] - miss_pick_fraction[0]) + miss_pick_fraction[0]
+		idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < p_miss_rate1)[0]
+		print('Deleting %d of %d (%0.2f) picks'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
+	else:
+		## Previous delete random pick version
+		idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < dt*p_miss_rate/T)[0]
+		print('Deleting %d of %d (%0.2f) picks'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
 
 	arrivals = np.delete(arrivals, idel, axis = 0)
 	n_events = len(src_times)
