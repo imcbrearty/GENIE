@@ -92,8 +92,13 @@ depth_steps = config['depth_steps']
 ## Load travel time neural network settings
 save_dense_travel_time_data = config['save_dense_travel_time_data']
 train_travel_time_neural_network = config['train_travel_time_neural_network']
+use_relative_1d_profile = config['use_relative_1d_profile']
 using_3D = config['using_3D']
 using_1D = config['using_1D']
+
+if use_relative_1d_profile == True:
+	print('Overwritting num cores, because using relative 1d profile option')
+	num_cores = 1
 
 depth_steps = np.arange(depth_steps['min_elevation'], depth_steps['max_elevation'] + depth_steps['elevation_step'], depth_steps['elevation_step']) # Elevation steps to compute travel times from 
 ## (These are reference points for stations; can be a regular grid, and each station looks up the
@@ -105,7 +110,7 @@ seperator =  '\\' if '\\' in path_to_file else '/'
 path_to_file += seperator
 
 template_ver = 1
-vel_model_ver = 1
+vel_model_ver = config['vel_model_ver']
 ## Load Files
 
 # Load region
@@ -209,7 +214,7 @@ hull = ConvexHull(xx)
 inside_hull = in_hull(reciever_proj, hull.points[hull.vertices])
 assert(inside_hull.sum() == locs_ref.shape[0])
 
-n_ver = 1
+# n_ver = 1
 
 Vp = interp(ftrns2(xx)[:,2], depth_grid, Vp_profile) ## This may be locating some depths at incorrect positions, due to projection.
 Vs = interp(ftrns2(xx)[:,2], depth_grid, Vs_profile)
@@ -220,6 +225,11 @@ if num_cores == 1:
 	Tp = []
 	Ts = []
 	for j in range(reciever_proj.shape[0]):
+
+		if use_relative_1d_profile == True: ## If True, shift the profile so that the same value occurs at each stations elevation (e.g., the profile varies with the surface)
+			Vp = interp(ftrns2(xx)[:,2], depth_grid + locs_ref[j,2], Vp_profile) ## This may be locating some depths at incorrect positions, due to projection.
+			Vs = interp(ftrns2(xx)[:,2], depth_grid + locs_ref[j,2], Vs_profile)
+		
 		results = compute_travel_times_parallel(xx, reciever_proj[j][None,:], Vp, Vs, dx_v, x11, x12, x13, num_cores = num_cores)
 		Tp.append(results[0])
 		Ts.append(results[1])
@@ -518,7 +528,7 @@ if train_travel_time_neural_network == True:
 
 	n_batch = 5000
 	n_steps = 50001 # 50000
-	n_ver_save = 1
+	n_ver_save = vel_model_ver
 
 	assert((using_3D + using_1D) == 1)
 	# if use_3D == True:
