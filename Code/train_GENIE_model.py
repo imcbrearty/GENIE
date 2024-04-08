@@ -317,7 +317,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	t_inc = np.floor(arrivals[:,3]/dt).astype('int')
 	p_miss_rate = 0.5*station_miss_rate[arrivals[:,1].astype('int'), t_inc] + 0.5*global_miss_rate[t_inc]
 
-	if miss_pick_fraction is not None: ## Scale random delete rates to min and max values (times inflate)
+	if miss_pick_fraction is not False: ## Scale random delete rates to min and max values (times inflate)
 		inflate = 1.5
 		p_miss_rate1 = np.copy(p_miss_rate)
 		p_miss_rate1 = (p_miss_rate - p_miss_rate.min())/(p_miss_rate.max() - p_miss_rate.min())
