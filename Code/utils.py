@@ -24,10 +24,12 @@ import itertools
 import pathlib
 import yaml
 
+
 if torch.cuda.is_available() == True:
 	device = torch.device('cuda') ## or use cpu
 else:
 	device = torch.device('cpu')
+
 
 def load_config(file_path: str) -> dict:
 	"""Load configuration from a YAML file."""
