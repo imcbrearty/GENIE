@@ -320,7 +320,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if miss_pick_fraction is not False: ## Scale random delete rates to min and max values (times inflate)
 		inflate = 1.5
 		p_miss_rate1 = np.copy(p_miss_rate)
-		p_miss_rate1 = (p_miss_rate - p_miss_rate.min())/(p_miss_rate.max() - p_miss_rate.min())
+		low_val, high_val = np.quantile(p_miss_rate, 0.1), np.quantile(p_miss_rate, 0.9)
+		p_miss_rate1 = (p_miss_rate - low_val)/(high_val - low_val) # approximate min-max normalization with quantiles
 		p_miss_rate1 = inflate*p_miss_rate1*(miss_pick_fraction[1] - miss_pick_fraction[0]) + miss_pick_fraction[0]
 		idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < p_miss_rate1)[0]
 		print('Deleting %d of %d (%0.2f) picks'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
