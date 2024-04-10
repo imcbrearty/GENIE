@@ -127,6 +127,7 @@ cost_value = process_config['cost_value'] # If use expanded competitve assignmen
 
 device = torch.device(process_config['device']) ## Right now, this isn't updated to work with cuda, since
 ## the necessary variables do not have .to(device) at the right places
+torch.set_grad_enabled(False)
 
 compute_magnitudes = process_config['compute_magnitudes']
 min_log_amplitude_val = process_config['min_log_amplitude_val']
@@ -462,37 +463,37 @@ for cnt, strs in enumerate([0]):
 	# Out_1 = np.zeros((x_grids[x_grid_ind_list[0]].shape[0], len(tsteps_abs))) # assumes all grids have same cardinality
 	Out_2 = np.zeros((X_query_cart.shape[0], len(tsteps_abs)))
   
-	with torch.no_grad():
+	# with torch.no_grad():
 
-		for n in range(len(times_need)):
-	
-			tsteps_slice = times_need[n]
-			tsteps_slice_indices = tree_tsteps.query(tsteps_slice.reshape(-1,1))[1]
-			# out_cumulative_max = 0.0
-			
-			for x_grid_ind in x_grid_ind_list:
-	
-				## It might be more efficient if Inpts, Masks, lp_times, and lp_stations were already on Tensor
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, tsteps_slice, x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
-	
-				for i0 in range(len(tsteps_slice)):
-	
-					if len(lp_times[i0]) == 0:
-						continue ## It will fail if len(lp_times[i0]) == 0!
-	
-					## Note: this is repeated, for each pass of the x_grid loop.
-					ip_need = tree_tsteps.query(tsteps_abs[tsteps_slice_indices[i0]] + np.arange(-t_win/2.0, t_win/2.0).reshape(-1,1))
-	
-					## Need x_src_query_cart and trv_out_src
-					out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i0]), torch.Tensor(Masks[i0]), torch.Tensor(lp_times[i0]), torch.Tensor(lp_stations[i0]).long(), torch.Tensor(lp_phases[i0].reshape(-1,1)).float(), locs_use, x_grids_cart_torch[x_grid_ind], X_query_cart, tq)
-	
-					# Out_1[:,ip_need[1]] += out[0][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
-					Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
-					# out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
-					
-					if (np.mod(i0, 50) == 0) + ((np.mod(i0, 5) == 0)*(out[1].max().item() > 0.075)):
-						print('%d %d %0.2f'%(n, i0, out[1].max().item()))
-						# out_cumulative_max = 0.0 # Reset moving detection metric print output
+	for n in range(len(times_need)):
+
+		tsteps_slice = times_need[n]
+		tsteps_slice_indices = tree_tsteps.query(tsteps_slice.reshape(-1,1))[1]
+		# out_cumulative_max = 0.0
+		
+		for x_grid_ind in x_grid_ind_list:
+
+			## It might be more efficient if Inpts, Masks, lp_times, and lp_stations were already on Tensor
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, tsteps_slice, x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+
+			for i0 in range(len(tsteps_slice)):
+
+				if len(lp_times[i0]) == 0:
+					continue ## It will fail if len(lp_times[i0]) == 0!
+
+				## Note: this is repeated, for each pass of the x_grid loop.
+				ip_need = tree_tsteps.query(tsteps_abs[tsteps_slice_indices[i0]] + np.arange(-t_win/2.0, t_win/2.0).reshape(-1,1))
+
+				## Need x_src_query_cart and trv_out_src
+				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i0]), torch.Tensor(Masks[i0]), torch.Tensor(lp_times[i0]), torch.Tensor(lp_stations[i0]).long(), torch.Tensor(lp_phases[i0].reshape(-1,1)).float(), locs_use, x_grids_cart_torch[x_grid_ind], X_query_cart, tq)
+
+				# Out_1[:,ip_need[1]] += out[0][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
+				Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
+				# out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
+				
+				if (np.mod(i0, 50) == 0) + ((np.mod(i0, 5) == 0)*(out[1].max().item() > 0.075)):
+					print('%d %d %0.2f'%(n, i0, out[1].max().item()))
+					# out_cumulative_max = 0.0 # Reset moving detection metric print output
 	
 	iz1, iz2 = np.where(Out_2 > 0.01) # Zeros out all values less than this
 	Out_2_sparse = np.concatenate((iz1.reshape(-1,1), iz2.reshape(-1,1), Out_2[iz1,iz2].reshape(-1,1)), axis = 1)
@@ -620,22 +621,22 @@ for cnt, strs in enumerate([0]):
 
 			Out_refined.append(np.zeros((X_query_1.shape[0], len(tq))))
 
-		with torch.no_grad(): 
+		# with torch.no_grad(): 
 		
-			for x_grid_ind in x_grid_ind_list_1:
-	
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, srcs_slice[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
-	
-				for i in range(srcs_slice.shape[0]):
-	
-					if len(lp_times[i]) == 0:
-						continue ## It will fail if len(lp_times[i0]) == 0!
-	
-					ipick, tpick = lp_stations[i].astype('int'), lp_times[i] ## are these constant across different x_grid_ind?
-					
-					# note, trv_out_sources, is already on cuda, may cause memory issue with too many sources
-					out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]), torch.Tensor(Masks[i]), torch.Tensor(lp_times[i]), torch.Tensor(lp_stations[i]).long(), torch.Tensor(lp_phases[i].reshape(-1,1)).float(), locs_use, x_grids_cart_torch[x_grid_ind], X_query_1_cart_list[i], tq)
-					Out_refined[i] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
+		for x_grid_ind in x_grid_ind_list_1:
+
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, srcs_slice[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+
+			for i in range(srcs_slice.shape[0]):
+
+				if len(lp_times[i]) == 0:
+					continue ## It will fail if len(lp_times[i0]) == 0!
+
+				ipick, tpick = lp_stations[i].astype('int'), lp_times[i] ## are these constant across different x_grid_ind?
+				
+				# note, trv_out_sources, is already on cuda, may cause memory issue with too many sources
+				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]), torch.Tensor(Masks[i]), torch.Tensor(lp_times[i]), torch.Tensor(lp_stations[i]).long(), torch.Tensor(lp_phases[i].reshape(-1,1)).float(), locs_use, x_grids_cart_torch[x_grid_ind], X_query_1_cart_list[i], tq)
+				Out_refined[i] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 
 		srcs_refined = []
 		for i in range(srcs_slice.shape[0]):
@@ -672,37 +673,37 @@ for cnt, strs in enumerate([0]):
 		X_save = np.copy(xx)
 		X_save_cart = torch.Tensor(ftrns1(X_save))
 
-		with torch.no_grad(): 
+		# with torch.no_grad(): 
 		
-			for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
-	
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, srcs_refined[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
-	
+		for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
+
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, srcs_refined[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+
+			if inc == 0:
+
+				Out_p_save = [np.zeros(len(lp_times[j])) for j in range(srcs_refined.shape[0])]
+				Out_s_save = [np.zeros(len(lp_times[j])) for j in range(srcs_refined.shape[0])]
+
+			for i in range(srcs_refined.shape[0]):
+
+				# Does this cause any issues? Could each ipick, tpick, not be constant, between grids?
+				ipick, tpick = lp_stations[i].astype('int'), lp_times[i]
+
 				if inc == 0:
-	
-					Out_p_save = [np.zeros(len(lp_times[j])) for j in range(srcs_refined.shape[0])]
-					Out_s_save = [np.zeros(len(lp_times[j])) for j in range(srcs_refined.shape[0])]
-	
-				for i in range(srcs_refined.shape[0]):
-	
-					# Does this cause any issues? Could each ipick, tpick, not be constant, between grids?
-					ipick, tpick = lp_stations[i].astype('int'), lp_times[i]
-	
-					if inc == 0:
-	
-						Save_picks.append(np.concatenate((tpick.reshape(-1,1), ipick.reshape(-1,1)), axis = 1))
-						lp_meta_l.append(lp_meta[i])
-	
-					X_save[:,2] = srcs_refined[i,2]
-					X_save_cart = torch.Tensor(ftrns1(X_save))
-	
-					if len(lp_times[i]) == 0:
-						continue ## It will fail if len(lp_times[i0]) == 0!				
-					
-					out = mz_list[x_grid_ind].forward_fixed(torch.Tensor(Inpts[i]), torch.Tensor(Masks[i]), torch.Tensor(lp_times[i]), torch.Tensor(lp_stations[i]).long(), torch.Tensor(lp_phases[i].reshape(-1,1)).long(), locs_use, x_grids_cart_torch[x_grid_ind], X_save_cart, torch.Tensor(ftrns1(srcs_refined[i,0:3].reshape(1,-1))), tq, torch.zeros(1), trv_out_srcs_slice[[i],:,:])
-					# Out_save[i,:,:] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
-					Out_p_save[i] += out[2][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
-					Out_s_save[i] += out[3][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
+
+					Save_picks.append(np.concatenate((tpick.reshape(-1,1), ipick.reshape(-1,1)), axis = 1))
+					lp_meta_l.append(lp_meta[i])
+
+				X_save[:,2] = srcs_refined[i,2]
+				X_save_cart = torch.Tensor(ftrns1(X_save))
+
+				if len(lp_times[i]) == 0:
+					continue ## It will fail if len(lp_times[i0]) == 0!				
+				
+				out = mz_list[x_grid_ind].forward_fixed(torch.Tensor(Inpts[i]), torch.Tensor(Masks[i]), torch.Tensor(lp_times[i]), torch.Tensor(lp_stations[i]).long(), torch.Tensor(lp_phases[i].reshape(-1,1)).long(), locs_use, x_grids_cart_torch[x_grid_ind], X_save_cart, torch.Tensor(ftrns1(srcs_refined[i,0:3].reshape(1,-1))), tq, torch.zeros(1), trv_out_srcs_slice[[i],:,:])
+				# Out_save[i,:,:] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
+				Out_p_save[i] += out[2][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
+				Out_s_save[i] += out[3][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 
 		for i in range(srcs_refined.shape[0]):
 			Out_p_save_l.append(Out_p_save[i])
