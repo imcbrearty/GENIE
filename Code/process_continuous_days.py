@@ -377,7 +377,8 @@ tq = torch.arange(-t_win/2.0, t_win/2.0 + 1.0).reshape(-1,1).float()
 yr, mo, dy = date[0], date[1], date[2]
 date = np.array([yr, mo, dy])
 
-P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
+P, ind_use = load_picks(path_to_file, date, spr_picks = spr_picks, n_ver = n_ver_picks)
+# P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
 locs_use = locs[ind_use]
 arrivals_tree = cKDTree(P[:,0][:,None])
 
