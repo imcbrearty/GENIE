@@ -579,7 +579,7 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 
 	return x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t
 
-def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut = None, use_quantile = None, min_amplitude = None, n_ver = 1, spr_picks = 1):
+def load_picks(path_to_file, date, thresh_cut = None, use_quantile = None, min_amplitude = None, n_ver = 1, spr_picks = 1):
 	
 	if '\\' in path_to_file:
 		z = np.load(path_to_file + 'Picks\\%d\\%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
