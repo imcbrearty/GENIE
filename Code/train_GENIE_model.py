@@ -727,7 +727,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		Lbls_query.append(lbls_query)
 
 	srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitude.reshape(-1,1)), axis = 1)
-	data = [arrivals, srcs, active_sources]		
+	data = [arrivals, srcs, active_sources]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
 
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
