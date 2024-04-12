@@ -1131,7 +1131,34 @@ for i in range(n_restart_step, n_epochs):
 		data_1 = Data(x=spatial_vals, edge_index=edge_index_1)
 		data_2 = Data(x=spatial_vals, edge_index=edge_index_2)
 
-		if len(lp_times[i0]) > max_number_pick_association_labels_per_sample:
+		use_updated_pick_max_associations = False
+                if (len(lp_times[i0]) > max_number_pick_association_labels_per_sample)*(use_updated_pick_max_associations == True):
+
+                        ## Cnt number of picks per station
+                        ## Optimally choose n stations to compute association labels for
+			## so that sum cnt_i < max_mumber of picks used. 
+                        ## Permute station indices to not bias ordering.
+                        ## Keep all picks for this set of stations.
+			## (note: this does not effect output values, only the ones we compute losses on)
+
+                        tree_sta_slice = cKDTree(lp_stations[i0].reshape(-1,1))
+                        lp_cnt_sta = tree_sta_slice.query_ball_point(np.arange(Locs[i0].shape[0]).reshape(-1,1), r = 0)
+                        cnt_lp_sta = np.array([len(lp_cnt_sta[j]) for j in range(len(lp_cnt_sta))])
+
+                        # Maximize the number of associations. Permute
+                        sta_grab = optimize_station_selection(cnt_lp_sta, max_number_pick_association_labels_per_sample)
+                        isample_picks = np.hstack([lp_cnt_sta[j] for j in sta_grab])
+
+                        lp_times[i0] = lp_times[i0][isample_picks]
+                        lp_stations[i0] = lp_stations[i0][isample_picks]
+                        lp_phases[i0] = lp_phases[i0][isample_picks]
+                        lp_meta[i0] = lp_meta[i0][isample_picks]
+
+                        assert(len(lp_times[i0]) <= max_number_pick_association_labels_per_sample)
+		
+		elif len(lp_times[i0]) > max_number_pick_association_labels_per_sample:
+
+			## Randomly choose max number of picks to compute association labels for.
 			isample_picks = np.sort(np.random.choice(len(lp_times[i0]), size = max_number_pick_association_labels_per_sample, replace = False))
 			lp_times[i0] = lp_times[i0][isample_picks]
 			lp_stations[i0] = lp_stations[i0][isample_picks]
