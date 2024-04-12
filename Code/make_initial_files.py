@@ -82,8 +82,8 @@ if __name__ == '__main__':
 
     elif pre_load_stations == True:
         print('Loading pre-built station file')
-        z = np.load(base_path + 'stations.npz')
-        locs, stas = z['locs'], z['stas']
+        z = np.load(base_path + 'stations.npz', allow_pickle = True)
+        locs, stas = z['locs'], z['stas'].astype('U5')
         z.close()
     
     print("Saving files...")
