@@ -579,18 +579,16 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 
 	return x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t
 
-def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut = None, use_quantile = None, permute_indices = False, min_amplitude = None, n_ver = 1, spr_picks = 100):
-
-	from obspy.core import UTCDateTime
+def load_picks(path_to_file, date, thresh_cut = None, use_quantile = None, min_amplitude = None, n_ver = 1, spr_picks = 1):
 	
 	if '\\' in path_to_file:
 		z = np.load(path_to_file + 'Picks\\%d\\%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
 	elif '/' in path_to_file:
 		z = np.load(path_to_file + 'Picks/%d/%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
-
-	yr, mn, dy = date[0], date[1], date[2]
-	t0 = UTCDateTime(yr, mn, dy)
-	P, sta_names_use, sta_ind_use = z['P'], z['sta_names_use'], z['sta_ind_use']
+		
+	P = z['P']
+	z.close()
+	P[:,0] = P[:,0]/spr_picks
 	
 	if use_quantile is not None:
 		iz = np.where(P[:,3] > np.quantile(P[:,3], use_quantile))[0]
@@ -600,68 +598,95 @@ def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut 
 		iz = np.where(P[:,3] > thresh_cut)[0]
 		P = P[iz]
 
-	if min_amplitude is not None:
-		iz = np.where(P[:,2] < min_amplitude)[0]
-		P = np.delete(P, iz, axis = 0) # remove picks with amplitude less than min possible amplitude
+	# if min_amplitude is not None:
+	# 	iz = np.where(P[:,2] < min_amplitude)[0]
+	# 	P = np.delete(P, iz, axis = 0) # remove picks with amplitude less than min possible amplitude
 
-	P_l = []
-	locs_use = []
-	sta_use = []
-	ind_use = []
-	sc = 0
-	for i in range(len(sta_names_use)):
-		iz = np.where(sta_names_use[i] == stas)[0]
-		if len(iz) == 0:
-			# print('no match')
-			continue
-		iz1 = np.where(P[:,1] == sta_ind_use[i])[0]
-		if len(iz1) == 0:
-			# print('no picks')
-			continue		
-		p_select = P[iz1]
-		if permute_indices == True:
-			p_select[:,1] = sc ## New indices
-		else:
-			p_select[:,1] = iz ## Absolute indices
-		P_l.append(p_select)
-		locs_use.append(locs[iz])
-		sta_use.append(stas[iz])
-		ind_use.append(iz)
-		sc += 1
+	return P, ind_use # Note: this permutation of locs_use.
 
-	P_l = np.vstack(P_l)
-	P_l[:,0] = P_l[:,0]/spr_picks ## Convert pick indices to time (note: if spr_picks = 1, then picks are already in absolute time)
-	locs_use = np.vstack(locs_use)
-	sta_use = np.hstack(sta_use)
-	ind_use = np.hstack(ind_use)
+# def load_picks(path_to_file, date, locs, stas, lat_range, lon_range, thresh_cut = None, use_quantile = None, permute_indices = False, min_amplitude = None, n_ver = 1, spr_picks = 100):
 
-	## Make sure ind_use is unique set. Then re-select others.
-	ind_use = np.sort(np.unique(ind_use))
-	locs_use = locs[ind_use]
-	sta_use = stas[ind_use]
+# 	from obspy.core import UTCDateTime
+	
+# 	if '\\' in path_to_file:
+# 		z = np.load(path_to_file + 'Picks\\%d\\%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
+# 	elif '/' in path_to_file:
+# 		z = np.load(path_to_file + 'Picks/%d/%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
 
-	if permute_indices == True:
-		argsort = np.argsort(ind_use)
-		P_l_1 = []
-		sc = 0
-		for i in range(len(argsort)):
-			iz1  = np.where(P_l[:,1] == argsort[i])[0]
-			p_slice = P_l[iz1]
-			p_slice[:,1] = sc
-			P_l_1.append(p_slice)
-			sc += 1
-		P_l = np.vstack(P_l)
+# 	yr, mn, dy = date[0], date[1], date[2]
+# 	t0 = UTCDateTime(yr, mn, dy)
+# 	P, sta_names_use, sta_ind_use = z['P'], z['sta_names_use'], z['sta_ind_use']
+	
+# 	if use_quantile is not None:
+# 		iz = np.where(P[:,3] > np.quantile(P[:,3], use_quantile))[0]
+# 		P = P[iz]
 
-	# julday = int((UTCDateTime(yr, mn, dy) - UTCDateTime(yr, 1, 1))/(3600*24.0) + 1)
+# 	if thresh_cut is not None:
+# 		iz = np.where(P[:,3] > thresh_cut)[0]
+# 		P = P[iz]
 
-	if download_catalog == True:
-		cat, _, event_type = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24.0, t0 = t0)
-	else:
-		cat, event_type = [], []
+# 	if min_amplitude is not None:
+# 		iz = np.where(P[:,2] < min_amplitude)[0]
+# 		P = np.delete(P, iz, axis = 0) # remove picks with amplitude less than min possible amplitude
 
-	z.close()
+# 	P_l = []
+# 	locs_use = []
+# 	sta_use = []
+# 	ind_use = []
+# 	sc = 0
+# 	for i in range(len(sta_names_use)):
+# 		iz = np.where(sta_names_use[i] == stas)[0]
+# 		if len(iz) == 0:
+# 			# print('no match')
+# 			continue
+# 		iz1 = np.where(P[:,1] == sta_ind_use[i])[0]
+# 		if len(iz1) == 0:
+# 			# print('no picks')
+# 			continue		
+# 		p_select = P[iz1]
+# 		if permute_indices == True:
+# 			p_select[:,1] = sc ## New indices
+# 		else:
+# 			p_select[:,1] = iz ## Absolute indices
+# 		P_l.append(p_select)
+# 		locs_use.append(locs[iz])
+# 		sta_use.append(stas[iz])
+# 		ind_use.append(iz)
+# 		sc += 1
 
-	return P_l, ind_use # Note: this permutation of locs_use.
+# 	P_l = np.vstack(P_l)
+# 	P_l[:,0] = P_l[:,0]/spr_picks ## Convert pick indices to time (note: if spr_picks = 1, then picks are already in absolute time)
+# 	locs_use = np.vstack(locs_use)
+# 	sta_use = np.hstack(sta_use)
+# 	ind_use = np.hstack(ind_use)
+
+# 	## Make sure ind_use is unique set. Then re-select others.
+# 	ind_use = np.sort(np.unique(ind_use))
+# 	locs_use = locs[ind_use]
+# 	sta_use = stas[ind_use]
+
+# 	if permute_indices == True:
+# 		argsort = np.argsort(ind_use)
+# 		P_l_1 = []
+# 		sc = 0
+# 		for i in range(len(argsort)):
+# 			iz1  = np.where(P_l[:,1] == argsort[i])[0]
+# 			p_slice = P_l[iz1]
+# 			p_slice[:,1] = sc
+# 			P_l_1.append(p_slice)
+# 			sc += 1
+# 		P_l = np.vstack(P_l)
+
+# 	# julday = int((UTCDateTime(yr, mn, dy) - UTCDateTime(yr, 1, 1))/(3600*24.0) + 1)
+
+# 	if download_catalog == True:
+# 		cat, _, event_type = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24.0, t0 = t0)
+# 	else:
+# 		cat, event_type = [], []
+
+# 	z.close()
+
+# 	return P_l, ind_use # Note: this permutation of locs_use.
 
 def download_catalog(lat_range, lon_range, min_magnitude, startime, endtime, t0 = None, client = 'NCEDC', include_arrivals = False):
 
