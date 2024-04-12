@@ -598,6 +598,8 @@ def load_picks(path_to_file, date, thresh_cut = None, use_quantile = None, min_a
 		iz = np.where(P[:,3] > thresh_cut)[0]
 		P = P[iz]
 
+	ind_use = np.unique(P[:,1]).astype('int')
+	
 	# if min_amplitude is not None:
 	# 	iz = np.where(P[:,2] < min_amplitude)[0]
 	# 	P = np.delete(P, iz, axis = 0) # remove picks with amplitude less than min possible amplitude
