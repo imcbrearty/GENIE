@@ -585,6 +585,7 @@ def load_picks(path_to_file, date, thresh_cut = None, use_quantile = None, min_a
 		z = np.load(path_to_file + 'Picks\\%d\\%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
 	elif '/' in path_to_file:
 		z = np.load(path_to_file + 'Picks/%d/%d_%d_%d_ver_%d.npz'%(date[0], date[0], date[1], date[2], n_ver))
+		
 	P = z['P']
 	z.close()
 	P[:,0] = P[:,0]/spr_picks
