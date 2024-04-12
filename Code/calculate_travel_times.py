@@ -369,6 +369,19 @@ if train_travel_time_neural_network == True:
 
 		one_vec = np.array([1.0, 1.0, 0.0]).reshape(1,-1)
 
+		use_random_station_locations = False
+		if use_random_station_locations == True:
+			## Randomly choose station coordinates within station footprint,
+			## so that when training 1D model, it is more uniformly sampled
+			## over reciever coordinates.
+			locs_init = np.copy(locs)
+			locs_max = locs.max(0, keepdims = True)
+			locs_min = locs.min(0, keepdims = True)
+			locs_sample = np.random.rand(5000, 3)*(locs_max - locs_min) + locs_min
+			# locs = np.copy(locs_sample)
+		else:
+			locs_sample = np.copy(locs)
+		
 		grab_near_station_samples = True
 		if grab_near_station_samples == True:
 
@@ -381,7 +394,7 @@ if train_travel_time_neural_network == True:
 
 				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample]*one_vec
 				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
-				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
+				locs_rand = locs_sample[np.random.randint(0, high = locs_sample.shape[0], size = len(isample))]
 				X_offset_sample = X_offset_sample + locs_rand
 				locs_rand[:,2] = locs_ref[n,2]
 				X_offset_sample[:,2] = locs_ref[n,2]
@@ -406,7 +419,7 @@ if train_travel_time_neural_network == True:
 
 				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample]*one_vec
 				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
-				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
+				locs_rand = locs_sample[np.random.randint(0, high = locs_sample.shape[0], size = len(isample))]
 				X_offset_sample = X_offset_sample + locs_rand
 				locs_rand[:,2] = locs_ref[n,2]
 				X_offset_sample[:,2] = X[isample,2]
@@ -425,7 +438,7 @@ if train_travel_time_neural_network == True:
 
 				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample]*one_vec
 				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
-				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
+				locs_rand = locs_sample[np.random.randint(0, high = locs_sample.shape[0], size = len(isample))]
 				X_offset_sample = X_offset_sample + locs_rand
 				locs_rand[:,2] = locs_ref[n,2]
 				X_offset_sample[:,2] = X[isample,2]
@@ -447,7 +460,7 @@ if train_travel_time_neural_network == True:
 
 				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample]*one_vec
 				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
-				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
+				locs_rand = locs_sample[np.random.randint(0, high = locs_sample.shape[0], size = len(isample))]
 				X_offset_sample = X_offset_sample + locs_rand
 				locs_rand[:,2] = locs_ref[n,2]
 				X_offset_sample[:,2] = X[isample,2]
@@ -470,7 +483,7 @@ if train_travel_time_neural_network == True:
 
 				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample]*one_vec
 				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample), 2))
-				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample))]
+				locs_rand = locs_sample[np.random.randint(0, high = locs_sample.shape[0], size = len(isample))]
 				X_offset_sample = X_offset_sample + locs_rand
 				locs_rand[:,2] = locs_ref[n,2]
 				X_offset_sample[:,2] = X[isample,2]
@@ -484,7 +497,7 @@ if train_travel_time_neural_network == True:
 
 				X_offset_sample = locs_ref[n,:].reshape(1,-1)*one_vec - X[isample_vald]*one_vec
 				X_offset_sample[:,0:2] = X_offset_sample[:,0:2]*np.random.choice([1.0, -1.0], size = (len(isample_vald), 2))
-				locs_rand = locs[np.random.randint(0, high = locs.shape[0], size = len(isample_vald))]
+				locs_rand = locs_sample[np.random.randint(0, high = locs_sample.shape[0], size = len(isample_vald))]
 				X_offset_sample = X_offset_sample + locs_rand
 				X_offset_sample[:,2] = X[isample_vald,2]
 
