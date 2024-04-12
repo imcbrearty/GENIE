@@ -377,7 +377,7 @@ if train_travel_time_neural_network == True:
 			locs_init = np.copy(locs)
 			locs_max = locs.max(0, keepdims = True)
 			locs_min = locs.min(0, keepdims = True)
-			locs_sample = np.random.rand(5000, 3)*(locs_max - locs_min) + locs_min
+			locs_sample = np.random.rand(50000, 3)*(locs_max - locs_min) + locs_min
 			# locs = np.copy(locs_sample)
 		else:
 			locs_sample = np.copy(locs)
