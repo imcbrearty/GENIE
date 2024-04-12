@@ -378,10 +378,12 @@ if train_travel_time_neural_network == True:
 			locs_max = locs.max(0, keepdims = True)
 			locs_min = locs.min(0, keepdims = True)
 			locs_sample = np.random.rand(50000, 3)*(locs_max - locs_min) + locs_min
+			locs_sample = locs_sample*one_vec
 			# locs = np.copy(locs_sample)
 		else:
 			locs_sample = np.copy(locs)
-		
+			locs_sample = locs_sample*one_vec
+
 		grab_near_station_samples = True
 		if grab_near_station_samples == True:
 
@@ -402,8 +404,8 @@ if train_travel_time_neural_network == True:
 				iassign_locs = np.random.choice(2, size = n_zero_inputs)
 				iswitch1 = np.where(iassign_locs == 0)[0]
 				iswitch2 = np.where(iassign_locs == 1)[0]
-				X_offset_sample[iswitch1,0:3] = np.copy(locs_rand[iswitch1,0:3])
-				locs_rand[iswitch2,0:3] = np.copy(X_offset_sample[iswitch2,0:3])
+				X_offset_sample[iswitch1,0:2] = np.copy(locs_rand[iswitch1,0:2]) ## Exhange lat-lon coordinates, but keep depths fixed.
+				locs_rand[iswitch2,0:2] = np.copy(X_offset_sample[iswitch2,0:2])
 
 				X_samples.append(X_offset_sample)
 				Tp_samples.append(0.0*Tp_interp[isample,n])
