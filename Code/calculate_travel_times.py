@@ -557,6 +557,9 @@ if train_travel_time_neural_network == True:
 	vald_steps = 10
 	loss_vald = 0.0
 
+	dz_offset = np.diff(depth_steps)[0]
+	add_random_vertical_shift = False
+	
 	for i in range(n_steps):
 
 		optimizer.zero_grad()
@@ -568,6 +571,14 @@ if train_travel_time_neural_network == True:
 		travel_times_p = Tp_samples[isample] #
 		travel_times_s = Ts_samples[isample] # = sample_inputs_unweighted(n_batch)
 
+		if add_random_vertical_shift == True: 
+			## Add this so network is more smooth w.r.t. station elevations 
+			## (since station elevations are sampled discretely in training)
+			
+			dz_shift = torch.Tensor(dz_offset*(np.random.rand(len(isample)) - 0.5)).to(device)
+			sta_pos[:,2] += dz_shift
+			src_pos[:,2] += dz_shift
+		
 		trgt = torch.Tensor(np.concatenate((travel_times_p.reshape(-1,1), travel_times_s.reshape(-1,1)), axis = 1)).to(device)
 
 		if using_3D == True:
@@ -596,6 +607,14 @@ if train_travel_time_neural_network == True:
 				travel_times_p = Tp_samples_vald[isample] #
 				travel_times_s = Ts_samples_vald[isample] # = sample_inputs_unweighted(n_batch)
 
+				if add_random_vertical_shift == True: 
+					## Add this so network is more smooth w.r.t. station elevations 
+					## (since station elevations are sampled discretely in training)
+			
+					dz_shift = torch.Tensor(dz_offset*(np.random.rand(len(isample)) - 0.5)).to(device)
+					sta_pos[:,2] += dz_shift
+					src_pos[:,2] += dz_shift
+				
 				trgt = torch.Tensor(np.concatenate((travel_times_p.reshape(-1,1), travel_times_s.reshape(-1,1)), axis = 1)).to(device)
 
 				if using_3D == True:
