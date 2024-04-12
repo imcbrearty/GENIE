@@ -20,6 +20,7 @@ from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from torch_scatter import scatter
 from numpy.matlib import repmat
+import cvxpy as cp
 import itertools
 import pathlib
 import yaml
@@ -435,6 +436,29 @@ def assemble_time_pointers_for_stations_multiple_grids(trv_out, max_t, dt = 1.0,
 
 	return edges_p, edges_s, dt_partition
 
+def optimize_station_selection(cnt_per_station, n_total):
+
+	## Randomize order of counts
+        iperm = np.random.permutation(np.arange(len(cnt_per_station)))
+        cnt_per_station_perm = cnt_per_station[iperm] ## Permuted cnts per station
+
+        ## Optimzation vector
+        c = -np.copy(cnt_per_station_perm)
+        A = np.ones((1,len(cnt_per_station_perm)))
+        A[0,:] = cnt_per_station_perm
+        b = n_total*np.ones((1,1))
+
+        # Solve ILP
+        x = cp.Variable(len(cnt_per_station_perm), integer = True)
+        prob = cp.Problem(cp.Minimize(c.T@x), constraints = [A@x <= b.reshape(-1), 0 <= x, x <= 1])
+        prob.solve()
+        soln = np.round(x.value)
+
+        assert prob.status == 'optimal', 'competitive assignment solution is not optimal'
+
+        sta_grab = iperm[np.where(soln > 0)[0]]
+
+        return sta_grab
 
 ## ACTUAL UTILS
 def remove_mean(x, axis):
