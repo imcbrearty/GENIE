@@ -1298,15 +1298,16 @@ for cnt, strs in enumerate([0]):
 		
 		file_save['P'] = P
 		file_save['P_perm'] = P_perm
-		file_save['srcs'] = srcs_refined
-		file_save['srcs_trv'] = srcs_trv
+		file_save['srcs'] = srcs_refined ## These are the direct locations predicted by the GNN (usually has some spatial bias due to locations of source nodes)
+		file_save['srcs_trv'] = srcs_trv ## These are the travel time located sources using associated picks (usually the most accurate!)
+		file_save['srcs_w'] = srcs[:,4] ## The detection likelihood value for each source (e.g., > thresh, and usually < 1).
 		file_save['locs_use'] = locs_use
 		file_save['ind_use'] = ind_use
 		file_save['date'] = np.array([date[0], date[1], date[2], julday])
 		# file_save['%d_%d_%d_%d_res1'%(date[0], date[1], date[2], julday)] = res1
 		# file_save['%d_%d_%d_%d_res2'%(date[0], date[1], date[2], julday)] = res2
-		file_save['cnt_p'] = cnt_p
-		file_save['cnt_s'] = cnt_s
+		file_save['cnt_p'] = cnt_p ## Number of P picks per event
+		file_save['cnt_s'] = cnt_s ## Number of S picks per event
 		file_save['tsteps_abs'] = tsteps_abs
 		file_save['X_query'] = X_query
 		file_save['mag_r'] = mag_r
