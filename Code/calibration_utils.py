@@ -117,6 +117,7 @@ class InterpolateWeighted(MessagePassing):
 
 		return edge_attr.unsqueeze(1)*x_j
 
+
 class InterpolateAnisotropic(MessagePassing):
 
 	def __init__(self, ftrns1_diff, k = 15, sig = 10.0, device = 'cpu'):
@@ -129,13 +130,12 @@ class InterpolateAnisotropic(MessagePassing):
 
 	def forward(self, x_context, x_query, x, ker_x):
 
-		# edges = knn(torch.Tensor(ftrns1(x_context)/1000.0).to(device), torch.Tensor(ftrns1(x_query)/1000.0).to(device), k = self.k).flip(0).long().contiguous().to(device)
 		pos1 = self.ftrns1_diff(x_context)/1000.0
 		pos2 = self.ftrns1_diff(x_query)/1000.0
 		edges = knn(pos1, pos2, k = self.k).flip(0).long().contiguous() # .to(device)
+
 		# weight = torch.exp(-0.5*torch.norm(pos1[edges[0]] - pos2[edges[1]], dim = 1)**2/(self.sig**2)).reshape(-1,1)
-		weight = torch.exp(-0.5*(((pos1[edges[0]] - pos2[edges[1]])/self.Softplus(ker_x[edges[0], :]))**2).sum(1)).reshape(-1,1)
-		## kernel is not station adaptive, sice this is called independent of station, and broadcast.
+		weight = torch.exp(-0.5*(((pos1[edges[0]] - pos2[edges[1]]).unsqueeze(1)/self.Softplus(ker_x[edges[0], :, :]))**2).sum(2)) # .reshape(-1,1)
 
 		weight_sum = global_sum_pool(weight, edges[1]).repeat_interleave(self.k, dim = 0)
 		weight_sum[weight_sum == 0] = 1.0
@@ -145,7 +145,7 @@ class InterpolateAnisotropic(MessagePassing):
 
 	def message(self, x_j, edge_attr):
 
-		return edge_attr.unsqueeze(1)*x_j
+		return edge_attr.unsqueeze(2)*x_j
 
 ## Attach corrections to travel times
 class TrvTimesCorrection(nn.Module):
