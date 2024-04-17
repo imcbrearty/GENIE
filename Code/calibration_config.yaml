@@ -5,7 +5,7 @@ interp_type: 'anisotropic' ## Type of spatial interpolation (mean, weighted, ani
 k_spc_lap: 25 ## k-nn value for laplacian smoothing spatial coefficients
 k_sta_lap: 10 ## k-nn value for laplacian smoothing station coefficients
 k_spc_lap_ker: 15 ## k-nn value for laplacian smoothing spatial coefficients kernel
-k_sta_lap_ker: 15 ## k-nn value for laplacian smoothing station coefficients kernel
+k_sta_lap_ker: 10 ## k-nn value for laplacian smoothing station coefficients kernel
 k_spc_interp: 15 ## k-nn value for spatial interpolation
 sig_ker: 10.0 ## spatial kernel (in km) of the weighting kernel (fixed for weighted, starting value for anisotropic) 
 grid_index: 0 ## grid index choice (of x_grids)
