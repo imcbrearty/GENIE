@@ -2,20 +2,24 @@ n_ver_events: 1 ## Version detected events
 n_ver_save: 1 ## Version save calibrations
 n_ver_reference: 1 ## Version reference events
 interp_type: 'anisotropic' ## Type of spatial interpolation (mean, weighted, anisotropic)
-k_spc_lap: 25 ## k-nn value for laplacian smoothing
-k_spc_interp: 15 ## k-nn value for interpolation
+k_spc_lap: 25 ## k-nn value for laplacian smoothing spatial coefficients
+k_sta_lap: 10 ## k-nn value for laplacian smoothing station coefficients
+k_spc_lap_ker: 15 ## k-nn value for laplacian smoothing spatial coefficients kernel
+k_sta_lap_ker: 15 ## k-nn value for laplacian smoothing station coefficients kernel
+k_spc_interp: 15 ## k-nn value for spatial interpolation
 sig_ker: 10.0 ## spatial kernel (in km) of the weighting kernel (fixed for weighted, starting value for anisotropic) 
 grid_index: 0 ## grid index choice (of x_grids)
 n_batch: 300 ## 1000 earthquakes per batch
 n_updates: 5000 ## Find automatic convergence criteria
-use_lap: True ## laplacian penality on spatial coefficients
+use_src_lap: True ## laplacian penality on spatial coefficients
+use_sta_lap: True ## laplacian penality station coefficients (anisotropic case)
 use_norm: True ## norm penality on spatial coefficients
-use_ker: True ## laplacian penality on kernel of spatial coefficients (anisotropic case)
-use_sta: True ## laplacian penality station coefficients (anisotropic case)
-lam: 30.0 ## weighting of laplacian regularization loss for spatial coefficients
-lam1: 0.1 ## weighting of norm loss
-lam2: 0.01 ## weighting of laplacian loss on kernel
-lam3: 0.1 ## weighting of laplacian regularization loss for stations
+use_ker: True ## ## laplacian penality on spatial coefficient kernels
+lam_spc: 30.0 ## weighting of laplacian regularization loss for spatial coefficients
+lam_sta: 0.01 ## weighting of laplacian loss on station coefficients
+lam_spc_ker: 0.1 ## weighting of laplacian loss on spatial coefficients kernel
+lam_sta_ker: 0.1 ## weighting of laplacian loss on station coefficients kernel
+lam_norm: 0.1 ## ## weighting of norm loss
 temporal_match: 10.0 ## window for matched events (seconds)
 spatial_match: 75000.0 ## spatial distance for matched events (m)
 min_picks: 5 ## minimum number of total picks to use event in calibration
