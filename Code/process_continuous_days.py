@@ -1320,6 +1320,7 @@ for cnt, strs in enumerate([0]):
 		file_save['srcs'] = srcs_refined ## These are the direct locations predicted by the GNN (usually has some spatial bias due to locations of source nodes)
 		file_save['srcs_trv'] = srcs_trv ## These are the travel time located sources using associated picks (usually the most accurate!)
 		file_save['srcs_w'] = srcs_refined[:,4] ## The detection likelihood value for each source (e.g., > thresh, and usually < 1).
+		file_save['locs'] = locs
 		file_save['locs_use'] = locs_use
 		file_save['ind_use'] = ind_use
 		file_save['date'] = np.array([date[0], date[1], date[2], julday])
