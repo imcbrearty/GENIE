@@ -19,7 +19,7 @@ lam_spc: 30.0 ## weighting of laplacian regularization loss for spatial coeffici
 lam_sta: 0.01 ## weighting of laplacian loss on station coefficients
 lam_spc_ker: 0.1 ## weighting of laplacian loss on spatial coefficients kernel
 lam_sta_ker: 0.1 ## weighting of laplacian loss on station coefficients kernel
-lam_norm: 0.1 ## ## weighting of norm loss
+lam_norm: 0.1 ## weighting of norm loss
 temporal_match: 10.0 ## window for matched events (seconds)
 spatial_match: 75000.0 ## spatial distance for matched events (m)
 min_picks: 5 ## minimum number of total picks to use event in calibration
