@@ -1260,15 +1260,15 @@ for cnt, strs in enumerate([0]):
 		mag_trv = np.nan*np.ones(srcs_trv.shape[0])		
 
 	trv_out1 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
-	trv_out1h = trv(torch.Tensor(locs), torch.Tensor(srcs_refined[:,0:3])).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
+	trv_out1_all = trv(torch.Tensor(locs), torch.Tensor(srcs_refined[:,0:3])).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
 	# trv_out2 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[:,0:3])).cpu().detach().numpy() + srcs_trv[:,3].reshape(-1,1,1) 
 	
 	trv_out2 = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
-	trv_out2h = np.nan*np.zeros((srcs_trv.shape[0], locs.shape[0], 2))
+	trv_out2_all = np.nan*np.zeros((srcs_trv.shape[0], locs.shape[0], 2))
 	ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
 	if len(ifind_not_nan) > 0:
 		trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
-		trv_out2h[ifind_not_nan,:,:] = trv(torch.Tensor(locs), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
+		trv_out2_all[ifind_not_nan,:,:] = trv(torch.Tensor(locs), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 
 	if ('corr1' in globals())*('corr2' in globals()):
 		# corr1 and corr2 can be used to "shift" a processing region
