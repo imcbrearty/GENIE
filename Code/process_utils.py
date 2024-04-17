@@ -815,7 +815,7 @@ def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, in
 
 	return x0_max, x0_max_val
 
-def maximize_bipartite_assignment(cat, srcs, ftrns1, ftrns2, temporal_win = 10.0, spatial_win = 75e3):
+def maximize_bipartite_assignment(cat, srcs, ftrns1, ftrns2, temporal_win = 10.0, spatial_win = 75e3, verbose = True):
 
 	tree_t = cKDTree(srcs[:,3].reshape(-1,1))
 	tree_s = cKDTree(ftrns1(srcs[:,0:3]))
@@ -885,8 +885,9 @@ def maximize_bipartite_assignment(cat, srcs, ftrns1, ftrns2, temporal_win = 10.0
 			results.append(np.array([unique_cat_ind[i], unique_src_ind[i1[0]]]).reshape(1,-1))
 			res.append((cat[unique_cat_ind[i],0:4] - srcs[unique_src_ind[i1[0]],0:4]).reshape(1,-1))
 
-			print('temporal diff %0.4f'%temporal_diffs[i, i1[0]])
-			print('spatial diff %0.4f'%spatial_diffs[i, i1[0]])
+			if verbose == True:
+				print('temporal diff %0.4f'%temporal_diffs[i, i1[0]])
+				print('spatial diff %0.4f'%spatial_diffs[i, i1[0]])
 
 	results = np.vstack(results)
 	res = np.vstack(res)
