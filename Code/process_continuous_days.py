@@ -132,6 +132,7 @@ torch.set_grad_enabled(False)
 compute_magnitudes = process_config['compute_magnitudes']
 min_log_amplitude_val = process_config['min_log_amplitude_val']
 process_known_events = process_config['process_known_events']
+load_prebuilt_sampling_grid = process_config['load_prebuilt_sampling_grid']
 use_expanded_competitive_assignment = process_config['use_expanded_competitive_assignment']
 use_differential_evolution_location = process_config['use_differential_evolution_location']
 
@@ -293,7 +294,7 @@ print('Going to compute sources only in interior region')
 x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
 x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
 
-load_prebuilt_sampling_grid = True
+# load_prebuilt_sampling_grid = True
 n_ver_sampling_grid = 1
 if (load_prebuilt_sampling_grid == True)*(os.path.isfile(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid) == True):
 	
