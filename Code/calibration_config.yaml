@@ -16,9 +16,9 @@ use_sta_lap: True ## laplacian penality station coefficients (anisotropic case)
 use_norm: True ## norm penality on spatial coefficients
 use_ker: True ## ## laplacian penality on spatial coefficient kernels
 lam_spc: 30.0 ## weighting of laplacian regularization loss for spatial coefficients
-lam_sta: 0.01 ## weighting of laplacian loss on station coefficients
-lam_spc_ker: 0.1 ## weighting of laplacian loss on spatial coefficients kernel
-lam_sta_ker: 0.1 ## weighting of laplacian loss on station coefficients kernel
+lam_sta: 0.1 ## weighting of laplacian loss on station coefficients
+lam_spc_ker: 0.01 ## weighting of laplacian loss on spatial coefficients kernel
+lam_sta_ker: 0.01 ## weighting of laplacian loss on station coefficients kernel
 lam_norm: 0.1 ## weighting of norm loss
 temporal_match: 10.0 ## window for matched events (seconds)
 spatial_match: 75000.0 ## spatial distance for matched events (m)
