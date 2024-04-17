@@ -2,7 +2,7 @@ n_ver_events: 1 ## Version detected events
 n_ver_save: 1 ## Version save calibrations
 n_ver_reference: 1 ## Version reference events
 interp_type: 'anisotropic' ## Type of spatial interpolation (mean, weighted, anisotropic)
-k_spc_lap: 30 ## k-nn value for laplacian smoothing
+k_spc_lap: 25 ## k-nn value for laplacian smoothing
 k_spc_interp: 15 ## k-nn value for interpolation
 sig_ker: 10.0 ## spatial kernel (in km) of the weighting kernel (fixed for weighted, starting value for anisotropic) 
 grid_index: 0 ## grid index choice (of x_grids)
