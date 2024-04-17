@@ -1159,8 +1159,10 @@ for cnt, strs in enumerate([0]):
 		locs_use_slice = locs_use[ind_unique_arrivals]
 		ind_p_perm_slice = perm_vec_arrivals[ind_p]
 		ind_s_perm_slice = perm_vec_arrivals[ind_s]
-		assert(ind_p_perm_slice.min() > -1)
-		assert(ind_s_perm_slice.min() > -1)
+		if len(ind_p_perm_slice) > 0:
+			assert(ind_p_perm_slice.min() > -1)
+		if len(ind_s_perm_slice) > 0:
+			assert(ind_s_perm_slice.min() > -1)
 
 		if use_differential_evolution_location == True:
 
