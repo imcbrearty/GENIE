@@ -12,9 +12,9 @@ grid_index: 0 ## grid index choice (of x_grids)
 n_batch: 300 ## 1000 earthquakes per batch
 n_updates: 5000 ## Find automatic convergence criteria
 use_spc: True ## laplacian penality on spatial coefficients
-use_sta: True ## laplacian penality station coefficients (anisotropic case)
+use_sta: True ## laplacian penality station coefficients
 use_norm: True ## norm penality on spatial coefficients
-use_ker: True ## ## laplacian penality on spatial coefficient kernels
+use_ker: True ## ## laplacian penality on spatial coefficient kernels (anisotropic case)
 lam_spc: 30.0 ## weighting of laplacian regularization loss for spatial coefficients
 lam_sta: 0.1 ## weighting of laplacian loss on station coefficients
 lam_spc_ker: 0.01 ## weighting of laplacian loss on spatial coefficients kernel
