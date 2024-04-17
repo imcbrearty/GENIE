@@ -11,9 +11,11 @@ n_updates: 5000 ## Find automatic convergence criteria
 use_lap: True ## laplacian penality on spatial coefficients
 use_norm: True ## norm penality on spatial coefficients
 use_ker: True ## laplacian penality on kernel of spatial coefficients (anisotropic case)
-lam: 30.0 ## weighting of laplacian regularization loss
+use_sta: True ## laplacian penality station coefficients (anisotropic case)
+lam: 30.0 ## weighting of laplacian regularization loss for spatial coefficients
 lam1: 0.1 ## weighting of norm loss
 lam2: 0.01 ## weighting of laplacian loss on kernel
+lam3: 0.1 ## weighting of laplacian regularization loss for stations
 temporal_match: 10.0 ## window for matched events (seconds)
 spatial_match: 75000.0 ## spatial distance for matched events (m)
 min_picks: 5 ## minimum number of total picks to use event in calibration
@@ -21,4 +23,7 @@ min_threshold: 0.3 ## minimum detection threshold value to use event in calibrat
 compute_relocations: True ## Compute example event relocations with travel time corrections
 n_relocations: 1000 ## Number of example event relocations with travel time corrections
 save_with_data: False ## Save the data used for the calibration
+lat_lim: False ## Limit calibrations to this latitude range
+lon_lim: False ## Limit calibrations to this longitude range
+depth_lim: False ## Limit calibrations to this depth range
 device: 'cuda' ## Device
