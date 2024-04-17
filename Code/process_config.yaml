@@ -57,5 +57,6 @@ min_log_amplitude_val: -2 # If computing magnitudes, then this is the minimum am
 
 parallel_processing: False ## (not implemented yet) Will parallelize the looping of the forward pass in time over available cpus
 process_known_events: False ## Only process times of known events in a reference catalog (default is USGS)
+load_prebuilt_sampling_grid: True ## Use the pre-built spatial grid to save initial source detections on (note: if False, we re-make the spatial grid to save initial source detections on each time)
 use_expanded_competitive_assignment: True ## This is advised, but the code is complex to avoid both memory issues and handling nearby or overlapping sources
 use_differential_evolution_location: True # otherwise use particle swarm to locate, which tends to converge less well (especially in depth)

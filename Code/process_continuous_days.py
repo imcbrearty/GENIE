@@ -132,6 +132,7 @@ torch.set_grad_enabled(False)
 compute_magnitudes = process_config['compute_magnitudes']
 min_log_amplitude_val = process_config['min_log_amplitude_val']
 process_known_events = process_config['process_known_events']
+load_prebuilt_sampling_grid = process_config['load_prebuilt_sampling_grid']
 use_expanded_competitive_assignment = process_config['use_expanded_competitive_assignment']
 use_differential_evolution_location = process_config['use_differential_evolution_location']
 
@@ -293,7 +294,7 @@ print('Going to compute sources only in interior region')
 x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
 x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
 
-load_prebuilt_sampling_grid = True
+# load_prebuilt_sampling_grid = True
 n_ver_sampling_grid = 1
 if (load_prebuilt_sampling_grid == True)*(os.path.isfile(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid) == True):
 	
@@ -1145,24 +1146,40 @@ for cnt, strs in enumerate([0]):
 	srcs_trv = []
 	for i in range(srcs_refined.shape[0]):
 
+		arv_p, ind_p, arv_s, ind_s = Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int')
+
+		ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
+
+		if len(ind_unique_arrivals) == 0:
+			srcs_trv.append(np.nan*np.ones((1, 4)))
+			continue			
+		
+		perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
+		perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
+		locs_use_slice = locs_use[ind_unique_arrivals]
+		ind_p_perm_slice = perm_vec_arrivals[ind_p]
+		ind_s_perm_slice = perm_vec_arrivals[ind_s]
+		if len(ind_p_perm_slice) > 0:
+			assert(ind_p_perm_slice.min() > -1)
+		if len(ind_s_perm_slice) > 0:
+			assert(ind_s_perm_slice.min() > -1)
+
 		if use_differential_evolution_location == True:
 
-			xmle, logprob = differential_evolution_location(trv, locs_use, Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int'), lat_range_extend, lon_range_extend, depth_range, device = device)
+			xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, device = device)
 		
 		else:
 		
-			xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use, Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int'), lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
+			xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
 		
 		if np.isnan(xmle).sum() > 0:
 			srcs_trv.append(np.nan*np.ones((1, 4)))
 			continue
 
-		pred_out = trv(torch.Tensor(locs_use), torch.Tensor(xmle)).cpu().detach().numpy() + srcs_refined[i,3]
+		pred_out = trv(torch.Tensor(locs_use_slice), torch.Tensor(xmle)).cpu().detach().numpy() + srcs_refined[i,3]
 
-		arv_p, ind_p, arv_s, ind_s = Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int')
-
-		res_p = pred_out[0,ind_p,0] - arv_p
-		res_s = pred_out[0,ind_s,1] - arv_s
+		res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+		res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
 
 		mean_shift = 0.0
 		cnt_phases = 0
@@ -1178,11 +1195,7 @@ for cnt, strs in enumerate([0]):
 
 	srcs_trv = np.vstack(srcs_trv)
 
-	# srcs_trv_times = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
-	# ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
-	# if len(ifind_not_nan) > 0:
-	# 	srcs_trv_times[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
-
+	
 	## Compute magnitudes.
 	# min_log_amplitude_val = -2.0 ## Choose this value to ignore very small amplitudes
 	if (compute_magnitudes == True)*(loaded_mag_model == True):
@@ -1248,14 +1261,20 @@ for cnt, strs in enumerate([0]):
 		mag_r = np.nan*np.ones(srcs_trv.shape[0])
 		mag_trv = np.nan*np.ones(srcs_trv.shape[0])		
 
-	trv_out1 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
+	trv_out1 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
+	trv_out1_all = trv(torch.Tensor(locs), torch.Tensor(srcs_refined[:,0:3])).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
 	# trv_out2 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[:,0:3])).cpu().detach().numpy() + srcs_trv[:,3].reshape(-1,1,1) 
 	
 	trv_out2 = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
+	trv_out2_all = np.nan*np.zeros((srcs_trv.shape[0], locs.shape[0], 2))
 	ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
 	if len(ifind_not_nan) > 0:
 		trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
-	
+		trv_out2_all[ifind_not_nan,:,:] = trv(torch.Tensor(locs), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
+
+	# assert(np.nanmax(trv_out1 - trv_out1_all[:,ind_use,:]).max() < 1e-2)
+	# assert(np.nanmax(trv_out2 - trv_out2_all[:,ind_use,:]).max() < 1e-2)
+
 	if ('corr1' in globals())*('corr2' in globals()):
 		# corr1 and corr2 can be used to "shift" a processing region
 		# into the physical space of a pre-trained model for processing,
@@ -1316,7 +1335,9 @@ for cnt, strs in enumerate([0]):
 		file_save['x_grid_ind_list_1'] = x_grid_ind_list_1
 		file_save['trv_out1'] = trv_out1
 		file_save['trv_out2'] = trv_out2
-
+		file_save['trv_out1_all'] = trv_out1_all
+		file_save['trv_out2_all'] = trv_out2_all
+		
 		if (process_known_events == True):
 			if len(srcs_known) > 0:
 				file_save['srcs_known'] = srcs_known
