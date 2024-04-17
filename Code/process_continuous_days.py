@@ -1270,6 +1270,9 @@ for cnt, strs in enumerate([0]):
 		trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 		trv_out2_all[ifind_not_nan,:,:] = trv(torch.Tensor(locs), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 
+	# assert(np.nanmax(trv_out1 - trv_out1_all[:,ind_use,:]).max() < 1e-2)
+	# assert(np.nanmax(trv_out2 - trv_out2_all[:,ind_use,:]).max() < 1e-2)
+
 	if ('corr1' in globals())*('corr2' in globals()):
 		# corr1 and corr2 can be used to "shift" a processing region
 		# into the physical space of a pre-trained model for processing,
@@ -1330,8 +1333,8 @@ for cnt, strs in enumerate([0]):
 		file_save['x_grid_ind_list_1'] = x_grid_ind_list_1
 		file_save['trv_out1'] = trv_out1
 		file_save['trv_out2'] = trv_out2
-		file_save['trv_out1_all'] = trv_out1h
-		file_save['trv_out2_all'] = trv_out2h
+		file_save['trv_out1_all'] = trv_out1_all
+		file_save['trv_out2_all'] = trv_out2_all
 		
 		if (process_known_events == True):
 			if len(srcs_known) > 0:
