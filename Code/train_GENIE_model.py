@@ -342,11 +342,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		p_miss_rate1 = inflate*p_miss_rate1*(miss_pick_fraction[1] - miss_pick_fraction[0]) + miss_pick_fraction[0]
 		p_miss_rate1 = p_miss_rate1 + 0.5*(np.random.rand() - 0.5)*(miss_pick_fraction[1] - miss_pick_fraction[0]) ## Random shift of 25% of range
 		idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < p_miss_rate1)[0]
-		print('Deleting %d of %d (%0.2f) picks'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
+		print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
 	else:
 		## Previous delete random pick version
 		idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < dt*p_miss_rate/T)[0]
-		print('Deleting %d of %d (%0.2f) picks'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
+		print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
 
 	arrivals = np.delete(arrivals, idel, axis = 0)
 	n_events = len(src_times)
