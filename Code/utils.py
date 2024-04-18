@@ -595,7 +595,7 @@ def load_station_corrections(trv, locs, path_to_file, name_of_project, n_ver_cor
 	z.close()
 
 	## Can we overwrite the function?
-	return TrvTimesCorrection(trv, x_grid_corr, locs_use, coefs, ftrns1_diff, coefs_ker = coefs_ker, interp_type = 'anisotropic', k = k_spc_interp, trv_direct = trv_direct, sig = sig_ker)
+	return TrvTimesCorrection(trv, x_grid_corr, locs_use, coefs, ftrns1_diff, coefs_ker = coefs_ker, interp_type = interp_type, k = k_spc_interp, trv_direct = trv_direct, sig = sig_ker)
 
 def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, dt_embed = 1.0, device = 'cpu'):
 
