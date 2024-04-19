@@ -347,13 +347,13 @@ for i in range(len(Matches)):
 	if (cnt_p[Matches[i,1]] + cnt_s[Matches[i,1]]) < min_picks:
 		prob[i] = 0.0
 	if lat_lim is not False:
-		if (srcs[:,0] < lat_lim[0]) or (srcs[:,0] > lat_lim[1]):
+		if (srcs[Matches[i,1],0] < lat_lim[0]) or (srcs[Matches[i,1],0] > lat_lim[1]):
 			prob[i] = 0.0
 	if lon_lim is not False:
-		if (srcs[:,1] < lon_lim[0]) or (srcs[:,1] > lon_lim[1]):
+		if (srcs[Matches[i,1],1] < lon_lim[0]) or (srcs[Matches[i,1],1] > lon_lim[1]):
 			prob[i] = 0.0
 	if depth_lim is not False:
-		if (srcs[:,2] < depth_lim[0]) or (srcs[:,2] > depth_lim[1]):
+		if (srcs[Matches[i,1],2] < depth_lim[0]) or (srcs[Matches[i,1],2] > depth_lim[1]):
 			prob[i] = 0.0
 	## Skip events missing all of one phase type, as might a cause a bug later.
 	if (skip_missing_phase_type == True) and ((len(Picks_P[Matches[i,1]]) == 0) or (len(Picks_S[Matches[i,1]]) == 0)):
