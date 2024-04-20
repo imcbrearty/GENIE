@@ -328,7 +328,7 @@ def extract_input_from_data(trv, P, t0, ind_use, locs, x_grid, trv_times = None,
 
 	## Make subset of perm_vec, for efficient indexing inside of function
 	ind_unique = np.sort(np.unique(P_slice[:,1]).astype('int'))
-	perm_vec_slice = -1*np.ones(ind_unique.max() + 1).astype('int')
+	perm_vec_slice = -1*np.ones(locs.shape[0]).astype('int')
 	perm_vec_slice[ind_unique] = np.arange(len(ind_unique))
 
 	perm_vec_inverse = -1*np.ones(len(ind_unique)).astype('int')
@@ -423,9 +423,10 @@ def extract_input_from_data(trv, P, t0, ind_use, locs, x_grid, trv_times = None,
 
 		write_indices = torch.Tensor((src_ind_vec*len(ind_use) + sta_ind_vec_abs).reshape(-1)).long().to(device)
 		if use_asserts == True:
-			assert(write_indices.min() > -1)
-			assert(write_indices.max() < len(ind_use)*x_grid.shape[0]) ## The indices should be smaller than the "full" cartesian product graph
-			assert(len(np.unique(write_indices.cpu().detach().numpy())) == len(write_indices))
+			if len(write_indices) > 0:
+				assert(write_indices.min() > -1)
+				assert(write_indices.max() < len(ind_use)*x_grid.shape[0]) ## The indices should be smaller than the "full" cartesian product graph
+				assert(len(np.unique(write_indices.cpu().detach().numpy())) == len(write_indices))
 
 		thresh_mask = 0.01
 		val_embed = torch.cat((val_embed_p.reshape(-1,1), val_embed_s.reshape(-1,1), val_embed_p1.reshape(-1,1), val_embed_s1.reshape(-1,1)), dim = 1)
