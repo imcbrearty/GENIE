@@ -47,8 +47,8 @@ cost_value: 2.5 # If use expanded competitve assignment, then this is the fixed 
 ## `sum' over the predicted source-arrival assignment for each pick. Ideally could make this number more
 ## adpative, potentially with number of stations or number of possible observing picks for each event. 
 
-device: 'cpu' ## Right now, this isn't updated to work with cuda, since
-## the necessary variables do not have .to(device) at the right places
+device: 'cpu' ## This can run on cuda, but it can also be faster to run ~100s of independent jobs
+## on different CPU's to process 100's of days at once, instead of using a few GPU's
 
 use_only_one_grid: True # (Use False for more accurate processing; for more efficient processing choose True. Accuracy is gained from averaging prediction over multiple spatial grids)
 compute_magnitudes: False # Uses local magnitude and will be un-calibrated by default, or can calibrate for a particular study site
