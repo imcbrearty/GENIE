@@ -475,7 +475,7 @@ if train_travel_time_neural_network == True:
 		grab_interior_samples = True
 		if grab_interior_samples == True:
 
-			n_per_station = 100000
+			n_per_station = 150000
 
 			for n in range(locs_ref.shape[0]):
 
@@ -541,8 +541,8 @@ if train_travel_time_neural_network == True:
 	loss_func = nn.MSELoss()
 	# loss_func1 = nn.BCELoss()
 
-	n_batch = 5000
-	n_steps = 50001 # 50000
+	n_batch = 15000
+	n_steps = 30001 # 50000
 	n_ver_save = vel_model_ver
 
 	assert((using_3D + using_1D) == 1)
