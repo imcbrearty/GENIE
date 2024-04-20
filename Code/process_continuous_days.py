@@ -392,7 +392,7 @@ P, ind_use = load_picks(path_to_file, date, spr_picks = spr_picks, n_ver = n_ver
 locs_use = locs[ind_use]
 arrivals_tree = cKDTree(P[:,0][:,None])
 
-use_updated_input = False
+use_updated_input = True
 dt_embed_discretize = 0.05 ## Picks are discretized to this amount if using updated input to speed up input
 
 if process_known_events == True: ## If true, only process around times of known events
