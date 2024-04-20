@@ -571,6 +571,32 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 	
 	return trv
 
+def load_station_corrections(trv, locs, path_to_file, name_of_project, n_ver_corrections, ftrns1_diff, ind_use = None, trv_direct = None, device = 'cpu'):
+
+	from calibration_utils import TrvTimesCorrection
+
+	path_to_corrections = path_to_file + 'Grids/%s_calibrated_travel_time_corrections_%d.npz'%(name_of_project, n_ver_corrections)
+	z = np.load(path_to_corrections)
+	coefs, coefs_ker, x_grid_corr = torch.Tensor(z['coefs']).to(device), torch.Tensor(z['coefs_ker']).to(device), torch.Tensor(z['x_grid']).to(device)
+
+	if ind_use is not None:
+		coefs = coefs[:,ind_use,:]
+		coefs_ker = coefs_ker[:,ind_use,:]
+		locs_use = np.copy(locs[ind_use])
+	else:
+		locs_use = np.copy(locs)
+
+
+	interp_type, k_spc_interp, _, sig_ker, grid_index = z['params']
+	k_spc_interp = int(k_spc_interp)
+	sig_ker = float(sig_ker)
+	grid_index = int(grid_index)
+	# assert(np.abs(x_grid_corr.cpu().detach().numpy() - x_grids[grid_index]).max() == 0)
+	z.close()
+
+	## Can we overwrite the function?
+	return TrvTimesCorrection(trv, x_grid_corr, locs_use, coefs, ftrns1_diff, coefs_ker = coefs_ker, interp_type = interp_type, k = k_spc_interp, trv_direct = trv_direct, sig = sig_ker)
+
 def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, dt_embed = 1.0, device = 'cpu'):
 
 	k_sta_edges, k_spc_edges, k_time_edges = graph_params

@@ -148,11 +148,52 @@ class InterpolateAnisotropic(MessagePassing):
 		return edge_attr.unsqueeze(2)*x_j
 
 ## Attach corrections to travel times
+# class TrvTimesCorrection(nn.Module):
+
+# 	def __init__(self, trv, x_grid, locs_ref, coefs, ftrns1_diff, coefs_ker = None, interp_type = 'anisotropic', k = 15, sig = 10.0, device = 'cpu'):
+# 		super(TrvTimesCorrection, self).__init__() # consider mean
+# 		self.trv = trv
+# 		self.x_grid = x_grid
+# 		self.coefs = coefs
+# 		self.coefs_ker = coefs_ker
+# 		self.interp_type = interp_type
+# 		self.locs_ref = locs_ref
+# 		self.device = device
+# 		self.sig = sig
+# 		self.k = k
+# 		self.ftrns1_diff = ftrns1_diff
+# 		self.locs_ref_cart = ftrns1_diff(torch.Tensor(self.locs_ref).to(device))/1000.0
+
+# 		if interp_type == 'mean':
+# 			self.Interp = Interpolate(ftrns1_diff, k = k, device = device)
+
+# 		elif interp_type == 'weighted':
+# 			self.Interp = InterpolateWeighted(ftrns1_diff, k = k, sig = sig, device = device)
+
+# 		elif interp_type == 'anisotropic':
+# 			self.Interp = InterpolateAnisotropic(ftrns1_diff, k = k, sig = sig, device = device)
+
+# 		else:
+# 			error('no interp type')
+
+
+# 	def forward(self, sta, src):
+
+# 		sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1)[1].long().contiguous()
+# 		# sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1).flip(0)[1].long().contiguous()
+
+# 		return self.trv(sta, src) + self.correction(sta_ind, src) # [:,knn_nearest,:]
+
+# 	def correction(self, sta_ind, src):
+
+# 		return self.Interp(self.x_grid, src, self.coefs[:,sta_ind,:], self.coefs_ker)
+
 class TrvTimesCorrection(nn.Module):
 
-	def __init__(self, trv, x_grid, locs_ref, coefs, ftrns1_diff, coefs_ker = None, interp_type = 'anisotropic', k = 15, sig = 10.0, device = 'cpu'):
+	def __init__(self, trv, x_grid, locs_ref, coefs, ftrns1_diff, coefs_ker = None, interp_type = 'anisotropic', k = 15, sig = 10.0, trv_direct = None, device = 'cpu'):
 		super(TrvTimesCorrection, self).__init__() # consider mean
 		self.trv = trv
+		self.trv_direct = trv_direct
 		self.x_grid = x_grid
 		self.coefs = coefs
 		self.coefs_ker = coefs_ker
@@ -177,13 +218,39 @@ class TrvTimesCorrection(nn.Module):
 			error('no interp type')
 
 
-	def forward(self, sta, src):
+	def forward(self, sta, src, method = 'pairs'):
 
-		sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1)[1].long().contiguous()
-		# sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1).flip(0)[1].long().contiguous()
+		if method == 'direct':
 
-		return self.trv(sta, src) + self.correction(sta_ind, src) # [:,knn_nearest,:]
+			sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1)[1].long().contiguous()
 
-	def correction(self, sta_ind, src):
+			return self.trv_direct(sta, src) + self.correction(sta_ind, src, method = 'direct') # [:,knn_nearest,:]
 
-		return self.Interp(self.x_grid, src, self.coefs[:,sta_ind,:], self.coefs_ker)
+
+		elif method == 'pairs':
+
+			sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1)[1].long().contiguous()
+			# sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1).flip(0)[1].long().contiguous()
+
+			return self.trv(sta, src) + self.correction(sta_ind, src) # [:,knn_nearest,:]
+
+
+	def correction(self, sta_ind, src, method = 'pairs'):
+
+		if method == 'direct':
+
+			scale_vec = np.array([1.0, 1.0, 1000.0]).reshape(1,-1) # .to(self.device)
+			src_unique = np.unique(src.cpu().detach().numpy()/scale_vec, axis = 0)
+			tree_src = cKDTree(src_unique)
+			ip_match_src = torch.Tensor(tree_src.query(src.cpu().detach().numpy()/scale_vec)[1]).long().to(self.device)
+
+			sta_ind_unique = np.sort(np.unique(sta_ind.cpu().detach().numpy()))
+			tree_sta = cKDTree(sta_ind_unique.reshape(-1,1))
+			ip_match_sta = torch.Tensor(tree_sta.query(sta_ind.cpu().detach().numpy().reshape(-1,1))[1]).long().to(self.device)
+
+			return self.Interp(self.x_grid, torch.Tensor(src_unique*scale_vec).to(self.device), self.coefs[:,sta_ind_unique,:], self.coefs_ker[:,sta_ind_unique,:])[ip_match_src, ip_match_sta, :]
+
+		elif method == 'pairs':
+
+			return self.Interp(self.x_grid, src, self.coefs[:,sta_ind,:], self.coefs_ker[:,sta_ind,:])
+

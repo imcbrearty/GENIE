@@ -54,13 +54,6 @@ path_to_file = str(pathlib.Path().absolute())
 seperator = '\\' if '\\' in path_to_file else '/'
 path_to_file += seperator
 
-## Note, parameters d_deg (multiple re-uses), n_batch, n_segment, min_picks, 
-## and max_sources (per connected graph), max_splits can be moved to config
-## Also replace "iz1, iz2 = np.where(Out_2 > 0.0025)" with specified thresh
-
-## Need to update how extract_inputs_from_data_fixed_grids_with_phase_type uses a variable t_win parammeter, 
-## and also adding inputs of training_params, graph_params, pred_params
-
 # The first system argument (after the file name; e.g., argvs[1]) is an integer used to select which
 # day in the %s_process_days_list_ver_%d.txt file each call of this script will compute
 argvs = sys.argv
@@ -93,68 +86,17 @@ device = calibration_config['device']
 ## Load Processing settings
 n_ver_load = process_config['n_ver_load']
 n_step_load = process_config['n_step_load']
-n_save_ver = process_config['n_save_ver']
-n_ver_picks = process_config['n_ver_picks']
-
 template_ver = process_config['template_ver']
 vel_model_ver = process_config['vel_model_ver']
-process_days_ver = process_config['process_days_ver']
 
-offset_increment = process_config['offset_increment']
-n_rand_query = process_config['n_rand_query']
-n_query_grid = process_config['n_query_grid']
-
-thresh = process_config['thresh'] # Threshold to declare detection
-thresh_assoc = process_config['thresh_assoc'] # Threshold to declare src-arrival association
-spr = process_config['spr'] # Sampling rate to save temporal predictions
-tc_win = process_config['tc_win'] # Temporal window (s) to link events in Local Marching
-sp_win = process_config['sp_win'] # Distance (m) to link events in Local Marching
-break_win = process_config['break_win'] # Temporal window to find disjoint groups of sources, 
-## so can run Local Marching without memory issues.
-spr_picks = process_config['spr_picks'] # Assumed sampling rate of picks 
-## (can be 1 if absolute times are used for pick time values)
-
-d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
-d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
-dx_depth = process_config['dx_depth'] ## Depth resolution to locate events with travel time based re-location
-
-step = process_config['step']
-step_abs = process_config['step_abs']
-
-cost_value = process_config['cost_value'] # If use expanded competitve assignment, then this is the fixed cost applied per source
-## when optimizing joint source-arrival assignments between nearby sources. The value is in terms of the 
-## `sum' over the predicted source-arrival assignment for each pick. Ideally could make this number more
-## adpative, potentially with number of stations or number of possible observing picks for each event. 
-
-## the necessary variables do not have .to(device) at the right places
-
-compute_magnitudes = process_config['compute_magnitudes']
-min_log_amplitude_val = process_config['min_log_amplitude_val']
-process_known_events = process_config['process_known_events']
-use_expanded_competitive_assignment = process_config['use_expanded_competitive_assignment']
-use_differential_evolution_location = process_config['use_differential_evolution_location']
-
-print('Beginning calibration')
 ### Begin automated processing ###
+print('Beginning calibration')
 
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 name_of_project = config['name_of_project']
-
-# Load day to process
-z = open(path_to_file + '%s_process_days_list_ver_%d.txt'%(name_of_project, process_days_ver), 'r')
-lines = z.readlines()
-z.close()
-day_select_val = day_select + offset_select*offset_increment
-if '/' in lines[day_select_val]:
-	date = lines[day_select_val].split('/')
-elif ',' in lines[day_select_val]:
-	date = lines[day_select_val].split(',')
-else:
-	date = lines[day_select_val].split(' ')	
-date = np.array([int(date[0]), int(date[1]), int(date[2])])
 
 # Load region
 z = np.load(path_to_file + '%s_region.npz'%name_of_project)
@@ -259,26 +201,28 @@ with open('calibration_config.yaml', 'r') as file:
     calibration_config = yaml.safe_load(file)
 
 interp_type = calibration_config['interp_type'] ## Type of spatial interpolation (mean, weighted, anisotropic)
-k_spc_lap = calibration_config['k_spc_lap'] ## k-nn value for laplacian smoothing
-k_spc_interp = calibration_config['k_spc_interp'] ## k-nn value for interpolation
-grid_index = calibration_config['grid_index'] ## grid index choice (of x_grids)
-
 n_ver_events = calibration_config['n_ver_events']
 n_ver_reference = calibration_config['n_ver_reference']
 n_ver_save = calibration_config['n_ver_save']
 interp_type = calibration_config['interp_type'] ## Type of spatial interpolation (mean, weighted, anisotropic)
 k_spc_lap = calibration_config['k_spc_lap'] ## k-nn value for laplacian smoothing
+k_sta_lap = calibration_config['k_sta_lap'] ## k-nn value for laplacian smoothing station coefficients
+k_spc_lap_ker = calibration_config['k_spc_lap_ker'] ## k-nn value for laplacian smoothing spatial coefficients kernel
+k_sta_lap_ker = calibration_config['k_sta_lap_ker'] ## k-nn value for laplacian smoothing station coefficients kernel
 k_spc_interp = calibration_config['k_spc_interp'] ## k-nn value for interpolation
 sig_ker = calibration_config['sig_ker'] ## spatial kernel (in km) of the weighting kernel (fixed for weighted, starting value for anisotropic) 
 grid_index = calibration_config['grid_index'] ## grid index choice (of x_grids)
 n_batch = calibration_config['n_batch'] ## 1000 earthquakes per batch
 n_updates = calibration_config['n_updates'] ## Find automatic convergence criteria
-use_lap = calibration_config['use_lap'] ## laplacian penality on spatial coefficients
-use_norm = calibration_config['use_norm'] ## norm penality on spatial coefficients
+use_spc = calibration_config['use_spc'] ## laplacian penality on spatial coefficients
+use_sta = calibration_config['use_sta'] ## laplacian penality station coefficients (anisotropic case)
 use_ker = calibration_config['use_ker'] ## laplacian penality on kernel of spatial coefficients (anisotropic case)
-lam = calibration_config['lam'] ## weighting of laplacian regularization loss
-lam1 = calibration_config['lam1'] ## weighting of norm loss
-lam2 = calibration_config['lam2'] ## weighting of laplacian loss on kernel
+use_norm = calibration_config['use_norm'] ## norm penality on spatial coefficients
+lam_spc = calibration_config['lam_spc'] ## weighting of laplacian regularization loss for spatial coefficients
+lam_sta = calibration_config['lam_sta'] ## weighting of laplacian loss on station coefficients
+lam_spc_ker = calibration_config['lam_spc_ker'] ## weighting of laplacian loss on station coefficients kernel
+lam_sta_ker = calibration_config['lam_sta_ker'] ## weighting of laplacian regularization loss for station coefficients
+lam_norm = calibration_config['lam_norm'] ## weighting of norm loss
 temporal_match =  calibration_config['temporal_match'] ## window for matched events (seconds)
 spatial_match = calibration_config['spatial_match'] ## spatial distance for matched events (m)
 min_picks = calibration_config['min_picks'] ## minimum number of total picks to use event in calibration
@@ -286,6 +230,10 @@ min_threshold = calibration_config['min_threshold'] ## minimum detection thresho
 compute_relocations = calibration_config['compute_relocations'] ## Compute example event relocations with travel time corrections
 n_relocations = calibration_config['n_relocations'] ## Number of example event relocations with travel time corrections
 save_with_data = calibration_config['save_with_data'] ## Flag whether to save data with the calibration file
+lat_lim = calibration_config['lat_lim']
+lon_lim = calibration_config['lon_lim']
+depth_lim = calibration_config['depth_lim']
+device = calibration_config['device']
 
 ## Now load catalog and calibration catalog and find matched events
 
@@ -343,7 +291,7 @@ for i in range(len(days)):
 		z.close()
 
 		## Find matched events
-		matches = maximize_bipartite_assignment(srcs_ref, srcs, ftrns1, ftrns2, temporal_win = temporal_match, spatial_win = spatial_match)[0]
+		matches = maximize_bipartite_assignment(srcs_ref, srcs, ftrns1, ftrns2, temporal_win = temporal_match, spatial_win = spatial_match, verbose = False)[0]
 
 		if len(matches) > 0:
 			Matches.append(matches + np.array([c1, c2]).reshape(1,-1))
@@ -387,6 +335,7 @@ for mag in mag_levels:
 	print('Depth residual %0.3f (+/- %0.3f)'%(res_slice[:,2].mean(), res_slice[:,2].std()))
 	print('Origin Time residual %0.3f (+/- %0.3f) \n'%(res_slice[:,3].mean(), res_slice[:,3].std()))
 
+skip_missing_phase_type = True
 
 ## Setup probability of sampling different matched events
 prob = np.ones(len(Matches))
@@ -397,18 +346,47 @@ for i in range(len(Matches)):
 		prob[i] = 0.0
 	if (cnt_p[Matches[i,1]] + cnt_s[Matches[i,1]]) < min_picks:
 		prob[i] = 0.0
+	if lat_lim is not False:
+		if (srcs[Matches[i,1],0] < lat_lim[0]) or (srcs[Matches[i,1],0] > lat_lim[1]):
+			prob[i] = 0.0
+	if lon_lim is not False:
+		if (srcs[Matches[i,1],1] < lon_lim[0]) or (srcs[Matches[i,1],1] > lon_lim[1]):
+			prob[i] = 0.0
+	if depth_lim is not False:
+		if (srcs[Matches[i,1],2] < depth_lim[0]) or (srcs[Matches[i,1],2] > depth_lim[1]):
+			prob[i] = 0.0
+	## Skip events missing all of one phase type, as might a cause a bug later.
+	if (skip_missing_phase_type == True) and ((len(Picks_P[Matches[i,1]]) == 0) or (len(Picks_S[Matches[i,1]]) == 0)):
+		prob[i] = 0.0
+
+
 prob = prob/prob.sum()
 print('Retained %0.8f of matches'%(len(np.where(prob > 0)[0])/len(Matches)))
 
-## Setup spatial graph and create laplacian
-
+## Choose spatial grid
 x_grid = x_grids[grid_index]
-A_src_src = knn(torch.Tensor(ftrns1(x_grid)/1000.0), torch.Tensor(ftrns1(x_grid)/1000.0), k = k_spc_lap).flip(0).long().contiguous().to(device) # )[0]
-lap = get_laplacian(A_src_src, normalization = 'rw')
+
+## Create Laplacians
+A_spc_spc = knn(torch.Tensor(ftrns1(x_grid)/1000.0), torch.Tensor(ftrns1(x_grid)/1000.0), k = k_spc_lap + 1).flip(0).long().contiguous().to(device) # )[0]
+lap_spc = get_laplacian(A_spc_spc, normalization = 'rw')
+
+A_spc_spc1 = knn(torch.Tensor(ftrns1(x_grid)/1000.0), torch.Tensor(ftrns1(x_grid)/1000.0), k = k_spc_lap_ker + 1).flip(0).long().contiguous().to(device) # )[0]
+lap_spc_ker = get_laplacian(A_spc_spc1, normalization = 'rw')
+
+A_sta_sta = knn(torch.Tensor(ftrns1(locs)/1000.0), torch.Tensor(ftrns1(locs)/1000.0), k = k_sta_lap + 1).flip(0).long().contiguous().to(device) # )[0]
+lap_sta = get_laplacian(A_sta_sta, normalization = 'rw')
+
+A_sta_sta1 = knn(torch.Tensor(ftrns1(locs)/1000.0), torch.Tensor(ftrns1(locs)/1000.0), k = k_sta_lap_ker + 1).flip(0).long().contiguous().to(device) # )[0]
+lap_sta_ker = get_laplacian(A_sta_sta1, normalization = 'rw')
+
+## Initilize Laplace classes
+Lap_spc = Laplacian(lap_spc[0], lap_spc[1])
+Lap_spc_ker = Laplacian(lap_spc_ker[0], lap_spc_ker[1])
+Lap_sta = Laplacian(lap_sta[0], lap_sta[1])
+Lap_sta_ker = Laplacian(lap_sta_ker[0], lap_sta_ker[1])
 x_grid = torch.Tensor(x_grid).to(device)
 
 ## Initilize Interpolation and Laplace classes
-Lap = Laplacian(lap[0], lap[1])
 if interp_type == 'mean':
 	Interp = Interpolate(ftrns1_diff, k = k_spc_interp, device = device)
 elif interp_type == 'weighted':
@@ -418,15 +396,20 @@ elif interp_type == 'anisotropic':
 
 ## Setup calibration parameters
 coefs = Variable(torch.zeros((len(x_grid), len(locs), 2)).to(device), requires_grad = True) ## Coefficients are initilized for all spatial grid points and stations
-coefs_ker = Variable(sig_ker*torch.ones((len(x_grid), 3)).to(device), requires_grad = True) ## Coefficients are initilized for all spatial grid points and stations
+coefs_ker = Variable(sig_ker*torch.ones((len(x_grid), locs.shape[0], 3)).to(device), requires_grad = True) ## Coefficients are initilized for all spatial grid points and stations
+## Note: coefs ker should have a different entry for each phase type
 
 optimizer = optim.Adam([coefs, coefs_ker], lr = 0.01)
 schedular = StepLR(optimizer, 1000, gamma = 0.8)
 loss_func = nn.MSELoss()
 
-trgt_lap = torch.zeros(x_grid.shape[0], locs.shape[0]).to(device)
+trgt_spc = torch.zeros(x_grid.shape[0], locs.shape[0]).to(device)
 trgt_norm = torch.zeros(x_grid.shape[0], locs.shape[0], 2).to(device)
-trgt_ker = torch.zeros(x_grid.shape[0], 3).to(device)
+trgt_sta = torch.zeros(locs.shape[0], x_grid.shape[0]).to(device)
+
+## Target kernel fields are Laplacian applied to uniform field
+trgt_spc_ker = Lap_spc_ker(coefs_ker[:,:,0]).detach()
+trgt_sta_ker = Lap_sta_ker(coefs_ker[:,:,0].T).detach()
 
 ## Applying fitting
 losses = []
@@ -468,22 +451,42 @@ for i in range(n_updates):
 	loss2 = loss_func(pred_s + corr_s, arv_s)
 	loss = 0.5*loss1 + 0.5*loss2
 
-	n_steps_lap = 1 ## Can reduce frequency that laplacian loss is computed
-	if ((use_lap == True)*(np.mod(i, n_steps_lap) == 0)) or (i > (0.9*n_updates)):
+	if use_spc:
 
-		lap1 = loss_func(Lap(coefs[:,:,0]), trgt_lap)
-		lap2 = loss_func(Lap(coefs[:,:,1]), trgt_lap)
-		loss = loss + lam*lap1 + lam*lap2
+		lap_spc1 = loss_func(Lap_spc(coefs[:,:,0]), trgt_spc)
+		lap_spc2 = loss_func(Lap_spc(coefs[:,:,1]), trgt_spc)
+		loss = loss + 0.5*lam_spc*lap_spc1 + 0.5*lam_spc*lap_spc2
+
+	if use_sta == True:
+
+		lap_sta1 = loss_func(Lap_sta(coefs[:,:,0].T), trgt_sta)
+		lap_sta2 = loss_func(Lap_sta(coefs[:,:,1].T), trgt_sta)
+		loss = loss + 0.5*lam_sta*lap_sta1 + 0.5*lam_sta*lap_sta2
+
+	if (use_ker == True)*(use_spc == True):
+
+		## Could also do this with reshaping, or broadcasting
+		lap_spc_ker1 = loss_func(Lap_spc_ker(coefs_ker[:,:,0]), trgt_spc_ker)
+		lap_spc_ker2 = loss_func(Lap_spc_ker(coefs_ker[:,:,1]), trgt_spc_ker)
+		lap_spc_ker3 = loss_func(Lap_spc_ker(coefs_ker[:,:,2]), trgt_spc_ker)
+
+		loss_spc_ker = (1/3.0)*lap_spc_ker1 + (1/3.0)*lap_spc_ker2 + (1/3.0)*lap_spc_ker3
+		loss = loss + lam_spc_ker*loss_spc_ker
+
+	if (use_ker == True)*(use_sta == True):
+
+		## Could also do this with reshaping, or broadcasting
+		lap_sta_ker1 = loss_func(Lap_sta_ker(coefs_ker[:,:,0].T), trgt_sta_ker)
+		lap_sta_ker2 = loss_func(Lap_sta_ker(coefs_ker[:,:,1].T), trgt_sta_ker)
+		lap_sta_ker3 = loss_func(Lap_sta_ker(coefs_ker[:,:,2].T), trgt_sta_ker)
+
+		loss_sta_ker = (1/3.0)*lap_sta_ker1 + (1/3.0)*lap_sta_ker2 + (1/3.0)*lap_sta_ker3
+		loss = loss + lam_sta_ker*loss_sta_ker
 
 	if use_norm == True:
 
-		loss3 = loss_func(coefs, trgt_norm)
-		loss = loss + lam1*loss3
-
-	if use_ker == True:
-
-		loss4 = loss_func(Lap(coefs_ker), trgt_ker)
-		loss = loss + lam2*loss4
+		loss_norm = loss_func(coefs, trgt_norm)
+		loss = loss + lam_norm*loss_norm
 
 	loss.backward()
 	optimizer.step()
@@ -503,9 +506,9 @@ print('Saving calibration result (version %d)'%n_ver_save)
 print('Max corr: %0.2f'%coefs.max().item())
 print('Min corr: %0.2f'%coefs.min().item())
 if save_with_data == False:
-	np.savez_compressed(path_to_file + seperator + 'Grids/%s_calibrated_travel_time_corrections_%d.npz'%(name_of_project, n_ver_save), coefs = coefs.cpu().detach().numpy(), coefs_ker = coefs_ker.cpu().detach().numpy(), x_grid = x_grid.cpu().detach().numpy(), srcs = srcs, srcs_ref = srcs_ref, Matches = Matches, params = params, losses = losses, loss1 = loss1.item(), loss2 = loss2.item())
+	np.savez_compressed(path_to_file + 'Grids/%s_calibrated_travel_time_corrections_%d.npz'%(name_of_project, n_ver_save), coefs = coefs.cpu().detach().numpy(), coefs_ker = coefs_ker.cpu().detach().numpy(), x_grid = x_grid.cpu().detach().numpy(), srcs = srcs, srcs_ref = srcs_ref, Matches = Matches, params = params, losses = losses, loss1 = loss1.item(), loss2 = loss2.item())
 elif save_with_data == True:
-	np.savez_compressed(path_to_file + seperator + 'Grids/%s_calibrated_travel_time_corrections_%d.npz'%(name_of_project, n_ver_save), coefs = coefs.cpu().detach().numpy(), coefs_ker = coefs_ker.cpu().detach().numpy(), x_grid = x_grid.cpu().detach().numpy(), srcs = srcs, srcs_ref = srcs_ref, Matches = Matches, Picks_P = np.vstack(Picks_P), Picks_S = np.vstack(Picks_S), event_ind_p = event_ind_p, event_ind_s = event_ind_s, params = params, losses = losses, loss1 = loss1.item(), loss2 = loss2.item())
+	np.savez_compressed(path_to_file + 'Grids/%s_calibrated_travel_time_corrections_%d.npz'%(name_of_project, n_ver_save), coefs = coefs.cpu().detach().numpy(), coefs_ker = coefs_ker.cpu().detach().numpy(), x_grid = x_grid.cpu().detach().numpy(), srcs = srcs, srcs_ref = srcs_ref, Matches = Matches, Picks_P = np.vstack(Picks_P), Picks_S = np.vstack(Picks_S), event_ind_p = event_ind_p, event_ind_s = event_ind_s, params = params, losses = losses, loss1 = loss1.item(), loss2 = loss2.item())
 else:
 	error('Set save_with_data flag')
 
@@ -515,8 +518,6 @@ if compute_relocations == True:
 	srcs_target = []
 	srcs_initial = []
 	srcs_relocated = []
-
-	# trv_corr = TrvTimesCorrection(trv, trv_grid, coefs, k = k_interp)
 
 	for i in range(n_relocations):
 
@@ -541,7 +542,7 @@ if compute_relocations == True:
 
 		# trv_corr = TrvTimesCorrectionAnisotropic(trv, x_grid, coefs[:,ind_unique,:], coefs_ker, k = k_spc_interp)
 
-		trv_corr = TrvTimesCorrection(trv, x_grid, locs_slice, coefs[:,ind_unique,:], ftrns1_diff, coefs_ker = coefs_ker, interp_type = 'anisotropic', k = k_spc_interp, sig = sig_ker)
+		trv_corr = TrvTimesCorrection(trv, x_grid, locs_slice, coefs[:,ind_unique,:], ftrns1_diff, coefs_ker = coefs_ker[:,ind_unique,:], interp_type = 'anisotropic', k = k_spc_interp, sig = sig_ker)
 
 		xmle, logprob = differential_evolution_location(trv_corr, locs_slice, arv_p, ind_p_perm, arv_s, ind_s_perm, lat_range_extend, lon_range_extend, depth_range, device = device)
 
@@ -562,6 +563,32 @@ if compute_relocations == True:
 			cnt_phases += 1
 
 		srcs_relocated.append(np.concatenate((xmle, np.array([srcs[srcs_ind,3] - mean_shift]).reshape(1,-1)), axis = 1))
+
+
+		plot_on = False
+		if plot_on == True:
+			fig, ax = plt.subplots(1,2, sharex = True, sharey = True)
+			pred_out1 = trv_corr(torch.Tensor(locs_slice), torch.Tensor(srcs[srcs_ind].reshape(1,-1))).cpu().detach().numpy() + srcs[srcs_ind,3]
+			pred_out2 = trv_corr(torch.Tensor(locs_slice), torch.Tensor(xmle)).cpu().detach().numpy() + srcs_relocated[-1][0,3]
+			# pred_out1 = trv_corr(torch.Tensor(locs_slice), torch.Tensor(xmle)).cpu().detach().numpy() + srcs[srcs_ind,3]
+			ax[0].scatter(arv_p, ind_p_perm)
+			ax[0].scatter(arv_s, ind_s_perm)
+			ax[1].scatter(arv_p, ind_p_perm)
+			ax[1].scatter(arv_s, ind_s_perm)
+			ax[0].plot(pred_out1[0,:,0], np.arange(len(locs_slice)), 'b')
+			ax[0].plot(pred_out1[0,:,1], np.arange(len(locs_slice)), 'r')
+			ax[1].plot(pred_out2[0,:,0], np.arange(len(locs_slice)), 'b')
+			ax[1].plot(pred_out2[0,:,1], np.arange(len(locs_slice)), 'r')
+			res_p1 = pred_out1[0,ind_p_perm,0] - arv_p
+			res_s1 = pred_out1[0,ind_s_perm,1] - arv_s
+			res_p2 = pred_out2[0,ind_p_perm,0] - arv_p
+			res_s2 = pred_out2[0,ind_s_perm,1] - arv_s
+			ax[0].set_title('%0.2f %0.2f'%(np.sqrt((res_p1**2).sum()/len(res_p1)), np.sqrt((res_s1**2).sum()/len(res_s1))))
+			ax[1].set_title('%0.2f %0.2f'%(np.sqrt((res_p2**2).sum()/len(res_p2)), np.sqrt((res_s2**2).sum()/len(res_s2))))
+			fig.set_size_inches([15,12])
+			# plt.savefig('D:/Projects/GCalifornia/Plots/relocated_event_%d.png'%i)
+
+
 
 	## Concatenate result
 	srcs_target = np.vstack(srcs_target)
@@ -612,4 +639,84 @@ if compute_relocations == True:
 	print('Depth: %0.3f'%(np.abs(bias2[:,2]).mean()))
 	print('Origin Time: %0.3f'%(np.abs(bias2[:,3]).mean()))
 
-	np.savez_compressed(path_to_file + seperator + 'Grids/%s_calibrated_travel_time_corrections_relocations_%d.npz'%(name_of_project, n_ver_save), srcs_initial = srcs_initial, srcs_relocated = srcs_relocated, srcs_target = srcs_target, res1 = res1, res2 = res2, bias1 = bias1, bias2 = bias2, ind_bias = ind_bias)
+	print('\nTotal Error (initial)')
+	print('Horizontal: %0.4f'%(np.linalg.norm(ftrns1(srcs_initial)[:,0:2] - ftrns1(srcs_target)[:,0:2], axis = 1).mean()))
+	print('Vertical: %0.4f'%(np.linalg.norm(ftrns1(srcs_initial)[:,[2]] - ftrns1(srcs_target)[:,[2]], axis = 1).mean()))
+
+	print('\nTotal Error (relocated)')
+	print('Horizontal: %0.4f'%(np.linalg.norm(ftrns1(srcs_relocated)[:,0:2] - ftrns1(srcs_target)[:,0:2], axis = 1).mean()))
+	print('Vertical: %0.4f'%(np.linalg.norm(ftrns1(srcs_relocated)[:,[2]] - ftrns1(srcs_target)[:,[2]], axis = 1).mean()))
+
+	np.savez_compressed(path_to_file + 'Grids/%s_calibrated_travel_time_corrections_relocations_%d.npz'%(name_of_project, n_ver_save), srcs_initial = srcs_initial, srcs_relocated = srcs_relocated, srcs_target = srcs_target, res1 = res1, res2 = res2, bias1 = bias1, bias2 = bias2, coefs = coefs.cpu().detach().numpy(), coefs_ker = coefs_ker.cpu().detach().numpy(), x_grid = x_grid.cpu().detach().numpy(), ind_bias = ind_bias)
+
+
+plot_results = True
+close_plots = True
+if plot_results == True:
+
+	## Visualize relocations
+	fig, ax = plt.subplots(1,2, sharex = True, sharey = True, figsize = [18,10])
+	ax[0].scatter(locs[:,1], locs[:,0], c = 'r', marker = '^', alpha = 0.3, s = 2)
+	ax[1].scatter(locs[:,1], locs[:,0], c = 'r', marker = '^', alpha = 0.3, s = 2)
+	ax[0].scatter(srcs_target[:,1], srcs_target[:,0], s = 8, alpha = 0.5, label = 'Target')
+	ax[1].scatter(srcs_target[:,1], srcs_target[:,0], s = 8, alpha = 0.5, label = 'Target')
+	ax[0].scatter(srcs_initial[:,1], srcs_initial[:,0], s = 8, alpha = 0.5, label = 'Ours')
+	ax[1].scatter(srcs_relocated[:,1], srcs_relocated[:,0], s = 8, alpha = 0.5, label = 'Ours')
+	ax[0].set_aspect(1.0/np.cos(np.mean(locs[:,0])*np.pi/180.0))
+	ax[1].set_aspect(1.0/np.cos(np.mean(locs[:,0])*np.pi/180.0))
+	ax[0].set_title('Initial')
+	ax[1].set_title('Relocated')
+	ax[0].legend()
+	ax[1].legend()
+	fig.savefig(path_to_file + 'Plots' + seperator + 'event_relocations_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
+	ax[0].plot(np.concatenate((srcs_initial[:,[1]], srcs_target[:,[1]]), axis = 1).T, np.concatenate((srcs_initial[:,[0]], srcs_target[:,[0]]), axis = 1).T, c = 'black', alpha = 0.2)
+	ax[1].plot(np.concatenate((srcs_relocated[:,[1]], srcs_target[:,[1]]), axis = 1).T, np.concatenate((srcs_relocated[:,[0]], srcs_target[:,[0]]), axis = 1).T, c = 'black', alpha = 0.2)
+	fig.savefig(path_to_file + 'Plots' + seperator + 'event_relocations_matches_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
+
+	## Visualize coefficients
+	coefs = coefs.cpu().detach().numpy()
+	coefs_ker = coefs_ker.cpu().detach().numpy()
+
+	## Spatial grid
+	for i in range(15):
+		i0 = np.random.randint(0, high = coefs.shape[1])
+		norm = Normalize(coefs[:,i0,:].min(), coefs[:,i0,:].max())
+		fig, ax = plt.subplots(1,2, sharex = True, sharey = True, figsize = [12, 8])
+		ax[0].scatter(x_grid[:,1], x_grid[:,0], c = coefs[:,i0,0], norm = norm)
+		ax[1].scatter(x_grid[:,1], x_grid[:,0], c = coefs[:,i0,1], norm = norm)
+		# ax[0].scatter(locs[i0,1], locs[i0,0], c = 'r', marker = '^')
+		fig.savefig(path_to_file + 'Plots' + seperator + 'spatial_grid_coefficients_example_%d_ver_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
+
+	## Stations
+	for i in range(15):
+		i0 = np.random.randint(0, high = coefs.shape[0])
+		norm = Normalize(coefs[i0,:,:].min(), coefs[i0,:,:].max())
+		fig, ax = plt.subplots(1,2, sharex = True, sharey = True, figsize = [12, 8])
+		ax[0].scatter(locs[:,1], locs[:,0], c = coefs[i0,:,0], norm = norm)
+		ax[1].scatter(locs[:,1], locs[:,0], c = coefs[i0,:,1], norm = norm)
+		fig.savefig(path_to_file + 'Plots' + seperator + 'station_coefficients_example_%d_ver_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
+
+
+	## Spatial grid (kernel)
+	for i in range(15):
+		i0 = np.random.randint(0, high = coefs.shape[1])
+		norm = Normalize(coefs_ker[:,i0,:].min(), coefs_ker[:,i0,:].max())
+		fig, ax = plt.subplots(1,3, sharex = True, sharey = True, figsize = [12, 8])
+		for j in range(3):
+			ax[j].scatter(x_grid[:,1], x_grid[:,0], c = coefs_ker[:,i0,j], norm = norm)
+			ax[j].scatter(x_grid[:,1], x_grid[:,0], c = coefs_ker[:,i0,j], norm = norm)
+		fig.savefig(path_to_file + 'Plots' + seperator + 'spatial_grids_kernel_example_%d_ver_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
+
+
+	## Stations (kernel)
+	for i in range(15):
+		i0 = np.random.randint(0, high = coefs.shape[0])
+		norm = Normalize(coefs_ker[i0,:,j].min(), coefs_ker[i0,:,j].max())
+		fig, ax = plt.subplots(1,3, sharex = True, sharey = True, figsize = [12, 8])
+		for j in range(3):
+			ax[j].scatter(locs[:,1], locs[:,0], c = coefs_ker[i0,:,j], norm = norm)
+			ax[j].scatter(locs[:,1], locs[:,0], c = coefs_ker[i0,:,j], norm = norm)
+		fig.savefig(path_to_file + 'Plots' + seperator + 'station_kernel_example_%d_ver_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
+
+	if close_plots == True:
+		plt.close('all')
