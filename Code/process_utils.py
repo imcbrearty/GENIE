@@ -425,7 +425,7 @@ def extract_input_from_data(trv, P, t0, ind_use, locs, x_grid, trv_times = None,
 		if use_asserts == True:
 			assert(write_indices.min() > -1)
 			assert(write_indices.max() < len(ind_use)*x_grid.shape[0]) ## The indices should be smaller than the "full" cartesian product graph
-			assert(len(np.unique(write_indices)) == len(write_indices))
+			assert(len(np.unique(write_indices.cpu().detach().numpy())) == len(write_indices))
 
 		thresh_mask = 0.01
 		val_embed = torch.cat((val_embed_p.reshape(-1,1), val_embed_s.reshape(-1,1), val_embed_p1.reshape(-1,1), val_embed_s1.reshape(-1,1)), dim = 1)
