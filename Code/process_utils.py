@@ -318,8 +318,8 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 	
 	A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), k = k_sta_edges + 1).flip(0).contiguous())[0]
 	A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
-	A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1)).contiguous()
-	A_prod_src_src = (n_sta_slice*A_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1)).contiguous()	
+	A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1).to(device)).contiguous()
+	A_prod_src_src = (n_sta_slice*A_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1).to(device)).contiguous()	
 	A_src_in_prod = torch.cat((torch.arange(n_sta_slice*n_spc).view(1,-1).to(device), torch.arange(n_spc).repeat_interleave(n_sta_slice).view(1,-1).to(device)), dim = 0).contiguous()
 	len_dt = len(x_grid_trv_ref)
 	A_edges_time_p = x_grid_trv_pointers_p[np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*ind_use.repeat(k_time_edges*len_dt)]
