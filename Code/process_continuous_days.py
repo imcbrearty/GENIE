@@ -251,8 +251,18 @@ graph_params = z['graph_params']
 pred_params = z['pred_params']
 z.close()
 
+## Check if knn is working on cuda
+if device.type == 'cuda' or device.type == 'cpu':
+	check_len = knn(torch.rand(10,3).to(device), torch.rand(10,3).to(device), k = 5).numel()
+	if check_len != 100: # If it's less than 2 * 10 * 5, there's an issue
+		raise SystemError('Issue with knn on cuda for some versions of pytorch geometric and cuda')
+
+	check_len = knn(10.0*torch.rand(200,3).to(device), 10.0*torch.rand(100,3).to(device), k = 15).numel()
+	if check_len != 3000: # If it's less than 2 * 10 * 5, there's an issue
+		raise SystemError('Issue with knn on cuda for some versions of pytorch geometric and cuda')
+
 x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, device = device)
-x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])) for i in range(len(x_grids))]
+x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])).to(device) for i in range(len(x_grids))]
 
 # mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff)
 
@@ -300,7 +310,7 @@ if (load_prebuilt_sampling_grid == True)*(os.path.isfile(path_to_file + 'Grids' 
 	
 	z = np.load(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid)
 	X_query = z['X_query']
-	X_query_cart = torch.Tensor(ftrns1(np.copy(X_query)))
+	X_query_cart = torch.Tensor(ftrns1(np.copy(X_query))).to(device)
 	z.close()
 
 else:	
@@ -308,13 +318,13 @@ else:
 	use_irregular_reference_grid = True ## Could add a different function to create the initial grid sampling points
 	if use_irregular_reference_grid == True:
 		X_query = kmeans_packing_sampling_points(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 3000, n_sim = 1)[0]
-		X_query_cart = torch.Tensor(ftrns1(np.copy(X_query)))
+		X_query_cart = torch.Tensor(ftrns1(np.copy(X_query))).to(device)
 	else:
 		x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
 		x11, x12, x13 = np.meshgrid(x1, x2, x3)
 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 		X_query = np.copy(xx)
-		X_query_cart = torch.Tensor(ftrns1(np.copy(xx)))
+		X_query_cart = torch.Tensor(ftrns1(np.copy(xx))).to(device)
 
 	if load_prebuilt_sampling_grid == True:
 		np.savez_compressed(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid, X_query = X_query)
@@ -373,7 +383,7 @@ x_src_query = locs.mean(0).reshape(1,-1) # arbitrary point to query source-arriv
 x_src_query_cart = torch.Tensor(ftrns1(x_src_query))
 tq_sample = torch.rand(n_src_query)*t_win - t_win/2.0 # Note this part!
 tq_sample = torch.zeros(1)
-tq = torch.arange(-t_win/2.0, t_win/2.0 + 1.0).reshape(-1,1).float()
+tq = torch.arange(-t_win/2.0, t_win/2.0 + 1.0).reshape(-1,1).float().to(device)
 
 yr, mo, dy = date[0], date[1], date[2]
 date = np.array([yr, mo, dy])
@@ -383,6 +393,9 @@ P, ind_use = load_picks(path_to_file, date, spr_picks = spr_picks, n_ver = n_ver
 locs_use = locs[ind_use]
 arrivals_tree = cKDTree(P[:,0][:,None])
 
+use_updated_input = False
+dt_embed_discretize = 0.05 ## Picks are discretized to this amount if using updated input to speed up input
+
 if process_known_events == True: ## If true, only process around times of known events
 	t0 = UTCDateTime(date[0], date[1], date[2])
 	min_magnitude = 1.0
@@ -391,19 +404,19 @@ if process_known_events == True: ## If true, only process around times of known 
 
 for cnt, strs in enumerate([0]):
 
-	trv_out_src = trv(torch.Tensor(locs[ind_use]), torch.Tensor(x_src_query)).detach()
-	locs_use_cart_torch = torch.Tensor(ftrns1(locs_use))
+	trv_out_src = trv(torch.Tensor(locs[ind_use]), torch.Tensor(x_src_query)).detach().to(device)
+	locs_use_cart_torch = torch.Tensor(ftrns1(locs_use)).to(device)
 
 	for i in range(len(x_grids)):
 
 		# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
-		A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref = extract_inputs_adjacencies(trv, locs, ind_use, x_grids[i], x_grids_trv[i], x_grids_trv_refs[i], x_grids_trv_pointers_p[i], x_grids_trv_pointers_s[i], ftrns1, graph_params)
+		A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref = extract_inputs_adjacencies(trv, locs, ind_use, x_grids[i], x_grids_trv[i], x_grids_trv_refs[i], x_grids_trv_pointers_p[i], x_grids_trv_pointers_s[i], ftrns1, graph_params, device = device)
 
-		spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(x_grids[i], axis = 1), len(ind_use), axis = 1) - np.repeat(np.expand_dims(locs[ind_use], axis = 0), x_grids[i].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend)
-		A_src_in_edges = Data(x = spatial_vals, edge_index = A_src_in_prod)
-		A_Lg_in_src = Data(x = spatial_vals, edge_index = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod.cpu().detach().numpy(), axis = 0))).long())
-		trv_out = trv(torch.Tensor(locs[ind_use]), torch.Tensor(x_grids[i])).detach().reshape(-1,2) ## Can replace trv_out with Trv_out
-		mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_edges, A_Lg_in_src, A_src_src, torch.Tensor(A_edges_time_p).long(), torch.Tensor(A_edges_time_s).long(), torch.Tensor(A_edges_ref), trv_out)
+		spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(x_grids[i], axis = 1), len(ind_use), axis = 1) - np.repeat(np.expand_dims(locs[ind_use], axis = 0), x_grids[i].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
+		A_src_in_edges = Data(x = spatial_vals, edge_index = A_src_in_prod).to(device)
+		A_Lg_in_src = Data(x = spatial_vals, edge_index = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod.cpu().detach().numpy(), axis = 0))).long()).to(device)
+		trv_out = trv(torch.Tensor(locs[ind_use]).to(device), torch.Tensor(x_grids[i]).to(device)).detach().reshape(-1,2) ## Can replace trv_out with Trv_out
+		mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_edges, A_Lg_in_src, A_src_src, torch.Tensor(A_edges_time_p).long().to(device), torch.Tensor(A_edges_time_s).long().to(device), torch.Tensor(A_edges_ref).to(device), trv_out)
 
 
 	tree_picks = cKDTree(P[:,0:2]) # based on absolute indices
@@ -475,9 +488,15 @@ for cnt, strs in enumerate([0]):
 		
 		for x_grid_ind in x_grid_ind_list:
 
-			## It might be more efficient if Inpts, Masks, lp_times, and lp_stations were already on Tensor
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, tsteps_slice, x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+			if use_updated_input == False:
+			
+				## It might be more efficient if Inpts, Masks, lp_times, and lp_stations were already on Tensor
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, tsteps_slice, x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
 
+			else:
+
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv, P, tsteps_slice, ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, device = device)
+			
 			for i0 in range(len(tsteps_slice)):
 
 				if len(lp_times[i0]) == 0:
@@ -487,7 +506,7 @@ for cnt, strs in enumerate([0]):
 				ip_need = tree_tsteps.query(tsteps_abs[tsteps_slice_indices[i0]] + np.arange(-t_win/2.0, t_win/2.0).reshape(-1,1))
 
 				## Need x_src_query_cart and trv_out_src
-				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i0]), torch.Tensor(Masks[i0]), torch.Tensor(lp_times[i0]), torch.Tensor(lp_stations[i0]).long(), torch.Tensor(lp_phases[i0].reshape(-1,1)).float(), locs_use, x_grids_cart_torch[x_grid_ind], X_query_cart, tq)
+				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i0]).to(device), torch.Tensor(Masks[i0]).to(device), torch.Tensor(lp_times[i0]).to(device), torch.Tensor(lp_stations[i0]).long().to(device), torch.Tensor(lp_phases[i0].reshape(-1,1)).float().to(device), locs_use, x_grids_cart_torch[x_grid_ind], X_query_cart, tq)
 
 				# Out_1[:,ip_need[1]] += out[0][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
 				Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
@@ -573,7 +592,7 @@ for cnt, strs in enumerate([0]):
 	print('Detected %d number of initial local maxima'%srcs.shape[0])
 
 	srcs = srcs[np.argsort(srcs[:,3])]
-	trv_out_srcs = trv(torch.Tensor(locs_use), torch.Tensor(srcs[:,0:3])).cpu().detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)
+	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs[:,0:3]).to(device)).cpu().detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)
 
 	## Run post processing detections.
 	print('check the thresh assoc %f'%thresh_assoc)
@@ -617,7 +636,7 @@ for cnt, strs in enumerate([0]):
 			X_query_1 = srcs_slice[i,0:3] + (np.random.rand(n_rand_query,3)*(X_offset.max(0, keepdims = True) - X_offset.min(0, keepdims = True)) + X_offset.min(0, keepdims = True))
 			inside = np.where((X_query_1[:,0] > lat_range[0])*(X_query_1[:,0] < lat_range[1])*(X_query_1[:,1] > lon_range[0])*(X_query_1[:,1] < lon_range[1])*(X_query_1[:,2] > depth_range[0])*(X_query_1[:,2] < depth_range[1]))[0]
 			X_query_1 = X_query_1[inside]
-			X_query_1_cart = torch.Tensor(ftrns1(np.copy(X_query_1))) # 
+			X_query_1_cart = torch.Tensor(ftrns1(np.copy(X_query_1))).to(device) # 
 			X_query_1_list.append(X_query_1)
 			X_query_1_cart_list.append(X_query_1_cart)
 
@@ -627,8 +646,14 @@ for cnt, strs in enumerate([0]):
 		
 		for x_grid_ind in x_grid_ind_list_1:
 
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, srcs_slice[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+			if use_updated_input == False:
+			
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, srcs_slice[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
 
+			else:
+			
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv, P, srcs_slice[:,3], ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, device = device)
+			
 			for i in range(srcs_slice.shape[0]):
 
 				if len(lp_times[i]) == 0:
@@ -637,7 +662,7 @@ for cnt, strs in enumerate([0]):
 				ipick, tpick = lp_stations[i].astype('int'), lp_times[i] ## are these constant across different x_grid_ind?
 				
 				# note, trv_out_sources, is already on cuda, may cause memory issue with too many sources
-				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]), torch.Tensor(Masks[i]), torch.Tensor(lp_times[i]), torch.Tensor(lp_stations[i]).long(), torch.Tensor(lp_phases[i].reshape(-1,1)).float(), locs_use, x_grids_cart_torch[x_grid_ind], X_query_1_cart_list[i], tq)
+				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).float().to(device), locs_use, x_grids_cart_torch[x_grid_ind], X_query_1_cart_list[i], tq)
 				Out_refined[i] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 
 		srcs_refined = []
@@ -660,7 +685,7 @@ for cnt, strs in enumerate([0]):
 		# 	srcs_refined = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
 		
 		## Can do multiple grids simultaneously, for a single source? (by duplicating the source?)
-		trv_out_srcs_slice = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)		
+		trv_out_srcs_slice = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)		
 
 		srcs_refined_l.append(srcs_refined)
 		trv_out_srcs_l.append(trv_out_srcs_slice)
@@ -679,8 +704,14 @@ for cnt, strs in enumerate([0]):
 		
 		for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, srcs_refined[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
+			if use_updated_input == False:
+			
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, P, P[:,4], arrivals_tree, srcs_refined[:,3], x_grids[x_grid_ind], x_grids_trv[x_grid_ind], lat_range_extend, lon_range_extend, depth_range, max_t, training_params, graph_params, pred_params, ftrns1, ftrns2)
 
+			else:
+
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv, P, srcs_refined[:,3], ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, device = device)				
+			
 			if inc == 0:
 
 				Out_p_save = [np.zeros(len(lp_times[j])) for j in range(srcs_refined.shape[0])]
@@ -697,12 +728,12 @@ for cnt, strs in enumerate([0]):
 					lp_meta_l.append(lp_meta[i])
 
 				X_save[:,2] = srcs_refined[i,2]
-				X_save_cart = torch.Tensor(ftrns1(X_save))
+				X_save_cart = torch.Tensor(ftrns1(X_save)).to(device)
 
 				if len(lp_times[i]) == 0:
 					continue ## It will fail if len(lp_times[i0]) == 0!				
 				
-				out = mz_list[x_grid_ind].forward_fixed(torch.Tensor(Inpts[i]), torch.Tensor(Masks[i]), torch.Tensor(lp_times[i]), torch.Tensor(lp_stations[i]).long(), torch.Tensor(lp_phases[i].reshape(-1,1)).long(), locs_use, x_grids_cart_torch[x_grid_ind], X_save_cart, torch.Tensor(ftrns1(srcs_refined[i,0:3].reshape(1,-1))), tq, torch.zeros(1), trv_out_srcs_slice[[i],:,:])
+				out = mz_list[x_grid_ind].forward_fixed(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).long().to(device), locs_use, x_grids_cart_torch[x_grid_ind], X_save_cart, torch.Tensor(ftrns1(srcs_refined[i,0:3].reshape(1,-1))).to(device), tq, torch.zeros(1).to(device), trv_out_srcs_slice[[i],:,:])
 				# Out_save[i,:,:] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 				Out_p_save[i] += out[2][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 				Out_s_save[i] += out[3][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
@@ -727,7 +758,7 @@ for cnt, strs in enumerate([0]):
 	Save_picks = [Save_picks[i] for i in ip_retained]
 	srcs_refined = srcs_refined[ip_retained]
 	
-	trv_out_srcs = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach()
+	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach()
 
 	iargsort = np.argsort(srcs_refined[:,3])
 	srcs_refined = srcs_refined[iargsort]
@@ -1176,7 +1207,7 @@ for cnt, strs in enumerate([0]):
 			srcs_trv.append(np.nan*np.ones((1, 4)))
 			continue
 
-		pred_out = trv(torch.Tensor(locs_use_slice), torch.Tensor(xmle)).cpu().detach().numpy() + srcs_refined[i,3]
+		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + srcs_refined[i,3]
 
 		res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
 		res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
@@ -1261,16 +1292,16 @@ for cnt, strs in enumerate([0]):
 		mag_r = np.nan*np.ones(srcs_trv.shape[0])
 		mag_trv = np.nan*np.ones(srcs_trv.shape[0])		
 
-	trv_out1 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_refined[:,0:3])).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
-	trv_out1_all = trv(torch.Tensor(locs), torch.Tensor(srcs_refined[:,0:3])).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
+	trv_out1 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
+	trv_out1_all = trv(torch.Tensor(locs).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
 	# trv_out2 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[:,0:3])).cpu().detach().numpy() + srcs_trv[:,3].reshape(-1,1,1) 
 	
 	trv_out2 = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
 	trv_out2_all = np.nan*np.zeros((srcs_trv.shape[0], locs.shape[0], 2))
 	ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
 	if len(ifind_not_nan) > 0:
-		trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
-		trv_out2_all[ifind_not_nan,:,:] = trv(torch.Tensor(locs), torch.Tensor(srcs_trv[ifind_not_nan,0:3])).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
+		trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_trv[ifind_not_nan,0:3]).to(device)).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
+		trv_out2_all[ifind_not_nan,:,:] = trv(torch.Tensor(locs).to(device), torch.Tensor(srcs_trv[ifind_not_nan,0:3]).to(device)).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 
 	# assert(np.nanmax(trv_out1 - trv_out1_all[:,ind_use,:]).max() < 1e-2)
 	# assert(np.nanmax(trv_out2 - trv_out2_all[:,ind_use,:]).max() < 1e-2)
