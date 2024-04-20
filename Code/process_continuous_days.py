@@ -46,13 +46,12 @@ from utils import *
 from module import *
 from process_utils import *
 
-## This code cannot be run with cuda quite yet 
-## (need to add .cuda()'s at appropriatte places)
-## In general, it often makes sense to run this
-## script in parallel for many days simulataneously (using argv[1]; 
+## This code can be run on cuda, though
+## in general, it often makes sense to run this script on seperate
+## jobs/cpus for many days simulataneously (using argv[1]; 
 ## e.g., call "python process_continuous_days.py n" for many different n
-## integers and each instance will run day t0_init + n.
-## sbatch or a bash script can call this file for a parallel set of cpu threads
+## integers and each instance will run day t0_init + n
+## sbatch or a bash script can call this file for a independent set of cpu threads
 ## (each for a different n, or, day).
 
 path_to_file = str(pathlib.Path().absolute())
