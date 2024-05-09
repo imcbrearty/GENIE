@@ -254,3 +254,150 @@ class TrvTimesCorrection(nn.Module):
 
 			return self.Interp(self.x_grid, src, self.coefs[:,sta_ind,:], self.coefs_ker[:,sta_ind,:])
 
+## Magnitude class
+class Magnitude(nn.Module):
+	def __init__(self, x_grid, locs_ref, ftrns1_diff, interp_type = 'anisotropic', k = 15, sig = 10.0, device = 'cpu'):
+		# super(MagPred, self).__init__(aggr = 'max') # node dim
+		super(Magnitude, self).__init__() # node dim
+
+		# In elliptical coordinates
+		self.x_grid = x_grid
+		self.locs_ref = torch.Tensor(locs_ref).to(device)
+		self.ftrns1_diff = ftrns1_diff
+		self.k = k
+		self.sig = sig
+		self.device = device
+		self.x_grid_cart = ftrns1_diff(x_grid)
+		self.locs_ref_cart = ftrns1_diff(torch.Tensor(self.locs_ref).to(device))/1000.0
+		self.lref = len(locs_ref)
+
+		self.mag_coef = nn.Parameter(torch.ones(2))
+		self.epicenter_spatial_coef = nn.Parameter(torch.ones(2))
+		self.depth_spatial_coef = nn.Parameter(torch.zeros(2))
+		self.coefs = nn.Parameter(torch.zeros(x_grid.shape[0], locs_ref.shape[0], 2))
+		self.coefs_ker = nn.Parameter(sig*torch.ones(x_grid.shape[0], locs_ref.shape[0], 3))
+		self.x_grid_save = nn.Parameter(x_grid, requires_grad = False)
+		self.zvec = torch.Tensor([1.0,1.0,0.0]).reshape(1,-1).to(device)
+		self.Softplus = nn.Softplus()
+
+		if interp_type == 'mean':
+			self.Interp = Interpolate(ftrns1_diff, k = k, device = device)
+
+		elif interp_type == 'weighted':
+			self.Interp = InterpolateWeighted(ftrns1_diff, k = k, sig = sig, device = device)
+
+		elif interp_type == 'anisotropic':
+			self.Interp = InterpolateAnisotropic(ftrns1_diff, k = k, sig = sig, device = device)
+
+		else:
+			error('no interp type')
+
+	## Need to double check these routines
+	def forward(self, sta, src, mag, phase, method = 'pairs'):
+
+		## Assume inputs are any number of picks (specified by sta positions and phase), and any number of sources; will populate all pairs
+		sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1)[1].long().contiguous()
+
+		if method == 'pairs':
+
+			fudge = 1.0 # add before log10, to avoid log10(0)
+			pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1_diff(src*self.zvec).unsqueeze(1) - self.ftrns1_diff(sta*self.zvec).unsqueeze(0), dim = 2) + fudge)
+			pw_log_dist_depths = torch.log10(torch.abs(src[:,2].view(-1,1) - sta[:,2].view(1,-1)) + fudge)
+			
+			if len(sta_ind) < self.lref:
+				bias_l = self.Interp(self.x_grid, src, self.coefs[:,sta_ind,:], self.coefs_ker[:,sta_ind,:])
+			else:
+				bias_l = self.Interp(self.x_grid, src, self.coefs, self.coefs_ker)[:,sta_ind,:]
+
+			iwhere_p = torch.where(phase == 0)[0]
+			iwhere_s = torch.where(phase == 1)[0]
+			bias = torch.zeros((bias_l.shape[0], bias_l.shape[1])).to(self.device)
+			bias[:,iwhere_p] = bias_l[:,iwhere_p,0]
+			bias[:,iwhere_s] = bias_l[:,iwhere_s,1]
+			phase = phase.reshape(1,-1)
+
+			log_amp = mag.reshape(-1,1)*self.Softplus(self.mag_coef[phase]) - self.Softplus(self.epicenter_spatial_coef[phase])*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
+
+		elif method == 'direct':
+
+			fudge = 1.0 # add before log10, to avoid log10(0)
+			pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1_diff(src*self.zvec) - self.ftrns1_diff(sta*self.zvec), dim = 1) + fudge)
+			pw_log_dist_depths = torch.log10(torch.abs(src[:,2] - sta[:,2]) + fudge)
+			
+			bias_l = self.Interp(self.x_grid, src, self.coefs, self.coefs_ker) # [:,sta_ind,:]
+			iwhere_p = torch.where(phase == 0)[0]
+			iwhere_s = torch.where(phase == 1)[0]
+			bias = torch.zeros(len(phase)).to(self.device)
+			bias[iwhere_p] = bias_l[iwhere_p, sta_ind[iwhere_p], 0]
+			bias[iwhere_s] = bias_l[iwhere_s, sta_ind[iwhere_s], 1]
+			# phase = phase.reshape(1,-1)
+
+			log_amp = mag*self.Softplus(self.mag_coef[phase]) - self.Softplus(self.epicenter_spatial_coef[phase])*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
+			log_amp = log_amp.reshape(-1,1)
+
+		return log_amp
+
+	def magnitude(self, sta, src, log_amp, phase, method = 'pairs'):
+
+		## Assume inputs are any number of picks (specified by sta positions and phase), and any number of sources; will populate all pairs
+		sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1)[1].long().contiguous()
+
+		if method == 'pairs':
+
+			fudge = 1.0 # add before log10, to avoid log10(0)
+			pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1_diff(src*self.zvec).unsqueeze(1) - self.ftrns1_diff(sta*self.zvec).unsqueeze(0), dim = 2) + fudge)
+			pw_log_dist_depths = torch.log10(torch.abs(src[:,2].view(-1,1) - sta[:,2].view(1,-1)) + fudge)
+			
+			if len(sta_ind) < self.lref:
+				bias_l = self.Interp(self.x_grid, src, self.coefs[:,sta_ind,:], self.coefs_ker[:,sta_ind,:])
+			else:
+				bias_l = self.Interp(self.x_grid, src, self.coefs, self.coefs_ker)[:,sta_ind,:]
+
+			iwhere_p = torch.where(phase == 0)[0]
+			iwhere_s = torch.where(phase == 1)[0]
+			bias = torch.zeros((bias_l.shape[0], bias_l.shape[1])).to(self.device)
+			bias[:,iwhere_p] = bias_l[:,iwhere_p,0]
+			bias[:,iwhere_s] = bias_l[:,iwhere_s,1]
+			phase = phase.reshape(1,-1)
+
+			mag = (log_amp.reshape(1,-1) + self.Softplus(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/self.Softplus(self.mag_coef[phase])
+			# log_amp = mag.reshape(-1,1)*self.Softplus(self.mag_coef[phase]) - self.Softplus(self.epicenter_spatial_coef[phase])*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
+
+		elif method == 'direct':
+
+			fudge = 1.0 # add before log10, to avoid log10(0)
+			pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1_diff(src*self.zvec) - self.ftrns1_diff(sta*self.zvec), dim = 1) + fudge)
+			pw_log_dist_depths = torch.log10(torch.abs(src[:,2] - sta[:,2]) + fudge)
+			
+			bias_l = self.Interp(self.x_grid, src, self.coefs, self.coefs_ker) # [:,sta_ind,:]
+			iwhere_p = torch.where(phase == 0)[0]
+			iwhere_s = torch.where(phase == 1)[0]
+			bias = torch.zeros(len(phase)).to(self.device)
+			bias[iwhere_p] = bias_l[iwhere_p, sta_ind[iwhere_p], 0]
+			bias[iwhere_s] = bias_l[iwhere_s, sta_ind[iwhere_s], 1]
+			# phase = phase.reshape(1,-1)
+			# log_amp = mag*self.Softplus(self.mag_coef[phase]) - self.Softplus(self.epicenter_spatial_coef[phase])*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
+			mag = (log_amp + self.Softplus(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/self.Softplus(self.mag_coef[phase])
+			mag = mag.reshape(-1,1)
+
+		return mag
+
+	def train(self, sta, src, mag, num, phase_type):
+
+		## Assume inputs are any number of picks (specified by sta positions and phase), and any number of sources; will populate all pairs
+		sta_ind = knn(self.locs_ref_cart, self.ftrns1_diff(sta)/1000.0, k = 1)[1].long().contiguous()
+
+		bias_l = self.Interp(self.x_grid, src, self.coefs, self.coefs_ker) # [:,sta_ind,:]
+		bias = bias_l.repeat_interleave(torch.Tensor(num).to(self.device).long(), dim = 0)[torch.arange(num.sum()), sta_ind, phase_type].reshape(-1,1)
+		# bias_s = bias_l.repeat_interleave(torch.Tensor(num_s).to(device).long(), dim = 0)[torch.arange(num_s.sum()),ind_s,1]
+		src_slice = src.repeat_interleave(torch.Tensor(num).to(self.device).long(), dim = 0)
+
+
+		fudge = 1.0 # add before log10, to avoid log10(0)
+		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1_diff(src_slice*self.zvec) - self.ftrns1_diff(sta*self.zvec), dim = 1, keepdim = True) + fudge)
+		pw_log_dist_depths = torch.log10(torch.abs(src_slice[:,2] - sta[:,2]) + fudge).reshape(-1,1)
+
+
+		log_amp = mag.reshape(-1,1)*self.Softplus(self.mag_coef[phase_type]) - self.Softplus(self.epicenter_spatial_coef[phase_type])*pw_log_dist_zero + self.depth_spatial_coef[phase_type]*pw_log_dist_depths + bias
+
+		return log_amp
