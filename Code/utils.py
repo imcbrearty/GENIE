@@ -638,6 +638,7 @@ def load_picks(path_to_file, date, thresh_cut = None, use_quantile = None, min_a
 		
 	P = z['P']
 	z.close()
+	P = P.astype('float')
 	P[:,0] = P[:,0]/spr_picks
 	
 	if use_quantile is not None:
