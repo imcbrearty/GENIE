@@ -72,6 +72,7 @@ use_sources : False
 use_full_network : False
 fixed_subnetworks : True ## If True, this uses realistic sets of stations available from the data saved in Picks. This can improve the model performance on real data (note: pick indices of each station must be saved in P[:,1] of pick files).
 use_preferential_sampling : True ## This concentrates more of the samples around times of known events, so labels arn't too sparse (e.g., trgt values in "project_name"_output.txt in GNN_TrainedNModels should not be all zeros)
+use_extra_nearby_moveouts : True ## This up-samples the amount of sources with moveouts only to nearby stations (e.g., it uses ~half of the distance range set in dist_range for 50% of events)
 use_shallow_sources : False
 
 ## Extra dataset parameters
