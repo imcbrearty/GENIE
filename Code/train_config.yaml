@@ -60,9 +60,9 @@ total_bias: 0.03 ## Total possible bias on travel times (uniform across stations
 
 ## Training params list 3
 dist_range : [15000, 400000] # This is the distance range over which to simulate theoretical moveouts of picks per event. Should scale with domain size.
-max_rate_events : 80 # 350 # 450 # Average rate of events per T window of time (e.g., T = 3 hrs, so 500*8 = 4000 events/day)
+max_rate_events : 100 # 350 # 450 # Average rate of events per T window of time (e.g., T = 3 hrs, so 500*8 = 4000 events/day)
 max_miss_events : 225 # 225 # 325 # Average rate of missed picks per station per T window of time. Note: this parameter does not work quite as intended; it is overwritten by miss_pick_fraction below
-max_false_events : 100 # 250 # 250 # Average rate of false picks per station per T window of time (e.g., T = 3 hrs, so 250*8 = 2000 false picks / station / day)
+max_false_events : 125 # 250 # 250 # Average rate of false picks per station per T window of time (e.g., T = 3 hrs, so 250*8 = 2000 false picks / station / day)
 miss_pick_fraction : [0.1, 0.9] # False # Average ratio of missed picks (if this is not False, it re-scales the miss pick rate to this ratio of true picks)
 T : 10800 # Time window to simualate synthetic data. More variability occurs per-batch, when T is longer. Note that this parameter trades off with max_rate_events, max_miss_events and max_false_events.
 dt : 30 # Time resolution to allow synthetic data parameters to vary in time, during the T window of synthetic data
