@@ -1237,25 +1237,27 @@ for cnt, strs in enumerate([0]):
 	
 	# min_required_picks = 6
 	# min_required_sta = 6
-	
-	ikeep_picks = np.where((cnt_p + cnt_s) >= min_required_picks)[0]
-	ikeep_sta = np.where(np.array([len(np.unique(np.concatenate((Picks_P[j][:,1], Picks_S[j][:,1]), axis = 0))) for j in range(len(srcs_refined))]) >= min_required_sta)[0]
-	ikeep = np.sort(np.array(list(set(ikeep_picks).intersection(ikeep_sta))))
-	
-	srcs_refined = srcs_refined[ikeep]
-	srcs_trv = srcs_trv[ikeep]
-	cnt_p = cnt_p[ikeep]
-	cnt_s = cnt_s[ikeep]
 
-	if len(srcs_trv) == 0:
-		print('No events left after minimum pick requirements')
-		continue
+	if (min_required_picks is not False)*(min_required_sta is not False):
 	
-	Picks_P = [Picks_P[j] for j in ikeep]
-	Picks_S = [Picks_S[j] for j in ikeep]
+		ikeep_picks = np.where((cnt_p + cnt_s) >= min_required_picks)[0]
+		ikeep_sta = np.where(np.array([len(np.unique(np.concatenate((Picks_P[j][:,1], Picks_S[j][:,1]), axis = 0))) for j in range(len(srcs_refined))]) >= min_required_sta)[0]
+		ikeep = np.sort(np.array(list(set(ikeep_picks).intersection(ikeep_sta))))
 	
-	Picks_P_perm = [Picks_P_perm[j] for j in ikeep]
-	Picks_S_perm = [Picks_S_perm[j] for j in ikeep]
+		srcs_refined = srcs_refined[ikeep]
+		srcs_trv = srcs_trv[ikeep]
+		cnt_p = cnt_p[ikeep]
+		cnt_s = cnt_s[ikeep]
+
+		if len(srcs_trv) == 0:
+			print('No events left after minimum pick requirements')
+			continue
+	
+		Picks_P = [Picks_P[j] for j in ikeep]
+		Picks_S = [Picks_S[j] for j in ikeep]
+	
+		Picks_P_perm = [Picks_P_perm[j] for j in ikeep]
+		Picks_S_perm = [Picks_S_perm[j] for j in ikeep]
 	
 	####################################################################################
 	
