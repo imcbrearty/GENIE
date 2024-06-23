@@ -135,8 +135,12 @@ load_prebuilt_sampling_grid = process_config['load_prebuilt_sampling_grid']
 use_expanded_competitive_assignment = process_config['use_expanded_competitive_assignment']
 use_differential_evolution_location = process_config['use_differential_evolution_location']
 
-print('Beginning processing')
+## Minimum required picks and stations per event
+min_required_picks = process_config['min_required_picks']
+min_required_sta = process_config['min_required_sta']
+
 ### Begin automated processing ###
+print('Beginning processing')
 
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
@@ -1165,6 +1169,10 @@ for cnt, strs in enumerate([0]):
 			## of picks per event, and (ii). It still identifies "good" fit and "bad" fit source-arrival pairs,
 			## based on the source-arrival weights.
 
+		if len(srcs_retained) == 0:
+			print('No events left after competitive assignment (e.g., cost is too high w.r.t. amount of available picks)')
+			continue
+		
 		srcs_refined = np.vstack(srcs_retained)
 
 	# Count number of P and S picks
@@ -1225,6 +1233,31 @@ for cnt, strs in enumerate([0]):
 
 	srcs_trv = np.vstack(srcs_trv)
 
+	###### Only keep events with minimum number of picks and observing stations #########
+	
+	# min_required_picks = 6
+	# min_required_sta = 6
+	
+	ikeep_picks = np.where((cnt_p + cnt_s) >= min_required_picks)[0]
+	ikeep_sta = np.where(np.array([len(np.unique(np.concatenate((Picks_P[j][:,1], Picks_S[j][:,1]), axis = 0))) for j in range(len(srcs_refined))]) >= min_required_sta)[0]
+	ikeep = np.sort(np.array(list(set(ikeep_picks).intersection(ikeep_sta))))
+	
+	srcs_refined = srcs_refined[ikeep]
+	srcs_trv = srcs_trv[ikeep]
+	cnt_p = cnt_p[ikeep]
+	cnt_s = cnt_s[ikeep]
+
+	if len(srcs_trv) == 0:
+		print('No events left after minimum pick requirements')
+		continue
+	
+	Picks_P = [Picks_P[j] for j in ikeep]
+	Picks_S = [Picks_S[j] for j in ikeep]
+	
+	Picks_P_perm = [Picks_P_perm[j] for j in ikeep]
+	Picks_S_perm = [Picks_S_perm[j] for j in ikeep]
+	
+	####################################################################################
 	
 	## Compute magnitudes.
 	# min_log_amplitude_val = -2.0 ## Choose this value to ignore very small amplitudes
