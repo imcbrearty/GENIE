@@ -60,3 +60,7 @@ process_known_events: False ## Only process times of known events in a reference
 load_prebuilt_sampling_grid: True ## Use the pre-built spatial grid to save initial source detections on (note: if False, we re-make the spatial grid to save initial source detections on each time)
 use_expanded_competitive_assignment: True ## This is advised, but the code is complex to avoid both memory issues and handling nearby or overlapping sources
 use_differential_evolution_location: True # otherwise use particle swarm to locate, which tends to converge less well (especially in depth)
+
+## Minimum requirements for keeping event after associations
+min_required_picks: 5 ## Minimum required picks per event
+min_required_sta: 5 ## Minimum required stations per event
