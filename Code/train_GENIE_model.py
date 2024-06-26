@@ -169,7 +169,18 @@ use_stable_association_labels = train_config['use_stable_association_labels']
 thresh_noise_max = train_config['thresh_noise_max'] # ratio of sig_t*travel time considered excess noise
 min_misfit_allowed = train_config['min_misfit_allowed'] ## The minimum error on theoretical vs. observed travel times that beneath which, picks have positive associaton labels (the upper limit is set by a percentage of the travel time)
 total_bias = train_config['total_bias'] ## The total (uniform across stations) bias on travel times for each synthetic earthquake (helps add robustness to uncertainity on assumed and true velocity models)
-training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias]
+
+if 'correlated_noise_rate' in train_config.keys(): # correlated_noise_rate, correlated_noise_sigma
+	correlated_noise_rate = train_config['correlated_noise_rate']
+else:
+	correlated_noise_rate = 0.0
+
+if 'correlated_noise_sigma' in train_config.keys(): # correlated_noise_rate, correlated_noise_sigma
+	correlated_noise_sigma = train_config['correlated_noise_sigma']
+else:
+	correlated_noise_sigma = 5.0
+
+training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias, correlated_noise_rate, correlated_noise_sigma]
 
 ## Training params list 3
 # n_batch = train_config['n_batch']
@@ -202,7 +213,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
 
 	n_spc_query, n_src_query = training_params
-	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias = training_params_2
+	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias, correlated_noise_rate, correlated_noise_sigma = training_params_2
 	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts = training_params_3
 
 	# spc_random = 20e3
@@ -389,6 +400,19 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	false_indices = np.hstack([k*np.ones(vals[k,:].sum()) for k in range(n_sta)])
 	n_false = len(false_times)
 	false_arrivals = np.concatenate((false_times.reshape(-1,1), false_indices.reshape(-1,1), -1.0*np.ones((n_false,1)), np.zeros((n_false,1)), -1.0*np.ones((n_false,1))), axis = 1)
+
+	if correlated_noise_rate > 0:
+		## For each false arrival, add a proportion of false arrivals within +/- error time on adjacent stations
+		edges_neighbors = cKDTree(ftrns1(locs)).query(ftrns1(locs), k = k_sta_edges)[1]
+		ichoose = np.random.choice(len(false_arrivals), size = int(len(false_arrivals)*correlated_noise_rate), replace = False)
+		ichoose_neighbor = np.random.choice(k_sta_edges, size = len(ichoose))
+		n_false_neighbor = len(ichoose)
+
+		false_neighbor_time = false_arrivals[ichoose,0] + correlated_noise_sigma*np.random.laplace(size = n_false_neighbor)
+		false_neighbor_index = edges_neighbors[false_arrivals[ichoose,1].astype('int'), ichoose_neighbor]
+		false_arrivals_neighbors = np.concatenate((false_neighbor_time.reshape(-1,1), false_neighbor_index.reshape(-1,1), -1.0*np.ones((n_false_neighbor,1)), np.zeros((n_false_neighbor,1)), -1.0*np.ones((n_false_neighbor,1))), axis = 1)
+		false_arrivals = np.concatenate((false_arrivals, false_arrivals_neighbors), axis = 0)
+	
 	arrivals = np.concatenate((arrivals, false_arrivals), axis = 0)
 
 	# n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
