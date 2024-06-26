@@ -88,6 +88,7 @@ n_ver_load = process_config['n_ver_load']
 n_step_load = process_config['n_step_load']
 template_ver = process_config['template_ver']
 vel_model_ver = process_config['vel_model_ver']
+use_differential_evolution_location  = process_config['use_differential_evolution_location']
 
 ### Begin automated processing ###
 print('Beginning calibration')
