@@ -405,7 +405,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if correlated_noise_rate > 0:
 		## For each false arrival, add a proportion of false arrivals within +/- error time on adjacent stations
 		edges_neighbors = cKDTree(ftrns1(locs)).query(ftrns1(locs), k = k_sta_edges)[1]
-		ichoose = np.random.choice(len(false_arrivals), size = int(len(false_arrivals)*correlated_noise_rate), replace = False)
+		ichoose = np.random.choice(len(false_arrivals), size = int(len(false_arrivals)*correlated_noise_rate))
 		ichoose_neighbor = np.random.choice(k_sta_edges, size = len(ichoose))
 		n_false_neighbor = len(ichoose)
 
