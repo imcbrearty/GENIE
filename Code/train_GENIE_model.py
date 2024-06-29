@@ -476,7 +476,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
 
 	## arrivals[:,4] = np.copy(phase_observed) ## Make the saved picks have phase values consistent with phase_observed
-
+	## Need to make sure doing this doesn't cause an issue later, if the arrivals[:,4] is used to check for -1 entries
+	## (and hence, that an arrival is a false arrival). Arrivals is also copied into the meta variable
+	
 	if use_sources == False:
 		time_samples = np.sort(np.random.rand(n_batch)*T) ## Uniform
 
