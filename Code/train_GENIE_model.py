@@ -341,9 +341,13 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	dist_thresh_p = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None] # Increased sig from 20e3 to 25e3 # Decreased to 10 km
 	dist_thresh_s = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None]
 
-	ikeep_p1, ikeep_p2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_p))
-	ikeep_s1, ikeep_s2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_s))
+	# ikeep_p1, ikeep_p2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_p))
+	# ikeep_s1, ikeep_s2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_s))
 
+	## Replacing with Laplacian noise, per station
+	ikeep_p1, ikeep_p2 = np.where(((sr_distances + spc_random*np.random.laplace(size = (n_src, n_sta))) < dist_thresh_p))
+	ikeep_s1, ikeep_s2 = np.where(((sr_distances + spc_random*np.random.laplace(size = (n_src, n_sta))) < dist_thresh_s))
+	
 	arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
 
 	add_bias_scaled_travel_time_noise = True ## This way, some "true moveouts" will have travel time 
