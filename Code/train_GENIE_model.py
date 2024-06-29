@@ -467,13 +467,15 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if len(iwhere_false) > 0: # For false picks, assign a random phase type
 		phase_observed[iwhere_false] = np.random.randint(0, high = 2, size = len(iwhere_false))
 
+	## Note: the perturbed phases are only being applied to 
 	perturb_phases = True # For true picks, randomly flip a fraction of phases
 	if (len(phase_observed) > 0)*(perturb_phases == True):
 		n_switch = int(np.random.rand()*(0.2*len(iwhere_real))) # switch up to 20% phases
 		iflip = np.random.choice(iwhere_real, size = n_switch, replace = False)
 		phase_observed[iflip] = np.mod(phase_observed[iflip] + 1, 2)
 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
-	
+
+	## arrivals[:,4] = np.copy(phase_observed) ## Make the saved picks have phase values consistent with phase_observed
 
 	if use_sources == False:
 		time_samples = np.sort(np.random.rand(n_batch)*T) ## Uniform
