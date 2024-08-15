@@ -6,7 +6,7 @@ Follow order of scripts explained in "Applying the model" section. Most of the p
 
 To train the model, the training parameters in "train_config.yaml" should be adapted somewhat for different settings. Several parameters that become the inputs to the "generate_synthetic_data" function (defined in lists "training_params", "training_params_2", and "training_params_3") should be edited based on the source domain scale and station distribution. These control things like the average background rate of sources, missed and false pick rates, travel time uncertainity levels, source and spatial label kernel widths, max moveout distances of sources, etc. 
 
-The training speed can be improved by first building the training data using "generate_synthetic_data", saving the data to distinct files, and loading during training (the memory cost of the files can be ~Tb in size). Currently it builds a new batch of training data between each update step.
+The training speed can be improved by first building the training data and saving it to distinct files (using build_training_data = True), and loading during training (the memory cost of the files can be ~Tb in size). By default it builds a new batch of training data between each update step.
 
 Use the parameter "fixed_subnetworks" in train_config.yaml to train the GNN on specific instances of subnetworks available per day, as recorded in the pick data (else, only random subsets of stations are chosen).
 
