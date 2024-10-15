@@ -10,7 +10,7 @@ The training speed can be improved by first building the training data and savin
 
 Use the parameter "fixed_subnetworks" in train_config.yaml to train the GNN on specific instances of subnetworks available per day, as recorded in the pick data (else, only random subsets of stations are chosen).
 
-Note, there are a few fixed scale-dependent parameters in module.py, such as "scale_rel", "scale_t" and "eps"; these are used to normalize typical offset distances between nodes, and arival time uncertainities. For small applications (e.g., < 50 km or so), these parameters should typically be decreased from their default values somewhat. In the future, these variables will be set in one of the config files.
+Note, there are a few fixed scale-dependent parameters in module.py, such as "scale_rel", "scale_t" and "eps"; these are used to normalize typical offset distances between nodes, and arival time uncertainities. For small applications (e.g., < 50 km or so), these parameters should typically be decreased from their default values. In the future, these variables will be set in one of the config files.
 
 ## Running process_continuous_days.py
 
