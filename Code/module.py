@@ -746,7 +746,7 @@ class TravelTimes(nn.Module):
 
 class TravelTimesPN(nn.Module):
 
-	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_hidden = 80, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, device = 'cuda'):
+	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_hidden = 100, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, device = 'cuda'):
 		super(TravelTimesPN, self).__init__()
 
 		## Relative offset prediction [2]
