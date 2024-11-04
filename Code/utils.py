@@ -571,6 +571,42 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 	
 	return trv
 
+def load_travel_time_neural_network_physics_informed(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
+
+	from module import TravelTimesPN
+	seperator = '\\' if '\\' in path_to_file else '/'
+	
+	z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+	n_phases = z['out1'].shape[1]
+	v_mean, scale_params = z['v_mean'], z['scale_params']
+	# scale_val = float(z['scale_val'])
+	# trav_val = float(z['trav_val'])
+	z.close()
+
+	max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor = scale_params
+	
+	norm_pos = lambda x: x/max_dist
+	norm_time = lambda t: t/max_time
+	norm_vel = lambda v: v/vp_max
+
+	inorm_pos = lambda x: x*max_dist
+	inorm_time = lambda t: t*max_time
+	inorm_vel = lambda v: v*vp_max	
+	
+	m = TravelTimesPN(ftrns1, ftrns2, n_phases = n_phases, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
+	m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
+	m.eval()
+
+	if method == 'relative pairs':
+
+		trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'pairs')
+
+	if method == 'direct':
+
+		trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'direct')
+	
+	return trv
+
 def load_station_corrections(trv, locs, path_to_file, name_of_project, n_ver_corrections, ftrns1_diff, ind_use = None, trv_direct = None, device = 'cpu'):
 
 	from calibration_utils import TrvTimesCorrection
