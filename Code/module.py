@@ -744,6 +744,104 @@ class TravelTimes(nn.Module):
 
 			return torch.sigmoid(self.fc3(sta_repeat - src_repeat)).reshape(len(src), len(sta), -1)
 
+class TravelTimesPN(nn.Module):
+
+	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_hidden = 80, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, device = 'cuda'):
+		super(TravelTimesPN, self).__init__()
+
+		## Relative offset prediction [2]
+		self.fc1_1 = nn.Linear(3 + n_phases, n_hidden)
+		self.fc1_2 = nn.Linear(n_hidden, n_hidden)
+		self.fc1_3 = nn.Linear(n_hidden, n_hidden)
+		self.fc1_4 = nn.Linear(n_hidden, n_phases)
+		self.activate1_1 = nn.PReLU()
+		self.activate1_2 = nn.PReLU()
+		self.activate1_3 = nn.PReLU()
+
+		## Absolute position prediction [3]
+		self.fc2_1 = nn.Linear(6 + n_phases, n_hidden)
+		self.fc2_2 = nn.Linear(n_hidden, n_hidden)
+		self.fc2_3 = nn.Linear(n_hidden, n_hidden)
+		self.fc2_4 = nn.Linear(n_hidden, n_phases)
+		self.activate2_1 = nn.PReLU()
+		self.activate2_2 = nn.PReLU()
+		self.activate2_3 = nn.PReLU()
+
+		## Projection functions
+		self.ftrns1 = ftrns1
+		self.ftrns2 = ftrns2
+		# self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
+		# self.tscale = torch.Tensor([trav_val]).to(device)
+		self.v_mean = torch.Tensor(v_mean).to(device)
+		self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
+		self.device = device
+		self.norm_pos = norm_pos
+		self.inorm_pos = inorm_pos
+		self.inorm_time = inorm_time
+		self.norm_vel = norm_vel
+		self.conversion_factor = conversion_factor
+		# self.Tp_average
+
+	def fc1_block(self, x):
+
+		x1 = self.activate1_1(self.fc1_1(x))
+		x = self.activate1_2(self.fc1_2(x1)) + x1
+		x1 = self.activate1_3(self.fc1_3(x)) + x
+
+		return self.fc1_4(x1)
+
+	def fc2_block(self, x):
+
+		x1 = self.activate2_1(self.fc2_1(x))
+		x = self.activate2_2(self.fc2_2(x1)) + x1
+		x1 = self.activate2_3(self.fc2_3(x)) + x
+
+		return self.fc2_4(x1)
+
+	def forward(self, sta, src, method = 'pairs', train = False):
+
+		if method == 'direct':
+
+			sta_proj = self.norm_pos(self.ftrns1(sta))
+			src_proj = self.norm_pos(self.ftrns1(src))
+
+			if train == True:
+				src_proj = Variable(src_proj, requires_grad = True)
+
+			base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.view(1,-1)
+
+			pred = self.fc1_block( torch.cat((sta_proj - src_proj, base_val), dim = 1) ) + self.fc2_block( torch.cat((sta_proj, src_proj, base_val), dim = 1) )
+
+			if train == True:
+
+				return base_val, pred, src_proj
+
+			else:
+
+				return torch.relu(self.inorm_time(base_val + pred))
+
+		elif method == 'pairs':
+
+			## First, create all pairs of srcs and recievers
+
+			src_repeat = self.norm_pos(self.ftrns1(src)).repeat_interleave(len(sta), dim = 0) # /self.scale
+			sta_repeat = self.norm_pos(self.ftrns1(sta)).repeat(len(src), 1) # /self.scale
+
+			if train == True:
+				src_repeat = Variable(src_repeat, requires_grad = True)
+
+			base_val = self.conversion_factor*(torch.norm(sta_repeat - src_repeat, dim = 1, keepdim = True)/self.v_mean_norm.view(1,-1)) # .reshape(len(src), len(sta), -1)
+
+			pred = (self.fc1_block(torch.cat((sta_repeat - src_repeat, base_val), dim = 1)) + self.fc2_block(torch.cat((sta_repeat, src_repeat, base_val), dim = 1))).reshape(len(src), len(sta), -1)
+
+			if train == True:
+
+				return base_val.reshape(len(src), len(sta), -1), pred, src_repeat.reshape(len(src), len(sta), -1)
+
+			else:
+
+				return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
+
 ## Magnitude class
 class MagPred(nn.Module):
 	def __init__(self, locs, grid, ftrns1_diff, ftrns2_diff, k = 1, device = 'cuda'):
