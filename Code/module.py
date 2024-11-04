@@ -16,6 +16,7 @@ from torch_geometric.utils import remove_self_loops, subgraph
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
+from torch.autograd import Variable
 from torch_scatter import scatter
 from numpy.matlib import repmat
 import itertools
