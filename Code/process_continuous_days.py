@@ -147,6 +147,7 @@ with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 name_of_project = config['name_of_project']
+use_physics_informed = config['use_physics_informed']
 
 # Load day to process
 z = open(path_to_file + '%s_process_days_list_ver_%d.txt'%(name_of_project, process_days_ver), 'r')
@@ -240,7 +241,7 @@ if config['train_travel_time_neural_network'] == False:
 elif config['train_travel_time_neural_network'] == True:
 
 	n_ver_trv_time_model_load = 1
-	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, device = device)
+	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, device = device, use_physics_informed = use_physics_informed)
 
 if (use_differential_evolution_location == False)*(config['train_travel_time_neural_network'] == False):
 	hull = ConvexHull(X)
