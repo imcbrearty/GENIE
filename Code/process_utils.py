@@ -651,6 +651,33 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 
 	return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
+def compute_time_embedding_vectors(trv_pairwise, locs, x_grid, A_src_in_sta, max_t, dt_res = 2.5, k_times = 10, t_win = 10, device = 'cpu'):
+
+	## Find sparse set of arrival embedding indices for each station into the subgraph
+	trv_out = trv_pairwise(torch.Tensor(locs).to(device)[A_src_in_sta[0]], torch.Tensor(x_grid).to(device)[A_src_in_sta[1]])
+
+	## Make tree and find look up
+	scale_sta_ind = max_t*2.0
+	tree_p = cKDTree(np.concatenate((scale_sta_ind*A_src_in_sta[0].cpu().detach().numpy().reshape(-1,1), trv_out[:,0].cpu().detach().numpy().reshape(-1,1)), axis = 1))
+	tree_s = cKDTree(np.concatenate((scale_sta_ind*A_src_in_sta[0].cpu().detach().numpy().reshape(-1,1), trv_out[:,1].cpu().detach().numpy().reshape(-1,1)), axis = 1))
+
+	dt_partition = np.arange(-t_win, max_t + t_win, dt_res)
+	sta_ind_range = np.arange(0, len(locs))
+	x11, x12 = np.meshgrid(dt_partition, sta_ind_range)
+	query_points = np.concatenate((scale_sta_ind*x12.reshape(-1,1), x11.reshape(-1,1)), axis = 1)
+	l_dt = len(dt_partition)
+	## Query points is ordered by each station, all time steps
+
+	edges_time_p = tree_p.query(query_points, k = k_times)
+	edges_time_s = tree_s.query(query_points, k = k_times)
+	assert(edges_time_p[0].max() < max_t)
+	assert(edges_time_s[0].max() < max_t)
+	edges_time_p = edges_time_p[1].reshape(-1)
+	edges_time_s = edges_time_s[1].reshape(-1)
+	assert(edges_time_p.shape[0]/(locs.shape[0]*k_times*len(dt_partition)) == 1)
+	assert(edges_time_s.shape[0]/(locs.shape[0]*k_times*len(dt_partition)) == 1)
+
+	return edges_time_p, edges_time_s, dt_partition
 
 def competitive_assignment(w, sta_inds, cost, min_val = 0.02, restrict = None, force_n_sources = None, verbose = False):
 
