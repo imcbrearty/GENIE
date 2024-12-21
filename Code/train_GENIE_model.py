@@ -970,6 +970,8 @@ if build_training_data == True:
 				A_prod_sta_sta_l[i] = A_prod_sta_sta
 				A_prod_src_src_l[i] = A_prod_src_src
 				A_src_in_prod_l[i] = A_src_in_prod
+				A_edges_time_p_l[i] = A_edges_time_p
+				A_edges_time_s_l[i] = A_edges_time_s
 				Inpts[i] = np.copy(np.ascontiguousarray(Inpts[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
 				Masks[i] = np.copy(np.ascontiguousarray(Masks[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))			
 				
