@@ -1006,9 +1006,9 @@ if build_training_data == True:
 			h['A_prod_sta_sta_%d'%i] = A_prod_sta_sta_l[i]
 			h['A_prod_src_src_%d'%i] = A_prod_src_src_l[i]
 			h['A_src_in_prod_%d'%i] = A_src_in_prod_l[i]
+			# h['A_src_in_prod_x_%d'%i] = A_src_in_prod_l[i].x
+			# h['A_src_in_prod_edges_%d'%i] = A_src_in_prod_l[i].edge_index
 			if use_subgraph == True:
-				h['A_src_in_prod_x_%d'%i] = A_src_in_prod.x
-				h['A_src_in_prod_edges_%d'%i] = A_src_in_prod.edge_index
 				h['A_src_in_sta_%d'%i] = A_src_in_sta
 
 			h['A_edges_time_p_%d'%i] = A_edges_time_p_l[i]
@@ -1112,8 +1112,8 @@ for i in range(n_restart_step, n_epochs):
 			A_prod_sta_sta_l = []
 			A_prod_src_src_l = []
 			A_src_in_prod_l = []
-			A_src_in_prod_x_l = []
-			A_src_in_prod_edges_l = []
+			# A_src_in_prod_x_l = []
+			# A_src_in_prod_edges_l = []
 			A_edges_time_p_l = []
 			A_edges_time_s_l = []
 			A_edges_ref_l = []
@@ -1141,9 +1141,10 @@ for i in range(n_restart_step, n_epochs):
 			A_prod_src_src_l.append(h['A_prod_src_src_%d'%i0][:])
 			A_src_in_prod_l.append(h['A_src_in_prod_%d'%i0][:])
 
+			# A_src_in_prod_l.append(h['A_src_in_prod_%d'%i0][:])
+			# A_src_in_prod_x_l.append(h['A_src_in_prod_x_%d'%i0][:])
+			# A_src_in_prod_edges_l.append(h['A_src_in_prod_edges_%d'%i0][:])
 			if use_subgraph == True:
-				A_src_in_prod_x_l.append(h['A_src_in_prod_x_%d'%i0][:])
-				A_src_in_prod_edges_l.append(h['A_src_in_prod_edges_%d'%i0][:])
 				A_src_in_sta_l.append(h['A_src_in_sta_%d'%i][:])
 			
 			A_edges_time_p_l.append(h['A_edges_time_p_%d'%i0][:])
@@ -1184,8 +1185,8 @@ for i in range(n_restart_step, n_epochs):
 		trv_out_src = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(x_src_query).to(device)).detach()
 
 		
-		is use_subgraph == True:
-			A_src_in_prod = Data(torch.Tensor(A_src_in_prod_x_l[i0]).to(device), edge_index = torch.Tensor(A_src_in_prod_edges_l[i0]).long().to(device))
+		if use_subgraph == True:
+			A_src_in_prod_l[i0] = Data(torch.Tensor(A_src_in_prod_x_l[i0]).to(device), edge_index = torch.Tensor(A_src_in_prod_edges_l[i0]).long().to(device))
 			trv_out = trv_pairwise(torch.Tensor(Locs[i0][A_src_in_sta_l[i0][0]]).to(device), torch.Tensor(X_fixed[i0][A_src_in_sta_l[i0][1]]).to(device))		
 		
 		tq_sample = torch.rand(n_src_query).to(device)*t_win - t_win/2.0
@@ -1197,8 +1198,8 @@ for i in range(n_restart_step, n_epochs):
 		spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(X_fixed[i0], axis = 1), Locs[i0].shape[0], axis = 1) - np.repeat(np.expand_dims(Locs[i0], axis = 0), X_fixed[i0].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
 
 		# Pre-process tensors for Inpts and Masks
-		input_tensor_1 = torch.Tensor(Inpts[i0]).to(device).reshape(-1, 4)
-		input_tensor_2 = torch.Tensor(Masks[i0]).to(device).reshape(-1, 4)
+		input_tensor_1 = torch.Tensor(Inpts[i0]).to(device) # .reshape(-1, 4)
+		input_tensor_2 = torch.Tensor(Masks[i0]).to(device) # .reshape(-1, 4)
 
 		# Process tensors for A_prod and A_src arrays
 		A_prod_sta_tensor = torch.Tensor(A_prod_sta_sta_l[i0]).long().to(device)
