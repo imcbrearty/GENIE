@@ -1117,6 +1117,7 @@ for i in range(n_restart_step, n_epochs):
 			A_edges_time_p_l = []
 			A_edges_time_s_l = []
 			A_edges_ref_l = []
+			A_src_in_sta_l = []
 
 			## Note: it would be more efficient (speed and memory) to pass 
 			## in each sample one at time, rather than appending batch to a list
@@ -1139,9 +1140,12 @@ for i in range(n_restart_step, n_epochs):
 			A_prod_sta_sta_l.append(h['A_prod_sta_sta_%d'%i0][:])
 			A_prod_src_src_l.append(h['A_prod_src_src_%d'%i0][:])
 			A_src_in_prod_l.append(h['A_src_in_prod_%d'%i0][:])
-			A_src_in_prod_x_l.append(h['A_src_in_prod_x_%d'%i0][:])
-			A_src_in_prod_edges_l.append(h['A_src_in_prod_edges_%d'%i0][:])
 
+			if use_subgraph == True:
+				A_src_in_prod_x_l.append(h['A_src_in_prod_x_%d'%i0][:])
+				A_src_in_prod_edges_l.append(h['A_src_in_prod_edges_%d'%i0][:])
+				A_src_in_sta_l.append(h['A_src_in_sta_%d'%i][:])
+			
 			A_edges_time_p_l.append(h['A_edges_time_p_%d'%i0][:])
 			A_edges_time_s_l.append(h['A_edges_time_s_%d'%i0][:])
 			A_edges_ref_l.append(h['A_edges_ref_%d'%i0][:])
@@ -1178,6 +1182,12 @@ for i in range(n_restart_step, n_epochs):
 
 		trv_out = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(X_fixed[i0]).to(device)).detach().reshape(-1,2) ## Note: could also just take this from x_grids_trv
 		trv_out_src = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(x_src_query).to(device)).detach()
+
+		
+		is use_subgraph == True:
+			A_src_in_prod = Data(torch.Tensor(A_src_in_prod_x_l[i0]).to(device), edge_index = torch.Tensor(A_src_in_prod_edges_l[i0]).long().to(device))
+			trv_out = trv_pairwise(torch.Tensor(Locs[i0][A_src_in_sta_l[i0][0]]).to(device), torch.Tensor(X_fixed[i0][A_src_in_sta_l[i0][1]]).to(device))		
+		
 		tq_sample = torch.rand(n_src_query).to(device)*t_win - t_win/2.0
 		tq = torch.arange(-t_win/2.0, t_win/2.0 + 1.0).reshape(-1,1).float().to(device)
 
