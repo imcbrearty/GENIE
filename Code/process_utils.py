@@ -619,6 +619,9 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	# spatial_vals = torch.Tensor((ftrns1(x_grid[A_src_in_prod[1].cpu().detach().numpy()]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()]))/scale_pairwise_sta_in_src_distances).to(device)
 	# A_src_in_prod = Data(x = spatial_vals, edge_index = A_src_in_prod)
 
+	spatial_vals = torch.Tensor(x_grid[A_src_in_prod[1].cpu().detach().numpy()] - locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()]).to(device)
+
+	
 	A_prod_sta_sta = []
 	A_prod_src_src = []
 
@@ -649,7 +652,7 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	isort = np.lexsort((A_prod_src_src[0].cpu().detach().numpy(), A_prod_src_src[1].cpu().detach().numpy())) # Likely not actually necessary
 	A_prod_src_src = A_prod_src_src[:,isort]
 
-	return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+	return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta, spatial_vals] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 def compute_time_embedding_vectors(trv_pairwise, locs, x_grid, A_src_in_sta, max_t, dt_res = 2.5, k_times = 10, t_win = 10, device = 'cpu'):
 
