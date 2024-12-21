@@ -61,6 +61,11 @@ k_time_edges: 10
 t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
 
+## Use subgraph
+use_subgraph: False
+max_deg_offset: 1.5
+k_nearest_pairs: 30
+
 ## Additional training params
 device: 'cuda' # or 'cpu'
 max_number_pick_association_labels_per_sample: 1500 # Max number of picks to compute associations for during training 
