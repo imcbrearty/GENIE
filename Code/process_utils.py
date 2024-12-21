@@ -547,7 +547,7 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 
 	return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
-def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_offset = 5.0, k_nearest_pairs = 30, k_sta_edges = 10, k_spc_edges = 15, verbose = False, scale_pairwise_sta_in_src_distances = 100e3, scale_deg = 110e3):
+def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_offset = 5.0, k_nearest_pairs = 30, k_sta_edges = 10, k_spc_edges = 15, verbose = False, scale_pairwise_sta_in_src_distances = 100e3, scale_deg = 110e3, device = 'cpu'):
 
 	## Connect all source-reciever pairs to their k_nearest_pairs, and those connections within max_deg_offset.
 	## By using the K-nn neighbors as well as epsilon-pairs, this ensures all source nodes are at least
@@ -572,8 +572,8 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	perm_vec[ind_use] = np.arange(len(ind_use))
 
 	## This will put more edges on the longitude or latitude axis, due to the shape of the Earth?
-	A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0), torch.Tensor(ftrns1(locs[ind_use])/1000.0), k = k_sta_edges + 1).flip(0).long().contiguous())[0]
-	A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)/1000.0), torch.Tensor(ftrns1(x_grid)/1000.0), k = k_spc_edges + 1).flip(0).long().contiguous())[0]
+	A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), k = k_sta_edges + 1).flip(0).long().contiguous())[0]
+	A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_spc_edges + 1).flip(0).long().contiguous())[0]
 
 	## Make "incoming" edges for all sources based on epsilon-distance graphs, since these are the nodes that need nearest stations
 	# dist_pairwise_src_locs = np.expand_dims(x_grid[:,0:2], axis = 1) - np.expand_dims(locs[:,0:2], axis = 0)
@@ -581,10 +581,10 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	# dist_pairwise_src_locs[:,:,1] = np.mod(dist_pairwise_src_locs[:,:,1], 360.0) ## Modulus on longitude distance
 	pairwise_src_locs_distances = np.linalg.norm(dist_pairwise_src_locs, axis = 2)
 	ind_src_keep, ind_sta_keep = np.where(pairwise_src_locs_distances < scale_deg*max_deg_offset)
-	A_src_in_sta_epsilon = torch.cat((torch.Tensor(ind_sta_keep.reshape(1,-1)), torch.Tensor(ind_src_keep.reshape(1,-1))), dim = 0).long()
+	A_src_in_sta_epsilon = torch.cat((torch.Tensor(ind_sta_keep.reshape(1,-1)).to(device), torch.Tensor(ind_src_keep.reshape(1,-1)).to(device)), dim = 0).long()
 
 	## Make "incoming" edges for all sources based on knn, since these are the nodes that need nearest stations
-	A_src_in_sta_knn = knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0), torch.Tensor(ftrns1(x_grid)/1000.0), k = k_nearest_pairs).flip(0).long().contiguous()
+	A_src_in_sta_knn = knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_nearest_pairs).flip(0).long().contiguous()
 
 	## Combine edges to a single source-station pairwise set of edges
 	A_src_in_sta = torch.cat((A_src_in_sta_epsilon, A_src_in_sta_knn), dim = 1)
@@ -613,10 +613,10 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	## for source_1 in Source graph and source_2 in Cartesian product graph
 	tree_srcs_in_prod = cKDTree(A_src_in_sta[1][:,None])
 	lp_src_in_prod = tree_srcs_in_prod.query_ball_point(np.arange(x_grid.shape[0])[:,None], r = 0)
-	A_src_in_prod = torch.Tensor(np.hstack([np.concatenate((np.array(lp_src_in_prod[j]).reshape(1,-1), j*np.ones(len(lp_src_in_prod[j])).reshape(1,-1)), axis = 0) for j in range(x_grid.shape[0])])).long()
+	A_src_in_prod = torch.Tensor(np.hstack([np.concatenate((np.array(lp_src_in_prod[j]).reshape(1,-1), j*np.ones(len(lp_src_in_prod[j])).reshape(1,-1)), axis = 0) for j in range(x_grid.shape[0])])).long().to(device)
 	# spatial_vals = torch.Tensor(x_grid[A_src_in_sta[1]] - locs_use[A_src_in_sta[0]] ## This approach assumes all station indices are ordered
 	# spatial_vals = torch.Tensor((ftrns1(x_grid[A_src_in_prod[1]]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]]]))/110e3*scale_src_in_prod)
-	spatial_vals = torch.Tensor((ftrns1(x_grid[A_src_in_prod[1]]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]]]))/scale_pairwise_sta_in_src_distances)
+	spatial_vals = torch.Tensor((ftrns1(x_grid[A_src_in_prod[1]]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]]]))/scale_pairwise_sta_in_src_distances).to(device)
 	A_src_in_prod = Data(x = spatial_vals, edge_index = A_src_in_prod)
 
 	A_prod_sta_sta = []
@@ -641,12 +641,12 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 		shift_ind = sta_ind_lists[slice_edges*n_sta + i]
 		assert(shift_ind.min() >= 0)
 		## For each source, need to find where that station index is in the "order" of the subgraph Cartesian product
-		A_prod_src_src.append(torch.Tensor(cum_count_degree_of_src_nodes[slice_edges] + shift_ind))
+		A_prod_src_src.append(torch.Tensor(cum_count_degree_of_src_nodes[slice_edges] + shift_ind).to(device))
 
 	## Make cartesian product graphs
 	A_prod_sta_sta = torch.hstack(A_prod_sta_sta).long()
 	A_prod_src_src = torch.hstack(A_prod_src_src).long()
-	isort = np.lexsort((A_prod_src_src[0], A_prod_src_src[1])) # Likely not actually necessary
+	isort = np.lexsort((A_prod_src_src[0].cpu().detach().numpy(), A_prod_src_src[1].cpu().detach().numpy())) # Likely not actually necessary
 	A_prod_src_src = A_prod_src_src[:,isort]
 
 	return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
