@@ -1186,8 +1186,13 @@ for i in range(n_restart_step, n_epochs):
 
 		
 		if use_subgraph == True:
-			A_src_in_prod_l[i0] = Data(torch.Tensor(A_src_in_prod_x_l[i0]).to(device), edge_index = torch.Tensor(A_src_in_prod_edges_l[i0]).long().to(device))
-			trv_out = trv_pairwise(torch.Tensor(Locs[i0][A_src_in_sta_l[i0][0]]).to(device), torch.Tensor(X_fixed[i0][A_src_in_sta_l[i0][1]]).to(device))		
+			# A_src_in_prod_l[i0] = Data(torch.Tensor(A_src_in_prod_x_l[i0]).to(device), edge_index = torch.Tensor(A_src_in_prod_edges_l[i0]).long().to(device))
+			trv_out = trv_pairwise(torch.Tensor(Locs[i0][A_src_in_sta_l[i0][0]]).to(device), torch.Tensor(X_fixed[i0][A_src_in_sta_l[i0][1]]).to(device))
+			spatial_vals = torch.Tensor((X_fixed[i0][A_src_in_prod_l[i0][1].cpu().detach().numpy()] - Locs[i0][A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()])/scale_x_extend).to(device)
+
+		else:
+			spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(X_fixed[i0], axis = 1), Locs[i0].shape[0], axis = 1) - np.repeat(np.expand_dims(Locs[i0], axis = 0), X_fixed[i0].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
+	
 		
 		tq_sample = torch.rand(n_src_query).to(device)*t_win - t_win/2.0
 		tq = torch.arange(-t_win/2.0, t_win/2.0 + 1.0).reshape(-1,1).float().to(device)
@@ -1195,7 +1200,6 @@ for i in range(n_restart_step, n_epochs):
 		if len(lp_srcs[i0]) > 0:
 			tq_sample[0:len(lp_srcs[i0])] = torch.Tensor(lp_srcs[i0][:,3]).to(device)
 
-		spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(X_fixed[i0], axis = 1), Locs[i0].shape[0], axis = 1) - np.repeat(np.expand_dims(Locs[i0], axis = 0), X_fixed[i0].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
 
 		# Pre-process tensors for Inpts and Masks
 		input_tensor_1 = torch.Tensor(Inpts[i0]).to(device) # .reshape(-1, 4)
