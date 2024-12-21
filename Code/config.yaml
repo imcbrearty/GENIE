@@ -14,6 +14,7 @@ time_range: # This sets up the Catalog and Pick files to have these years initia
 client : 'IRIS'
 network: 'HV'
 pre_load_stations: False # If True, then skip download stations during make_initial_files.py; instead, stations.npz is assumed to already exist with locs and stas as the two fields.
+use_physics_informed: False
 
 degree_padding: 0.25 # This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
 number_of_grids: 5 # Number of distinct spatial graphs to create (this reduced slight bias that can result from only using one spatial graph)
