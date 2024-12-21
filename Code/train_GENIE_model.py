@@ -57,6 +57,7 @@ path_to_file += '\\' if '\\' in path_to_file else '/'
 k_sta_edges = config['k_sta_edges']
 k_spc_edges = config['k_spc_edges']
 k_time_edges = config['k_time_edges']
+use_physics_informed = config['use_physics_informed']
 
 graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
@@ -858,7 +859,7 @@ if config['train_travel_time_neural_network'] == False:
 elif config['train_travel_time_neural_network'] == True:
 
 	n_ver_trv_time_model_load = 1
-	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, device = device)
+	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, device = device, use_physics_informed = use_physics_informed)
 
 use_only_active_stations = False
 if use_only_active_stations == True:
