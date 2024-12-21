@@ -745,28 +745,187 @@ class TravelTimes(nn.Module):
 
 			return torch.sigmoid(self.fc3(sta_repeat - src_repeat)).reshape(len(src), len(sta), -1)
 
+# class TravelTimesPN(nn.Module):
+
+# 	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_hidden = 100, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, device = 'cuda'):
+# 		super(TravelTimesPN, self).__init__()
+
+# 		## Relative offset prediction [2]
+# 		self.fc1_1 = nn.Linear(3 + n_phases, n_hidden)
+# 		self.fc1_2 = nn.Linear(n_hidden, n_hidden)
+# 		self.fc1_3 = nn.Linear(n_hidden, n_hidden)
+# 		self.fc1_4 = nn.Linear(n_hidden, n_phases)
+# 		self.activate1_1 = nn.PReLU()
+# 		self.activate1_2 = nn.PReLU()
+# 		self.activate1_3 = nn.PReLU()
+
+# 		## Absolute position prediction [3]
+# 		self.fc2_1 = nn.Linear(6 + n_phases, n_hidden)
+# 		self.fc2_2 = nn.Linear(n_hidden, n_hidden)
+# 		self.fc2_3 = nn.Linear(n_hidden, n_hidden)
+# 		self.fc2_4 = nn.Linear(n_hidden, n_phases)
+# 		self.activate2_1 = nn.PReLU()
+# 		self.activate2_2 = nn.PReLU()
+# 		self.activate2_3 = nn.PReLU()
+
+# 		## Projection functions
+# 		self.ftrns1 = ftrns1
+# 		self.ftrns2 = ftrns2
+# 		# self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
+# 		# self.tscale = torch.Tensor([trav_val]).to(device)
+# 		self.v_mean = torch.Tensor(v_mean).to(device)
+# 		self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
+# 		self.device = device
+# 		self.norm_pos = norm_pos
+# 		self.inorm_pos = inorm_pos
+# 		self.inorm_time = inorm_time
+# 		self.norm_vel = norm_vel
+# 		self.conversion_factor = conversion_factor
+# 		# self.Tp_average
+
+# 	def fc1_block(self, x):
+
+# 		x1 = self.activate1_1(self.fc1_1(x))
+# 		x = self.activate1_2(self.fc1_2(x1)) + x1
+# 		x1 = self.activate1_3(self.fc1_3(x)) + x
+
+# 		return self.fc1_4(x1)
+
+# 	def fc2_block(self, x):
+
+# 		x1 = self.activate2_1(self.fc2_1(x))
+# 		x = self.activate2_2(self.fc2_2(x1)) + x1
+# 		x1 = self.activate2_3(self.fc2_3(x)) + x
+
+# 		return self.fc2_4(x1)
+
+# 	def forward(self, sta, src, method = 'pairs', train = False):
+
+# 		if method == 'direct':
+
+# 			sta_proj = self.norm_pos(self.ftrns1(sta))
+# 			src_proj = self.norm_pos(self.ftrns1(src))
+
+# 			if train == True:
+# 				src_proj = Variable(src_proj, requires_grad = True)
+
+# 			base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.view(1,-1)
+
+# 			pred = self.fc1_block( torch.cat((sta_proj - src_proj, base_val), dim = 1) ) + self.fc2_block( torch.cat((sta_proj, src_proj, base_val), dim = 1) )
+
+# 			if train == True:
+
+# 				return base_val, pred, src_proj
+
+# 			else:
+
+# 				return torch.relu(self.inorm_time(base_val + pred))
+
+# 		elif method == 'pairs':
+
+# 			## First, create all pairs of srcs and recievers
+
+# 			src_repeat = self.norm_pos(self.ftrns1(src)).repeat_interleave(len(sta), dim = 0) # /self.scale
+# 			sta_repeat = self.norm_pos(self.ftrns1(sta)).repeat(len(src), 1) # /self.scale
+
+# 			if train == True:
+# 				src_repeat = Variable(src_repeat, requires_grad = True)
+
+# 			base_val = self.conversion_factor*(torch.norm(sta_repeat - src_repeat, dim = 1, keepdim = True)/self.v_mean_norm.view(1,-1)) # .reshape(len(src), len(sta), -1)
+
+# 			pred = (self.fc1_block(torch.cat((sta_repeat - src_repeat, base_val), dim = 1)) + self.fc2_block(torch.cat((sta_repeat, src_repeat, base_val), dim = 1))).reshape(len(src), len(sta), -1)
+
+# 			if train == True:
+
+# 				return base_val.reshape(len(src), len(sta), -1), pred, src_repeat.reshape(len(src), len(sta), -1)
+
+# 			else:
+
+# 				return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
+
+class VModel(nn.Module):
+
+	def __init__(self, n_phases = 2, n_hidden = 50, n_embed = 10, device = 'cuda'): # v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, 
+		super(VModel, self).__init__()
+
+		## Relative offset prediction [2]
+		self.fc1_1 = nn.Linear(3 + n_embed, n_hidden)
+		self.fc1_2 = nn.Linear(n_hidden, n_hidden)
+		self.fc1_3 = nn.Linear(n_hidden, n_hidden)
+		self.fc1_41 = nn.Linear(n_hidden, 1)
+		self.fc1_42 = nn.Linear(n_hidden, 1)
+		self.activate1_1 = lambda x: torch.sin(x)
+		self.activate1_2 = lambda x: torch.sin(x)
+		self.activate1_3 = lambda x: torch.sin(x)
+		self.activate = nn.Softplus()
+		self.mask = torch.zeros((1, 3)).to(device) # + n_embed)).to(device)
+		self.mask[0,2] = 1.0
+
+		# ## Projection functions
+		# self.ftrns1 = ftrns1
+		# self.ftrns2 = ftrns2
+		# # self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
+		# # self.tscale = torch.Tensor([trav_val]).to(device)
+		# self.v_mean = torch.Tensor(v_mean).to(device)
+		# self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
+		# self.device = device
+		# self.norm_pos = norm_pos
+		# self.inorm_pos = inorm_pos
+		# self.inorm_time = inorm_time
+		# self.norm_vel = norm_vel
+		# self.conversion_factor = conversion_factor
+		# self.Tp_average
+
+	def fc1_block(self, x):
+
+		# x = x*torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(x.device)
+		x1 = self.activate1_1(self.fc1_1(x))
+		x = self.activate1_2(self.fc1_2(x1)) + x1
+		x1 = self.activate1_3(self.fc1_3(x)) + x
+
+		return self.activate(self.fc1_41(x1)), self.activate(self.fc1_42(x1))
+
+	def forward(self, src, embed):
+
+		out1, out2 = self.fc1_block(torch.cat((src, embed), dim = 1))
+		out2 = out1*out2
+		# out[:,1] = out[:,0]*out[:,1] ## Vs is a fraction of Vp
+
+		return torch.cat((out1, out2), dim = 1)
+
 class TravelTimesPN(nn.Module):
 
-	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_hidden = 100, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, device = 'cuda'):
+	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, device = 'cuda'):
 		super(TravelTimesPN, self).__init__()
 
 		## Relative offset prediction [2]
-		self.fc1_1 = nn.Linear(3 + n_phases, n_hidden)
+		self.fc1_1 = nn.Linear(3 + n_phases + n_embed, n_hidden)
 		self.fc1_2 = nn.Linear(n_hidden, n_hidden)
 		self.fc1_3 = nn.Linear(n_hidden, n_hidden)
-		self.fc1_4 = nn.Linear(n_hidden, n_phases)
-		self.activate1_1 = nn.PReLU()
-		self.activate1_2 = nn.PReLU()
-		self.activate1_3 = nn.PReLU()
+		# self.fc1_4 = nn.Linear(n_hidden, n_phases)
+		self.activate1_1 = lambda x: torch.sin(x)
+		self.activate1_2 = lambda x: torch.sin(x)
+		self.activate1_3 = lambda x: torch.sin(x)
 
 		## Absolute position prediction [3]
-		self.fc2_1 = nn.Linear(6 + n_phases, n_hidden)
+		self.fc2_1 = nn.Linear(6 + n_phases + n_embed, n_hidden)
 		self.fc2_2 = nn.Linear(n_hidden, n_hidden)
 		self.fc2_3 = nn.Linear(n_hidden, n_hidden)
-		self.fc2_4 = nn.Linear(n_hidden, n_phases)
-		self.activate2_1 = nn.PReLU()
-		self.activate2_2 = nn.PReLU()
-		self.activate2_3 = nn.PReLU()
+		# self.fc2_4 = nn.Linear(n_hidden, n_phases)
+		self.activate2_1 = lambda x: torch.sin(x)
+		self.activate2_2 = lambda x: torch.sin(x)
+		self.activate2_3 = lambda x: torch.sin(x)
+
+		self.merge = nn.Sequential(nn.Linear(2*n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_phases))
+
+		## Embed source [3]
+		self.fc3_1 = nn.Linear(3, n_hidden)
+		self.fc3_2 = nn.Linear(n_hidden, n_hidden)
+		self.fc3_3 = nn.Linear(n_hidden, n_hidden)
+		self.fc3_4 = nn.Linear(n_hidden, n_embed)
+		self.activate3_1 = lambda x: torch.sin(x)
+		self.activate3_2 = lambda x: torch.sin(x)
+		self.activate3_3 = lambda x: torch.sin(x)
 
 		## Projection functions
 		self.ftrns1 = ftrns1
@@ -781,6 +940,13 @@ class TravelTimesPN(nn.Module):
 		self.inorm_time = inorm_time
 		self.norm_vel = norm_vel
 		self.conversion_factor = conversion_factor
+		self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed).to(device)
+		self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
+
+		if n_srcs > 0:
+			self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))).to(device)
+			self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))).to(device)
+
 		# self.Tp_average
 
 	def fc1_block(self, x):
@@ -789,7 +955,7 @@ class TravelTimesPN(nn.Module):
 		x = self.activate1_2(self.fc1_2(x1)) + x1
 		x1 = self.activate1_3(self.fc1_3(x)) + x
 
-		return self.fc1_4(x1)
+		return x1 # self.fc1_4(x1)
 
 	def fc2_block(self, x):
 
@@ -797,9 +963,33 @@ class TravelTimesPN(nn.Module):
 		x = self.activate2_2(self.fc2_2(x1)) + x1
 		x1 = self.activate2_3(self.fc2_3(x)) + x
 
-		return self.fc2_4(x1)
+		return x1 # self.fc2_4(x1)
+
+	def fc3_block(self, x):
+
+		x1 = self.activate3_1(self.fc3_1(x))
+		x = self.activate3_2(self.fc3_2(x1)) + x1
+		x1 = self.activate3_3(self.fc3_3(x)) + x
+
+		return self.fc3_4(x1)
+
+	def embed_src(self, src):
+
+		return self.fc3_block(self.norm_pos(self.ftrns1(src)))
+
+	def src_proj(self, src):
+
+		return self.norm_pos(self.ftrns1(src))
+
+	# def embed_src(self, src):
+
+	# 	return self.fc3_block(src)
 
 	def forward(self, sta, src, method = 'pairs', train = False):
+
+		# embed_src = self.fc3_block(self.norm_pos(self.ftrns1(src)))
+		# embed_src = self.embed_src(src*self.mask)
+		embed_src = self.embed_src(src)
 
 		if method == 'direct':
 
@@ -809,13 +999,15 @@ class TravelTimesPN(nn.Module):
 			if train == True:
 				src_proj = Variable(src_proj, requires_grad = True)
 
-			base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.view(1,-1)
+			base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)
 
-			pred = self.fc1_block( torch.cat((sta_proj - src_proj, base_val), dim = 1) ) + self.fc2_block( torch.cat((sta_proj, src_proj, base_val), dim = 1) )
+			pred1 = self.fc1_block( torch.cat((sta_proj - src_proj, base_val, embed_src), dim = 1) )
+			pred2 = self.fc2_block( torch.cat((sta_proj, src_proj, base_val, embed_src), dim = 1) )
+			pred = self.merge(torch.cat((pred1, pred2), dim = 1))
 
 			if train == True:
 
-				return base_val, pred, src_proj
+				return base_val, pred, src_proj, embed_src
 
 			else:
 
@@ -827,22 +1019,25 @@ class TravelTimesPN(nn.Module):
 
 			src_repeat = self.norm_pos(self.ftrns1(src)).repeat_interleave(len(sta), dim = 0) # /self.scale
 			sta_repeat = self.norm_pos(self.ftrns1(sta)).repeat(len(src), 1) # /self.scale
+			src_embed_repeat = embed_src.repeat_interleave(len(sta), dim = 0)
 
 			if train == True:
 				src_repeat = Variable(src_repeat, requires_grad = True)
 
-			base_val = self.conversion_factor*(torch.norm(sta_repeat - src_repeat, dim = 1, keepdim = True)/self.v_mean_norm.view(1,-1)) # .reshape(len(src), len(sta), -1)
+			base_val = self.conversion_factor*(torch.norm(sta_repeat - src_repeat, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)) # .reshape(len(src), len(sta), -1)
 
-			pred = (self.fc1_block(torch.cat((sta_repeat - src_repeat, base_val), dim = 1)) + self.fc2_block(torch.cat((sta_repeat, src_repeat, base_val), dim = 1))).reshape(len(src), len(sta), -1)
+			pred1 = self.fc1_block(torch.cat((sta_repeat - src_repeat, base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
+			pred2 = self.fc2_block(torch.cat((sta_repeat, src_repeat, base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
+			pred = self.merge(torch.cat((pred1, pred2), dim = 1)).reshape(len(src), len(sta), -1)
 
 			if train == True:
 
-				return base_val.reshape(len(src), len(sta), -1), pred, src_repeat.reshape(len(src), len(sta), -1)
+				return base_val.reshape(len(src), len(sta), -1), pred, src_repeat.reshape(len(src), len(sta), -1), src_embed_repeat.reshape(len(src), len(sta), -1)
 
 			else:
 
 				return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
-
+				
 ## Magnitude class
 class MagPred(nn.Module):
 	def __init__(self, locs, grid, ftrns1_diff, ftrns2_diff, k = 1, device = 'cuda'):
