@@ -25,6 +25,7 @@ import sys
 
 from utils import *
 from module import *
+from process_utils import *
 # from generate_synthetic_data import generate_synthetic_data 
 ## For now not using the seperate files definition of generate_synthetic_data
 
