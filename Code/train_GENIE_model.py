@@ -199,7 +199,7 @@ use_shallow_sources = train_config['use_shallow_sources']
 use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False):
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False):
 
 	if verbose == True:
 		st = time.time()
@@ -210,14 +210,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	n_spc_query, n_src_query = training_params
 	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias = training_params_2
 	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts = training_params_3
-
-	# spc_random = 20e3
-	# sig_t = 0.03 # 3 percent of travel time error on pick times
-	# spc_thresh_rand = 20e3
-	# min_sta_arrival = 4
-	# coda_rate = 0.035 # 5 percent arrival have code. Probably more than this? Increased from 0.035.
-	# coda_win = np.array([0, 25.0]) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
-	# max_num_spikes = 20
 
 	assert(np.floor(n_sta_range[0]*locs.shape[0]) > k_sta_edges)
 
@@ -288,24 +280,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		dist_thresh = np.random.rand(n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
 	else:
 		## Use beta distribution to generate more samples with smaller moveouts
-		# dist_thresh = -1.0*np.log(np.sqrt(np.random.rand(n_src))) ## Sort of strange dist threshold set!
-		# dist_thresh = (dist_thresh*dist_range[1]/10.0 + dist_range[0]).reshape(-1,1)
-		# dist_thresh = beta(2,5).rvs(size = n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-		# ireplace = np.random.choice(len(dist_thresh), size = int(0.15*len(dist_thresh)), replace = False)
-		# dist_thresh[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-
-		# use_extra_nearby_moveouts = True
 	
-		# if (np.random.rand() > 0.5)*(use_extra_nearby_moveouts == True):
-
 		if use_extra_nearby_moveouts == True:
 		
 			## For half of samples, use only half of range supplied
 			## (this is to increase training for sources that span only small range of network)
-	
-			# dist_thresh = beta(2,5).rvs(size = n_src).reshape(-1,1)*(dist_range[1] - dist_range[0])/2.0 + dist_range[0]
-			# ireplace = np.random.choice(len(dist_thresh), size = int(0.15*len(dist_thresh)), replace = False)
-			# dist_thresh[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0])/2.0 + dist_range[0]
 
 			n1 = int(n_src*0.3)
 			n2 = int(n_src*0.3)
@@ -664,42 +643,44 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		lp_meta.append(meta[lex_sort]) # final index of meta points into 
 		lp_srcs.append(src_subset)
 
-		A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), k = k_sta_edges + 1).flip(0).contiguous())[0]
-		A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
-		## Cross-product graph is: source node x station node. Order as, for each source node, all station nodes.
-
-		# Cross-product graph, nodes connected by: same source node, connected stations
-		A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1).to(device)).contiguous()
-		A_prod_src_src = (n_sta_slice*A_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1).to(device)).contiguous()	
-
-		# For each unique spatial point, sum in all edges.
-		A_src_in_prod = torch.cat((torch.arange(n_sta_slice*n_spc).view(1,-1), torch.arange(n_spc).repeat_interleave(n_sta_slice).view(1,-1)), dim = 0).to(device).contiguous()
-
-		## Sub-selecting from the time-arrays, is easy, since the time-arrays are indexed by station (triplet indexing; )
-		len_dt = len(x_grids_trv_refs[grid_select])
-
-		### Note: A_edges_time_p needs to be augmented: by removing stations, we need to re-label indices for subsequent nodes,
-		### To the "correct" number of stations. Since, not n_sta shows up in definition of edges. "assemble_pointers.."
-		A_edges_time_p = x_grids_trv_pointers_p[grid_select][np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*sta_select.repeat(k_time_edges*len_dt)]
-		A_edges_time_s = x_grids_trv_pointers_s[grid_select][np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*sta_select.repeat(k_time_edges*len_dt)]
-		## Need to convert these edges again. Convention is:
-		## subtract i (station index absolute list), divide by n_sta, mutiply by N stations, plus ith station (in permutted indices)
-		# shape is len_dt*k_time_edges*len(sta_select)
-		one_vec = np.repeat(sta_select*np.ones(n_sta_slice), k_time_edges*len_dt).astype('int') # also used elsewhere
-		A_edges_time_p = (n_sta_slice*(A_edges_time_p - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
-		A_edges_time_s = (n_sta_slice*(A_edges_time_s - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
-
-		assert(A_edges_time_p.max() < n_spc*n_sta_slice) ## Can remove these, after a bit of testing.
-		assert(A_edges_time_s.max() < n_spc*n_sta_slice)
-
-		A_sta_sta_l.append(A_sta_sta.cpu().detach().numpy())
-		A_src_src_l.append(A_src_src.cpu().detach().numpy())
-		A_prod_sta_sta_l.append(A_prod_sta_sta.cpu().detach().numpy())
-		A_prod_src_src_l.append(A_prod_src_src.cpu().detach().numpy())
-		A_src_in_prod_l.append(A_src_in_prod.cpu().detach().numpy())
-		A_edges_time_p_l.append(A_edges_time_p)
-		A_edges_time_s_l.append(A_edges_time_s)
-		A_edges_ref_l.append(x_grids_trv_refs[grid_select])
+		if skip_graphs == False:
+		
+			A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), k = k_sta_edges + 1).flip(0).contiguous())[0]
+			A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
+			## Cross-product graph is: source node x station node. Order as, for each source node, all station nodes.
+	
+			# Cross-product graph, nodes connected by: same source node, connected stations
+			A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1).to(device)).contiguous()
+			A_prod_src_src = (n_sta_slice*A_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1).to(device)).contiguous()	
+	
+			# For each unique spatial point, sum in all edges.
+			A_src_in_prod = torch.cat((torch.arange(n_sta_slice*n_spc).view(1,-1), torch.arange(n_spc).repeat_interleave(n_sta_slice).view(1,-1)), dim = 0).to(device).contiguous()
+	
+			## Sub-selecting from the time-arrays, is easy, since the time-arrays are indexed by station (triplet indexing; )
+			len_dt = len(x_grids_trv_refs[grid_select])
+	
+			### Note: A_edges_time_p needs to be augmented: by removing stations, we need to re-label indices for subsequent nodes,
+			### To the "correct" number of stations. Since, not n_sta shows up in definition of edges. "assemble_pointers.."
+			A_edges_time_p = x_grids_trv_pointers_p[grid_select][np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*sta_select.repeat(k_time_edges*len_dt)]
+			A_edges_time_s = x_grids_trv_pointers_s[grid_select][np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*sta_select.repeat(k_time_edges*len_dt)]
+			## Need to convert these edges again. Convention is:
+			## subtract i (station index absolute list), divide by n_sta, mutiply by N stations, plus ith station (in permutted indices)
+			# shape is len_dt*k_time_edges*len(sta_select)
+			one_vec = np.repeat(sta_select*np.ones(n_sta_slice), k_time_edges*len_dt).astype('int') # also used elsewhere
+			A_edges_time_p = (n_sta_slice*(A_edges_time_p - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
+			A_edges_time_s = (n_sta_slice*(A_edges_time_s - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
+	
+			assert(A_edges_time_p.max() < n_spc*n_sta_slice) ## Can remove these, after a bit of testing.
+			assert(A_edges_time_s.max() < n_spc*n_sta_slice)
+	
+			A_sta_sta_l.append(A_sta_sta.cpu().detach().numpy())
+			A_src_src_l.append(A_src_src.cpu().detach().numpy())
+			A_prod_sta_sta_l.append(A_prod_sta_sta.cpu().detach().numpy())
+			A_prod_src_src_l.append(A_prod_src_src.cpu().detach().numpy())
+			A_src_in_prod_l.append(A_src_in_prod.cpu().detach().numpy())
+			A_edges_time_p_l.append(A_edges_time_p)
+			A_edges_time_s_l.append(A_edges_time_s)
+			A_edges_ref_l.append(x_grids_trv_refs[grid_select])
 
 		x_query = np.random.rand(n_spc_query, 3)*scale_x + offset_x # Check if scale_x and offset_x are correct.
 
@@ -724,22 +705,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			lbls_query = np.zeros((n_spc_query, len(t_slice)))
 		else:
 			active_sources_per_slice = active_sources_per_slice.astype('int')
-
-			## Must move the .sum(2) in the below def to use this expanded version of labels
-			# lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
-			# Spatial component
-			# spatial_term1 = np.expand_dims(ftrns1(x_grids[grid_select]), axis=1)
-			# spatial_term2 = np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis=0)
-			# spatial_diff = spatial_term1 - spatial_term2
-			# spatial_exp_term = np.exp(-0.5 * (spatial_diff**2) / (src_spatial_kernel**2))
-
-			# # Temporal component
-			# temporal_term1 = (time_samples[i] + t_slice).reshape(1,-1,1)
-			# temporal_term2 = src_times[active_sources_per_slice].reshape(1,1,-1)
-			# temporal_diff = temporal_term1 - temporal_term2
-			# temporal_exp_term = np.exp(-0.5 * (temporal_diff**2) / (src_t_kernel**2))
-
-			# print('There is an error in these updated label definitions, since the first two targets should be of a similar value')
 			
 			# Combine components
 			# lbls_grid = (np.expand_dims(spatial_exp_term.sum(2), axis=1) * temporal_exp_term).max(2)
@@ -759,8 +724,13 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
 
-	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+	if skip_graphs == True:
+	
+		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
+	else:
+
+		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
 
