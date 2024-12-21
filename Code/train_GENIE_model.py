@@ -58,6 +58,10 @@ k_sta_edges = config['k_sta_edges']
 k_spc_edges = config['k_spc_edges']
 k_time_edges = config['k_time_edges']
 use_physics_informed = config['use_physics_informed']
+use_subgraph = config['use_subgraph']
+if use_subgraph == True:
+    max_deg_offset = config['max_deg_offset']
+    k_nearest_pairs = config['k_nearest_pairs']	
 
 graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
