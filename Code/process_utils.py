@@ -616,7 +616,7 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	A_src_in_prod = torch.Tensor(np.hstack([np.concatenate((np.array(lp_src_in_prod[j]).reshape(1,-1), j*np.ones(len(lp_src_in_prod[j])).reshape(1,-1)), axis = 0) for j in range(x_grid.shape[0])])).long().to(device)
 	# spatial_vals = torch.Tensor(x_grid[A_src_in_sta[1]] - locs_use[A_src_in_sta[0]] ## This approach assumes all station indices are ordered
 	# spatial_vals = torch.Tensor((ftrns1(x_grid[A_src_in_prod[1]]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]]]))/110e3*scale_src_in_prod)
-	spatial_vals = torch.Tensor((ftrns1(x_grid[A_src_in_prod[1]]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]]]))/scale_pairwise_sta_in_src_distances).to(device)
+	spatial_vals = torch.Tensor((ftrns1(x_grid[A_src_in_prod[1].cpu().detach().numpy()]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()]))/scale_pairwise_sta_in_src_distances).to(device)
 	A_src_in_prod = Data(x = spatial_vals, edge_index = A_src_in_prod)
 
 	A_prod_sta_sta = []
