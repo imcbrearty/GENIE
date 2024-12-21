@@ -949,8 +949,12 @@ if build_training_data == True:
 
 		file_index = n_repeat*job_number + n ## Unique file index
 
-		[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
-
+		if use_subgraph == True:
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
+		else:
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = False)
+			
+		
 		h = h5py.File(path_to_data + 'training_data_slice_%d_ver_%d.hdf5'%(file_index, n_ver_training_data), 'w')
 		h['data'] = data[0]
 		h['srcs'] = data[1]
@@ -958,6 +962,17 @@ if build_training_data == True:
 
 		for i in range(n_batch):
 
+			if use_subgraph == True:
+				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs)
+				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[i], x_grid, A_src_in_sta, max_t)
+				A_sta_sta_l[i] = A_sta_sta ## These should be equal
+				A_src_src_l[i] = A_src_src ## These should be equal
+				A_prod_sta_sta_l[i] = A_prod_sta_sta
+				A_prod_src_src_l[i] = A_prod_src_src
+				A_src_in_prod_l[i] = A_src_in_prod
+				Inpts[i] = np.copy(np.ascontiguousarray(Inpts[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
+				Masks[i] = np.copy(np.ascontiguousarray(Masks[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))			
+				
 			h['Inpts_%d'%i] = Inpts[i]
 			h['Masks_%d'%i] = Masks[i]
 			h['X_fixed_%d'%i] = X_fixed[i]
@@ -977,9 +992,10 @@ if build_training_data == True:
 			h['A_prod_sta_sta_%d'%i] = A_prod_sta_sta_l[i]
 			h['A_prod_src_src_%d'%i] = A_prod_src_src_l[i]
 			h['A_src_in_prod_%d'%i] = A_src_in_prod_l[i]
-			# h['A_src_in_prod_x_%d'%i] = A_src_in_prod.x
-			# h['A_src_in_prod_edges_%d'%i] = A_src_in_prod.edge_index
-			# h['A_src_in_sta_%d'%i] = A_src_in_sta
+			if use_subgraph == True:
+				h['A_src_in_prod_x_%d'%i] = A_src_in_prod.x
+				h['A_src_in_prod_edges_%d'%i] = A_src_in_prod.edge_index
+				h['A_src_in_sta_%d'%i] = A_src_in_sta
 
 			h['A_edges_time_p_%d'%i] = A_edges_time_p_l[i]
 			h['A_edges_time_s_%d'%i] = A_edges_time_s_l[i]
@@ -1026,8 +1042,18 @@ for i in range(n_restart_step, n_epochs):
 	else:
 
 		## Build a training batch on the fly
-		[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
-
+		if use_subgraph == False:
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
+		
+		
+		if use_subgraph == True:
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
+			for n in range(len(Inpts)):
+				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs)
+				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[i], x_grid, A_src_in_sta, max_t)
+				Inpts[i] = np.copy(np.ascontiguousarray(Inpts[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
+				Masks[i] = np.copy(np.ascontiguousarray(Masks[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))	
+	
 	loss_val = 0
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
 	mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4 = 0.0, 0.0, 0.0, 0.0
@@ -1062,6 +1088,8 @@ for i in range(n_restart_step, n_epochs):
 			A_prod_sta_sta_l = []
 			A_prod_src_src_l = []
 			A_src_in_prod_l = []
+			A_src_in_prod_x_l = []
+			A_src_in_prod_edges_l = []
 			A_edges_time_p_l = []
 			A_edges_time_s_l = []
 			A_edges_ref_l = []
@@ -1087,8 +1115,8 @@ for i in range(n_restart_step, n_epochs):
 			A_prod_sta_sta_l.append(h['A_prod_sta_sta_%d'%i0][:])
 			A_prod_src_src_l.append(h['A_prod_src_src_%d'%i0][:])
 			A_src_in_prod_l.append(h['A_src_in_prod_%d'%i0][:])
-			# A_src_in_prod_x = h['A_src_in_prod_x_%d'%i0][:]
-			# A_src_in_prod_edges = h['A_src_in_prod_edges_%d'%i0][:]
+			A_src_in_prod_x_l.append(h['A_src_in_prod_x_%d'%i0][:])
+			A_src_in_prod_edges_l.append(h['A_src_in_prod_edges_%d'%i0][:])
 
 			A_edges_time_p_l.append(h['A_edges_time_p_%d'%i0][:])
 			A_edges_time_s_l.append(h['A_edges_time_s_%d'%i0][:])
