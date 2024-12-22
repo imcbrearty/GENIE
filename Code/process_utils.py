@@ -612,7 +612,7 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	## A_src_in_prod : For each entry in A_src, need to determine which subset of A_src_in_sta is incoming.
 	## E.g., which set of incoming stations for each pair of (source-station); so, all point source_1 == source_2
 	## for source_1 in Source graph and source_2 in Cartesian product graph
-	tree_srcs_in_prod = cKDTree(A_src_in_sta[1][:,None])
+	tree_srcs_in_prod = cKDTree(A_src_in_sta[1].cpu().detach().numpy()[:,None])
 	lp_src_in_prod = tree_srcs_in_prod.query_ball_point(np.arange(x_grid.shape[0])[:,None], r = 0)
 	A_src_in_prod = torch.Tensor(np.hstack([np.concatenate((np.array(lp_src_in_prod[j]).reshape(1,-1), j*np.ones(len(lp_src_in_prod[j])).reshape(1,-1)), axis = 0) for j in range(x_grid.shape[0])])).long().to(device)
 	# spatial_vals = torch.Tensor(x_grid[A_src_in_sta[1]] - locs_use[A_src_in_sta[0]] ## This approach assumes all station indices are ordered
