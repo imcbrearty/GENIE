@@ -1208,7 +1208,7 @@ for i in range(n_restart_step, n_epochs):
 
 		# Process edge index data
 		edge_index_1 = torch.Tensor(A_src_in_prod_l[i0]).long().to(device)
-		flipped_edge = np.ascontiguousarray(np.flip(A_src_in_prod_l[i0], axis=0))
+		flipped_edge = np.ascontiguousarray(np.flip(A_src_in_prod_l[i0].cpu().detach().numpy(), axis = 0))
 		edge_index_2 = torch.Tensor(flipped_edge).long().to(device)
 
 		data_1 = Data(x=spatial_vals, edge_index=edge_index_1)
