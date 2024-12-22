@@ -20,6 +20,7 @@ from torch_geometric.utils import to_undirected, to_networkx
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
+from torch_geometric.utils import degree
 from torch_scatter import scatter
 from numpy.matlib import repmat
 import networkx as nx
