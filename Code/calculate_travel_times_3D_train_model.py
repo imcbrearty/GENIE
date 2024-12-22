@@ -1452,7 +1452,10 @@ if train_travel_time_neural_network == True:
 		Rel_p1 = np.hstack(Rel_p1)
 		Rel_s1 = np.hstack(Rel_s1)
 
-
+	remove_travel_time_files = True
+	if remove_travel_time_files == True:
+		for s in st_sta:
+			os.remove(s)
 
 print("All files saved successfully!")
 print("✔ Script execution: Done")
