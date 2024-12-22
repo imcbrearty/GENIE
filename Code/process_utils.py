@@ -593,7 +593,7 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	isort = np.argsort(A_src_in_sta[1,:]) ## Don't need this sort, if using the one below
 	A_src_in_sta = A_src_in_sta[:,isort]
 	isort = np.lexsort((A_src_in_sta[0], A_src_in_sta[1]))
-	A_src_in_sta = torch.Tensor(A_src_in_sta[:,isort]).long()
+	A_src_in_sta = torch.Tensor(A_src_in_sta[:,isort]).long().to(device)
 
 	## Create "subgraph" Cartesian product graph edges
 	## E.g., the "subgraph" Cartesian product is only "nodes" of pairs of sources-recievers in A_src_in_sta, rather than all pairs locs*x_grid.
