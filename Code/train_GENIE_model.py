@@ -1184,7 +1184,7 @@ for i in range(n_restart_step, n_epochs):
 		
 		if use_subgraph == True:
 			# A_src_in_prod_l[i0] = Data(torch.Tensor(A_src_in_prod_x_l[i0]).to(device), edge_index = torch.Tensor(A_src_in_prod_edges_l[i0]).long().to(device))
-			trv_out = trv_pairwise(torch.Tensor(Locs[i0][A_src_in_sta_l[i0][0]]).to(device), torch.Tensor(X_fixed[i0][A_src_in_sta_l[i0][1]]).to(device))
+			trv_out = trv_pairwise(torch.Tensor(Locs[i0][A_src_in_sta_l[i0][0].cpu().detach().numpy()]).to(device), torch.Tensor(X_fixed[i0][A_src_in_sta_l[i0][1].cpu().detach().numpy()]).to(device))
 			spatial_vals = torch.Tensor((X_fixed[i0][A_src_in_prod_l[i0][1].cpu().detach().numpy()] - Locs[i0][A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()])/scale_x_extend).to(device)
 
 		else:
