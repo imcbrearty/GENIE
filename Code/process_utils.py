@@ -642,7 +642,7 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 		if slice_edges.shape[1] == 0:
 			continue
 
-		shift_ind = sta_ind_lists[slice_edges*n_sta + i]
+		shift_ind = sta_ind_lists[slice_edges.cpu().detach().numpy()*n_sta + i]
 		assert(shift_ind.min() >= 0)
 		## For each source, need to find where that station index is in the "order" of the subgraph Cartesian product
 		A_prod_src_src.append(torch.Tensor(cum_count_degree_of_src_nodes[slice_edges] + shift_ind).to(device))
