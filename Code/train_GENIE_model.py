@@ -1057,7 +1057,8 @@ for i in range(n_restart_step, n_epochs):
 		
 		if use_subgraph == True:
 			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
-
+			A_src_in_sta_l = [[] for j in range(len(Inpts))]
+			
 			for n in range(len(Inpts)):
 				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[n], X_fixed[n], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, device = device)
 				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[n], X_fixed[n], A_src_in_sta, max_t, device = device)
@@ -1066,6 +1067,7 @@ for i in range(n_restart_step, n_epochs):
 				A_prod_sta_sta_l[n] = A_prod_sta_sta
 				A_prod_src_src_l[n] = A_prod_src_src
 				A_src_in_prod_l[n] = A_src_in_prod
+				A_src_in_sta_l[n] = A_src_in_sta
 				A_edges_time_p_l[n] = A_edges_time_p
 				A_edges_time_s_l[n] = A_edges_time_s
 				A_edges_ref_l[n] = dt_partition
