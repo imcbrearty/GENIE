@@ -604,7 +604,7 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	sta_ind_lists = []
 	for i in range(x_grid.shape[0]):
 		ind_list = -1*np.ones(locs.shape[0])
-		ind_list[A_src_in_sta[0,cum_count_degree_of_src_nodes[i]:cum_count_degree_of_src_nodes[i+1]].cpu().detach().numpy()] = np.arange(degree_of_src_nodes[i])
+		ind_list[A_src_in_sta[0,cum_count_degree_of_src_nodes[i]:cum_count_degree_of_src_nodes[i+1]].cpu().detach().numpy()] = np.arange(degree_of_src_nodes[i].item())
 		sta_ind_lists.append(ind_list)
 	sta_ind_lists = np.hstack(sta_ind_lists).astype('int')
 
