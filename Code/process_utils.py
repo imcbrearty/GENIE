@@ -636,13 +636,13 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 
 	for i in range(locs.shape[0]):
 	
-		slice_edges = subgraph(A_src_in_sta[1,np.array(lp_fixed_stas[i])], A_src_src, relabel_nodes = False)[0]
+		slice_edges = subgraph(A_src_in_sta[1,np.array(lp_fixed_stas[i])], A_src_src, relabel_nodes = False)[0].cpu().detach().numpy()
 
 		## This can happen when a station is only linked to one source
 		if slice_edges.shape[1] == 0:
 			continue
 
-		shift_ind = sta_ind_lists[slice_edges.cpu().detach().numpy()*n_sta + i]
+		shift_ind = sta_ind_lists[slice_edges*n_sta + i]
 		assert(shift_ind.min() >= 0)
 		## For each source, need to find where that station index is in the "order" of the subgraph Cartesian product
 		A_prod_src_src.append(torch.Tensor(cum_count_degree_of_src_nodes[slice_edges] + shift_ind).to(device))
