@@ -148,7 +148,11 @@ with open('config.yaml', 'r') as file:
 
 name_of_project = config['name_of_project']
 use_physics_informed = config['use_physics_informed']
-
+use_subgraph = config['use_subgraph']
+if use_subgraph == True:
+    max_deg_offset = config['max_deg_offset']
+    k_nearest_pairs = config['k_nearest_pairs']
+	
 # Load day to process
 z = open(path_to_file + '%s_process_days_list_ver_%d.txt'%(name_of_project, process_days_ver), 'r')
 lines = z.readlines()
@@ -241,7 +245,8 @@ if config['train_travel_time_neural_network'] == False:
 elif config['train_travel_time_neural_network'] == True:
 
 	n_ver_trv_time_model_load = 1
-	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, device = device, use_physics_informed = use_physics_informed)
+	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, use_physics_informed = use_physics_informed, device = device)
+	trv_pairwise = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', use_physics_informed = use_physics_informed, device = device)
 
 if (use_differential_evolution_location == False)*(config['train_travel_time_neural_network'] == False):
 	hull = ConvexHull(X)
