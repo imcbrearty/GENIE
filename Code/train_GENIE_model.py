@@ -1142,7 +1142,7 @@ for i in range(n_restart_step, n_epochs):
 			# A_src_in_prod_x_l.append(h['A_src_in_prod_x_%d'%i0][:])
 			# A_src_in_prod_edges_l.append(h['A_src_in_prod_edges_%d'%i0][:])
 			if use_subgraph == True:
-				A_src_in_sta_l.append(torch.Tensor(h['A_src_in_sta_%d'%i][:]).long().to(device))
+				A_src_in_sta_l.append(torch.Tensor(h['A_src_in_sta_%d'%i0][:]).long().to(device))
 			
 			A_edges_time_p_l.append(h['A_edges_time_p_%d'%i0][:])
 			A_edges_time_s_l.append(h['A_edges_time_s_%d'%i0][:])
