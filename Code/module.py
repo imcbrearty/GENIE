@@ -82,8 +82,8 @@ class BipartiteGraphOperator(MessagePassing):
 
 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
 
-		N = n_sta*n_temp
-		M = n_temp
+		N = A_src_in_edges.edge_index[0].max().item() + 1
+		M = A_src_in_edges.edge_index[1].max().item() + 1
 
 		return self.activate2(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = mask.max(1, keepdims = True)[0]*self.activate1(self.fc1(torch.cat((inpt, A_src_in_edges.x), dim = -1))))))
 
@@ -198,8 +198,8 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 
 	def forward(self, inpt, A_Lg_in_srcs, mask, n_sta, n_temp):
 
-		N = n_temp
-		M = n_sta*n_temp
+		N = A_Lg_in_srcs.edge_index[0].max().item() + 1
+		M = A_Lg_in_srcs.edge_index[1].max().item() + 1
 
 		return self.activate2(self.fc2(self.propagate(A_Lg_in_srcs.edge_index, size = (N, M), x = inpt, edge_attr = A_Lg_in_srcs.x, mask = mask))), mask[A_Lg_in_srcs.edge_index[0]] # note: outputting multiple outputs
 
@@ -252,6 +252,43 @@ class DataAggregationAssociationPhase(MessagePassing): # make equivelent version
 
 		return tr # the new embedding.
 
+# class LocalSliceLgCollapse(MessagePassing):
+# 	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = 15.0, device = 'cuda'):
+# 		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
+# 		self.fc1 = nn.Linear(ndim_in + n_edge, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
+# 		self.fc2 = nn.Linear(n_hidden, ndim_out)
+# 		self.activate1 = nn.PReLU()
+# 		self.activate2 = nn.PReLU()
+# 		self.eps = eps
+# 		self.device = device
+
+# 	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, inpt, tlatent, n_temp, n_sta): # reference k nearest spatial points
+
+# 		## Assert is problem?
+# 		k_infer = int(len(A_edges)/(n_sta*len(dt_partition)))
+# 		assert(k_infer == 10)
+# 		n_arvs, l_dt = len(tpick), len(dt_partition)
+# 		N = n_sta*n_temp # Lg graph
+# 		M = n_arvs# M is target
+# 		dt = dt_partition[1] - dt_partition[0]
+
+# 		t_index = torch.floor((tpick - dt_partition[0])/torch.Tensor([dt]).to(self.device)).long() # index into A_edges, which is each station, each dt_point, each k.
+# 		t_index = ((ipick*l_dt*k_infer + t_index*k_infer).view(-1,1) + torch.arange(k_infer).view(1,-1).to(self.device)).reshape(-1).long() # check this
+
+# 		src_index = torch.arange(n_arvs).view(-1,1).repeat(1,k_infer).view(1,-1).to(self.device)
+# 		sliced_edges = torch.cat((A_edges[t_index].view(1,-1), src_index), dim = 0).long()
+# 		t_rel = tpick[sliced_edges[1]] - tlatent[sliced_edges[0],0] # Breaks here?
+
+# 		ikeep = torch.where(abs(t_rel) < self.eps)[0]
+# 		sliced_edges = sliced_edges[:,ikeep] # only use times within range. (need to specify target node cardinality)
+# 		out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), phase = phase_label, size = (N, M))))
+
+# 		return out
+
+# 	def message(self, x_j, pos_i, pos_j, phase_i):
+
+# 		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
+
 class LocalSliceLgCollapse(MessagePassing):
 	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = 15.0, device = 'cuda'):
 		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
@@ -262,32 +299,34 @@ class LocalSliceLgCollapse(MessagePassing):
 		self.eps = eps
 		self.device = device
 
-	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, inpt, tlatent, n_temp, n_sta): # reference k nearest spatial points
+	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, inpt, tlatent, n_temp, n_sta, k_infer = 10): # reference k nearest spatial points
 
 		## Assert is problem?
-		k_infer = int(len(A_edges)/(n_sta*len(dt_partition)))
+		# k_infer = int(len(A_edges)/(n_sta*len(dt_partition)))
 		assert(k_infer == 10)
 		n_arvs, l_dt = len(tpick), len(dt_partition)
-		N = n_sta*n_temp # Lg graph
-		M = n_arvs# M is target
+		N = inpt.shape[0] # Lg graph
+		M = n_arvs # M is target
 		dt = dt_partition[1] - dt_partition[0]
 
 		t_index = torch.floor((tpick - dt_partition[0])/torch.Tensor([dt]).to(self.device)).long() # index into A_edges, which is each station, each dt_point, each k.
 		t_index = ((ipick*l_dt*k_infer + t_index*k_infer).view(-1,1) + torch.arange(k_infer).view(1,-1).to(self.device)).reshape(-1).long() # check this
 
 		src_index = torch.arange(n_arvs).view(-1,1).repeat(1,k_infer).view(1,-1).to(self.device)
-		sliced_edges = torch.cat((A_edges[t_index].view(1,-1), src_index), dim = 0).long()
+
+		sliced_edges = torch.cat((A_edges[t_index].reshape(1,-1), src_index), dim = 0).contiguous().long()
+
 		t_rel = tpick[sliced_edges[1]] - tlatent[sliced_edges[0],0] # Breaks here?
 
-		ikeep = torch.where(abs(t_rel) < self.eps)[0]
+		if len(t_rel) > 0:
+			ikeep = torch.where(abs(t_rel) < self.eps)[0]
+		else:
+			ikeep = torch.Tensor([]).long().to(device)
+
 		sliced_edges = sliced_edges[:,ikeep] # only use times within range. (need to specify target node cardinality)
 		out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), phase = phase_label, size = (N, M))))
 
 		return out
-
-	def message(self, x_j, pos_i, pos_j, phase_i):
-
-		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
 
 class StationSourceAttentionMergedPhases(MessagePassing):
 	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = 15.0, device = device):
