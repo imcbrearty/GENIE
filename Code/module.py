@@ -445,7 +445,7 @@ if use_previous_model_definition == False:
 			mask_p_thresh = 0.01
 			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
 	
-			x_latent = self.DataAggregation(Slice.view(n_line_nodes, -1), Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
@@ -488,7 +488,7 @@ if use_previous_model_definition == False:
 	
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
-			x_latent = self.DataAggregation(Slice.view(n_line_nodes, -1), Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
@@ -519,7 +519,7 @@ if use_previous_model_definition == False:
 	
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
-			x_latent = self.DataAggregation(Slice.view(n_line_nodes, -1), Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
@@ -563,7 +563,7 @@ elif use_previous_model_definition == True:
 			mask_p_thresh = 0.01
 			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
 	
-			x_latent = self.DataAggregation(Slice.view(n_line_nodes, -1), Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
@@ -606,7 +606,7 @@ elif use_previous_model_definition == True:
 	
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
-			x_latent = self.DataAggregation(Slice.view(n_line_nodes, -1), Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
@@ -637,7 +637,7 @@ elif use_previous_model_definition == True:
 	
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
-			x_latent = self.DataAggregation(Slice.view(n_line_nodes, -1), Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
