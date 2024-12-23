@@ -1132,17 +1132,17 @@ for i in range(n_restart_step, n_epochs):
 			lp_phases.append(h['lp_phases_%d'%i0][:])
 			lp_meta.append(h['lp_meta_%d'%i0][:])
 			lp_srcs.append(h['lp_srcs_%d'%i0][:])
-			A_sta_sta_l.append(torch.Tensor(h['A_sta_sta_%d'%i0][:]).to(device))
-			A_src_src_l.append(torch.Tensor(h['A_src_src_%d'%i0][:]).to(device))
-			A_prod_sta_sta_l.append(torch.Tensor(h['A_prod_sta_sta_%d'%i0][:]).to(device))
-			A_prod_src_src_l.append(torch.Tensor(h['A_prod_src_src_%d'%i0][:]).to(device))
-			A_src_in_prod_l.append(torch.Tensor(h['A_src_in_prod_%d'%i0][:]).to(device))
+			A_sta_sta_l.append(torch.Tensor(h['A_sta_sta_%d'%i0][:]).long().to(device))
+			A_src_src_l.append(torch.Tensor(h['A_src_src_%d'%i0][:]).long().to(device))
+			A_prod_sta_sta_l.append(torch.Tensor(h['A_prod_sta_sta_%d'%i0][:]).long().to(device))
+			A_prod_src_src_l.append(torch.Tensor(h['A_prod_src_src_%d'%i0][:]).long().to(device))
+			A_src_in_prod_l.append(torch.Tensor(h['A_src_in_prod_%d'%i0][:]).long().to(device))
 
 			# A_src_in_prod_l.append(h['A_src_in_prod_%d'%i0][:])
 			# A_src_in_prod_x_l.append(h['A_src_in_prod_x_%d'%i0][:])
 			# A_src_in_prod_edges_l.append(h['A_src_in_prod_edges_%d'%i0][:])
 			if use_subgraph == True:
-				A_src_in_sta_l.append(torch.Tensor(h['A_src_in_sta_%d'%i][:]).to(device))
+				A_src_in_sta_l.append(torch.Tensor(h['A_src_in_sta_%d'%i][:]).long().to(device))
 			
 			A_edges_time_p_l.append(h['A_edges_time_p_%d'%i0][:])
 			A_edges_time_s_l.append(h['A_edges_time_s_%d'%i0][:])
