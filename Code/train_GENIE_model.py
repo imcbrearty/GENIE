@@ -996,15 +996,15 @@ if build_training_data == True:
 			h['lp_meta_%d'%i] = lp_meta[i]
 			h['lp_srcs_%d'%i] = lp_srcs[i]
 
-			h['A_sta_sta_%d'%i] = A_sta_sta_l[i]
-			h['A_src_src_%d'%i] = A_src_src_l[i]
-			h['A_prod_sta_sta_%d'%i] = A_prod_sta_sta_l[i]
-			h['A_prod_src_src_%d'%i] = A_prod_src_src_l[i]
-			h['A_src_in_prod_%d'%i] = A_src_in_prod_l[i]
+			h['A_sta_sta_%d'%i] = A_sta_sta_l[i].cpu().detach().numpy()
+			h['A_src_src_%d'%i] = A_src_src_l[i].cpu().detach().numpy()
+			h['A_prod_sta_sta_%d'%i] = A_prod_sta_sta_l[i].cpu().detach().numpy()
+			h['A_prod_src_src_%d'%i] = A_prod_src_src_l[i].cpu().detach().numpy()
+			h['A_src_in_prod_%d'%i] = A_src_in_prod_l[i].cpu().detach().numpy()
 			# h['A_src_in_prod_x_%d'%i] = A_src_in_prod_l[i].x
 			# h['A_src_in_prod_edges_%d'%i] = A_src_in_prod_l[i].edge_index
 			if use_subgraph == True:
-				h['A_src_in_sta_%d'%i] = A_src_in_sta
+				h['A_src_in_sta_%d'%i] = A_src_in_sta.cpu().detach().numpy()
 
 			h['A_edges_time_p_%d'%i] = A_edges_time_p_l[i]
 			h['A_edges_time_s_%d'%i] = A_edges_time_s_l[i]
