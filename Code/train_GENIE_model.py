@@ -1132,17 +1132,17 @@ for i in range(n_restart_step, n_epochs):
 			lp_phases.append(h['lp_phases_%d'%i0][:])
 			lp_meta.append(h['lp_meta_%d'%i0][:])
 			lp_srcs.append(h['lp_srcs_%d'%i0][:])
-			A_sta_sta_l.append(h['A_sta_sta_%d'%i0][:])
-			A_src_src_l.append(h['A_src_src_%d'%i0][:])
-			A_prod_sta_sta_l.append(h['A_prod_sta_sta_%d'%i0][:])
-			A_prod_src_src_l.append(h['A_prod_src_src_%d'%i0][:])
-			A_src_in_prod_l.append(h['A_src_in_prod_%d'%i0][:])
+			A_sta_sta_l.append(torch.Tensor(h['A_sta_sta_%d'%i0][:]).to(device))
+			A_src_src_l.append(torch.Tensor(h['A_src_src_%d'%i0][:]).to(device))
+			A_prod_sta_sta_l.append(torch.Tensor(h['A_prod_sta_sta_%d'%i0][:]).to(device))
+			A_prod_src_src_l.append(torch.Tensor(h['A_prod_src_src_%d'%i0][:]).to(device))
+			A_src_in_prod_l.append(torch.Tensor(h['A_src_in_prod_%d'%i0][:]).to(device))
 
 			# A_src_in_prod_l.append(h['A_src_in_prod_%d'%i0][:])
 			# A_src_in_prod_x_l.append(h['A_src_in_prod_x_%d'%i0][:])
 			# A_src_in_prod_edges_l.append(h['A_src_in_prod_edges_%d'%i0][:])
 			if use_subgraph == True:
-				A_src_in_sta_l.append(h['A_src_in_sta_%d'%i][:])
+				A_src_in_sta_l.append(torch.Tensor(h['A_src_in_sta_%d'%i][:]).to(device))
 			
 			A_edges_time_p_l.append(h['A_edges_time_p_%d'%i0][:])
 			A_edges_time_s_l.append(h['A_edges_time_s_%d'%i0][:])
@@ -1203,11 +1203,11 @@ for i in range(n_restart_step, n_epochs):
 		input_tensor_2 = torch.Tensor(Masks[i0]).to(device) # .reshape(-1, 4)
 
 		# Process tensors for A_prod and A_src arrays
-		A_prod_sta_tensor = torch.Tensor(A_prod_sta_sta_l[i0]).long().to(device)
-		A_prod_src_tensor = torch.Tensor(A_prod_src_src_l[i0]).long().to(device)
+		A_prod_sta_tensor = A_prod_sta_sta_l[i0]
+		A_prod_src_tensor = A_prod_src_src_l[i0]
 
 		# Process edge index data
-		edge_index_1 = torch.Tensor(A_src_in_prod_l[i0]).long().to(device)
+		edge_index_1 = A_src_in_prod_l[i0]
 		flipped_edge = np.ascontiguousarray(np.flip(A_src_in_prod_l[i0].cpu().detach().numpy(), axis = 0))
 		edge_index_2 = torch.Tensor(flipped_edge).long().to(device)
 
@@ -1252,7 +1252,7 @@ for i in range(n_restart_step, n_epochs):
 		input_tensors = [
 			input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor,
 			data_1, data_2,
-			torch.Tensor(A_src_src_l[i0]).long().to(device),
+			A_src_src_l[i0],
 			torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
 			torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
 			torch.Tensor(A_edges_ref_l[i0]).to(device),
