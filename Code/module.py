@@ -882,7 +882,7 @@ class TravelTimesPN(nn.Module):
 		self.inorm_time = inorm_time
 		self.norm_vel = norm_vel
 		self.conversion_factor = conversion_factor
-		self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed).to(device)
+		self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
 		self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
 
 		if n_srcs > 0:
