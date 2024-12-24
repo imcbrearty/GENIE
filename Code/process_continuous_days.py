@@ -29,6 +29,7 @@ from matplotlib.colors import Normalize
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from sklearn.cluster import SpectralClustering
+from torch.autograd import Variable
 from numpy.matlib import repmat
 import pathlib
 import itertools
