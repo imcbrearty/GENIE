@@ -1276,7 +1276,15 @@ for cnt, strs in enumerate([0]):
 		srcs_trv.append(np.concatenate((xmle, np.array([srcs_refined[i,3] - mean_shift]).reshape(1,-1)), axis = 1))
 
 		## Estimate uncertainties
-	        scale_partials = (1/60.0)*np.array([1.0, 1.0, 110e3]).reshape(1,-1)
+	        pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + srcs_trv[-1][0,3]
+	        res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+	        res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+		
+	        scale_val1 = 100.0*np.linalg.norm(ftrns1(xmle[0,0:3].reshape(1,-1)) - ftrns1(xmle[0,0:3].reshape(1,-1) + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)
+	        scale_val2 = 100.0*np.linalg.norm(ftrns1(xmle[0,0:3].reshape(1,-1)) - ftrns1(xmle[0,0:3].reshape(1,-1) + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)
+	        scale_val = 0.5*(scale_val1 + scale_val2)
+			
+	        scale_partials = (1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)
 	        src_input_p = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_p_perm_slice),1).to(device), requires_grad = True)
 	        src_input_s = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_s_perm_slice),1).to(device), requires_grad = True)
 	        trv_out_p = trv_pairwise(torch.Tensor(locs_use_slice[ind_p_perm_slice]).to(device), src_input_p, method = 'direct')[:,0]
@@ -1293,10 +1301,9 @@ for cnt, strs in enumerate([0]):
 	        var = np.linalg.pinv(var.T@var)*(sig_d**2)
 	        var = var*chi_pdf
 	        #Variances.append(np.expand_dims(var, axis = 0))
-	        var_cart = (d_grad/scale_partials)/np.array([110e3, 110e3, 1.0]).reshape(1,-1)
+	        var_cart = (d_grad/scale_partials)/np.array([scale_val1, scale_val2, 1.0]).reshape(1,-1)
 	        var_cart = np.linalg.pinv(var_cart.T@var_cart)*(sig_d**2)
 	        var_cart = var_cart*chi_pdf
-	        # Variances_cart.append(np.expand_dims(var, axis = 0))
 	
 	
 	srcs_trv = np.vstack(srcs_trv)
