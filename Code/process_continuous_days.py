@@ -1275,6 +1275,30 @@ for cnt, strs in enumerate([0]):
 
 		srcs_trv.append(np.concatenate((xmle, np.array([srcs_refined[i,3] - mean_shift]).reshape(1,-1)), axis = 1))
 
+		## Estimate uncertainties
+	        scale_partials = (1/60.0)*np.array([1.0, 1.0, 110e3]).reshape(1,-1)
+	        src_input_p = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_p_perm_slice),1).to(device), requires_grad = True)
+	        src_input_s = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_s_perm_slice),1).to(device), requires_grad = True)
+	        trv_out_p = trv_pairwise(torch.Tensor(locs_use_slice[ind_p_perm_slice]).to(device), src_input_p, method = 'direct')[:,0]
+	        trv_out_s = trv_pairwise(torch.Tensor(locs_use_slice[ind_s_perm_slice]).to(device), src_input_s, method = 'direct')[:,1]
+	        # trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
+	        d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0].cpu().detach().numpy()
+	        d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0].cpu().detach().numpy()
+	
+	        d_grad = np.concatenate((d_p, d_s), axis = 0)
+	        sig_d = 0.15 ## Assumed pick uncertainty (seconds)
+	        chi_pdf = chi2(df = 3).pdf(0.99)
+	
+	        var = (d_grad/scale_partials)
+	        var = np.linalg.pinv(var.T@var)*(sig_d**2)
+	        var = var*chi_pdf
+	        #Variances.append(np.expand_dims(var, axis = 0))
+	        var_cart = (d_grad/scale_partials)/np.array([110e3, 110e3, 1.0]).reshape(1,-1)
+	        var_cart = np.linalg.pinv(var_cart.T@var_cart)*(sig_d**2)
+	        var_cart = var_cart*chi_pdf
+	        # Variances_cart.append(np.expand_dims(var, axis = 0))
+	
+	
 	srcs_trv = np.vstack(srcs_trv)
 
 	###### Only keep events with minimum number of picks and observing stations #########
