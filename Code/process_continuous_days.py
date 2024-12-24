@@ -1304,6 +1304,7 @@ for cnt, strs in enumerate([0]):
 	        var_cart = (d_grad/scale_partials)/np.array([scale_val1, scale_val2, 1.0]).reshape(1,-1)
 	        var_cart = np.linalg.pinv(var_cart.T@var_cart)*(sig_d**2)
 	        var_cart = var_cart*chi_pdf
+		sigma_cart = np.linalg.norm(np.diag(var_cart)**(0.5))
 	
 	
 	srcs_trv = np.vstack(srcs_trv)
