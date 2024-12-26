@@ -1287,8 +1287,8 @@ for cnt, strs in enumerate([0]):
 		scale_partials = (1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)
 		src_input_p = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_p_perm_slice),1).to(device), requires_grad = True)
 		src_input_s = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_s_perm_slice),1).to(device), requires_grad = True)
-		trv_out_p = trv_pairwise(torch.Tensor(locs_use_slice[ind_p_perm_slice]).to(device), src_input_p, method = 'direct')[:,0]
-		trv_out_s = trv_pairwise(torch.Tensor(locs_use_slice[ind_s_perm_slice]).to(device), src_input_s, method = 'direct')[:,1]
+		trv_out_p = trv_pairwise(torch.Tensor(locs_use_slice[ind_p_perm_slice]).to(device), src_input_p)[:,0]
+		trv_out_s = trv_pairwise(torch.Tensor(locs_use_slice[ind_s_perm_slice]).to(device), src_input_s)[:,1]
 		# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
 		d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0].cpu().detach().numpy()
 		d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0].cpu().detach().numpy()
