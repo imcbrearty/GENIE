@@ -546,7 +546,7 @@ def load_files_with_travel_times(path_to_file, name_of_project, template_ver, ve
 
 	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
 
-def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs', use_physics_informed = False):
+def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs', return_model = False, use_physics_informed = False):
 
 	if use_physics_informed == False:
 	
@@ -561,7 +561,9 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		
 		m = TravelTimes(ftrns1, ftrns2, scale_val = scale_val, trav_val = trav_val, n_phases = n_phases, device = device).to(device)
 		m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
-		m.eval()
+		
+		if return_model == False:
+			m.eval()
 	
 		if method == 'relative pairs':
 	
@@ -570,8 +572,14 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		if method == 'direct':
 	
 			trv = lambda sta_pos, src_pos: m.forward_relative(sta_pos, src_pos, method = 'direct')
+
+		if return_model == True:
+
+			return m
+
+		else:
 		
-		return trv
+			return trv
 
 	else:
 
@@ -597,7 +605,8 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		
 		m = TravelTimesPN(ftrns1, ftrns2, n_phases = n_phases, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
 		m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
-		m.eval()
+		if return_model == False:
+			m.eval()
 	
 		if method == 'relative pairs':
 	
@@ -606,8 +615,14 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		if method == 'direct':
 	
 			trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'direct')
+
+		if return_model == True:
+
+			return m
+
+		else:
 		
-		return trv		
+			return trv		
 
 # def load_travel_time_neural_network_physics_informed(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
 
