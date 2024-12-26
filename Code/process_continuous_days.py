@@ -1225,13 +1225,10 @@ for cnt, strs in enumerate([0]):
 		
 		srcs_refined = np.vstack(srcs_retained)
 
-	# Count number of P and S picks
-	cnt_p, cnt_s = np.zeros(srcs_refined.shape[0]), np.zeros(srcs_refined.shape[0])
-	for i in range(srcs_refined.shape[0]):
-		cnt_p[i] = Picks_P[i].shape[0]
-		cnt_s[i] = Picks_S[i].shape[0]
 
-	srcs_trv = []
+	## Locate events using travel times and associated picks
+	srcs_arv, srcs_sigma = [], []
+	del_arv_p, del_arv_s = [], []
 	torch.set_grad_enabled(True)
 	for i in range(srcs_refined.shape[0]):
 
@@ -1254,11 +1251,8 @@ for cnt, strs in enumerate([0]):
 			assert(ind_s_perm_slice.min() > -1)
 
 		if use_differential_evolution_location == True:
-
 			xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, device = device)
-		
 		else:
-		
 			xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
 		
 		if np.isnan(xmle).sum() > 0:
@@ -1280,10 +1274,83 @@ for cnt, strs in enumerate([0]):
 			mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
 			cnt_phases += 1
 
-		srcs_trv.append(np.concatenate((xmle, np.array([srcs_refined[i,3] - mean_shift]).reshape(1,-1)), axis = 1))
+		## This moved later, after the quality check
+		# srcs_trv.append(np.concatenate((xmle, np.array([srcs_refined[i,3] - mean_shift]).reshape(1,-1)), axis = 1))
 
 		## Estimate uncertainties
-		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + srcs_trv[-1][0,3]
+		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + (srcs_refined[i,3] - mean_shift) # srcs_trv[-1][0,3]
+		res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+		res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+		
+		# use_quality_check = process_config['use_quality_check'] ## If True, check all associated picks and set a maximum allowed relative error after obtaining initial location
+		# max_relative_error = process_config['max_relative_error'] ## 0.15 corresponds to 15% maximum relative error allowed
+		# min_time_buffer = process_config['min_time_buffer'] ## Uses this time (seconds) as a minimum residual time, beneath which, the relative error criterion is ignored (i.e., an associated pick is removed if both the relative error > max_relative_error and the residual > min_time_buffer)
+		if use_quality_check == True:
+			rel_error_p = np.abs(res_p/pred_out[0,ind_p_perm_slice,0])
+			rel_error_s = np.abs(res_s/pred_out[0,ind_s_perm_slice,1])
+			idel_p = np.where((rel_error_p > max_relative_error)*(pred_out[0,ind_p_perm_slice,0] > min_time_buffer)[0]
+			idel_s = np.where((rel_error_s > max_relative_error)*(pred_out[0,ind_s_perm_slice,1] > min_time_buffer)[0]
+			del_arv_p.append(len(idel_p))
+			del_arv_s.append(len(idel_s))
+					  
+			if len(idel_p) > 0:
+				arv_p = np.delete(arv_p, idel_p, axis = 0)
+				ind_p = np.delete(ind_p, idel_p, axis = 0)
+				Picks_P[i] = np.delete(Picks_P[i], idel_p, axis = 0)
+				Picks_P_perm[i] = np.delete(Picks_P_perm[i], idel_p, axis = 0)
+
+			if len(idel_s) > 0:
+				arv_s = np.delete(arv_s, idel_s, axis = 0)
+				ind_s = np.delete(ind_s, idel_s, axis = 0)
+				Picks_S[i] = np.delete(Picks_S[i], idel_s, axis = 0)
+				Picks_S_perm[i] = np.delete(Picks_S_perm[i], idel_s, axis = 0)
+			
+			ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
+	
+			if len(ind_unique_arrivals) == 0:
+				srcs_trv.append(np.nan*np.ones((1, 4)))
+				continue			
+			
+			perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
+			perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
+			locs_use_slice = locs_use[ind_unique_arrivals]
+			ind_p_perm_slice = perm_vec_arrivals[ind_p]
+			ind_s_perm_slice = perm_vec_arrivals[ind_s]
+			
+			if len(ind_p_perm_slice) > 0:
+				assert(ind_p_perm_slice.min() > -1)
+			if len(ind_s_perm_slice) > 0:
+				assert(ind_s_perm_slice.min() > -1)
+
+			if ((len(idel_p) > 0) + (len(idel_s) > 0)) > 0: ## If arrivals have been removed, re-locate
+				
+				if use_differential_evolution_location == True:
+					xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, device = device)
+				else:
+					xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
+				
+			if np.isnan(xmle).sum() > 0:
+				srcs_trv.append(np.nan*np.ones((1, 4)))
+				continue
+				
+			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + srcs_refined[i,3] # srcs_trv[-1][0,3]
+			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+			
+			mean_shift = 0.0
+			cnt_phases = 0
+			if len(res_p) > 0:
+				mean_shift += np.median(res_p)*(len(res_p)/(len(res_p) + len(res_s)))
+				cnt_phases += 1
+	
+			if len(res_s) > 0:
+				mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
+				cnt_phases += 1		
+		else:
+			del_arv_p.append(0)
+			del_arv_s.append(0)
+		
+		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + (srcs_refined[i,3] - mean_shift) # srcs_trv[-1][0,3]
 		res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
 		res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
 		
@@ -1312,11 +1379,23 @@ for cnt, strs in enumerate([0]):
 		var_cart = np.linalg.pinv(var_cart.T@var_cart)*(sig_d**2)
 		var_cart = var_cart*chi_pdf
 		sigma_cart = np.linalg.norm(np.diag(var_cart)**(0.5))
+
+		## Append the final location and origin time
+		srcs_trv.append(np.concatenate((xmle, np.array([srcs_refined[i,3] - mean_shift]).reshape(1,-1)), axis = 1))
+		srcs_sigma.append(sigma_cart)
 	
 	
 	srcs_trv = np.vstack(srcs_trv)
-
+	srcs_sigma = np.hstack(srcs_sigma)
+	del_arv_p = np.hstack(del_arv_p)
+	del_arv_s = np.hstack(del_arv_s)
 	###### Only keep events with minimum number of picks and observing stations #########
+
+	# Count number of P and S picks
+	cnt_p, cnt_s = np.zeros(srcs_refined.shape[0]), np.zeros(srcs_refined.shape[0])
+	for i in range(srcs_refined.shape[0]):
+		cnt_p[i] = Picks_P[i].shape[0]
+		cnt_s[i] = Picks_S[i].shape[0]
 	
 	# min_required_picks = 6
 	# min_required_sta = 6
@@ -1329,6 +1408,9 @@ for cnt, strs in enumerate([0]):
 	
 		srcs_refined = srcs_refined[ikeep]
 		srcs_trv = srcs_trv[ikeep]
+		srcs_sigma = srcs_sigma[ikeep]
+		del_arv_p = del_arv_p[ikeep]
+		del_arv_s = del_arv_s[ikeep]
 		cnt_p = cnt_p[ikeep]
 		cnt_s = cnt_s[ikeep]
 
@@ -1468,6 +1550,7 @@ for cnt, strs in enumerate([0]):
 		file_save['srcs'] = srcs_refined ## These are the direct locations predicted by the GNN (usually has some spatial bias due to locations of source nodes)
 		file_save['srcs_trv'] = srcs_trv ## These are the travel time located sources using associated picks (usually the most accurate!)
 		file_save['srcs_w'] = srcs_refined[:,4] ## The detection likelihood value for each source (e.g., > thresh, and usually < 1).
+		file_save['srcs_sigma'] = srcs_sigma ## The detection likelihood value for each source (e.g., > thresh, and usually < 1).
 		file_save['locs'] = locs
 		file_save['locs_use'] = locs_use
 		file_save['ind_use'] = ind_use
@@ -1476,6 +1559,8 @@ for cnt, strs in enumerate([0]):
 		# file_save['%d_%d_%d_%d_res2'%(date[0], date[1], date[2], julday)] = res2
 		file_save['cnt_p'] = cnt_p ## Number of P picks per event
 		file_save['cnt_s'] = cnt_s ## Number of S picks per event
+		file_save['del_arv_p'] = del_arv_p ## Number of deleted P picks during quality check
+		file_save['del_arv_s'] = del_arv_s ## Number of deleted S picks during quality check
 		file_save['tsteps_abs'] = tsteps_abs
 		file_save['X_query'] = X_query
 		file_save['mag_r'] = mag_r
