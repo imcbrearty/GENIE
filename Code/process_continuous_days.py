@@ -31,6 +31,7 @@ from torch_geometric.utils import softmax
 from sklearn.cluster import SpectralClustering
 from torch.autograd import Variable
 from numpy.matlib import repmat
+from scipy.stats import chi2
 import pathlib
 import itertools
 import sys
