@@ -1286,8 +1286,8 @@ for cnt, strs in enumerate([0]):
 		# max_relative_error = process_config['max_relative_error'] ## 0.15 corresponds to 15% maximum relative error allowed
 		# min_time_buffer = process_config['min_time_buffer'] ## Uses this time (seconds) as a minimum residual time, beneath which, the relative error criterion is ignored (i.e., an associated pick is removed if both the relative error > max_relative_error and the residual > min_time_buffer)
 		if use_quality_check == True:
-			rel_error_p = np.abs(res_p/pred_out[0,ind_p_perm_slice,0])
-			rel_error_s = np.abs(res_s/pred_out[0,ind_s_perm_slice,1])
+			rel_error_p = np.abs(res_p/(pred_out[0,ind_p_perm_slice,0] - (srcs_refined[i,3] - mean_shift)))
+			rel_error_s = np.abs(res_s/(pred_out[0,ind_s_perm_slice,1] - (srcs_refined[i,3] - mean_shift)))
 			idel_p = np.where((rel_error_p > max_relative_error)*(pred_out[0,ind_p_perm_slice,0] > min_time_buffer))[0]
 			idel_s = np.where((rel_error_s > max_relative_error)*(pred_out[0,ind_s_perm_slice,1] > min_time_buffer))[0]
 			del_arv_p.append(len(idel_p))
