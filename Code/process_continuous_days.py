@@ -121,6 +121,10 @@ dx_depth = process_config['dx_depth'] ## Depth resolution to locate events with 
 step = process_config['step']
 step_abs = process_config['step_abs']
 
+use_quality_check = process_config['use_quality_check'] ## If True, check all associated picks and set a maximum allowed relative error after obtaining initial location
+max_relative_error = process_config['max_relative_error'] ## 0.15 corresponds to 15% maximum relative error allowed
+min_time_buffer = process_config['min_time_buffer'] ## Uses this time (seconds) as a minimum residual time, beneath which, the relative error criterion is ignored (i.e., an associated pick is removed if both the relative error > max_relative_error and the residual > min_time_buffer)
+
 cost_value = process_config['cost_value'] # If use expanded competitve assignment, then this is the fixed cost applied per source
 ## when optimizing joint source-arrival assignments between nearby sources. The value is in terms of the 
 ## `sum' over the predicted source-arrival assignment for each pick. Ideally could make this number more
