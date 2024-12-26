@@ -65,19 +65,35 @@ def ecef2lla(x, a = 6378137.0, e = 8.18191908426215e-2):
 	alt[k] = np.abs(x[k,2]) - b
 	return np.concatenate((180.0*lat[:,None]/np.pi, 180.0*lon[:,None]/np.pi, alt[:,None]), axis = 1)
 
+# def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2]), device = 'cpu'):
+# 	# x = x.astype('float')
+# 	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
+# 	a = a.to(device)
+# 	e = e.to(device)
+# 	p = p.detach().clone().float().to(device) # why include detach here?
+# 	pi = torch.Tensor([np.pi]).to(device)
+# 	p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1).to(device)
+# 	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0])**2)
+# 	# results:
+# 	x = (N + p[:,2])*torch.cos(p[:,0])*torch.cos(p[:,1])
+# 	y = (N + p[:,2])*torch.cos(p[:,0])*torch.sin(p[:,1])
+# 	z = ((1-e**2)*N + p[:,2])*torch.sin(p[:,0])
+
+# 	return torch.cat((x.view(-1,1), y.view(-1,1), z.view(-1,1)), dim = 1)
+
 def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2]), device = 'cpu'):
 	# x = x.astype('float')
 	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
 	a = a.to(device)
 	e = e.to(device)
-	p = p.detach().clone().float().to(device) # why include detach here?
+	# p = p.detach().clone().float().to(device) # why include detach here?
 	pi = torch.Tensor([np.pi]).to(device)
-	p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1).to(device)
-	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0])**2)
+	# p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1).to(device)
+	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0]*pi/180.0)**2)
 	# results:
-	x = (N + p[:,2])*torch.cos(p[:,0])*torch.cos(p[:,1])
-	y = (N + p[:,2])*torch.cos(p[:,0])*torch.sin(p[:,1])
-	z = ((1-e**2)*N + p[:,2])*torch.sin(p[:,0])
+	x = (N + p[:,2])*torch.cos(p[:,0]*pi/180.0)*torch.cos(p[:,1]*pi/180.0)
+	y = (N + p[:,2])*torch.cos(p[:,0]*pi/180.0)*torch.sin(p[:,1]*pi/180.0)
+	z = ((1-e**2)*N + p[:,2])*torch.sin(p[:,0]*pi/180.0)
 
 	return torch.cat((x.view(-1,1), y.view(-1,1), z.view(-1,1)), dim = 1)
 
