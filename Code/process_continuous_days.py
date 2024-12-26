@@ -1227,6 +1227,7 @@ for cnt, strs in enumerate([0]):
 		cnt_s[i] = Picks_S[i].shape[0]
 
 	srcs_trv = []
+	torch.set_grad_enabled(True)
 	for i in range(srcs_refined.shape[0]):
 
 		arv_p, ind_p, arv_s, ind_s = Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int')
