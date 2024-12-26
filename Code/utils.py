@@ -707,7 +707,7 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 		edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
 		x_grids_edges.append(edge_index)
 
-	max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # + 10.0
+	max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # *1.1 # + 10.0
 
 	for i in range(len(x_grids)):
 
