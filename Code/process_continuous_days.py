@@ -1288,8 +1288,8 @@ for cnt, strs in enumerate([0]):
 		if use_quality_check == True:
 			rel_error_p = np.abs(res_p/pred_out[0,ind_p_perm_slice,0])
 			rel_error_s = np.abs(res_s/pred_out[0,ind_s_perm_slice,1])
-			idel_p = np.where((rel_error_p > max_relative_error)*(pred_out[0,ind_p_perm_slice,0] > min_time_buffer)[0]
-			idel_s = np.where((rel_error_s > max_relative_error)*(pred_out[0,ind_s_perm_slice,1] > min_time_buffer)[0]
+			idel_p = np.where((rel_error_p > max_relative_error)*(pred_out[0,ind_p_perm_slice,0] > min_time_buffer))[0]
+			idel_s = np.where((rel_error_s > max_relative_error)*(pred_out[0,ind_s_perm_slice,1] > min_time_buffer))[0]
 			del_arv_p.append(len(idel_p))
 			del_arv_s.append(len(idel_s))
 					  
