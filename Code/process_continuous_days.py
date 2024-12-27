@@ -1293,8 +1293,10 @@ for cnt, strs in enumerate([0]):
 			tval_s[tval_s <= 0] = 0.01
 			rel_error_p = np.abs(res_p/tval_p)
 			rel_error_s = np.abs(res_s/tval_s)
-			idel_p = np.where((rel_error_p > max_relative_error)*((pred_out[0,ind_p_perm_slice,0] - origin) > min_time_buffer))[0]
-			idel_s = np.where((rel_error_s > max_relative_error)*((pred_out[0,ind_s_perm_slice,1] - origin) > min_time_buffer))[0]
+			# idel_p = np.where((rel_error_p > max_relative_error)*((pred_out[0,ind_p_perm_slice,0] - origin) > min_time_buffer))[0]
+			# idel_s = np.where((rel_error_s > max_relative_error)*((pred_out[0,ind_s_perm_slice,1] - origin) > min_time_buffer))[0]
+			idel_p = np.where((rel_error_p > max_relative_error)*(np.abs(res_p) > min_time_buffer))[0]
+			idel_s = np.where((rel_error_s > max_relative_error)*(np.abs(res_s) > min_time_buffer))[0]
 			del_arv_p.append(len(idel_p))
 			del_arv_s.append(len(idel_s))
 					  
