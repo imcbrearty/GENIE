@@ -424,7 +424,7 @@ if process_known_events == True: ## If true, only process around times of known 
 
 for cnt, strs in enumerate([0]):
 
-	trv_out_src = trv(torch.Tensor(locs[ind_use]), torch.Tensor(x_src_query)).detach().to(device)
+	trv_out_src = trv(torch.Tensor(locs[ind_use]).to(device), torch.Tensor(x_src_query).to(device)).detach() # .to(device)
 	locs_use_cart_torch = torch.Tensor(ftrns1(locs_use)).to(device)
 	A_src_in_sta_l = []
 	
