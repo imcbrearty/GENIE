@@ -1328,8 +1328,24 @@ for cnt, strs in enumerate([0]):
 				assert(ind_p_perm_slice.min() > -1)
 			if len(ind_s_perm_slice) > 0:
 				assert(ind_s_perm_slice.min() > -1)
-
+				
+			# if len(ind_uniqu_arrivals) == 0:
+			# 	srcs_trv.append(np.nan*np.ones((1, 4)))
+			# 	continue				
+								
 			if ((len(idel_p) > 0) + (len(idel_s) > 0)) > 0: ## If arrivals have been removed, re-locate
+
+				if (min_required_picks is not False)*(min_required_sta is not False):
+					
+					if ((len(ind_uniqu_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
+						srcs_trv.append(np.nan*np.ones((1, 4)))
+						continue
+	
+				else:
+	
+					if len(ind_uniqu_arrivals) == 0:
+						srcs_trv.append(np.nan*np.ones((1, 4)))
+						continue
 				
 				if use_differential_evolution_location == True:
 					xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, device = device)
