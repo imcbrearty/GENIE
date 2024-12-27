@@ -1278,7 +1278,8 @@ for cnt, strs in enumerate([0]):
 		# srcs_trv.append(np.concatenate((xmle, np.array([srcs_refined[i,3] - mean_shift]).reshape(1,-1)), axis = 1))
 
 		## Estimate uncertainties
-		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + (srcs_refined[i,3] - mean_shift) # srcs_trv[-1][0,3]
+		origin = srcs_refined[i,3] - mean_shift
+		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + origin # srcs_trv[-1][0,3]
 		res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
 		res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
 		
@@ -1286,14 +1287,14 @@ for cnt, strs in enumerate([0]):
 		# max_relative_error = process_config['max_relative_error'] ## 0.15 corresponds to 15% maximum relative error allowed
 		# min_time_buffer = process_config['min_time_buffer'] ## Uses this time (seconds) as a minimum residual time, beneath which, the relative error criterion is ignored (i.e., an associated pick is removed if both the relative error > max_relative_error and the residual > min_time_buffer)
 		if use_quality_check == True:
-			tval_p = pred_out[0,ind_p_perm_slice,0] - (srcs_refined[i,3] - mean_shift)
-			tval_s = pred_out[0,ind_s_perm_slice,1] - (srcs_refined[i,3] - mean_shift)
-			tval_p[tval_p <= 0] = 1.0
-			tval_s[tval_s <= 0] = 1.0
+			tval_p = pred_out[0,ind_p_perm_slice,0] - origin
+			tval_s = pred_out[0,ind_s_perm_slice,1] - origin
+			tval_p[tval_p <= 0] = 0.01
+			tval_s[tval_s <= 0] = 0.01
 			rel_error_p = np.abs(res_p/tval_p)
 			rel_error_s = np.abs(res_s/tval_s)
-			idel_p = np.where((rel_error_p > max_relative_error)*((pred_out[0,ind_p_perm_slice,0] - (srcs_refined[i,3] - mean_shift)) > min_time_buffer))[0]
-			idel_s = np.where((rel_error_s > max_relative_error)*((pred_out[0,ind_s_perm_slice,1] - (srcs_refined[i,3] - mean_shift)) > min_time_buffer))[0]
+			idel_p = np.where((rel_error_p > max_relative_error)*((pred_out[0,ind_p_perm_slice,0] - origin) > min_time_buffer))[0]
+			idel_s = np.where((rel_error_s > max_relative_error)*((pred_out[0,ind_s_perm_slice,1] - origin) > min_time_buffer))[0]
 			del_arv_p.append(len(idel_p))
 			del_arv_s.append(len(idel_s))
 					  
@@ -1353,8 +1354,9 @@ for cnt, strs in enumerate([0]):
 		else:
 			del_arv_p.append(0)
 			del_arv_s.append(0)
-		
-		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + (srcs_refined[i,3] - mean_shift) # srcs_trv[-1][0,3]
+
+		origin = srcs_refined[i,3] - mean_shift
+		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + origin # srcs_trv[-1][0,3]
 		res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
 		res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
 		
@@ -1385,7 +1387,7 @@ for cnt, strs in enumerate([0]):
 		sigma_cart = np.linalg.norm(np.diag(var_cart)**(0.5))
 
 		## Append the final location and origin time
-		srcs_trv.append(np.concatenate((xmle, np.array([srcs_refined[i,3] - mean_shift]).reshape(1,-1)), axis = 1))
+		srcs_trv.append(np.concatenate((xmle, np.array([origin]).reshape(1,-1)), axis = 1))
 		srcs_sigma.append(sigma_cart)
 	
 	
