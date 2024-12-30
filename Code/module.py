@@ -21,8 +21,18 @@ from torch_scatter import scatter
 from numpy.matlib import repmat
 import itertools
 import pathlib
+import yaml
 
-use_updated_model_definition = True
+# Load configuration from YAML
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
+
+use_updated_model_definition = config['use_updated_model_definition']
+scale_rel = config['scale_rel'] # 30e3
+scale_t = config['scale_t'] # 10.0
+eps = config['eps'] # 15.0
+
+# use_updated_model_definition = True
 
 device = torch.device('cuda') ## or use cpu
 
@@ -75,7 +85,7 @@ if use_updated_model_definition == False:
 else:
 
 	class DataAggregation(MessagePassing): # make equivelent version with sum operations.
-		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, scale_rel = 30.0, ndim_proj = 3):
+		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, scale_rel = scale_rel, ndim_proj = 3):
 			super(DataAggregation, self).__init__('mean') # node dim
 			## Use two layers of SageConv.
 			self.in_channels = in_channels
@@ -113,8 +123,8 @@ else:
 	
 			# embed_sta_edges = self.fproj_edges_sta(pos_loc/1e6)
 	
-			pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]]/1000.0 - pos_loc[A_src_in_sta[0][A_in_sta[1]]]/1000.0)/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-			pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]]/1000.0 - pos_src[A_src_in_sta[1][A_in_src[1]]]/1000.0)/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+			pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+			pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
 			dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdims = True)
 			dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdims = True)
 			pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
@@ -154,7 +164,7 @@ class BipartiteGraphOperator(MessagePassing):
 		return self.activate2(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = mask.max(1, keepdims = True)[0]*self.activate1(self.fc1(torch.cat((inpt, A_src_in_edges.x), dim = -1))))))
 
 class SpatialAggregation(MessagePassing):
-	def __init__(self, in_channels, out_channels, scale_rel = 30e3, n_dim = 3, n_global = 5, n_hidden = 30):
+	def __init__(self, in_channels, out_channels, scale_rel = scale_rel, n_dim = 3, n_global = 5, n_hidden = 30):
 		super(SpatialAggregation, self).__init__('mean') # node dim
 		## Use two layers of SageConv. Explictly or implicitly?
 		self.fc1 = nn.Linear(in_channels + n_dim + n_global, n_hidden)
@@ -185,7 +195,7 @@ class SpatialDirect(nn.Module):
 		return self.activate(self.f_direct(inpts))
 
 class SpatialAttention(MessagePassing):
-	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, scale_rel = 30e3, n_hidden = 30, n_heads = 5):
+	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, scale_rel = scale_rel, n_hidden = 30, n_heads = 5):
 		super(SpatialAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
 		# notice node_dim = 0.
 		self.param_vector = nn.Parameter(nn.init.xavier_uniform_(torch.Tensor(1, n_heads, n_latent)))
@@ -219,7 +229,7 @@ class SpatialAttention(MessagePassing):
 		return alpha.unsqueeze(-1)*value_embed
 
 class TemporalAttention(MessagePassing): ## Hopefully replace this.
-	def __init__(self, inpt_dim, out_channels, n_latent, scale_t = 10.0, n_hidden = 30, n_heads = 5):
+	def __init__(self, inpt_dim, out_channels, n_latent, scale_t = scale_t, n_hidden = 30, n_heads = 5):
 		super(TemporalAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
 
 		self.temporal_query_1 = nn.Linear(1, n_hidden)
@@ -323,7 +333,7 @@ if use_updated_model_definition == False:
 else:
 
 	class DataAggregationAssociationPhase(MessagePassing): # make equivelent version with sum operations.
-		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_latent = 30, n_dim_mask = 5, scale_rel = 30.0, ndim_proj = 3):
+		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_latent = 30, n_dim_mask = 5, scale_rel = scale_rel, ndim_proj = 3):
 			super(DataAggregationAssociationPhase, self).__init__('mean') # node dim
 			## Use two layers of SageConv. Explictly or implicitly?
 			self.in_channels = in_channels
@@ -360,8 +370,8 @@ else:
 			tr = torch.cat((tr, latent, mask), dim = -1)
 			tr = self.activate(self.init_trns(tr)) # should tlatent appear here too? Not on first go..
 	
-			pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]]/1000.0 - pos_loc[A_src_in_sta[0][A_in_sta[1]]]/1000.0)/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-			pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]]/1000.0 - pos_src[A_src_in_sta[1][A_in_src[1]]]/1000.0)/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+			pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+			pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
 			dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdims = True)
 			dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdims = True)
 			pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
@@ -420,7 +430,7 @@ else:
 # 		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
 
 class LocalSliceLgCollapse(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = 15.0, device = 'cuda'):
+	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = eps, device = 'cuda'):
 		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
 		self.fc1 = nn.Linear(ndim_in + n_edge, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
 		self.fc2 = nn.Linear(n_hidden, ndim_out)
@@ -459,7 +469,7 @@ class LocalSliceLgCollapse(MessagePassing):
 		return out
 
 class StationSourceAttentionMergedPhases(MessagePassing):
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = 15.0, device = device):
+	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, device = device):
 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
 		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6, n_hidden) # add edge data (observed arrival - theoretical arrival)
