@@ -579,14 +579,14 @@ if use_updated_model_definition == False:
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
 	
-		def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+		def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
-			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
+			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 	
 			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
+			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, locs_use_cart.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
@@ -621,16 +621,16 @@ if use_updated_model_definition == False:
 			self.dt_partition = dt_partition
 			self.tlatent = tlatent	
 		
-		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
-			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
+			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 	
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
 			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
+			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use_cart.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
@@ -652,16 +652,16 @@ if use_updated_model_definition == False:
 	
 			return y, x, arv_p, arv_s
 
-		def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use, x_temp_cuda_cart, x_query_cart, t_query):
+		def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, t_query):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
-			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
+			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 	
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
 			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
+			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use_cart.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
@@ -698,15 +698,14 @@ elif use_updated_model_definition == True:
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
 	
-		def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+		def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
-			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
-			locs_use_cart = self.ftrns1(locs_use)
+			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 	
 			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
+			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, locs_use_cart.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
@@ -741,17 +740,16 @@ elif use_updated_model_definition == True:
 			self.dt_partition = dt_partition
 			self.tlatent = tlatent	
 		
-		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
-			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
-			locs_use_cart = self.ftrns1(locs_use)
+			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 	
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
 			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use.shape[0], x_temp_cuda_cart.shape[0])
+			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, locs_use_cart.shape[0], x_temp_cuda_cart.shape[0])
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
@@ -773,12 +771,11 @@ elif use_updated_model_definition == True:
 	
 			return y, x, arv_p, arv_s
 
-		def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use, x_temp_cuda_cart, x_query_cart, t_query):
+		def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, t_query):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
-			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use.shape[0]
-			locs_use_cart = self.ftrns1(locs_use)
+			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 	
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
