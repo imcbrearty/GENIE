@@ -125,8 +125,8 @@ else:
 	
 			pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
 			pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-			dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdims = True)
-			dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdims = True)
+			dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
+			dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
 			pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
 			pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
 			
@@ -372,8 +372,8 @@ else:
 	
 			pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
 			pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-			dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdims = True)
-			dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdims = True)
+			dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
+			dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
 			pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
 			pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)	
 	
