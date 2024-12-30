@@ -84,9 +84,9 @@ if use_updated_model_definition == False:
 
 else:
 
-	class DataAggregation(MessagePassing): # make equivelent version with sum operations.
+	class DataAggregationEdges(MessagePassing): # make equivelent version with sum operations.
 		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, ndim_proj = 3, scale_rel = scale_rel):
-			super(DataAggregation, self).__init__('mean') # node dim
+			super(DataAggregationEdges, self).__init__('mean') # node dim
 			## Use two layers of SageConv.
 			self.in_channels = in_channels
 			self.out_channels = out_channels
@@ -332,9 +332,9 @@ if use_updated_model_definition == False:
 
 else:
 
-	class DataAggregationAssociationPhase(MessagePassing): # make equivelent version with sum operations.
+	class DataAggregationAssociationPhaseEdges(MessagePassing): # make equivelent version with sum operations.
 		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_latent = 30, n_dim_mask = 5, ndim_proj = 3, scale_rel = scale_rel):
-			super(DataAggregationAssociationPhase, self).__init__('mean') # node dim
+			super(DataAggregationAssociationPhaseEdges, self).__init__('mean') # node dim
 			## Use two layers of SageConv. Explictly or implicitly?
 			self.in_channels = in_channels
 			self.out_channels = out_channels
@@ -679,7 +679,7 @@ elif use_updated_model_definition == True:
 			super(GCN_Detection_Network_extended, self).__init__()
 			# Define modules and other relavent fixed objects (scaling coefficients.)
 			# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
-			self.DataAggregation = DataAggregation(4, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
+			self.DataAggregation = DataAggregationEdges(4, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
 			self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 3).to(device) # 30, 15
 			self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
 			self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
@@ -689,7 +689,7 @@ elif use_updated_model_definition == True:
 			self.TemporalAttention = TemporalAttention(30, 1, 15).to(device)
 	
 			self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
-			self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
+			self.DataAggregationAssociationPhase = DataAggregationAssociationPhaseEdges(15, 15).to(device) # need to add concatenation
 			self.LocalSliceLgCollapseP = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3, device = device).to(device)
