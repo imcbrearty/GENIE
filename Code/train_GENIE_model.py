@@ -1214,7 +1214,7 @@ for i in range(n_restart_step, n_epochs):
 		data_1 = Data(x=spatial_vals, edge_index=edge_index_1)
 		data_2 = Data(x=spatial_vals, edge_index=edge_index_2)
 
-		use_updated_pick_max_associations = False
+		use_updated_pick_max_associations = True # Changing to True
 		if (len(lp_times[i0]) > max_number_pick_association_labels_per_sample)*(use_updated_pick_max_associations == True):
 
 			## Cnt number of picks per station
