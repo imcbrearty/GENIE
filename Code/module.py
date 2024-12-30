@@ -85,7 +85,7 @@ if use_updated_model_definition == False:
 else:
 
 	class DataAggregation(MessagePassing): # make equivelent version with sum operations.
-		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, scale_rel = scale_rel, ndim_proj = 3):
+		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, ndim_proj = 3, scale_rel = scale_rel):
 			super(DataAggregation, self).__init__('mean') # node dim
 			## Use two layers of SageConv.
 			self.in_channels = in_channels
@@ -195,7 +195,7 @@ class SpatialDirect(nn.Module):
 		return self.activate(self.f_direct(inpts))
 
 class SpatialAttention(MessagePassing):
-	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, scale_rel = scale_rel, n_hidden = 30, n_heads = 5):
+	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, n_hidden = 30, n_heads = 5, scale_rel = scale_rel):
 		super(SpatialAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
 		# notice node_dim = 0.
 		self.param_vector = nn.Parameter(nn.init.xavier_uniform_(torch.Tensor(1, n_heads, n_latent)))
@@ -229,7 +229,7 @@ class SpatialAttention(MessagePassing):
 		return alpha.unsqueeze(-1)*value_embed
 
 class TemporalAttention(MessagePassing): ## Hopefully replace this.
-	def __init__(self, inpt_dim, out_channels, n_latent, scale_t = scale_t, n_hidden = 30, n_heads = 5):
+	def __init__(self, inpt_dim, out_channels, n_latent, n_hidden = 30, n_heads = 5, scale_t = scale_t):
 		super(TemporalAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
 
 		self.temporal_query_1 = nn.Linear(1, n_hidden)
@@ -333,7 +333,7 @@ if use_updated_model_definition == False:
 else:
 
 	class DataAggregationAssociationPhase(MessagePassing): # make equivelent version with sum operations.
-		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_latent = 30, n_dim_mask = 5, scale_rel = scale_rel, ndim_proj = 3):
+		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_latent = 30, n_dim_mask = 5, ndim_proj = 3, scale_rel = scale_rel):
 			super(DataAggregationAssociationPhase, self).__init__('mean') # node dim
 			## Use two layers of SageConv. Explictly or implicitly?
 			self.in_channels = in_channels
