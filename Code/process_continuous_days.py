@@ -1228,7 +1228,7 @@ for cnt, strs in enumerate([0]):
 
 
 	## Locate events using travel times and associated picks
-	srcs_arv, srcs_sigma = [], []
+	srcs_trv, srcs_sigma = [], []
 	del_arv_p, del_arv_s = [], []
 	torch.set_grad_enabled(True)
 	for i in range(srcs_refined.shape[0]):
