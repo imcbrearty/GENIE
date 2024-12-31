@@ -434,12 +434,13 @@ for cnt, strs in enumerate([0]):
 		
 			# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
 			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref = extract_inputs_adjacencies(trv, locs, ind_use, x_grids[i], x_grids_trv[i], x_grids_trv_refs[i], x_grids_trv_pointers_p[i], x_grids_trv_pointers_s[i], ftrns1, graph_params, device = device)
-	
+
+			A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(len(ind_use)), len(x_grids[i])).reshape(1,-1), np.arange(len(x_grids[i])).repeat(len(ind_use), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
 			spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(x_grids[i], axis = 1), len(ind_use), axis = 1) - np.repeat(np.expand_dims(locs[ind_use], axis = 0), x_grids[i].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
 			A_src_in_edges = Data(x = spatial_vals, edge_index = A_src_in_prod).to(device)
 			A_Lg_in_src = Data(x = spatial_vals, edge_index = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod.cpu().detach().numpy(), axis = 0))).long()).to(device)
 			trv_out = trv(torch.Tensor(locs[ind_use]).to(device), torch.Tensor(x_grids[i]).to(device)).detach().reshape(-1,2) ## Can replace trv_out with Trv_out
-			mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_edges, A_Lg_in_src, A_src_src, torch.Tensor(A_edges_time_p).long().to(device), torch.Tensor(A_edges_time_s).long().to(device), torch.Tensor(A_edges_ref).to(device), trv_out)
+			mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src_src, torch.Tensor(A_edges_time_p).long().to(device), torch.Tensor(A_edges_time_s).long().to(device), torch.Tensor(A_edges_ref).to(device), trv_out)
 
 		else:
 
@@ -452,7 +453,7 @@ for cnt, strs in enumerate([0]):
 			flipped_edge = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod.edge_index.cpu().detach().numpy(), axis = 0))).long().to(device)
 			A_src_in_prod_flipped = Data(x = spatial_vals, edge_index = flipped_edge).to(device)
 			trv_out = trv_pairwise(torch.Tensor(locs_use[A_src_in_sta[0].cpu().detach().numpy()]).to(device), torch.Tensor(x_grids[i][A_src_in_sta[1].cpu().detach().numpy()]).to(device))
-			mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_prod_flipped, A_src_src, torch.Tensor(A_edges_time_p).long().to(device), torch.Tensor(A_edges_time_s).long().to(device), torch.Tensor(dt_partition).to(device), trv_out)
+			mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_prod_flipped, A_src_in_sta, A_src_src, torch.Tensor(A_edges_time_p).long().to(device), torch.Tensor(A_edges_time_s).long().to(device), torch.Tensor(dt_partition).to(device), trv_out)
 			A_src_in_sta_l.append(A_src_in_sta.cpu().detach().numpy())
 		
 	
