@@ -116,11 +116,15 @@ else:
 			self.scale_rel = scale_rel
 			self.merge_edges = nn.Sequential(nn.Linear(n_hidden + ndim_proj + 1, n_hidden), nn.PReLU())
 	
-		def forward(self, tr, mask, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src, pos_rel_sta, pos_rel_src):
+		def forward(self, tr, mask, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src, pos_rel_sta = None, pos_rel_src = None):
 	
 			tr = torch.cat((tr, mask), dim = -1)
 			tr = self.activate(self.init_trns(tr))
-	
+
+			if pos_rel_sta is None:
+				pos_rel_sta = self.pos_rel_sta
+				pos_rel_src = self.pos_rel_src
+			
 			# embed_sta_edges = self.fproj_edges_sta(pos_loc/1e6)
 	
 			# pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
@@ -364,12 +368,16 @@ else:
 			self.scale_rel = scale_rel
 			self.merge_edges = nn.Sequential(nn.Linear(n_hidden + ndim_proj + 1, n_hidden), nn.PReLU())
 	
-		def forward(self, tr, latent, mask1, mask2, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src, pos_rel_sta, pos_rel_src):
+		def forward(self, tr, latent, mask1, mask2, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src, pos_rel_sta = None, pos_rel_src = None):
 	
 			mask = torch.cat((mask1, mask2), dim = - 1)
 			tr = torch.cat((tr, latent, mask), dim = -1)
 			tr = self.activate(self.init_trns(tr)) # should tlatent appear here too? Not on first go..
-	
+
+			if pos_rel_sta is None:
+				pos_rel_sta = self.pos_rel_sta
+				pos_rel_src = self.pos_rel_src			
+			
 			# pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
 			# pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
 			# dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
@@ -720,7 +728,7 @@ elif use_updated_model_definition == True:
 			pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
 			pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
 			
-			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart, pos_rel_sta, pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
@@ -762,8 +770,10 @@ elif use_updated_model_definition == True:
 			self.A_edges_s = A_edges_s
 			self.dt_partition = dt_partition
 			self.tlatent = tlatent
-			self.pos_rel_sta = pos_rel_sta
-			self.pos_rel_src = pos_rel_src
+			self.DataAggregation.pos_rel_sta = pos_rel_sta
+			self.DataAggregation.pos_rel_src = pos_rel_src
+			self.DataAggregationAssociationPhase.pos_rel_sta = pos_rel_sta
+			self.DataAggregationAssociationPhase.pos_rel_src = pos_rel_src
 		
 		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
@@ -773,7 +783,7 @@ elif use_updated_model_definition == True:
 	
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
-			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, self.pos_rel_sta, self.pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
@@ -787,7 +797,7 @@ elif use_updated_model_definition == True:
 			## Note below: why detach x_latent?
 			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
-			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, self.pos_rel_sta, self.pos_rel_src) # detach x_latent. Just a "reference"
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart) # detach x_latent. Just a "reference"
 			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta)
 			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,1].reshape(-1,1), n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
@@ -804,7 +814,7 @@ elif use_updated_model_definition == True:
 	
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
-			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, self.pos_rel_sta, self.pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
