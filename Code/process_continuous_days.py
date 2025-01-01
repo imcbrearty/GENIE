@@ -1330,7 +1330,7 @@ for cnt, strs in enumerate([0]):
 			if len(ind_s_perm_slice) > 0:
 				assert(ind_s_perm_slice.min() > -1)
 				
-			# if len(ind_uniqu_arrivals) == 0:
+			# if len(ind_unique_arrivals) == 0:
 			# 	srcs_trv.append(np.nan*np.ones((1, 4)))
 			# 	continue				
 								
