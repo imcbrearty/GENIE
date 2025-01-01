@@ -744,7 +744,7 @@ elif use_updated_model_definition == True:
 			self.DataAggregationAssociationPhase.pos_rel_sta = pos_rel_sta
 			self.DataAggregationAssociationPhase.pos_rel_src = pos_rel_src
 			
-			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
@@ -758,7 +758,7 @@ elif use_updated_model_definition == True:
 			## Note below: why detach x_latent?
 			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
-			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart, pos_rel_sta, pos_rel_src) # detach x_latent. Just a "reference"
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart) # detach x_latent. Just a "reference"
 			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size
 			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, s, tlatent[:,1].reshape(-1,1), n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
