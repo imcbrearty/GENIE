@@ -1338,13 +1338,13 @@ for cnt, strs in enumerate([0]):
 
 				if (min_required_picks is not False)*(min_required_sta is not False):
 					
-					if ((len(ind_uniqu_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
+					if ((len(ind_unique_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
 						srcs_trv.append(np.nan*np.ones((1, 4)))
 						continue
 	
 				else:
 	
-					if len(ind_uniqu_arrivals) == 0:
+					if len(ind_unique_arrivals) == 0:
 						srcs_trv.append(np.nan*np.ones((1, 4)))
 						continue
 				
