@@ -608,8 +608,15 @@ if use_updated_model_definition == False:
 	
 			return y, x, arv_p, arv_s
 	
-		def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent):
-	
+		def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, pos_loc, pos_src):
+
+			# pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+			# pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+			# dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
+			# dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
+			# pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
+			# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
+			
 			self.A_in_sta = A_in_sta
 			self.A_in_src = A_in_src
 			self.A_src_in_edges = A_src_in_edges
@@ -619,7 +626,9 @@ if use_updated_model_definition == False:
 			self.A_edges_p = A_edges_p
 			self.A_edges_s = A_edges_s
 			self.dt_partition = dt_partition
-			self.tlatent = tlatent	
+			self.tlatent = tlatent
+			# self.pos_rel_sta = pos_rel_sta
+			# self.pos_rel_src = pos_rel_src
 		
 		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
