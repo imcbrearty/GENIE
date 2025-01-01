@@ -96,25 +96,25 @@ else:
 			self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
 	
 			self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
-			self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+			self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask + ndim_proj + 1, n_hidden)
 	
 			self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
-			self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+			self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask + ndim_proj + 1, n_hidden)
 			self.activate11 = nn.PReLU() # can extend to each channel
 			self.activate12 = nn.PReLU() # can extend to each channel
 			self.activate1 = nn.PReLU() # can extend to each channel
 	
 			self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
-			self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+			self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask + ndim_proj + 1, out_channels)
 	
 			self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
-			self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+			self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask + ndim_proj + 1, out_channels)
 			self.activate21 = nn.PReLU() # can extend to each channel
 			self.activate22 = nn.PReLU() # can extend to each channel
 			self.activate2 = nn.PReLU() # can extend to each channel
 	
 			self.scale_rel = scale_rel
-			self.merge_edges = nn.Sequential(nn.Linear(n_hidden + ndim_proj + 1, n_hidden), nn.PReLU())
+			# self.merge_edges = nn.Sequential(nn.Linear(n_hidden + ndim_proj + 1, n_hidden), nn.PReLU())
 			self.pos_rel_sta = None
 			self.pos_rel_src = None
 	
@@ -147,11 +147,11 @@ else:
 
 			if message_type == 1:
 			
-				return self.merge_edges(torch.cat((x_j, self.pos_rel_sta), dim = 1)) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
-		
+				return torch.cat((x_j, self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+
 			elif message_type == 2:
 
-				return self.merge_edges(torch.cat((x_j, self.pos_rel_src), dim = 1)) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+				return torch.cat((x_j, self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 				
 
 class BipartiteGraphOperator(MessagePassing):
@@ -352,25 +352,25 @@ else:
 			self.init_trns = nn.Linear(in_channels + n_dim_latent + n_dim_mask, n_hidden)
 	
 			self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
-			self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+			self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask + ndim_proj + 1, n_hidden)
 	
 			self.l1_t2_1 = nn.Linear(n_hidden, n_hidden)
-			self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+			self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask + ndim_proj + 1, n_hidden)
 			self.activate11 = nn.PReLU() # can extend to each channel
 			self.activate12 = nn.PReLU() # can extend to each channel
 			self.activate1 = nn.PReLU() # can extend to each channel
 	
 			self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
-			self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+			self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask + ndim_proj + 1, out_channels)
 	
 			self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
-			self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+			self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask + ndim_proj + 1, out_channels)
 			self.activate21 = nn.PReLU() # can extend to each channel
 			self.activate22 = nn.PReLU() # can extend to each channel
 			self.activate2 = nn.PReLU() # can extend to each channel
 	
 			self.scale_rel = scale_rel
-			self.merge_edges = nn.Sequential(nn.Linear(n_hidden + ndim_proj + 1, n_hidden), nn.PReLU())
+			# self.merge_edges = nn.Sequential(nn.Linear(n_hidden + ndim_proj + 1, n_hidden), nn.PReLU())
 			self.pos_rel_sta = None
 			self.pos_rel_src = None
 	
@@ -405,11 +405,11 @@ else:
 
 			if message_type == 1:
 			
-				return self.merge_edges(torch.cat((x_j, self.pos_rel_sta), dim = 1)) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+				return torch.cat((x_j, self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 		
 			elif message_type == 2:
 
-				return self.merge_edges(torch.cat((x_j, self.pos_rel_src), dim = 1)) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+				return torch.cat((x_j, self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 				
 # class LocalSliceLgCollapse(MessagePassing):
 # 	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = 15.0, device = 'cuda'):
