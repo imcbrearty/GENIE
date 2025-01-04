@@ -131,6 +131,10 @@ cost_value = process_config['cost_value'] # If use expanded competitve assignmen
 ## adpative, potentially with number of stations or number of possible observing picks for each event. 
 
 device = torch.device(process_config['device']) ## Right now, this isn't updated to work with cuda, since
+if (process_config['device'] == 'cuda')*(torch.cuda.is_available() == False):
+	print('No cuda available, using cpu')
+	device = torch.device('cpu')
+
 ## the necessary variables do not have .to(device) at the right places
 torch.set_grad_enabled(False)
 
