@@ -1239,6 +1239,9 @@ for cnt, strs in enumerate([0]):
 
 		if len(ind_unique_arrivals) == 0:
 			srcs_trv.append(np.nan*np.ones((1, 4)))
+			srcs_sigma.append(np.nan)
+			del_arv_p.append(0)
+			del_arv_s.append(0)
 			continue			
 		
 		perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
@@ -1258,6 +1261,9 @@ for cnt, strs in enumerate([0]):
 		
 		if np.isnan(xmle).sum() > 0:
 			srcs_trv.append(np.nan*np.ones((1, 4)))
+			srcs_sigma.append(np.nan)
+			del_arv_p.append(0)
+			del_arv_s.append(0)
 			continue
 
 		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + srcs_refined[i,3]
@@ -1317,6 +1323,7 @@ for cnt, strs in enumerate([0]):
 	
 			if len(ind_unique_arrivals) == 0:
 				srcs_trv.append(np.nan*np.ones((1, 4)))
+				srcs_sigma.append(np.nan)
 				continue			
 			
 			perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
@@ -1340,12 +1347,14 @@ for cnt, strs in enumerate([0]):
 					
 					if ((len(ind_unique_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
 						srcs_trv.append(np.nan*np.ones((1, 4)))
+						srcs_sigma.append(np.nan)
 						continue
 	
 				else:
 	
 					if len(ind_unique_arrivals) == 0:
 						srcs_trv.append(np.nan*np.ones((1, 4)))
+						srcs_sigma.append(np.nan)
 						continue
 				
 				if use_differential_evolution_location == True:
@@ -1355,6 +1364,7 @@ for cnt, strs in enumerate([0]):
 				
 			if np.isnan(xmle).sum() > 0:
 				srcs_trv.append(np.nan*np.ones((1, 4)))
+				srcs_sigma.append(np.nan)
 				continue
 				
 			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + srcs_refined[i,3] # srcs_trv[-1][0,3]
@@ -1382,7 +1392,7 @@ for cnt, strs in enumerate([0]):
 		scale_val1 = 100.0*np.linalg.norm(ftrns1(xmle[0,0:3].reshape(1,-1)) - ftrns1(xmle[0,0:3].reshape(1,-1) + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
 		scale_val2 = 100.0*np.linalg.norm(ftrns1(xmle[0,0:3].reshape(1,-1)) - ftrns1(xmle[0,0:3].reshape(1,-1) + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
 		scale_val = 0.5*(scale_val1 + scale_val2)
-			
+
 		scale_partials = (1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)
 		src_input_p = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_p_perm_slice),1).to(device), requires_grad = True)
 		src_input_s = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_s_perm_slice),1).to(device), requires_grad = True)
@@ -1414,6 +1424,12 @@ for cnt, strs in enumerate([0]):
 	srcs_sigma = np.hstack(srcs_sigma)
 	del_arv_p = np.hstack(del_arv_p)
 	del_arv_s = np.hstack(del_arv_s)
+	assert(len(srcs_trv) == len(srcs_sigma))
+	assert(len(srcs_trv) == len(del_arv_p))
+	assert(len(srcs_trv) == len(del_arv_s))
+	assert(len(srcs_trv) == len(Picks_P))
+	assert(len(srcs_trv) == len(Picks_S))
+	assert(len(srcs_trv) == len(srcs_refined))
 	###### Only keep events with minimum number of picks and observing stations #########
 
 	# Count number of P and S picks
