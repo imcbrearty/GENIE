@@ -1227,8 +1227,7 @@ for i in range(n_restart_step, n_epochs):
 			x_src_query[ind_overwrite_focused_queries] = x_query_focused
 		
 		x_src_query_cart = ftrns1(x_src_query)
-
-		trv_out = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(X_fixed[i0]).to(device)).detach().reshape(-1,2) ## Note: could also just take this from x_grids_trv
+		
 		trv_out_src = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(x_src_query).to(device)).detach()
 
 		
@@ -1238,6 +1237,7 @@ for i in range(n_restart_step, n_epochs):
 			spatial_vals = torch.Tensor((X_fixed[i0][A_src_in_prod_l[i0][1].cpu().detach().numpy()] - Locs[i0][A_src_in_sta_l[i0][0][A_src_in_prod_l[i0][0]].cpu().detach().numpy()])/scale_x_extend).to(device)
 
 		else:
+			trv_out = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(X_fixed[i0]).to(device)).detach().reshape(-1,2) ## Note: could also just take this from x_grids_trv
 			spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(X_fixed[i0], axis = 1), Locs[i0].shape[0], axis = 1) - np.repeat(np.expand_dims(Locs[i0], axis = 0), X_fixed[i0].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
 	
 		
