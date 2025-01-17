@@ -186,7 +186,9 @@ if use_reference_spatial_density == True:
 		for s in st:
 			srcs_ref.append(np.load(s)['srcs_ref'])
 		srcs_ref = np.vstack(srcs_ref)
-		srcs_ref = kmeans_packing_fit_sources(srcs_ref, scale_x, offset_x, 3, n_reference_clusters, ftrns1, ftrns2, n_batch = 5000, n_steps = 5000, blur_sigma = spatial_sigma)
+		scale_x_ = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+		offset_x_ = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
+		srcs_ref = kmeans_packing_fit_sources(srcs_ref, scale_x_, offset_x_, 3, n_reference_clusters, ftrns1, ftrns2, n_batch = 5000, n_steps = 5000, blur_sigma = spatial_sigma)
 		if load_reference_density == True:
 			np.savez_compressed(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_1.npz', srcs_ref = srcs_ref)
 						      
