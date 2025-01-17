@@ -171,7 +171,7 @@ else:
 
 
 ## Check for reference catalog
-if use_reference_spatial_density === True:
+if use_reference_spatial_density == True:
 	load_reference_density = True
 	if (os.path.isfile(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_1.npz') == 1)*(load_reference_density == True):
 		srcs_ref = np.load(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_1.npz')['srcs_ref']
