@@ -429,6 +429,73 @@ def kmeans_packing_spherical(scale_x, offset_x, ndim, n_clusters, ftrns1, ftrns2
 
 	return ftrns2(V_results[ibest]), V_results, Losses, losses, rz
 
+def kmeans_packing_fit_sources(srcs, scale_x, offset_x, ndim, n_clusters, ftrns1, ftrns2, n_batch = 3000, n_steps = 5000, blur_sigma = 30e3, weights = [1.0, 1.0, 2.0], n_sim = 1, lr = 0.01):
+
+	# ftrns1_sphere_unit = lambda pos: lla2ecef(pos, e = 0.0, a = 1.0) # a = 6378137.0, e = 8.18191908426215e-2
+	# ftrns2_sphere_unit = lambda pos: ecef2lla(pos, e = 0.0, a = 1.0)
+
+	ftrns1_sphere_unit = lambda pos: lla2ecef(pos, a = 1.0, e = 0.0) # a = 6378137.0, e = 8.18191908426215e-2
+	ftrns2_sphere_unit = lambda pos: ecef2lla(pos, a = 1.0, e = 0.0)
+	from scipy.stats import beta
+
+	if weights is not None:
+		weights = np.array(weights).reshape(1,-1)
+	else:
+		weights = np.array([1.0, 1.0, 1.0]).reshape(1,-1)
+
+	def sample_sources(n):
+
+		xlat = ftrns2(ftrns1(srcs[np.random.choice(len(srcs), size = n),0:3]) + np.random.randn(n,3)*blur_sigma)
+		xlat[xlat[:,2] > (offset_x[0,2] + scale_x[0,2])] = offset_x[0,2] + scale_x[0,2]
+		xlat[xlat[:,2] < offset_x[0,2]] = offset_x[0,2]
+
+		return xlat
+
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v = sample_sources(n_clusters)
+				v1 = ftrns1(np.copy(v)*weights)
+				v = ftrns1(v) # np.random.rand(n_clusters, ndim)*scale_x + offset_x
+				# v1 = ftrns1(v1)
+
+			tree = cKDTree(v1)
+			x = sample_sources(n_batch)
+			x1 = ftrns1(np.copy(x)*weights)
+			x = ftrns1(x)
+			q, ip = tree.query(x1)
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = sample_sources(n_batch)
+		x1 = ftrns1(np.copy(x)*weights)
+		x = ftrns1(x)		
+		q, ip = tree.query(x1)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return ftrns2(V_results[ibest]), V_results, Losses, losses, rz
+
 ### TRAVEL TIMES ###
 
 def interp_3D_return_function_adaptive(X, Xmin, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
