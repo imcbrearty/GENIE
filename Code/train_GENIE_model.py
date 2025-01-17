@@ -185,6 +185,7 @@ if use_reference_spatial_density == True:
 		srcs_ref = []
 		for s in st:
 			srcs_ref.append(np.load(s)['srcs_ref'])
+			print('Read %s'%s)
 		srcs_ref = np.vstack(srcs_ref)
 		scale_x_ = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 		offset_x_ = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
