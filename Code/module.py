@@ -1002,6 +1002,56 @@ class TravelTimes(nn.Module):
 			return torch.sigmoid(self.fc3(sta_repeat - src_repeat)).reshape(len(src), len(sta), -1)
 
 
+# class VModel(nn.Module):
+
+# 	def __init__(self, n_phases = 2, n_hidden = 50, n_embed = 10, device = 'cuda'): # v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, 
+# 		super(VModel, self).__init__()
+
+# 		## Relative offset prediction [2]
+# 		self.fc1_1 = nn.Linear(3 + n_embed, n_hidden)
+# 		self.fc1_2 = nn.Linear(n_hidden, n_hidden)
+# 		self.fc1_3 = nn.Linear(n_hidden, n_hidden)
+# 		self.fc1_41 = nn.Linear(n_hidden, 1)
+# 		self.fc1_42 = nn.Linear(n_hidden, 1)
+# 		self.activate1_1 = lambda x: torch.sin(x)
+# 		self.activate1_2 = lambda x: torch.sin(x)
+# 		self.activate1_3 = lambda x: torch.sin(x)
+# 		self.activate = nn.Softplus()
+# 		self.mask = torch.zeros((1, 3)).to(device) # + n_embed)).to(device)
+# 		self.mask[0,2] = 1.0
+
+# 		# ## Projection functions
+# 		# self.ftrns1 = ftrns1
+# 		# self.ftrns2 = ftrns2
+# 		# # self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
+# 		# # self.tscale = torch.Tensor([trav_val]).to(device)
+# 		# self.v_mean = torch.Tensor(v_mean).to(device)
+# 		# self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
+# 		# self.device = device
+# 		# self.norm_pos = norm_pos
+# 		# self.inorm_pos = inorm_pos
+# 		# self.inorm_time = inorm_time
+# 		# self.norm_vel = norm_vel
+# 		# self.conversion_factor = conversion_factor
+# 		# self.Tp_average
+
+# 	def fc1_block(self, x):
+
+# 		# x = x*torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(x.device)
+# 		x1 = self.activate1_1(self.fc1_1(x))
+# 		x = self.activate1_2(self.fc1_2(x1)) + x1
+# 		x1 = self.activate1_3(self.fc1_3(x)) + x
+
+# 		return self.activate(self.fc1_41(x1)), self.activate(self.fc1_42(x1))
+
+# 	def forward(self, src, embed):
+
+# 		out1, out2 = self.fc1_block(torch.cat((src, embed), dim = 1))
+# 		out2 = out1*out2
+# 		# out[:,1] = out[:,0]*out[:,1] ## Vs is a fraction of Vp
+
+# 		return torch.cat((out1, out2), dim = 1)
+
 class VModel(nn.Module):
 
 	def __init__(self, n_phases = 2, n_hidden = 50, n_embed = 10, device = 'cuda'): # v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, 
@@ -1011,29 +1061,18 @@ class VModel(nn.Module):
 		self.fc1_1 = nn.Linear(3 + n_embed, n_hidden)
 		self.fc1_2 = nn.Linear(n_hidden, n_hidden)
 		self.fc1_3 = nn.Linear(n_hidden, n_hidden)
-		self.fc1_41 = nn.Linear(n_hidden, 1)
-		self.fc1_42 = nn.Linear(n_hidden, 1)
+		self.fc1_4 = nn.ModuleList()
+		for j in range(n_phases):
+			self.fc1_4.append(nn.Linear(n_hidden, 1))
+			# self.fc1_41 = nn.Linear(n_hidden, 1)
+			# self.fc1_42 = nn.Linear(n_hidden, 1)
 		self.activate1_1 = lambda x: torch.sin(x)
 		self.activate1_2 = lambda x: torch.sin(x)
 		self.activate1_3 = lambda x: torch.sin(x)
 		self.activate = nn.Softplus()
 		self.mask = torch.zeros((1, 3)).to(device) # + n_embed)).to(device)
 		self.mask[0,2] = 1.0
-
-		# ## Projection functions
-		# self.ftrns1 = ftrns1
-		# self.ftrns2 = ftrns2
-		# # self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
-		# # self.tscale = torch.Tensor([trav_val]).to(device)
-		# self.v_mean = torch.Tensor(v_mean).to(device)
-		# self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
-		# self.device = device
-		# self.norm_pos = norm_pos
-		# self.inorm_pos = inorm_pos
-		# self.inorm_time = inorm_time
-		# self.norm_vel = norm_vel
-		# self.conversion_factor = conversion_factor
-		# self.Tp_average
+		self.n_phases = n_phases
 
 	def fc1_block(self, x):
 
@@ -1041,16 +1080,19 @@ class VModel(nn.Module):
 		x1 = self.activate1_1(self.fc1_1(x))
 		x = self.activate1_2(self.fc1_2(x1)) + x1
 		x1 = self.activate1_3(self.fc1_3(x)) + x
+		# out = [self.activate(self.fc1_4[j](x1)) for j in range(self.n_phases)]
 
-		return self.activate(self.fc1_41(x1)), self.activate(self.fc1_42(x1))
+		return [self.activate(self.fc1_4[j](x1)) for j in range(self.n_phases)]
 
 	def forward(self, src, embed):
 
-		out1, out2 = self.fc1_block(torch.cat((src, embed), dim = 1))
-		out2 = out1*out2
+		out = self.fc1_block(torch.cat((src, embed), dim = 1))
+		lout = [out[0]]
+		for j in range(1, self.n_phases):
+			lout.append(out[0]*out[j])
 		# out[:,1] = out[:,0]*out[:,1] ## Vs is a fraction of Vp
 
-		return torch.cat((out1, out2), dim = 1)
+		return torch.cat(lout, dim = 1)
 
 class TravelTimesPN(nn.Module):
 
