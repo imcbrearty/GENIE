@@ -878,7 +878,7 @@ x_grids_trv = []
 x_grids_trv_pointers_p = []
 x_grids_trv_pointers_s = []
 x_grids_trv_refs = []
-x_grids_edges = []
+# x_grids_edges = []
 
 if config['train_travel_time_neural_network'] == False:
 	ts_max_val = Ts.max()
@@ -906,9 +906,9 @@ for i in range(len(x_grids)):
 	x_grids_trv_pointers_s.append(A_edges_time_s)
 	x_grids_trv_refs.append(dt_partition) # save as cuda tensor, or no?
 
-	edge_index = knn(torch.Tensor(ftrns1(x_grids[i])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[i])/1000.0).to(device), k = k_spc_edges).flip(0).contiguous()
-	edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
-	x_grids_edges.append(edge_index)
+	# edge_index = knn(torch.Tensor(ftrns1(x_grids[i])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[i])/1000.0).to(device), k = k_spc_edges).flip(0).contiguous()
+	# edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
+	# x_grids_edges.append(edge_index)
 
 ## Check if this can cause an issue (can increase max_t to a bit larger than needed value)
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # + 10.0
