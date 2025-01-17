@@ -53,6 +53,7 @@ name_of_project = config['name_of_project']
 
 path_to_file = str(pathlib.Path().absolute())
 path_to_file += '\\' if '\\' in path_to_file else '/'
+seperator = '\\' if '\\' in path_to_file else '/'
 
 ## Graph params
 k_sta_edges = config['k_sta_edges']
@@ -171,7 +172,21 @@ else:
 
 ## Check for reference catalog
 if use_reference_spatial_density === True:
-
+	load_reference_density = True
+	if (os.path.isfile(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_1.npz') == 1)*(load_reference_density == True):
+		srcs_ref = np.load(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_1.npz')['srcs_ref']
+	else:
+		st1 = glob.glob(path_to_file + 'Calibration/19*') ## Assuming years are 1900 and 2000's
+		st2 = glob.glob(path_to_file + 'Calibration/20*')
+		st = np.concatenate((st1, st2), axis = 0)
+		srcs_ref = []
+		for s in st:
+			srcs_ref.append(np.load(s)['srcs_ref'])
+		srcs_ref = np.vstack(srcs_ref)
+		srcs_ref = kmeans_packing_fit_sources(srcs_ref, scale_x, offset_x, 3, n_reference_clusters, ftrns1, ftrns2, n_batch = 5000, n_steps = 5000, blur_sigma = spatial_sigma
+		if load_reference_density == True:
+			np.savez_compressed(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_1.npz', srcs_ref = srcs_ref)
+						      
 ## Training synthic data parameters
 
 ## Training params list 2
@@ -276,6 +291,13 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	src_positions = np.random.rand(n_src, 3)*scale_x + offset_x
 	src_magnitude = np.random.rand(n_src)*7.0 - 1.0 # magnitudes, between -1.0 and 7 (uniformly)
 
+	if use_reference_spatial_density == True:
+		n_rand_sample = int(len(src_positions)*n_frac_reference_catalog)
+		rand_sample = ftrns2(ftrns1(srcs_ref[np.random.choice(len(srcs_ref), size = n_rand_sample),0:3]) + spatial_sigma*np.random.randn(n_rand_sample,3))
+		rand_sample[rand_sample[:,2] < depth_range[0],2] = depth_range[0]
+		rand_sample[rand_sample[:,2] > depth_range[1],2] = depth_range[1]
+		src_positions[np.random.choice(len(src_positions), size = n_rand_sample, replace = False)] = rand_sample
+	
 	if use_shallow_sources == True:
 		sample_random_depths = gamma(1.75, 0.0).rvs(n_src)
 		sample_random_grab = np.where(sample_random_depths > 5)[0] # Clip the long tails, and place in uniform, [0,5].
