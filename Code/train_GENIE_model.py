@@ -100,6 +100,9 @@ t_win = config['t_win'] ## This is the time window over which predictions are ma
 load_training_data = train_config['load_training_data']
 build_training_data = train_config['build_training_data'] ## If try, will use system argument to build a set of data
 
+max_number_pick_association_labels_per_sample = config['max_number_pick_association_labels_per_sample']
+make_visualize_predictions = config['make_visualize_predictions']
+
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
 
 ## Will update to be adaptive soon. The step size of temporal prediction is fixed at 1 s right now.
@@ -168,6 +171,37 @@ if load_subnetworks == True:
 
 else:
 	Ind_subnetworks = False
+	
+
+# Load region
+z = np.load(path_to_file + '%s_region.npz'%name_of_project)
+lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
+z.close()
+
+# Load templates
+z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
+x_grids = z['x_grids']
+z.close()
+
+# Load stations
+z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
+locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
+z.close()
+
+## Create path to write files
+seperator = '\\' if '\\' in path_to_file else '/'
+write_training_file = path_to_file + 'GNN_TrainedModels' + seperator + name_of_project + '_'
+
+lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
+lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
+
+scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
+scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
+
+rbest_cuda = torch.Tensor(rbest).to(device)
+mn_cuda = torch.Tensor(mn).to(device)
 
 
 ## Check for reference catalog
@@ -792,41 +826,6 @@ def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_
 
 	return lbl_trgt
 
-
-# Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
-
-max_number_pick_association_labels_per_sample = config['max_number_pick_association_labels_per_sample']
-make_visualize_predictions = config['make_visualize_predictions']
-
-# Load region
-z = np.load(path_to_file + '%s_region.npz'%name_of_project)
-lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-z.close()
-
-# Load templates
-z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-x_grids = z['x_grids']
-z.close()
-
-# Load stations
-z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
-locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-z.close()
-
-## Create path to write files
-seperator = '\\' if '\\' in path_to_file else '/'
-write_training_file = path_to_file + 'GNN_TrainedModels' + seperator + name_of_project + '_'
-
-lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
-lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
-
-scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
-scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
-
-rbest_cuda = torch.Tensor(rbest).to(device)
-mn_cuda = torch.Tensor(mn).to(device)
 
 # use_spherical = False
 if config['use_spherical'] == True:
