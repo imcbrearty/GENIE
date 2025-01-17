@@ -75,6 +75,13 @@ use_preferential_sampling : True ## This concentrates more of the samples around
 use_extra_nearby_moveouts : True ## This up-samples the amount of sources with moveouts only to nearby stations (e.g., it uses ~half of the distance range set in dist_range for 50% of events)
 use_shallow_sources : False
 
+## Use reference density for source distribution
+use_reference_spatial_density: False ## If True, must store reference sources in "Calibration/"yr"/"project_name"_reference_2023_1_3_ver_1.npz with field "srcs_ref"
+spatial_sigma: 20000.0 ## The amount of spatial smoothing to the reference catalog
+n_reference_clusters: 10000 ## The amount of "quasi-uniiform" nodes to obtain for representing the source catalog distribution
+n_frac_reference_catalog: 0.8 ## The amount of sources to simulate from the reference catalog coordinates compared to background
+
+
 ## Extra dataset parameters
 build_training_data : False ## Pre-build training data (rather than building inside training loop)
 load_training_data : False ## Load the pre-built training data during training
