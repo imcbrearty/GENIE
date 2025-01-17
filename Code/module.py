@@ -573,7 +573,8 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		queries = self.f_arrival_query_2(self.activate2(self.f_arrival_query_1(torch.cat((x_j, rel_t_p, rel_t_s), dim = 1)))).view(-1, self.n_heads, self.n_latent)
 		values = self.f_values_2(self.activate3(self.f_values_1(torch.cat((x_j, rel_t_p, rel_t_s, self_link, null_link), dim = 1)))).view(-1, self.n_heads, self.n_latent)
 
-		assert(self_link.sum() == (len(atime) - 1)*tsrc_p.shape[0])
+		# When using sparse, this assert is not true
+		# assert(self_link.sum() == (len(atime) - 1)*tsrc_p.shape[0])
 
 		## Do computation
 		scores = (queries*contexts).sum(-1)/self.scale
