@@ -727,7 +727,7 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		seperator = '\\' if '\\' in path_to_file else '/'
 		
 		z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_%s_losses_ver_%d.npz'%(phase, n_ver_load))
-		n_phases = z['out1'].shape[1]
+		n_phases = len(z['v_mean'])
 		scale_val = float(z['scale_val'])
 		trav_val = float(z['trav_val'])
 		z.close()
@@ -760,7 +760,7 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		seperator = '\\' if '\\' in path_to_file else '/'
 		
 		z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_load))
-		n_phases = z['out1'].shape[1]
+		n_phases = len(z['v_mean'])
 		v_mean, scale_params = z['v_mean'], z['scale_params']
 		# scale_val = float(z['scale_val'])
 		# trav_val = float(z['trav_val'])
