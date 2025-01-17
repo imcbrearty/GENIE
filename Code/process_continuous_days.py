@@ -162,7 +162,7 @@ k_time_edges = config['k_time_edges']
 
 name_of_project = config['name_of_project']
 use_physics_informed = config['use_physics_informed']
-use_unlabeled_phase_types = config['use_unlabeled_phase_types']
+use_phase_types = config['use_phase_types']
 use_subgraph = config['use_subgraph']
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
@@ -545,7 +545,7 @@ for cnt, strs in enumerate([0]):
 			                Inpts[i] = Inpts[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
 			                Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
 			
-			if use_unlabeled_phase_types == True:
+			if use_phase_types == False:
 				for i in range(len(Inpts)):
 					Inpts[i][:,2::] = 0.0 ## Phase type informed features zeroed out
 					Masks[i][:,2::] = 0.0
@@ -713,7 +713,7 @@ for cnt, strs in enumerate([0]):
 			                Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
 
 			
-			if use_unlabeled_phase_types == True:
+			if use_phase_types == False:
 				for i in range(len(Inpts)):
 					Inpts[i][:,2::] = 0.0 ## Phase type informed features zeroed out
 					Masks[i][:,2::] = 0.0
@@ -782,7 +782,7 @@ for cnt, strs in enumerate([0]):
 			                Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
 
 			
-			if use_unlabeled_phase_types == True:
+			if use_phase_types == False:
 				for i in range(len(Inpts)):
 					Inpts[i][:,2::] = 0.0 ## Phase type informed features zeroed out
 					Masks[i][:,2::] = 0.0
