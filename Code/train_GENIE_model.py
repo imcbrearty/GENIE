@@ -172,13 +172,16 @@ else:
 
 ## Check for reference catalog
 if use_reference_spatial_density == True:
+
+	n_reference_ver = 1
 	load_reference_density = True
 	if (os.path.isfile(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_1.npz') == 1)*(load_reference_density == True):
-		srcs_ref = np.load(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_1.npz')['srcs_ref']
+		srcs_ref = np.load(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver)['srcs_ref']
 	else:
 		st1 = glob.glob(path_to_file + 'Calibration/19*') ## Assuming years are 1900 and 2000's
 		st2 = glob.glob(path_to_file + 'Calibration/20*')
 		st = np.concatenate((st1, st2), axis = 0)
+		st = np.hstack([glob.glob(s + '/*ver_%d.npz'%n_reference_ver) for s in st])
 		srcs_ref = []
 		for s in st:
 			srcs_ref.append(np.load(s)['srcs_ref'])
