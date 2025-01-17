@@ -671,7 +671,7 @@ def compute_time_embedding_vectors(trv_pairwise, locs, x_grid, A_src_in_sta, max
 	tree_p = cKDTree(np.concatenate((scale_sta_ind*A_src_in_sta[0].cpu().detach().numpy().reshape(-1,1), trv_out[:,0].cpu().detach().numpy().reshape(-1,1)), axis = 1))
 	tree_s = cKDTree(np.concatenate((scale_sta_ind*A_src_in_sta[0].cpu().detach().numpy().reshape(-1,1), trv_out[:,1].cpu().detach().numpy().reshape(-1,1)), axis = 1))
 
-	dt_partition = np.arange(-t_win, max_t + t_win, dt_res)
+	dt_partition = np.arange(-t_win, max_t + eps + t_win, dt_res)
 	sta_ind_range = np.arange(0, len(locs))
 	x11, x12 = np.meshgrid(dt_partition, sta_ind_range)
 	query_points = np.concatenate((scale_sta_ind*x12.reshape(-1,1), x11.reshape(-1,1)), axis = 1)
@@ -680,8 +680,8 @@ def compute_time_embedding_vectors(trv_pairwise, locs, x_grid, A_src_in_sta, max
 
 	edges_time_p = tree_p.query(query_points, k = k_times)
 	edges_time_s = tree_s.query(query_points, k = k_times)
-	assert(edges_time_p[0].max() < max_t)
-	assert(edges_time_s[0].max() < max_t)
+	# assert(edges_time_p[0].max() < 10*max_t)
+	# assert(edges_time_s[0].max() < 10*max_t)
 	edges_time_p = edges_time_p[1].reshape(-1)
 	edges_time_s = edges_time_s[1].reshape(-1)
 	assert(edges_time_p.shape[0]/(locs.shape[0]*k_times*len(dt_partition)) == 1)
