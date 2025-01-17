@@ -411,9 +411,11 @@ np.savez_compressed(path_to_file + f'{config["name_of_project"]}_stations.npz', 
 
 os.makedirs(path_to_file + 'Picks', exist_ok=True)
 os.makedirs(path_to_file + 'Catalog', exist_ok=True)
+os.makedirs(path_to_file + 'Calibration', exist_ok=True)
 for year in years:
 	os.makedirs(path_to_file + f'Picks/{year}', exist_ok=True)
 	os.makedirs(path_to_file + f'Catalog/{year}', exist_ok=True)
+	os.makedirs(path_to_file + f'Calibration/{year}', exist_ok=True)
 
 os.makedirs(path_to_file + 'Plots', exist_ok=True)
 os.makedirs(path_to_file + 'GNN_TrainedModels', exist_ok=True)
