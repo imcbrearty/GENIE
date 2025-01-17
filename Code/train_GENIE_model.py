@@ -59,7 +59,7 @@ k_sta_edges = config['k_sta_edges']
 k_spc_edges = config['k_spc_edges']
 k_time_edges = config['k_time_edges']
 use_physics_informed = config['use_physics_informed']
-use_unlabeled_phase_types = config['use_unlabeled_phase_types']
+use_phase_types = config['use_phase_types']
 use_subgraph = config['use_subgraph']
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
@@ -1209,7 +1209,7 @@ for i in range(n_restart_step, n_epochs):
 		if len(lp_srcs[i0]) > 0:
 			tq_sample[0:len(lp_srcs[i0])] = torch.Tensor(lp_srcs[i0][:,3]).to(device)
 
-		if use_unlabeled_phase_types == True:
+		if use_phase_types == False:
 			Inpts[i0][:,2::] = 0.0 ## Phase type informed features zeroed out
 			Masks[i0][:,2::] = 0.0
 
