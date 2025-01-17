@@ -33,7 +33,7 @@ scale_t = config['scale_t'] # 10.0
 eps = config['eps'] # 15.0
 
 # use_updated_model_definition = True
-use_unlabeled_phase_types = config['use_unlabeled_phase_types']
+use_phase_types = config['use_phase_types']
 
 device = torch.device('cuda') ## or use cpu
 
