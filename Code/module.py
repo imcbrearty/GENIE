@@ -506,7 +506,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		self.n_heads = n_heads
 		self.n_latent = n_latent
 		self.eps = eps
-		self.t_kernel_sq = torch.Tensor([10.0]).to(device)**2
+		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
 		self.ndim_feat = ndim_arv_in + ndim_extra
 
 		self.activate1 = nn.PReLU()
@@ -533,9 +533,20 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		n_edge = edges.shape[1]
 
 		## Now must duplicate edges, for each unique source. (different accumulation points)
-		edges = (edges.repeat(1, n_src) + torch.cat((torch.zeros(1, n_src*n_edge).to(self.device), (torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device)), dim = 0)).long()
-		src_index = torch.arange(n_src).repeat_interleave(n_edge).long().to(self.device)
+		edges = (edges.repeat(1, n_src) + torch.cat((torch.zeros(1, n_src*n_edge).to(self.device), (torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device)), dim = 0)).long().contiguous()
+		src_index = torch.arange(n_src).repeat_interleave(n_edge).contiguous().long().to(self.device)
 
+		use_sparse = True
+		if use_sparse == True:
+			# pdb.set_trace()
+			## Find which values have offset times that exceed max time, and ignore these edges (does this work?)
+			rel_t_p = (torch.cat((tpick, torch.Tensor([-self.eps]).to(self.device)), dim = 0)[edges[0]] - (torch.cat((trv_src[:,:,0], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach()[src_index, torch.cat((ipick, torch.Tensor([n_sta]).long().to(self.device)), dim = 0)[edges[0]]] + stime[src_index])).reshape(-1,1).detach()
+			rel_t_s = (torch.cat((tpick, torch.Tensor([-self.eps]).to(self.device)), dim = 0)[edges[0]] - (torch.cat((trv_src[:,:,1], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach()[src_index, torch.cat((ipick, torch.Tensor([n_sta]).long().to(self.device)), dim = 0)[edges[0]]] + stime[src_index])).reshape(-1,1).detach()
+			ikeep = torch.where(((torch.abs(rel_t_p) < 2.0*torch.sqrt(self.t_kernel_sq)) + (torch.abs(rel_t_s) < 2.0*torch.sqrt(self.t_kernel_sq))).reshape(-1) > 0)[0].cpu().detach().numpy() ## Either query is within the threshold amount of time
+			# edges = edges[:,ikeep]
+			edges = torch.cat((edges[0][ikeep].reshape(1,-1), edges[1][ikeep].reshape(1,-1)), dim = 0).contiguous()
+			src_index = src_index[ikeep]
+		
 		N = n_arv + 1 # still correct?
 		M = n_arv*n_src
 
