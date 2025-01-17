@@ -339,6 +339,96 @@ def kmeans_packing_sampling_points(scale_x, offset_x, ndim, n_clusters, ftrns1, 
 
 	return V_results[ibest], V_results, Losses, losses, rz
 
+def kmeans_packing_spherical(scale_x, offset_x, ndim, n_clusters, ftrns1, ftrns2, n_batch = 3000, n_steps = 5000, weights = [1.0, 1.0, 2.0], n_sim = 1, lr = 0.01):
+
+	# ftrns1_sphere_unit = lambda pos: lla2ecef(pos, e = 0.0, a = 1.0) # a = 6378137.0, e = 8.18191908426215e-2
+	# ftrns2_sphere_unit = lambda pos: ecef2lla(pos, e = 0.0, a = 1.0)
+
+	ftrns1_sphere_unit = lambda pos: lla2ecef(pos, a = 1.0, e = 0.0) # a = 6378137.0, e = 8.18191908426215e-2
+	ftrns2_sphere_unit = lambda pos: ecef2lla(pos, a = 1.0, e = 0.0)
+	from scipy.stats import beta
+
+	if weights is not None:
+		weights = np.array(weights).reshape(1,-1)
+	else:
+		weights = np.array([1.0, 1.0, 1.0]).reshape(1,-1)
+
+	def spherical_packing_nodes(n, use_depth_scale = True, use_rotate = True, izero = 0.65):
+
+		## Based on The Fibonacci Lattice
+		## https://extremelearning.com.au/evenly-distributing-points-on-a-sphere/
+
+		# n = 30000
+		i = np.arange(0, n).astype('float') + 0.5
+		phi = np.arccos(1 - 2*i/n)
+		goldenRatio = (1 + 5**0.5)/2
+		theta = 2*np.pi * i / goldenRatio
+		x, y, z = np.cos(theta) * np.sin(phi), np.sin(theta) * np.sin(phi), np.cos(phi);
+		xlat = ftrns2_sphere_unit(np.concatenate((x.reshape(-1,1), y.reshape(-1,1), z.reshape(-1,1)), axis = 1))
+
+		if use_rotate == True:
+			rand_val = [np.random.rand()*2.0*np.pi for i in range(3)]
+			rotate = rotation_matrix_full_precision(rand_val[0], rand_val[1], rand_val[2])
+			xlat = ftrns2_sphere_unit(ftrns1_sphere_unit(xlat) @ rotate)
+
+		if use_depth_scale is not None:
+			xlat[:,2] = offset_x[0][2] + np.random.rand()*scale_x[0][2]
+
+			if izero is not None:
+
+				ichoose = np.random.choice(len(xlat), size = int(izero*len(xlat)))
+				xlat[ichoose,2] = (1.0 - beta.rvs(1.0, 3.0, size = len(ichoose)))*scale_x[0,2] + offset_x[0,2]
+
+				ichoose = np.random.choice(len(xlat), size = int(izero*len(xlat)))
+				xlat[ichoose,2] = (1.0 - beta.rvs(1.0, 12.0, size = len(ichoose)))*scale_x[0,2] + offset_x[0,2]
+
+		return xlat
+
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v = spherical_packing_nodes(n_clusters)
+				v1 = ftrns1(np.copy(v)*weights)
+				v = ftrns1(v) # np.random.rand(n_clusters, ndim)*scale_x + offset_x
+				# v1 = ftrns1(v1)
+
+			tree = cKDTree(v1)
+			x = spherical_packing_nodes(n_batch)
+			x1 = ftrns1(np.copy(x)*weights)
+			x = ftrns1(x)
+			q, ip = tree.query(x1)
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = spherical_packing_nodes(n_batch)
+		x1 = ftrns1(np.copy(x)*weights)
+		x = ftrns1(x)		
+		q, ip = tree.query(x1)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return ftrns2(V_results[ibest]), V_results, Losses, losses, rz
+
 ### TRAVEL TIMES ###
 
 def interp_3D_return_function_adaptive(X, Xmin, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
