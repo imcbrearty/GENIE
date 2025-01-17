@@ -162,6 +162,7 @@ k_time_edges = config['k_time_edges']
 
 name_of_project = config['name_of_project']
 use_physics_informed = config['use_physics_informed']
+use_unlabeled_phase_types = config['use_unlabeled_phase_types']
 use_subgraph = config['use_subgraph']
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
@@ -544,6 +545,10 @@ for cnt, strs in enumerate([0]):
 			                Inpts[i] = Inpts[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
 			                Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
 			
+			if use_unlabeled_phase_types == True:
+				for i in range(len(Inpts)):
+					Inpts[i][:,2::] = 0.0 ## Phase type informed features zeroed out
+					Masks[i][:,2::] = 0.0
 			
 			for i0 in range(len(tsteps_slice)):
 
@@ -701,12 +706,18 @@ for cnt, strs in enumerate([0]):
 			else:
 			
 				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv, P, srcs_slice[:,3], ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, device = device)
-
+			
 			if use_subgraph == True:
 				for i in range(len(Inpts)):
 			                Inpts[i] = Inpts[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
 			                Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
+
 			
+			if use_unlabeled_phase_types == True:
+				for i in range(len(Inpts)):
+					Inpts[i][:,2::] = 0.0 ## Phase type informed features zeroed out
+					Masks[i][:,2::] = 0.0
+		
 			for i in range(srcs_slice.shape[0]):
 
 				if len(lp_times[i]) == 0:
@@ -769,6 +780,12 @@ for cnt, strs in enumerate([0]):
 				for i in range(len(Inpts)):
 			                Inpts[i] = Inpts[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
 			                Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
+
+			
+			if use_unlabeled_phase_types == True:
+				for i in range(len(Inpts)):
+					Inpts[i][:,2::] = 0.0 ## Phase type informed features zeroed out
+					Masks[i][:,2::] = 0.0
 			
 			if inc == 0:
 
