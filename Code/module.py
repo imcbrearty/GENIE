@@ -33,6 +33,7 @@ scale_t = config['scale_t'] # 10.0
 eps = config['eps'] # 15.0
 
 # use_updated_model_definition = True
+use_unlabeled_phase_types = config['use_unlabeled_phase_types']
 
 device = torch.device('cuda') ## or use cpu
 
@@ -449,7 +450,7 @@ else:
 # 		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
 
 class LocalSliceLgCollapse(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = eps, device = 'cuda'):
+	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, device = 'cuda'):
 		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
 		self.fc1 = nn.Linear(ndim_in + n_edge, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
 		self.fc2 = nn.Linear(n_hidden, ndim_out)
@@ -457,6 +458,7 @@ class LocalSliceLgCollapse(MessagePassing):
 		self.activate2 = nn.PReLU()
 		self.eps = eps
 		self.device = device
+		self.use_phase_types = use_phase_types
 
 	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, inpt, tlatent, n_temp, n_sta, k_infer = 10): # reference k nearest spatial points
 
@@ -467,6 +469,8 @@ class LocalSliceLgCollapse(MessagePassing):
 		N = inpt.shape[0] # Lg graph
 		M = n_arvs # M is target
 		dt = dt_partition[1] - dt_partition[0]
+		if self.use_phase_types == False:
+			phase_label = phase_label*0.0
 
 		t_index = torch.floor((tpick - dt_partition[0])/torch.Tensor([dt]).to(self.device)).long() # index into A_edges, which is each station, each dt_point, each k.
 		t_index = ((ipick*l_dt*k_infer + t_index*k_infer).view(-1,1) + torch.arange(k_infer).view(1,-1).to(self.device)).reshape(-1).long() # check this
@@ -493,7 +497,7 @@ class LocalSliceLgCollapse(MessagePassing):
 		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
 
 class StationSourceAttentionMergedPhases(MessagePassing):
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, device = device):
+	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, device = device):
 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
 		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6, n_hidden) # add edge data (observed arrival - theoretical arrival)
@@ -513,6 +517,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		self.eps = eps
 		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
 		self.ndim_feat = ndim_arv_in + ndim_extra
+		self.use_phase_types = use_phase_types
 
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
@@ -529,6 +534,8 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		ip_unique = torch.unique(ipick).float().cpu().detach().numpy() # unique stations
 		tree_indices = cKDTree(ipick.float().cpu().detach().numpy().reshape(-1,1))
 		unique_sta_lists = tree_indices.query_ball_point(ip_unique.reshape(-1,1), r = 0)
+		if self.use_phase_types == False:
+			phase_label = phase_label*0.0
 
 		arrival_p = torch.cat((arrival_p, torch.zeros(1,arrival_p.shape[1]).to(self.device)), dim = 0) # add null arrival, that all arrivals link too. This acts as a "stabalizer" in the inner-product space, and allows softmax to not blow up for arrivals with only self loops. May not be necessary.
 		arrival_s = torch.cat((arrival_s, torch.zeros(1,arrival_s.shape[1]).to(self.device)), dim = 0) # add null arrival, that all arrivals link too. This acts as a "stabalizer" in the inner-product space, and allows softmax to not blow up for arrivals with only self loops. May not be necessary.
