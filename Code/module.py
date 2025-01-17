@@ -487,6 +487,11 @@ class LocalSliceLgCollapse(MessagePassing):
 
 		return out
 
+	## Adding back after removed
+	def message(self, x_j, pos_i, pos_j, phase_i):
+
+		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
+
 class StationSourceAttentionMergedPhases(MessagePassing):
 	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, device = device):
 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
