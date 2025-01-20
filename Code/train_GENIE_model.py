@@ -83,6 +83,8 @@ training_params = [n_spc_query, n_src_query]
 ## Reference catalog parameters
 use_reference_spatial_density = train_config['use_reference_spatial_density'] # False ## If True, must store reference sources in "Calibration/"yr"/"project_name"_reference_2023_1_3_ver_1.npz with field "srcs_ref"
 spatial_sigma = train_config['spatial_sigma'] # 20000.0 ## The amount of spatial smoothing to the reference catalog
+min_magnitude_ref = train_config['min_magnitude_ref'] # 1.5
+percentile_threshold_ref = train_config['percentile_threshold_ref'] # 0.1
 n_reference_clusters = train_config['n_reference_clusters'] # 10000 ## The amount of "quasi-uniiform" nodes to obtain for representing the source catalog distribution
 n_frac_reference_catalog = train_config['n_frac_reference_catalog'] # 0.8 ## The amount of sources to simulate from the reference catalog coordinates compared to background
 
