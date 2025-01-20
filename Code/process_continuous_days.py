@@ -415,6 +415,9 @@ date = np.array([yr, mo, dy])
 
 P, ind_use = load_picks(path_to_file, date, spr_picks = spr_picks, n_ver = n_ver_picks)
 # P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
+
+if use_phase_types == False:
+	P[:,4] = 0 ## No phase types
 locs_use = locs[ind_use]
 arrivals_tree = cKDTree(P[:,0][:,None])
 
