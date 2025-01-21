@@ -79,7 +79,7 @@ use_shallow_sources : False
 use_reference_spatial_density: False ## If True, must store reference sources in "Calibration/"yr"/"project_name"_reference_2023_1_3_ver_1.npz with field "srcs_ref"
 spatial_sigma: 20000.0 ## The amount of spatial smoothing to the reference catalog
 min_magnitude_ref: 1.5 ## Min magnitude to consider for reference catalog
-percentile_threshold_ref: 0.1 ## Take all areas of > kernel Gaussian estimation probability as the "uniform" area to sample sources within
+percentile_threshold_ref: 0.01 ## Take all areas of > kernel Gaussian estimation probability as the "uniform" area to sample sources within
 n_reference_clusters: 10000 ## The amount of "quasi-uniiform" nodes to obtain for representing the source catalog distribution
 n_frac_reference_catalog: 0.8 ## The amount of sources to simulate from the reference catalog coordinates compared to background
 
