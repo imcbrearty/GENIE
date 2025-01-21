@@ -14,6 +14,7 @@ from scipy.stats import gamma, beta
 import time
 from torch_cluster import knn
 from torch_geometric.utils import remove_self_loops, subgraph
+from sklearn.neighbors import KernelDensity
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
@@ -244,7 +245,22 @@ if use_reference_spatial_density == True:
 		srcs_ref = np.vstack(srcs_ref)
 		scale_x_ = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 		offset_x_ = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
+		if (min_magnitude_ref is not False)*(np.isnan(srcs_ref[:,4]).sum() == 0):
+			srcs_ref = srcs_ref[srcs_ref[:,4] >= min_magnitude_ref,:]
+		
 		srcs_ref = kmeans_packing_fit_sources(srcs_ref, scale_x_, offset_x_, 3, n_reference_clusters, ftrns1, ftrns2, n_batch = 5000, n_steps = 5000, blur_sigma = spatial_sigma)[0]
+		m_ref = KernelDensity(kernel = 'gaussian', bandwidth = spatial_sigma).fit(ftrns1(srcs_ref))
+		## Make uniform grid, query if prob > percentile prob of the kernel density; keep these points and repeat kmeans_packing_fit_sources
+		dlen1, dlen2 = np.diff(lat_range_extend), np.diff(lon_range_extend)
+		dscale = np.sqrt(dlen1*dlen2)[0]/200.0
+		x1_lat, x2_lon, x3_depth = np.arange(lat_range_extend[0], lat_range_extend[1], dscale), np.arange(lon_range_extend[0], lon_range_extend[1], dscale), np.arange(depth_range[0], depth_range[1] + 110e3*dscale, 110e3*dscale)
+		x11, x12, x13 = np.meshgrid(x1_lat, x2_lon, x3_depth)
+		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+		prob = m_ref.score_samples(ftrns1(xx))
+		prob = np.exp(prob - prob.max())
+		itrue = np.where(prob > percentile_threshold_ref)[0] # np.where(prob/prob.max() > np.quantile(prob/prob.max(), percentile_threshold_ref))[0]
+		srcs_ref = kmeans_packing_fit_sources(xx[itrue], scale_x_, offset_x_, 3, n_reference_clusters, ftrns1, ftrns2, n_batch = 5000, n_steps = 5000, blur_sigma = spatial_sigma)[0]
+		
 		if load_reference_density == True:
 			np.savez_compressed(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver, srcs_ref = srcs_ref)
 						      
