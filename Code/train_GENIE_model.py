@@ -253,7 +253,8 @@ if use_reference_spatial_density == True:
 		## Make uniform grid, query if prob > percentile prob of the kernel density; keep these points and repeat kmeans_packing_fit_sources
 		dlen1, dlen2 = np.diff(lat_range_extend), np.diff(lon_range_extend)
 		dscale = np.sqrt(dlen1*dlen2)[0]/200.0
-		x1_lat, x2_lon, x3_depth = np.arange(lat_range_extend[0], lat_range_extend[1], dscale), np.arange(lon_range_extend[0], lon_range_extend[1], dscale), np.arange(depth_range[0], depth_range[1] + 110e3*dscale, 110e3*dscale)
+		dscale_depth = np.minimum(spatial_sigma, 110e3*dscale)
+		x1_lat, x2_lon, x3_depth = np.arange(lat_range_extend[0], lat_range_extend[1], dscale), np.arange(lon_range_extend[0], lon_range_extend[1], dscale), np.arange(depth_range[0], depth_range[1] + dscale_depth, dscale_depth)
 		x11, x12, x13 = np.meshgrid(x1_lat, x2_lon, x3_depth)
 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 		prob = m_ref.score_samples(ftrns1(xx))
