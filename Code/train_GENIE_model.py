@@ -1236,7 +1236,7 @@ for i in range(n_restart_step, n_epochs):
 		if len(lp_srcs[i0]) > 0:
 			x_src_query[0:len(lp_srcs[i0]),0:3] = lp_srcs[i0][:,0:3]
 
-		n_frac_focused_association_queries = 0.1 # concentrate 10% of association queries around true sources
+		n_frac_focused_association_queries = 0.2 # concentrate 10% of association queries around true sources
 		n_concentration_focused_association_queries = 0.03 # 3% of scale of domain
 		if (len(lp_srcs[i0]) > 0)*(n_frac_focused_association_queries > 0):
 
