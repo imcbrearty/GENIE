@@ -765,7 +765,7 @@ for cnt, strs in enumerate([0]):
 		x11, x12, x13 = np.meshgrid(x1, x2, x3)
 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 		X_save = np.copy(xx)[0,:].reshape(1,-1)
-		X_save = X_save[0].reshape(1,-1) ## X_save is not actually used
+		# X_save = X_save[0].reshape(1,-1) ## X_save is not actually used
 		X_save_cart = torch.Tensor(ftrns1(X_save))
 
 		# with torch.no_grad(): 
