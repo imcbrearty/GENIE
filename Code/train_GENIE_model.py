@@ -1272,7 +1272,7 @@ if optimize_training_data == True:
 	          (5, 250), # max_miss_events
 	          (0.2, 5.0), # max_false_events # (5, 350)
 	          (0, 0.25), # miss_pick_fraction[0]
-	          (0.25, 0.6)] # ] # miss_pick_fraction[0]]
+	          (0.25, 0.6)] # ] # miss_pick_fraction[0]
 
 	optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
 	                  bounds,      # the bounds on each dimension of x
@@ -1286,7 +1286,9 @@ if optimize_training_data == True:
 
 	res, Trgts, arrivals = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
 
-	np.savez_compressed(path_to_file + '%s_optimized_training_data_parameters_ver_%d.npz'%(name_of_project, n_ver_optimize), res = res, x = np.array(optimize.x), arrivals = arrivals)
+	strings = ['spc_random', 'spc_thresh_rand', 'coda_rate', 'coda_win', 'dist_range[0]', 'dist_range[1]', 'max_rate_events', 'max_miss_events', 'max_false_events', 'miss_pick_fraction[0]', 'miss_pick_fraction[0]']
+	
+	np.savez_compressed(path_to_file + '%s_optimized_training_data_parameters_ver_%d.npz'%(name_of_project, n_ver_optimize), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings)
 
 	print('Finished optimized training data')
 
