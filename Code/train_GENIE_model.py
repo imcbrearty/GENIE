@@ -374,8 +374,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if use_reference_spatial_density == True:
 		n_rand_sample = int(len(src_positions)*n_frac_reference_catalog)
 		rand_sample = ftrns2(ftrns1(srcs_ref[np.random.choice(len(srcs_ref), size = n_rand_sample),0:3]) + spatial_sigma*np.random.randn(n_rand_sample,3))
-		rand_sample[rand_sample[:,2] < depth_range[0],2] = depth_range[0]
-		rand_sample[rand_sample[:,2] > depth_range[1],2] = depth_range[1]
+		ioutside = np.where(((rand_sample[:,2] < depth_range[0]) + (rand_sample[:,2] > depth_range[1])) > 0)[0]
+		rand_sample[ioutside,2] = np.random.rand(len(ioutside))*(depth_range[1] - depth_range[0]) + depth_range[0]		
 		src_positions[np.random.choice(len(src_positions), size = n_rand_sample, replace = False)] = rand_sample
 	
 	if use_shallow_sources == True:
