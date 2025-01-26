@@ -412,7 +412,7 @@ if os.path.isfile(path_to_file + '%s_process_days_list_ver_1.txt'%config["name_o
 	f = open(path_to_file + '%s_process_days_list_ver_1.txt'%config["name_of_project"], 'w')
 	for j in range(5): ## Arbitrary 5 days to process
 		f.write('%d/%d/%d \n'%(years[0], 1, j)) ## Process days list (write which days want to process)
-	
+	f.close()
 
 os.makedirs(path_to_file + 'Picks', exist_ok=True)
 os.makedirs(path_to_file + 'Catalog', exist_ok=True)
