@@ -102,6 +102,8 @@ t_win = config['t_win'] ## This is the time window over which predictions are ma
 ## Dataset parameters
 load_training_data = train_config['load_training_data']
 build_training_data = train_config['build_training_data'] ## If try, will use system argument to build a set of data
+optimize_training_data = train_config['optimize_training_data']
+
 
 max_number_pick_association_labels_per_sample = config['max_number_pick_association_labels_per_sample']
 make_visualize_predictions = config['make_visualize_predictions']
