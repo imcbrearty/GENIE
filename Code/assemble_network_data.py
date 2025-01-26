@@ -409,7 +409,7 @@ np.savez_compressed(path_to_file + f'{config["name_of_project"]}_stations.npz', 
 
 ## Make necessary directories
 if os.path.isfile(path_to_file + '%s_process_days_list_ver_1.txt'%config["name_of_project"]) == 0:
-	f = open('path_to_file + '%s_process_days_list_ver_1.txt'%config["name_of_project"], 'w')
+	f = open(path_to_file + '%s_process_days_list_ver_1.txt'%config["name_of_project"], 'w')
 	for j in range(5): ## Arbitrary 5 days to process
 		f.write('%d/%d/%d \n'%(years[0], 1, j)) ## Process days list (write which days want to process)
 	
