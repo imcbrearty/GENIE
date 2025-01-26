@@ -87,6 +87,7 @@ n_frac_reference_catalog: 0.8 ## The amount of sources to simulate from the refe
 ## Extra dataset parameters
 build_training_data : False ## Pre-build training data (rather than building inside training loop)
 load_training_data : False ## Load the pre-built training data during training
+optimize_training_data : False ## Optimize the training parameters
 path_to_data : '' ## Specify absolute path to the training data folder
 n_ver_training_data : 1 ## Training data version
 n_batches_per_job : 250 ## Number of batches of data to create per job array index when building dataset
