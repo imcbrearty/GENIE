@@ -222,7 +222,29 @@ Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., 
 
 ## Load velocity model
 load_model_type = 1
+
 if load_model_type == 1:
+	z = np.load(path_to_file + '1d_velocity_model.npz')
+        depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+        z.close()
+
+        tree = cKDTree(depths.reshape(-1,1))
+        ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
+        Vp = vp[ip_nearest]
+        Vs = vs[ip_nearest]
+
+elif load_model_type == 2:
+
+	z = np.load(path_to_file + 'Thurber_velocity_model.npz')
+	x_vel, vp_vel, vs_vel = z['X'], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
+	z.close()
+
+	tree = cKDTree(ftrns1(x_vel)) ## Assigns the velocity values to the computation grid (xx) using nearest neighbors (e.g., the input 3D model can include any number of points, anywhere, and interpolation will fill in the values elsewhere)
+	ip_nearest = tree.query(xx)[1]
+	Vp = vp_vel[ip_nearest]
+	Vs = vs_vel[ip_nearest]
+
+elif load_model_type == 3:
 
 	z = h5py.File(path_to_file + 'Vel_models.hdf5', 'r')
 	Depths_l, Coor_l, Vp_l, Vs_l, Radius_l = [], [], [], [], []
@@ -260,19 +282,6 @@ if load_model_type == 1:
 			Vp[i1] = Vp_l[i][imatch_depth]
 			Vs[i1] = Vs_l[i][imatch_depth]
 			print('Finished %d'%i)
-
-elif load_model_type == 2:
-
-	z = np.load(path_to_file + 'Thurber_velocity_model.npz')
-	x_vel, vp_vel, vs_vel = z['X'], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
-	z.close()
-
-	tree = cKDTree(ftrns1(x_vel)) ## Assigns the velocity values to the computation grid (xx) using nearest neighbors (e.g., the input 3D model can include any number of points, anywhere, and interpolation will fill in the values elsewhere)
-	ip_nearest = tree.query(xx)[1]
-	Vp = vp_vel[ip_nearest]
-	Vs = vs_vel[ip_nearest]
-
-
 
 ## Using 3D domain, so must use actual station coordinates
 locs_ref = np.copy(locs)
