@@ -135,7 +135,7 @@ else:
 			# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
 			
 			## Could add binary edge type information to indicate data type
-			tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), message_type = 1, mask = mask_in, mask), dim = 1)) # could concatenate edge features here, and before.
+			tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), message_type = 1, mask = mask_in), mask), dim = 1)) # could concatenate edge features here, and before.
 			tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(tr), message_type = 2, mask = mask_in), mask), dim = 1))
 			tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
 	
