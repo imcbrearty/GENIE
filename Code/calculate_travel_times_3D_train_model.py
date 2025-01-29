@@ -225,14 +225,15 @@ Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., 
 load_model_type = 1
 
 if load_model_type == 1:
+	
 	z = np.load(path_to_file + '1d_velocity_model.npz')
-        depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
-        z.close()
+	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+	z.close()
 
-        tree = cKDTree(depths.reshape(-1,1))
-        ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
-        Vp = vp[ip_nearest]
-        Vs = vs[ip_nearest]
+	tree = cKDTree(depths.reshape(-1,1))
+	ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
+	Vp = vp[ip_nearest]
+	Vs = vs[ip_nearest]
 
 elif load_model_type == 2:
 
