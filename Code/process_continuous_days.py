@@ -422,7 +422,7 @@ locs_use = locs[ind_use]
 arrivals_tree = cKDTree(P[:,0][:,None])
 
 use_updated_input = True
-dt_embed_discretize = 0.05 ## Picks are discretized to this amount if using updated input to speed up input
+dt_embed_discretize = pred_params[1]/10.0 # 0.05 ## Picks are discretized to this amount if using updated input to speed up input
 
 if process_known_events == True: ## If true, only process around times of known events
 	t0 = UTCDateTime(date[0], date[1], date[2])
