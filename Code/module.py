@@ -601,12 +601,12 @@ class StationSourceAttentionMergedPhasesUpdated(MessagePassing):
 	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, device = device):
 		super(StationSourceAttentionMergedPhasesUpdated, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
-		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 5, n_hidden) # add edge data (observed arrival - theoretical arrival)
+		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6, n_hidden) # add edge data (observed arrival - theoretical arrival)
 		self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
 		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + 1, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
 		self.f_src_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # only use single tranform layer for source embdding (which already has sufficient information)
 
-		self.f_values_1 = nn.Linear(2*ndim_arv_in + ndim_extra + 7, n_hidden) # add second layer transformation.
+		self.f_values_1 = nn.Linear(2*ndim_arv_in + ndim_extra + 6, n_hidden) # add second layer transformation.
 		self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
 
 		self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
