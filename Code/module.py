@@ -872,7 +872,7 @@ elif use_updated_model_definition == True:
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
-			y_latent = self.SpatialDirect(x) # contains data on spatial solution.
+			y_latent = self.SpatialDirect(x_spatial) # contains data on spatial solution.
 			y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
 			x = self.SpatialAttention(x_spatial, x_query_cart, x_temp_cuda_cart) # second slowest module (could use this embedding to seed source source attention vector).
 			x_src = self.SpatialAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart) # obtain spatial embeddings, source want to query associations for.
@@ -927,7 +927,7 @@ elif use_updated_model_definition == True:
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
-			y_latent = self.SpatialDirect(x) # contains data on spatial solution.
+			y_latent = self.SpatialDirect(x_spatial) # contains data on spatial solution.
 			y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
 			x = self.SpatialAttention(x_spatial, x_query_cart, x_temp_cuda_cart) # second slowest module (could use this embedding to seed source source attention vector).
 			x_src = self.SpatialAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart) # obtain spatial embeddings, source want to query associations for.
@@ -958,7 +958,7 @@ elif use_updated_model_definition == True:
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
-			y_latent = self.SpatialDirect(x) # contains data on spatial solution.
+			y_latent = self.SpatialDirect(x_spatial) # contains data on spatial solution.
 			y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
 			x = self.SpatialAttention(x_spatial, x_query_cart, x_temp_cuda_cart) # second slowest module (could use this embedding to seed source source attention vector).
 			x = self.TemporalAttention(x, t_query) # on random queries
