@@ -306,7 +306,7 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 
 	return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
-def extract_input_from_data(trv, P, t0, ind_use, locs, x_grid, trv_times = None, max_t = 300.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, device = 'cpu'): ## pred_params[1]
+def extract_input_from_data(trv, P, t0, ind_use, locs, x_grid, trv_times = None, max_t = 300.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, return_embedding = False, device = 'cpu'): ## pred_params[1]
 
 	## Travel time calculator
 	## Picks
@@ -398,6 +398,9 @@ def extract_input_from_data(trv, P, t0, ind_use, locs, x_grid, trv_times = None,
 	embed = torch.cat((embed_p.reshape(1,-1), embed_s.reshape(1,-1)), dim = 0).max(0)[0] ## Either phase type trace
 	## Note: does sum reduction produce the stacked nearest neighbors of picks?
 
+	if return_embedding == True:
+		return embed, ind_unique, abs_time_ref, n_time_series, n_sta_unique ## Return temporal embedding per active station trace
+	
 	if batch_grids == True:
 
 		error('Not implemented')
