@@ -480,7 +480,7 @@ for cnt, strs in enumerate([0]):
 			P1[:,4] = 0 ## No phase types
 
 		x_grid_ind = x_grid_ind_list[0]
-		embed_p, embed_s, ind_unique_, abs_time_ref_, n_time_series_, n_sta_unique_ = extract_input_from_data(trv, P1, np.array([src_origin]), ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, return_embedding = True, device = device)
+		embed_p, embed_s, ind_unique_, abs_time_ref_, n_time_series_, n_sta_unique_ = extract_input_from_data(trv_pairwise, P1, np.array([src_origin]), ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, return_embedding = True, device = device)
 
 		## Check positive points
 		vec_p_ = embed_p.reshape(n_sta_unique_, n_time_series_)
@@ -588,12 +588,12 @@ for cnt, strs in enumerate([0]):
 
 			else:
 
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv, P, tsteps_slice, ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, device = device)
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, tsteps_slice, ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, device = device)
 
-			if use_subgraph == True:
-				for i in range(len(Inpts)):
-			                Inpts[i] = Inpts[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
-			                Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
+			# if use_subgraph == True:
+			# 	for i in range(len(Inpts)):
+			#                 Inpts[i] = Inpts[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
+			#                 Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
 			
 			if use_phase_types == False:
 				for i in range(len(Inpts)):
@@ -755,13 +755,13 @@ for cnt, strs in enumerate([0]):
 
 			else:
 			
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv, P, srcs_slice[:,3], ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, device = device)
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, srcs_slice[:,3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, device = device)
 			
-			if use_subgraph == True:
-				for i in range(len(Inpts)):
-			                Inpts[i] = Inpts[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
-			                Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
-
+			# if use_subgraph == True:
+			# 	for i in range(len(Inpts)):
+			#                 Inpts[i] = Inpts[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
+			#                 Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
+			
 			
 			if use_phase_types == False:
 				for i in range(len(Inpts)):
@@ -825,12 +825,12 @@ for cnt, strs in enumerate([0]):
 
 			else:
 
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv, P, srcs_refined[:,3], ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, device = device)				
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, srcs_refined[:,3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, device = device)				
 
-			if use_subgraph == True:
-				for i in range(len(Inpts)):
-			                Inpts[i] = Inpts[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
-			                Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
+			# if use_subgraph == True:
+			# 	for i in range(len(Inpts)):
+			#                 Inpts[i] = Inpts[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
+			#                 Masks[i] = Masks[i].reshape(x_grids[x_grid_ind].shape[0], locs_use.shape[0], 4)[A_src_in_sta_l[x_grid_ind][1], A_src_in_sta_l[x_grid_ind][0]] # .cpu().detach().numpy()
 
 			
 			if use_phase_types == False:
