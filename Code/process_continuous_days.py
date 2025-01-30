@@ -475,7 +475,7 @@ for cnt, strs in enumerate([0]):
 		ikeep1 = np.sort(np.random.choice(len(ind_use), size = int(np.ceil(len(ind_use)*0.7)), replace = False))
 		
 		P1 = np.concatenate((trv_out[0,ind_use[ikeep],0].reshape(-1,1), ind_use[ikeep].reshape(-1,1), np.zeros((len(ikeep),3))), axis = 1)
-		P1 = np.concatenate((P, np.concatenate((trv_out[0,ind_use[ikeep1],1].reshape(-1,1), ind_use[ikeep1].reshape(-1,1), np.zeros((len(ikeep1),2)), np.ones((len(ikeep1),1))), axis = 1)), axis = 0)
+		P1 = np.concatenate((P1, np.concatenate((trv_out[0,ind_use[ikeep1],1].reshape(-1,1), ind_use[ikeep1].reshape(-1,1), np.zeros((len(ikeep1),2)), np.ones((len(ikeep1),1))), axis = 1)), axis = 0)
 		if use_phase_types == False:
 			P1[:,4] = 0 ## No phase types
 
@@ -484,12 +484,14 @@ for cnt, strs in enumerate([0]):
 
 		vec_ = embed.reshape(n_sta_unique_, n_time_series_)
 		tree_ = cKDTree(ind_unique_.reshape(-1,1))
-		ip_ = tree.query(P1[:,1].reshape(-1,1))[1] ## Matched index to unique indices
+		ip_ = tree_.query(P1[:,1].reshape(-1,1))[1] ## Matched index to unique indices
 		ip1_, ip2_ = np.where(P1[:,4] == 0)[0], np.where(P1[:,4] == 1)[0]
 		t_p_, t_s_ = ((P1[ip1_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int'), ((P1[ip2_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int')
-		val_p_, val_s_ = vec_[ip_[ip1_], t_p_].cpu().detach().numpy(), vec_[ip_[ip2_], t_s_].cpu().detach().numpy()
+		itp_, its_ = np.where((t_p_ >= 0)*(t_p_ < n_time_series_))[0], np.where((t_s_ >= 0)*(t_s_ < n_time_series_))[0]
+		val_p_, val_s_ = vec_[ip_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_[ip_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
 		assert(val_p_.min() > 0.9)
 		assert(val_s_.min() > 0.9)
+		print('Min check val is %0.4f \n'%np.minimum(val_p_.min(), val_s_.min()))
 	
 	tree_picks = cKDTree(P[:,0:2]) # based on absolute indices
 
