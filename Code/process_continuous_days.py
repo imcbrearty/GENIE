@@ -463,7 +463,32 @@ for cnt, strs in enumerate([0]):
 			trv_out = trv_pairwise(torch.Tensor(locs_use[A_src_in_sta[0].cpu().detach().numpy()]).to(device), torch.Tensor(x_grids[i][A_src_in_sta[1].cpu().detach().numpy()]).to(device))
 			mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_prod_flipped, A_src_in_sta, A_src_src, torch.Tensor(A_edges_time_p).long().to(device), torch.Tensor(A_edges_time_s).long().to(device), torch.Tensor(dt_partition).to(device), trv_out, torch.Tensor(ftrns1(locs_use)).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device))
 			A_src_in_sta_l.append(A_src_in_sta.cpu().detach().numpy())
+
+	check_overflow = True
+	if (use_updated_input == True)*(check_overflow == True): ## Check if embedding correctly preserved all travel time indices (overflow can happen on GPU for very large spatial domains x number of stations when using scatter)
 		
+		## Simulate picks
+		src, src_origin = x_grids[0].mean(0, keepdims = True), np.nanmin(P[:,0])
+		trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(src).to(device)).cpu().detach().numpy() + src_origin
+		ikeep = np.sort(np.random.choice(len(ind_use), size = int(np.ceil(len(ind_use)*0.7)), replace = False))
+		ikeep1 = np.sort(np.random.choice(len(ind_use), size = int(np.ceil(len(ind_use)*0.7)), replace = False))
+		
+		P1 = np.concatenate((trv_out[0,ind_use[ikeep],0].reshape(-1,1), ind_use[ikeep].reshape(-1,1), np.zeros((len(ikeep),3))), axis = 1)
+		P1 = np.concatenate((P, np.concatenate((trv_out[0,ind_use[ikeep1],1].reshape(-1,1), ind_use[ikeep1].reshape(-1,1), np.zeros((len(ikeep1),2)), np.ones((len(ikeep1),1))), axis = 1)), axis = 0)
+		if use_phase_types == False:
+			P1[:,4] = 0 ## No phase types
+
+		x_grid_ind = x_grid_ind_list[0]
+		embed, ind_unique_, abs_time_ref_, n_time_series_, n_sta_unique_ = extract_input_from_data(trv, P1, np.array([src_origin]), ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, return_embedding = True, device = device)
+
+		vec_ = embed.reshape(n_sta_unique_, n_time_series_)
+		tree_ = cKDTree(ind_unique_.reshape(-1,1))
+		ip_ = tree.query(P1[:,1].reshape(-1,1))[1] ## Matched index to unique indices
+		ip1_, ip2_ = np.where(P1[:,4] == 0)[0], np.where(P1[:,4] == 1)[0]
+		t_p_, t_s_ = ((P1[ip1_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int'), ((P1[ip2_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int')
+		val_p_, val_s_ = vec_[ip_[ip1_], t_p_].cpu().detach().numpy(), vec_[ip_[ip2_], t_s_].cpu().detach().numpy()
+		assert(val_p_.min() > 0.9)
+		assert(val_s_.min() > 0.9)
 	
 	tree_picks = cKDTree(P[:,0:2]) # based on absolute indices
 
