@@ -467,49 +467,50 @@ for cnt, strs in enumerate([0]):
 	check_overflow = True
 	if (use_updated_input == True)*(check_overflow == True): ## Check if embedding correctly preserved all travel time indices (overflow can happen on GPU for very large spatial domains x number of stations when using scatter)
 		## Note, must also add check that overflow doesn't happen during the second scatter operation in extract_input_from_data
-		
-		## Simulate picks
-		src, src_origin = x_grids[0].mean(0, keepdims = True), np.nanmin(P[:,0])
-		trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(src).to(device)).cpu().detach().numpy() + src_origin
-		ikeep = np.sort(np.random.choice(len(ind_use), size = int(np.ceil(len(ind_use)*0.7)), replace = False))
-		ikeep1 = np.sort(np.random.choice(len(ind_use), size = int(np.ceil(len(ind_use)*0.7)), replace = False))
-		
-		P1 = np.concatenate((trv_out[0,ind_use[ikeep],0].reshape(-1,1), ind_use[ikeep].reshape(-1,1), np.zeros((len(ikeep),3))), axis = 1)
-		P1 = np.concatenate((P1, np.concatenate((trv_out[0,ind_use[ikeep1],1].reshape(-1,1), ind_use[ikeep1].reshape(-1,1), np.zeros((len(ikeep1),2)), np.ones((len(ikeep1),1))), axis = 1)), axis = 0)
-		# if use_phase_types == False:
-		# 	P1[:,4] = 0 ## No phase types
-
-		x_grid_ind = x_grid_ind_list[0]
-		embed_p, embed_s, ind_unique_, abs_time_ref_, n_time_series_, n_sta_unique_ = extract_input_from_data(trv_pairwise, P1, np.array([src_origin]), ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, return_embedding = True, device = device)
-
-		## Check positive points
-		vec_p_ = embed_p.reshape(n_sta_unique_, n_time_series_)
-		vec_s_ = embed_s.reshape(n_sta_unique_, n_time_series_)
-		tree_ = cKDTree(ind_unique_.reshape(-1,1))
-		ip_ = tree_.query(P1[:,1].reshape(-1,1))[1] ## Matched index to unique indices
-		ip1_, ip2_ = np.where(P1[:,4] == 0)[0], np.where(P1[:,4] == 1)[0]
-		t_p_, t_s_ = ((P1[ip1_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int'), ((P1[ip2_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int')
-		itp_, its_ = np.where((t_p_ >= 0)*(t_p_ < n_time_series_))[0], np.where((t_s_ >= 0)*(t_s_ < n_time_series_))[0]
-		val_p_, val_s_ = vec_p_[ip_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_s_[ip_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
-		if len(val_p_) > 0: assert(val_p_.min() > 0.9)
-		if len(val_s_) > 0: assert(val_s_.min() > 0.9)
-		print('Min check val is %0.4f \n'%np.min(np.concatenate((val_p_, val_s_), axis = 0)))
-
-		## Check zero points
-		iselect_ = np.sort(np.random.choice(len(P1), size = 10000))
-		iwhere_p_, iwhere_s_ = np.where(P1[iselect_,4] == 0)[0], np.where(P1[iselect_,4] == 1)[0]
-		t_rand_p_ = P1[iselect_[iwhere_p_],0] + 4.0*pred_params[1]*np.random.choice([-1.0, 1.0], size = len(iwhere_p_))
-		t_rand_s_ = P1[iselect_[iwhere_s_],0] + 4.0*pred_params[1]*np.random.choice([-1.0, 1.0], size = len(iwhere_s_))
-
-		ip_1_ = tree_.query(P1[iselect_[iwhere_p_],1].reshape(-1,1))[1] ## Matched index to unique indices
-		ip_2_ = tree_.query(P1[iselect_[iwhere_s_],1].reshape(-1,1))[1] ## Matched index to unique indices
-		ip1_, ip2_ = np.where(P1[iselect_[iwhere_p_],4] == 0)[0], np.where(P1[iselect_[iwhere_s_],4] == 1)[0]
-		t_p_, t_s_ = ((t_rand_p_[ip1_] - abs_time_ref_[0])/dt_embed_discretize).astype('int'), ((t_rand_s_[ip2_] - abs_time_ref_[0])/dt_embed_discretize).astype('int')
-		itp_, its_ = np.where((t_p_ >= 0)*(t_p_ < n_time_series_))[0], np.where((t_s_ >= 0)*(t_s_ < n_time_series_))[0]
-		val_p_, val_s_ = vec_p_[ip_1_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_s_[ip_2_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
-		if len(val_p_) > 0: assert(val_p_.max() < 0.1)
-		if len(val_s_) > 0: assert(val_s_.max() < 0.1)
-		print('Max check val is %0.4f \n'%np.max(np.concatenate((val_p_, val_s_), axis = 0)))
+		n_random_check = 10
+		for i in range(n_random_check): ## n_random_check
+			## Simulate picks
+			src, src_origin = x_grids[0][np.random.choice(len(x_grids[0]))].reshape(1,-1), np.random.rand()*(np.nanmax(P[:,0]) - np.nanmin(P[:,0])) + np.nanmin(P[:,0])
+			trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(src).to(device)).cpu().detach().numpy() + src_origin
+			ikeep = np.sort(np.random.choice(len(ind_use), size = int(np.ceil(len(ind_use)*0.7)), replace = False))
+			ikeep1 = np.sort(np.random.choice(len(ind_use), size = int(np.ceil(len(ind_use)*0.7)), replace = False))
+			
+			P1 = np.concatenate((trv_out[0,ind_use[ikeep],0].reshape(-1,1), ind_use[ikeep].reshape(-1,1), np.zeros((len(ikeep),3))), axis = 1)
+			P1 = np.concatenate((P1, np.concatenate((trv_out[0,ind_use[ikeep1],1].reshape(-1,1), ind_use[ikeep1].reshape(-1,1), np.zeros((len(ikeep1),2)), np.ones((len(ikeep1),1))), axis = 1)), axis = 0)
+			# if use_phase_types == False:
+			# 	P1[:,4] = 0 ## No phase types
+	
+			x_grid_ind = x_grid_ind_list[0] ## Note: if this fails, essentially dt_embed_discretize is too small (resulting in too many time steps x number stations (combined with max moveout, max_t) leading to too large of graphs in the scatter operation for extracting inputs (e.g., ~ 100 million nodes))
+			embed_p, embed_s, ind_unique_, abs_time_ref_, n_time_series_, n_sta_unique_ = extract_input_from_data(trv_pairwise, P1, np.array([src_origin]), ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, return_embedding = True, device = device)
+	
+			## Check positive points
+			vec_p_ = embed_p.reshape(n_sta_unique_, n_time_series_)
+			vec_s_ = embed_s.reshape(n_sta_unique_, n_time_series_)
+			tree_ = cKDTree(ind_unique_.reshape(-1,1))
+			ip_ = tree_.query(P1[:,1].reshape(-1,1))[1] ## Matched index to unique indices
+			ip1_, ip2_ = np.where(P1[:,4] == 0)[0], np.where(P1[:,4] == 1)[0]
+			t_p_, t_s_ = ((P1[ip1_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int'), ((P1[ip2_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int')
+			itp_, its_ = np.where((t_p_ >= 0)*(t_p_ < n_time_series_))[0], np.where((t_s_ >= 0)*(t_s_ < n_time_series_))[0]
+			val_p_, val_s_ = vec_p_[ip_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_s_[ip_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
+			if len(val_p_) > 0: assert(val_p_.min() > 0.9)
+			if len(val_s_) > 0: assert(val_s_.min() > 0.9)
+			print('Min check val is %0.4f \n'%np.min(np.concatenate((val_p_, val_s_), axis = 0)))
+	
+			## Check zero points
+			iselect_ = np.sort(np.random.choice(len(P1), size = 10000))
+			iwhere_p_, iwhere_s_ = np.where(P1[iselect_,4] == 0)[0], np.where(P1[iselect_,4] == 1)[0]
+			t_rand_p_ = P1[iselect_[iwhere_p_],0] + 4.0*pred_params[1]*np.random.choice([-1.0, 1.0], size = len(iwhere_p_))
+			t_rand_s_ = P1[iselect_[iwhere_s_],0] + 4.0*pred_params[1]*np.random.choice([-1.0, 1.0], size = len(iwhere_s_))
+	
+			ip_1_ = tree_.query(P1[iselect_[iwhere_p_],1].reshape(-1,1))[1] ## Matched index to unique indices
+			ip_2_ = tree_.query(P1[iselect_[iwhere_s_],1].reshape(-1,1))[1] ## Matched index to unique indices
+			ip1_, ip2_ = np.where(P1[iselect_[iwhere_p_],4] == 0)[0], np.where(P1[iselect_[iwhere_s_],4] == 1)[0]
+			t_p_, t_s_ = ((t_rand_p_[ip1_] - abs_time_ref_[0])/dt_embed_discretize).astype('int'), ((t_rand_s_[ip2_] - abs_time_ref_[0])/dt_embed_discretize).astype('int')
+			itp_, its_ = np.where((t_p_ >= 0)*(t_p_ < n_time_series_))[0], np.where((t_s_ >= 0)*(t_s_ < n_time_series_))[0]
+			val_p_, val_s_ = vec_p_[ip_1_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_s_[ip_2_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
+			if len(val_p_) > 0: assert(val_p_.max() < 0.1)
+			if len(val_s_) > 0: assert(val_s_.max() < 0.1)
+			print('Max check val is %0.4f \n'%np.max(np.concatenate((val_p_, val_s_), axis = 0)))
 	
 	
 	tree_picks = cKDTree(P[:,0:2]) # based on absolute indices
