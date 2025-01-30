@@ -399,7 +399,7 @@ def extract_input_from_data(trv, P, t0, ind_use, locs, x_grid, trv_times = None,
 	## Note: does sum reduction produce the stacked nearest neighbors of picks?
 
 	if return_embedding == True:
-		return embed, ind_unique, abs_time_ref, n_time_series, n_sta_unique ## Return temporal embedding per active station trace
+		return embed_p, embed_s, ind_unique, abs_time_ref, n_time_series, n_sta_unique ## Return temporal embedding per active station trace
 	
 	if batch_grids == True:
 
