@@ -493,7 +493,7 @@ for cnt, strs in enumerate([0]):
 		val_p_, val_s_ = vec_p_[ip_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_s_[ip_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
 		if len(val_p_) > 0: assert(val_p_.min() > 0.9)
 		if len(val_s_) > 0: assert(val_s_.min() > 0.9)
-		print('Min check val is %0.4f \n'%np.minimum(val_p_.min(), val_s_.min()))
+		print('Min check val is %0.4f \n'%np.min(np.concatenate((val_p_, val_s_), axis = 0)))
 
 		## Check zero points
 		iselect_ = np.sort(np.random.choice(len(P1), size = 10000))
@@ -508,8 +508,8 @@ for cnt, strs in enumerate([0]):
 		itp_, its_ = np.where((t_p_ >= 0)*(t_p_ < n_time_series_))[0], np.where((t_s_ >= 0)*(t_s_ < n_time_series_))[0]
 		val_p_, val_s_ = vec_p_[ip_1_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_s_[ip_2_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
 		if len(val_p_) > 0: assert(val_p_.max() < 0.1)
-		if len(val_p_) > 0: assert(val_s_.max() < 0.1)
-		print('Max check val is %0.4f \n'%np.maximum(val_p_.max(), val_s_.max()))
+		if len(val_s_) > 0: assert(val_s_.max() < 0.1)
+		print('Max check val is %0.4f \n'%np.max(np.concatenate((val_p_, val_s_), axis = 0)))
 	
 	
 	tree_picks = cKDTree(P[:,0:2]) # based on absolute indices
