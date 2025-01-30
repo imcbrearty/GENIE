@@ -1219,7 +1219,7 @@ class TravelTimesPN(nn.Module):
 		self.merge = nn.Sequential(nn.Linear(2*n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_phases))
 
 		## Embed source [3]
-		self.fc3_1 = nn.Linear(3, n_hidden)
+		self.fc3_1 = nn.Linear(3 + 2 + 1, n_hidden)
 		self.fc3_2 = nn.Linear(n_hidden, n_hidden)
 		self.fc3_3 = nn.Linear(n_hidden, n_hidden)
 		self.fc3_4 = nn.Linear(n_hidden, n_embed)
@@ -1242,6 +1242,8 @@ class TravelTimesPN(nn.Module):
 		self.conversion_factor = conversion_factor
 		self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
 		self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
+		self.scale_angles = torch.Tensor([180.0, 180.0]).reshape(1,-1).to(device) ## Make these adaptive
+		self.scale_depths = torch.Tensor([300e3]).reshape(1,-1).to(device)
 
 		if n_srcs > 0:
 			self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))).to(device)
@@ -1273,9 +1275,13 @@ class TravelTimesPN(nn.Module):
 
 		return self.fc3_4(x1)
 
+	# def embed_src(self, src):
+
+	# 	return self.fc3_block(self.norm_pos(self.ftrns1(src)))
+
 	def embed_src(self, src):
 
-		return self.fc3_block(self.norm_pos(self.ftrns1(src)))
+		return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), src[:,0:2]/self.scale_angles, src[:,[2]]/self.scale_depths), dim = 1))
 
 	def src_proj(self, src):
 
