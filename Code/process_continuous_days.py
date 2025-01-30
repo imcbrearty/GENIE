@@ -482,6 +482,7 @@ for cnt, strs in enumerate([0]):
 		x_grid_ind = x_grid_ind_list[0]
 		embed_p, embed_s, ind_unique_, abs_time_ref_, n_time_series_, n_sta_unique_ = extract_input_from_data(trv, P1, np.array([src_origin]), ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, return_embedding = True, device = device)
 
+		## Check positive points
 		vec_p_ = embed_p.reshape(n_sta_unique_, n_time_series_)
 		vec_s_ = embed_s.reshape(n_sta_unique_, n_time_series_)
 		tree_ = cKDTree(ind_unique_.reshape(-1,1))
