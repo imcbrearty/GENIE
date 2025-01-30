@@ -491,8 +491,8 @@ for cnt, strs in enumerate([0]):
 		t_p_, t_s_ = ((P1[ip1_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int'), ((P1[ip2_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int')
 		itp_, its_ = np.where((t_p_ >= 0)*(t_p_ < n_time_series_))[0], np.where((t_s_ >= 0)*(t_s_ < n_time_series_))[0]
 		val_p_, val_s_ = vec_p_[ip_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_s_[ip_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
-		assert(val_p_.min() > 0.9)
-		assert(val_s_.min() > 0.9)
+		if len(val_p_) > 0: assert(val_p_.min() > 0.9)
+		if len(val_s_) > 0: assert(val_s_.min() > 0.9)
 		print('Min check val is %0.4f \n'%np.minimum(val_p_.min(), val_s_.min()))
 
 		## Check zero points
@@ -507,8 +507,8 @@ for cnt, strs in enumerate([0]):
 		t_p_, t_s_ = ((t_rand_p_[ip1_] - abs_time_ref_[0])/dt_embed_discretize).astype('int'), ((t_rand_s_[ip2_] - abs_time_ref_[0])/dt_embed_discretize).astype('int')
 		itp_, its_ = np.where((t_p_ >= 0)*(t_p_ < n_time_series_))[0], np.where((t_s_ >= 0)*(t_s_ < n_time_series_))[0]
 		val_p_, val_s_ = vec_p_[ip_1_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_s_[ip_2_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
-		assert(val_p_.max() < 0.1)
-		assert(val_s_.max() < 0.1)
+		if len(val_p_) > 0: assert(val_p_.max() < 0.1)
+		if len(val_p_) > 0: assert(val_s_.max() < 0.1)
 		print('Max check val is %0.4f \n'%np.maximum(val_p_.max(), val_s_.max()))
 	
 	
