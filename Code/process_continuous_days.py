@@ -466,6 +466,7 @@ for cnt, strs in enumerate([0]):
 
 	check_overflow = True
 	if (use_updated_input == True)*(check_overflow == True): ## Check if embedding correctly preserved all travel time indices (overflow can happen on GPU for very large spatial domains x number of stations when using scatter)
+		## Note, must also add check that overflow doesn't happen during the second scatter operation in extract_input_from_data
 		
 		## Simulate picks
 		src, src_origin = x_grids[0].mean(0, keepdims = True), np.nanmin(P[:,0])
