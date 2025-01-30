@@ -519,14 +519,33 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 	vec_repeat = np.arange(-num_index_extra, num_index_extra + 1).astype('int')
 	n_repeat = len(vec_repeat)
 
+	## Previous approach
 	## Make sure to zero out feature value of station traces at first and last index, so that overflow values writing to these edges are ignored
-	indices_p = np.minimum(np.maximum(0, nearest_index_p.reshape(-1,1) + vec_repeat.reshape(1,-1)), n_time_series - 1) ## Broadcasting
-	indices_s = np.minimum(np.maximum(0, nearest_index_s.reshape(-1,1) + vec_repeat.reshape(1,-1)), n_time_series - 1) ## Broadcasting
+	# indices_p = np.minimum(np.maximum(0, nearest_index_p.reshape(-1,1) + vec_repeat.reshape(1,-1)), n_time_series - 1) ## Broadcasting
+	# indices_s = np.minimum(np.maximum(0, nearest_index_s.reshape(-1,1) + vec_repeat.reshape(1,-1)), n_time_series - 1) ## Broadcasting
+
+	# time_vals_p = P_slice[ifind_p,0].reshape(-1,1).repeat(n_repeat, axis = 1) - abs_time_ref[indices_p]
+	# time_vals_s = P_slice[ifind_s,0].reshape(-1,1).repeat(n_repeat, axis = 1) - abs_time_ref[indices_s]
+	# feat_val_p = np.exp(-0.5*(time_vals_p**2)/(kernel_sig_t**2))
+	# feat_val_s = np.exp(-0.5*(time_vals_s**2)/(kernel_sig_t**2))
+
+
+	indices_p = nearest_index_p.reshape(-1,1) + vec_repeat.reshape(1,-1) ## Broadcasting
+	indices_s = nearest_index_s.reshape(-1,1) + vec_repeat.reshape(1,-1) ## Broadcasting
+
+	imask_p = (indices_p >= 0)*(indices_p < n_time_series)
+	imask_s = (indices_s >= 0)*(indices_s < n_time_series)
+
+	indices_p = np.minimum(np.maximum(0, indices_p), n_time_series - 1) ## Broadcasting
+	indices_s = np.minimum(np.maximum(0, indices_s), n_time_series - 1) ## Broadcasting
 
 	time_vals_p = P_slice[ifind_p,0].reshape(-1,1).repeat(n_repeat, axis = 1) - abs_time_ref[indices_p]
 	time_vals_s = P_slice[ifind_s,0].reshape(-1,1).repeat(n_repeat, axis = 1) - abs_time_ref[indices_s]
-	feat_val_p = np.exp(-0.5*(time_vals_p**2)/(kernel_sig_t**2))
-	feat_val_s = np.exp(-0.5*(time_vals_s**2)/(kernel_sig_t**2))
+	vals_p = (imask_p*np.exp(-0.5*(time_vals_p**2)/(kernel_sig_t**2))).reshape(-1) # feat_val_p
+	vals_s = (imask_s*np.exp(-0.5*(time_vals_s**2)/(kernel_sig_t**2))).reshape(-1) # feat_val_s
+	## Note: could concatenate sign offsets
+	
+	
 	## Note: could concatenate sign offsets
 
 	## Input feature is the time of pick
@@ -536,8 +555,8 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 	write_indices_p = (indices_p + P_ind_perm[ifind_p].reshape(-1,1)*n_time_series).reshape(-1)
 	write_indices_s = (indices_s + P_ind_perm[ifind_s].reshape(-1,1)*n_time_series).reshape(-1)
 
-	vals_p = feat_val_p.reshape(-1)
-	vals_s = feat_val_s.reshape(-1)
+	# vals_p = feat_val_p.reshape(-1)
+	# vals_s = feat_val_s.reshape(-1)
 
 	embed_p = scatter(torch.Tensor(vals_p).to(device), torch.Tensor(write_indices_p).long().to(device), dim = 0, dim_size = n_time_series*n_sta_unique, reduce = 'max')
 	embed_s = scatter(torch.Tensor(vals_s).to(device), torch.Tensor(write_indices_s).long().to(device), dim = 0, dim_size = n_time_series*n_sta_unique, reduce = 'max')
