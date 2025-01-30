@@ -480,15 +480,16 @@ for cnt, strs in enumerate([0]):
 			P1[:,4] = 0 ## No phase types
 
 		x_grid_ind = x_grid_ind_list[0]
-		embed, ind_unique_, abs_time_ref_, n_time_series_, n_sta_unique_ = extract_input_from_data(trv, P1, np.array([src_origin]), ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, return_embedding = True, device = device)
+		embed_p, embed_s, ind_unique_, abs_time_ref_, n_time_series_, n_sta_unique_ = extract_input_from_data(trv, P1, np.array([src_origin]), ind_use, locs, x_grids[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, return_embedding = True, device = device)
 
-		vec_ = embed.reshape(n_sta_unique_, n_time_series_)
+		vec_p_ = embed_p.reshape(n_sta_unique_, n_time_series_)
+		vec_s_ = embed_s.reshape(n_sta_unique_, n_time_series_)
 		tree_ = cKDTree(ind_unique_.reshape(-1,1))
 		ip_ = tree_.query(P1[:,1].reshape(-1,1))[1] ## Matched index to unique indices
 		ip1_, ip2_ = np.where(P1[:,4] == 0)[0], np.where(P1[:,4] == 1)[0]
 		t_p_, t_s_ = ((P1[ip1_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int'), ((P1[ip2_,0] - abs_time_ref_[0])/dt_embed_discretize).astype('int')
 		itp_, its_ = np.where((t_p_ >= 0)*(t_p_ < n_time_series_))[0], np.where((t_s_ >= 0)*(t_s_ < n_time_series_))[0]
-		val_p_, val_s_ = vec_[ip_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_[ip_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
+		val_p_, val_s_ = vec_p_[ip_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_s_[ip_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
 		assert(val_p_.min() > 0.9)
 		assert(val_s_.min() > 0.9)
 		print('Min check val is %0.4f \n'%np.minimum(val_p_.min(), val_s_.min()))
