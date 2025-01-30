@@ -493,6 +493,23 @@ for cnt, strs in enumerate([0]):
 		assert(val_p_.min() > 0.9)
 		assert(val_s_.min() > 0.9)
 		print('Min check val is %0.4f \n'%np.minimum(val_p_.min(), val_s_.min()))
+
+		## Check zero points
+		iselect_ = np.sort(np.random.choice(len(P1), size = 10000))
+		iwhere_p_, iwhere_s_ = np.where(P1[iselect_,4] == 0)[0], np.where(P1[iselect_,4] == 1)[0]
+		t_rand_p_ = P1[iselect_[iwhere_p_],0] + 4.0*pred_params[1]*np.random.choice([-1.0, 1.0], size = len(iwhere_p_))
+		t_rand_s_ = P1[iselect_[iwhere_s_],0] + 4.0*pred_params[1]*np.random.choice([-1.0, 1.0], size = len(iwhere_s_))
+
+		ip_1_ = tree_.query(P1[iselect_[iwhere_p_],1].reshape(-1,1))[1] ## Matched index to unique indices
+		ip_2_ = tree_.query(P1[iselect_[iwhere_s_],1].reshape(-1,1))[1] ## Matched index to unique indices
+		ip1_, ip2_ = np.where(P1[iselect_[iwhere_p_],4] == 0)[0], np.where(P1[iselect_[iwhere_s_],4] == 1)[0]
+		t_p_, t_s_ = ((t_rand_p_[ip1_] - abs_time_ref_[0])/dt_embed_discretize).astype('int'), ((t_rand_s_[ip2_] - abs_time_ref_[0])/dt_embed_discretize).astype('int')
+		itp_, its_ = np.where((t_p_ >= 0)*(t_p_ < n_time_series_))[0], np.where((t_s_ >= 0)*(t_s_ < n_time_series_))[0]
+		val_p_, val_s_ = vec_p_[ip_1_[ip1_[itp_]], t_p_[itp_]].cpu().detach().numpy(), vec_s_[ip_2_[ip2_[its_]], t_s_[its_]].cpu().detach().numpy()
+		assert(val_p_.max() < 0.1)
+		assert(val_s_.max() < 0.1)
+		print('Max check val is %0.4f \n'%np.maximum(val_p_.max(), val_s_.max()))
+	
 	
 	tree_picks = cKDTree(P[:,0:2]) # based on absolute indices
 
