@@ -456,6 +456,163 @@ def extract_input_from_data(trv, P, t0, ind_use, locs, x_grid, trv_times = None,
 
 	return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta]
 
+def extract_input_from_data_sparse(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta, trv_times = None, max_t = 300.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, return_embedding = False, device = 'cpu'): ## pred_params[1]
+
+	## Travel time calculator
+	## Picks
+	## Sample origin time (not yet batched)
+	## Set of indices in P[:,1] to actually use (e.g., ind_use specifies locs_use, while P[:,1] are absolute indices)
+	## Station locations (absolute set)
+	## Sampling grid
+
+	if verbose == True:
+		st_start = time.time()
+
+	# if len(t0) == 1:
+	# 	t0 = float(t0)
+
+	ineed = np.where((P[:,0] > (t0 - 3.0*kernel_sig_t))*(P[:,0] < (t0 + max_t + 3.0*kernel_sig_t)))[0]
+	P_slice = np.copy(P[ineed])
+
+	## Find pick indices with stations in desired subset (note could do this after the next query instead)
+	tree = cKDTree(ind_use.reshape(-1,1))
+	dist = tree.query(P_slice[:,[1]])[0]
+	P_slice = P_slice[np.where(dist == 0)[0]]
+
+	## Make normal perm_vec, for absolute index writing at output
+	perm_vec = -1*np.ones(locs.shape[0]).astype('int')
+	perm_vec[ind_use] = np.arange(len(ind_use))
+
+	## Make subset of perm_vec, for efficient indexing inside of function
+	ind_unique = np.sort(np.unique(P_slice[:,1]).astype('int'))
+	perm_vec_slice = -1*np.ones(locs.shape[0]).astype('int')
+	perm_vec_slice[ind_unique] = np.arange(len(ind_unique))
+
+	perm_vec_inverse = -1*np.ones(len(ind_unique)).astype('int')
+	perm_vec_inverse[np.arange(len(ind_unique))] = perm_vec[ind_unique] ## Map the subset of indices to their "ordered" index in terms of ind_use
+
+	n_sta_unique = len(ind_unique)
+	P_ind_perm = perm_vec_slice[P_slice[:,1].astype('int')]
+
+	t_offset = 3.0*kernel_sig_t
+	# int_offset = int(np.ceil(t_offset/dt))
+	abs_time_ref = np.arange(t0 - t_offset, t0 + max_t + t_offset + dt, dt)
+	## Note: Pick times of t0, should be mapped to indices of int_offset.
+
+	n_time_series = len(abs_time_ref) # int((3*kernel_sig_t + 3*kernel_sig_t + max_t)/dt)
+	# time_series = np.zeros((2, n_time_series*n_sta_unique)) ## phase type by number stations x time series
+	## Note: shape is number_phases x (time_series * num_stations)
+
+	ifind_p = np.where(P_slice[:,4] == 0)[0]
+	ifind_s = np.where(P_slice[:,4] == 1)[0]
+	if use_asserts == True:
+		assert((len(ifind_p) + len(ifind_s)) == len(P_slice)) ## Otherwise, one of the phase types is neither P or S
+
+	## Each pick is mapped to to it's nearest indicy plus +/- those within 3*kernel_sig_t/dt
+	# nearest_index = ((P_slice[:,0] - t0)/dt).astype('int') + int_offset + P_ind_perm*n_time_series ## Offset for stations and the time window buffer
+	nearest_index_p = ((P_slice[ifind_p,0] - abs_time_ref[0])/dt).astype('int') # + int_offset # + P_ind_perm[ifind_p]*n_time_series ## Offset for stations and the time window buffer
+	nearest_index_s = ((P_slice[ifind_s,0] - abs_time_ref[0])/dt).astype('int') # + int_offset # + P_ind_perm[ifind_s]*n_time_series ## Offset for stations and the time window buffer
+	## For each station this should map picks at time t0 to indices unique_station_index*n_time_series + int_offset
+	## Note: add offset to the above when finding absolute write indices (these are only time indices)
+
+	num_index_extra = np.ceil(3*kernel_sig_t/dt)
+	vec_repeat = np.arange(-num_index_extra, num_index_extra + 1).astype('int')
+	n_repeat = len(vec_repeat)
+
+	## Make sure to zero out feature value of station traces at first and last index, so that overflow values writing to these edges are ignored
+	indices_p = np.minimum(np.maximum(0, nearest_index_p.reshape(-1,1) + vec_repeat.reshape(1,-1)), n_time_series - 1) ## Broadcasting
+	indices_s = np.minimum(np.maximum(0, nearest_index_s.reshape(-1,1) + vec_repeat.reshape(1,-1)), n_time_series - 1) ## Broadcasting
+
+	time_vals_p = P_slice[ifind_p,0].reshape(-1,1).repeat(n_repeat, axis = 1) - abs_time_ref[indices_p]
+	time_vals_s = P_slice[ifind_s,0].reshape(-1,1).repeat(n_repeat, axis = 1) - abs_time_ref[indices_s]
+	feat_val_p = np.exp(-0.5*(time_vals_p**2)/(kernel_sig_t**2))
+	feat_val_s = np.exp(-0.5*(time_vals_s**2)/(kernel_sig_t**2))
+	## Note: could concatenate sign offsets
+
+	## Input feature is the time of pick
+	## Edges point to the indices it can "influence"
+	## Message passing can determine the feature value.
+	
+	write_indices_p = (indices_p + P_ind_perm[ifind_p].reshape(-1,1)*n_time_series).reshape(-1)
+	write_indices_s = (indices_s + P_ind_perm[ifind_s].reshape(-1,1)*n_time_series).reshape(-1)
+
+	vals_p = feat_val_p.reshape(-1)
+	vals_s = feat_val_s.reshape(-1)
+
+	embed_p = scatter(torch.Tensor(vals_p).to(device), torch.Tensor(write_indices_p).long().to(device), dim = 0, dim_size = n_time_series*n_sta_unique, reduce = 'max')
+	embed_s = scatter(torch.Tensor(vals_s).to(device), torch.Tensor(write_indices_s).long().to(device), dim = 0, dim_size = n_time_series*n_sta_unique, reduce = 'max')
+	embed_p[torch.arange(n_sta_unique).to(device)*n_time_series] = 0.0 ## Set overflow values on edges to zero
+	embed_s[torch.arange(n_sta_unique).to(device)*n_time_series] = 0.0 ## Set overflow values on edges to zero
+	embed_p[torch.arange(n_sta_unique).to(device)*n_time_series + n_time_series - 1] = 0.0 ## Set overflow values on edges to zero
+	embed_s[torch.arange(n_sta_unique).to(device)*n_time_series + n_time_series - 1] = 0.0 ## Set overflow values on edges to zero
+	embed = torch.cat((embed_p.reshape(1,-1), embed_s.reshape(1,-1)), dim = 0).max(0)[0] ## Either phase type trace
+	## Note: does sum reduction produce the stacked nearest neighbors of picks?
+
+	if return_embedding == True:
+		return embed_p, embed_s, ind_unique, abs_time_ref, n_time_series, n_sta_unique ## Return temporal embedding per active station trace
+	
+	if batch_grids == True:
+
+		error('Not implemented')
+
+	else:
+
+		
+		## Makes perm vec to map ind into unique ind
+		perm_vec = (-1*np.ones(len(locs))).astype('int')
+		d = cKDTree(ind_unique.reshape(-1,1)).query(ind_use.reshape(-1,1))
+		d_where = np.where(d[0] == 0)[0]
+		perm_vec[d_where] = d[1][d_where]
+		A_src_in_sta_proj = perm_vec[A_src_in_sta[0]]
+		ifind = np.where(A_src_in_sta_proj > -1)[0]
+
+
+		## Find sampling times for all grid nodes
+		if trv_times is None:
+
+			trv_out_ind = ((trv_pairwise(torch.Tensor(locs[ind_use]).to(device)[A_src_in_sta[0][ifind]], torch.Tensor(x_grid).to(device)[A_src_in_sta[1][ifind]]).cpu().detach().numpy() + t0 - abs_time_ref[0])/dt).astype('int') ## Referenced to time since start of window
+
+
+		else:
+			## Assume trv_times is the absolute theoretical travel times from x_grid to locs
+			trv_out_ind = ((trv_times[A_src_in_sta[1][ifind], ind_use[A_src_in_sta[0][ifind]],:] + t0 - abs_time_ref[0])/dt).astype('int')
+
+
+		trv_read_ind_p = (trv_out_ind[:,0] + A_src_in_sta_proj[ifind]*n_time_series).reshape(-1)
+		trv_read_ind_s = (trv_out_ind[:,1] + A_src_in_sta_proj[ifind]*n_time_series).reshape(-1)
+		## Need to reshape; need to make sure reshaping preserved correct order for Cartesian product
+		val_embed_p = embed[trv_read_ind_p] ## P waves accessing all picks
+		val_embed_s = embed[trv_read_ind_s] ## S waves accessing all picks
+		val_embed_p1 = embed_p[trv_read_ind_p] ## P waves accessing P labeled picks
+		val_embed_s1 = embed_s[trv_read_ind_s] ## S waves accessing S labeled picks
+
+		# write_indices = torch.Tensor((src_ind_vec*len(ind_use) + sta_ind_vec_abs).reshape(-1)).long().to(device)
+		# write_indices = torch.Tensor((A_src_in_sta[1][ifind]*len(ind_use) + A_src_in_sta[0][ifind]).reshape(-1)).long().to(device)
+		write_indices = torch.Tensor(ifind).long().to(device) ## Can skip the scatter operation, since there should be no duplicated entries?
+
+		if use_asserts == True:
+			if len(write_indices) > 0:
+				assert(write_indices.min() > -1)
+				assert(write_indices.max() < len(ind_use)*x_grid.shape[0]) ## The indices should be smaller than the "full" cartesian product graph
+				assert(len(np.unique(write_indices.cpu().detach().numpy())) == len(write_indices))
+
+		thresh_mask = 0.01
+		val_embed = torch.cat((val_embed_p.reshape(-1,1), val_embed_s.reshape(-1,1), val_embed_p1.reshape(-1,1), val_embed_s1.reshape(-1,1)), dim = 1)
+		Inpts = [scatter(val_embed, write_indices, dim = 0, dim_size = len(A_src_in_sta[0]), reduce = 'sum')] ## Sum should not exceed original values. This should be onto
+		Masks = [1.0*(Inpts[-1] > thresh_mask)] ## Putting into lists for consistency with batching
+		# Inpts = [Inpt]
+		# Masks = [Mask]
+
+	## t0 are the sampling times
+	# if isinstance(t0, float) or isinstance(t0, int):
+	# 	t0 = [t0]
+
+	lp_times, lp_stations, lp_phases, lp_meta = extract_pick_inputs_from_data(P_slice, locs, ind_use, t0, max_t, use_batch = False, verbose = False)
+
+	if verbose == True:
+		print('batch gen time took %0.2f'%(time.time() - st_start))		
+
+	return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta]
 
 def extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, t_win = 10.0, use_batch = False, verbose = False):
 
