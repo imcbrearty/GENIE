@@ -21,6 +21,7 @@ from torch_geometric.utils import get_laplacian
 from process_utils import * # differential_evolution_location
 import glob
 import sys
+import os
 
 def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2]), device = 'cpu'):
 	# x = x.astype('float')
