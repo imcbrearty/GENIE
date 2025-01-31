@@ -263,7 +263,7 @@ elif load_model_type == 2:
 		ip_match = tree.query(ftrns1(np.concatenate((xx_surface, np.zeros((len(xx_surface),1))), axis = 1)))
 		val = Points[ip_match[1],2] ## Surface elevations of regular grid
 		val[ip_match[0] > buffer_distance] = 0.0 ## Setting points on regular grid far from reference points to sea level
-		xx_surface = np.concatente((xx_surface, val.reshape(-1,1)), axis = 1)
+		xx_surface = np.concatenate((xx_surface, val.reshape(-1,1)), axis = 1)
 		
 		## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface
 		tree = cKDTree(ftrns1(xx_surface))
