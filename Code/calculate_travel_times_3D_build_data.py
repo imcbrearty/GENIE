@@ -219,6 +219,10 @@ Xmin = xx.min(0)
 Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
 Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
 
+## Note: if going to loop over stations, and only compute
+## travel times to a certain distance, then can clip
+## spatial domain travel times are computed for during the
+## building travel time step for each station
 
 ## Load velocity model
 load_model_type = 1
