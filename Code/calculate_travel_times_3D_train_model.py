@@ -226,12 +226,16 @@ Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., 
 if vel_model_type == 1:
 	z = np.load(path_to_file + '1d_velocity_model.npz')
 	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+	iarg = np.argsort(depths)
 	z.close()
+	depths_fine = np.arange(depths.min(), depths.max() + dx_depth/10.0, dx_depth/10.0)
+	vp_fine = np.interp(depths_fine, depths[iarg], vp[iarg])
+	vs_fine = np.interp(depths_fine, depths[iarg], vs[iarg])
 
-	tree = cKDTree(depths.reshape(-1,1))
+	tree = cKDTree(depths_fine.reshape(-1,1))
 	ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
-	Vp = vp[ip_nearest]
-	Vs = vs[ip_nearest]
+	Vp = vp_fine[ip_nearest]
+	Vs = vs_fine[ip_nearest]
 
 elif vel_model_type == 2:
 
