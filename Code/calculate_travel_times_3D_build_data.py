@@ -268,18 +268,29 @@ elif load_model_type == 2:
 		ioutside_hull = np.where(in_hull(xx_surface,  hull.points[hull.vertices]) == 0)[0]
 		val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
 		xx_surface = np.concatenate((xx_surface, val.reshape(-1,1)), axis = 1)
-		
-		## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface
+		# np.savez_compressed(path_to_file + 'surface_elevation.npz', Points = Points, xx_surface = xx_surface)
+
+		## Check if stations are beneath surface
+		tol_elev_val = 100.0 ## Stations must be within 100 meters of being beneath surface
 		tree = cKDTree(ftrns1(xx_surface))
+		unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
+		dist_near = tree.query(ftrns1(locs))[0]
+		dist_perturb = tree.query(unit_out)[0]
+		iabove_surface = np.where(dist_perturb > dist_near)[0]
+		if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - xx_surface[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
+
+		## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
 		inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
-		unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1000.0*np.ones((len(inear_surface),1))), axis = 1))
+		unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1.0*np.ones((len(inear_surface),1))), axis = 1))
 		dist_near = tree.query(xx[inear_surface])[0]
 		dist_perturb = tree.query(unit_out)[0]
 		iabove_surface = np.where(dist_perturb > dist_near)[0]
-
+		
 		## Set points above surface to air wave speeds (or find a way to mask)
 		Vp[inear_surface[iabove_surface]] = 343.0
 		Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
+
+
 
 
 elif load_model_type == 3:
