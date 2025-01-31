@@ -123,7 +123,7 @@ else:
 	
 			tr = torch.cat((tr, mask), dim = -1)
 			tr = self.activate(self.init_trns(tr))
-			mask_in = mask.max(1, keepdims = True)[0]
+			# mask_in = mask.max(1, keepdims = True)[0]
 			
 			# embed_sta_edges = self.fproj_edges_sta(pos_loc/1e6)
 	
@@ -135,26 +135,63 @@ else:
 			# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
 			
 			## Could add binary edge type information to indicate data type
-			tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), message_type = 1, mask = mask_in), mask), dim = 1)) # could concatenate edge features here, and before.
-			tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(tr), message_type = 2, mask = mask_in), mask), dim = 1))
+			tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), message_type = 1), mask), dim = 1)) # could concatenate edge features here, and before.
+			tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(tr), message_type = 2), mask), dim = 1))
 			tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
 	
-			tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), message_type = 1, mask = mask_in), mask), dim = 1)) # could concatenate edge features here, and before.
-			tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), message_type = 2, mask = mask_in), mask), dim = 1))
+			tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), message_type = 1), mask), dim = 1)) # could concatenate edge features here, and before.
+			tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), message_type = 2), mask), dim = 1))
 			tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
 	
 			return tr # the new embedding.
 	
-		def message(self, x_j, mask_j, message_type = 1):
+		def message(self, x_j, message_type = 1):
 
 			if message_type == 1:
 			
-				return torch.cat((x_j, mask_j*self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+				return torch.cat((x_j, self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 
 			elif message_type == 2:
 
-				return torch.cat((x_j, mask_j*self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+				return torch.cat((x_j, self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+
+		# def forward(self, tr, mask, A_in_sta, A_in_src): # A_src_in_sta, pos_loc, pos_src
+	
+		# 	tr = torch.cat((tr, mask), dim = -1)
+		# 	tr = self.activate(self.init_trns(tr))
+		# 	mask_in = mask.max(1, keepdims = True)[0]
+			
+		# 	# embed_sta_edges = self.fproj_edges_sta(pos_loc/1e6)
+	
+		# 	# pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		# 	# pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		# 	# dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
+		# 	# dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
+		# 	# pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
+		# 	# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
+			
+		# 	## Could add binary edge type information to indicate data type
+		# 	tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), message_type = 1, mask = mask_in), mask), dim = 1)) # could concatenate edge features here, and before.
+		# 	tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(tr), message_type = 2, mask = mask_in), mask), dim = 1))
+		# 	tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
+	
+		# 	tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), message_type = 1, mask = mask_in), mask), dim = 1)) # could concatenate edge features here, and before.
+		# 	tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), message_type = 2, mask = mask_in), mask), dim = 1))
+		# 	tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
+	
+		# 	return tr # the new embedding.
+	
+		# def message(self, x_j, mask_j, message_type = 1):
+
+		# 	if message_type == 1:
+			
+		# 		return torch.cat((x_j, mask_j*self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+
+		# 	elif message_type == 2:
+
+		# 		return torch.cat((x_j, mask_j*self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 				
+
 
 class BipartiteGraphOperator(MessagePassing):
 	def __init__(self, ndim_in, ndim_out, ndim_edges = 3):
@@ -381,7 +418,7 @@ else:
 			mask = torch.cat((mask1, mask2), dim = - 1)
 			tr = torch.cat((tr, latent, mask), dim = -1)
 			tr = self.activate(self.init_trns(tr)) # should tlatent appear here too? Not on first go..
-			mask_in = mask.max(1, keepdims = True)[0]
+			# mask_in = mask.max(1, keepdims = True)[0]
 			
 			# if pos_rel_sta is None:
 			# 	pos_rel_sta = self.pos_rel_sta
@@ -394,26 +431,65 @@ else:
 			# pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
 			# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)	
 	
-			tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(self.l1_t1_1(tr)), message_type = 1, mask = mask_in), mask), dim = 1)) # Supposed to use this layer. Now, using correct layer.
-			tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(self.l1_t2_1(tr)), message_type = 2, mask = mask_in), mask), dim = 1))
+			tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(self.l1_t1_1(tr)), message_type = 1), mask), dim = 1)) # Supposed to use this layer. Now, using correct layer.
+			tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(self.l1_t2_1(tr)), message_type = 2), mask), dim = 1))
 			tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
 	
-			tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), message_type = 1, mask = mask_in), mask), dim = 1)) # could concatenate edge features here, and before.
-			tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), message_type = 2, mask = mask_in), mask), dim = 1))
+			tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), message_type = 1), mask), dim = 1)) # could concatenate edge features here, and before.
+			tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), message_type = 2), mask), dim = 1))
 			tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
 	
 			return tr # the new embedding.
 	
-		def message(self, x_j, mask_j, message_type = 1):
+		def message(self, x_j, message_type = 1):
 
 			if message_type == 1:
 			
-				return torch.cat((x_j, mask_j*self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+				return torch.cat((x_j, self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 		
 			elif message_type == 2:
 
-				return torch.cat((x_j, mask_j*self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+				return torch.cat((x_j, self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+
+		# def forward(self, tr, latent, mask1, mask2, A_in_sta, A_in_src): # A_src_in_sta, pos_loc, pos_src
+	
+		# 	mask = torch.cat((mask1, mask2), dim = - 1)
+		# 	tr = torch.cat((tr, latent, mask), dim = -1)
+		# 	tr = self.activate(self.init_trns(tr)) # should tlatent appear here too? Not on first go..
+		# 	mask_in = mask.max(1, keepdims = True)[0]
+			
+		# 	# if pos_rel_sta is None:
+		# 	# 	pos_rel_sta = self.pos_rel_sta
+		# 	# 	pos_rel_src = self.pos_rel_src			
+			
+		# 	# pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		# 	# pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		# 	# dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
+		# 	# dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
+		# 	# pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
+		# 	# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)	
+	
+		# 	tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(self.l1_t1_1(tr)), message_type = 1, mask = mask_in), mask), dim = 1)) # Supposed to use this layer. Now, using correct layer.
+		# 	tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(self.l1_t2_1(tr)), message_type = 2, mask = mask_in), mask), dim = 1))
+		# 	tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
+	
+		# 	tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), message_type = 1, mask = mask_in), mask), dim = 1)) # could concatenate edge features here, and before.
+		# 	tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), message_type = 2, mask = mask_in), mask), dim = 1))
+		# 	tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
+	
+		# 	return tr # the new embedding.
+	
+		# def message(self, x_j, mask_j, message_type = 1):
+
+		# 	if message_type == 1:
+			
+		# 		return torch.cat((x_j, mask_j*self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+		
+		# 	elif message_type == 2:
+
+		# 		return torch.cat((x_j, mask_j*self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 				
+
 # class LocalSliceLgCollapse(MessagePassing):
 # 	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = 15.0, device = 'cuda'):
 # 		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
