@@ -260,7 +260,7 @@ elif load_model_type == 2:
 		x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
 		x11_s, x12_s = np.meshgrid(x1_s, x2_s)
 		xx_surface = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
-		ip_match = tree1.query(ftrns1(np.concatenate((xx_surface, np.zeros((len(xx_surface),1))), axis = 1)))
+		ip_match = tree.query(ftrns1(np.concatenate((xx_surface, np.zeros((len(xx_surface),1))), axis = 1)))
 		val = Points[ip_match[1],2] ## Surface elevations of regular grid
 		val[ip_match[0] > buffer_distance] = 0.0 ## Setting points on regular grid far from reference points to sea level
 		xx_surface = np.concatente((xx_surface, val.reshape(-1,1)), axis = 1)
