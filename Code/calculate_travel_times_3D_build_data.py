@@ -249,11 +249,9 @@ elif load_model_type == 2:
 		z = np.load(path_to_file + 'surface_elevation.npz')
 		Points = z['Points']
 		z.close()
-		tree = cKDTree(ftrns1(Points))
-
 		## Determine average spacing of points (to find a buffer for missing values)
-		avg_distance = tree.query(ftrns1(Points[np.random.choice(len(Points), size = int(len(Points)/10))]), k = 5)[0][:,1::].mean()
-		buffer_distance = 5.0*avg_distance ## Beyond this distance to points, will assume zero elevation
+		# avg_distance = tree.query(ftrns1(Points[np.random.choice(len(Points), size = int(len(Points)/10))]), k = 5)[0][:,1::].mean()
+		# buffer_distance = 5.0*avg_distance ## Beyond this distance to points, will assume zero elevation
 		
 		## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
 		tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
@@ -262,12 +260,14 @@ elif load_model_type == 2:
 		xx_surface = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
 		ip_match = tree.query(ftrns1(np.concatenate((xx_surface, np.zeros((len(xx_surface),1))), axis = 1)))
 		val = Points[ip_match[1],2] ## Surface elevations of regular grid
-		val[ip_match[0] > buffer_distance] = 0.0 ## Setting points on regular grid far from reference points to sea level
+		hull = ConvexHull(Points[:,0:2])
+		ioutside_hull = np.where(in_hull(xx_surface,  hull.points[hull.vertices]) == 0)[0]
+		val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
 		xx_surface = np.concatenate((xx_surface, val.reshape(-1,1)), axis = 1)
 		
 		## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface
 		tree = cKDTree(ftrns1(xx_surface))
-		inear_surface = np.where(ftrns2(xx)[:,2] >= (0.9*(depth_range[1] - depth_range[0]) + depth_range[0]))[0]
+		inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
 		unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1000.0*np.ones((len(inear_surface),1))), axis = 1))
 		dist_near = tree.query(xx[inear_surface])[0]
 		dist_perturb = tree.query(unit_out)[0]
