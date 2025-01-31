@@ -235,7 +235,7 @@ if load_model_type == 1:
 
 elif load_model_type == 2:
 
-	z = np.load(path_to_file + 'Thurber_velocity_model.npz')
+	z = np.load(path_to_file + '3d_velocity_model.npz')
 	x_vel, vp_vel, vs_vel = z['X'], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
 	z.close()
 
@@ -246,7 +246,7 @@ elif load_model_type == 2:
 
 elif load_model_type == 3:
 
-	z = h5py.File(path_to_file + 'Vel_models.hdf5', 'r')
+	z = h5py.File(path_to_file + 'Vel_models.hdf5', 'r') ## Using a series of 1d velocity models for different areas
 	Depths_l, Coor_l, Vp_l, Vs_l, Radius_l = [], [], [], [], []
 	keys = list(z.keys())
 	n_profiles = len(list(filter(lambda x: 'Depths' in x, keys)))
