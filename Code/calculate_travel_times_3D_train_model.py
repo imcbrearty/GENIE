@@ -220,24 +220,22 @@ Xmin = xx.min(0)
 Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
 Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
 
-
 ## Load velocity model
 load_model_type = 1
 
 if load_model_type == 1:
-	
 	z = np.load(path_to_file + '1d_velocity_model.npz')
-	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
-	z.close()
+        depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+        z.close()
 
-	tree = cKDTree(depths.reshape(-1,1))
-	ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
-	Vp = vp[ip_nearest]
-	Vs = vs[ip_nearest]
+        tree = cKDTree(depths.reshape(-1,1))
+        ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
+        Vp = vp[ip_nearest]
+        Vs = vs[ip_nearest]
 
 elif load_model_type == 2:
 
-	z = np.load(path_to_file + 'Thurber_velocity_model.npz')
+	z = np.load(path_to_file + '3d_velocity_model.npz')
 	x_vel, vp_vel, vs_vel = z['X'], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
 	z.close()
 
@@ -248,7 +246,7 @@ elif load_model_type == 2:
 
 elif load_model_type == 3:
 
-	z = h5py.File(path_to_file + 'Vel_models.hdf5', 'r')
+	z = h5py.File(path_to_file + 'Vel_models.hdf5', 'r') ## Using a series of 1d velocity models for different areas
 	Depths_l, Coor_l, Vp_l, Vs_l, Radius_l = [], [], [], [], []
 	keys = list(z.keys())
 	n_profiles = len(list(filter(lambda x: 'Depths' in x, keys)))
@@ -284,7 +282,6 @@ elif load_model_type == 3:
 			Vp[i1] = Vp_l[i][imatch_depth]
 			Vs[i1] = Vs_l[i][imatch_depth]
 			print('Finished %d'%i)
-
 
 ## Using 3D domain, so must use actual station coordinates
 locs_ref = np.copy(locs)
