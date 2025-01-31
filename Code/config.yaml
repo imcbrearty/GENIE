@@ -24,7 +24,6 @@ load_initial_files: [False]
 use_pretrained_model: [None]
 
 velocity_model_type: 1 ## 1: 1d_velocity_model file is used; 2: 3d_velocity_model is used; 3: a series of 1d velocity models is used to construct a 3d model 
-
 velocity_model:
   Depths: [-40000, -35000, -30000, -25000, -20000, -15000, -10000, -5000, 0, 5000]
   Vp: [8200, 8200, 8150, 8100, 8050, 7400, 6800, 6100, 2900, 2900]
