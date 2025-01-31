@@ -136,8 +136,8 @@ depth_steps = config['depth_steps']
 save_dense_travel_time_data = config['save_dense_travel_time_data']
 train_travel_time_neural_network = config['train_travel_time_neural_network']
 use_relative_1d_profile = config['use_relative_1d_profile']
-using_3D = config['using_3D']
-using_1D = config['using_1D']
+# using_3D = config['using_3D']
+# using_1D = config['using_1D']
 
 if use_relative_1d_profile == True:
 	print('Overwritting num cores, because using relative 1d profile option')
@@ -154,6 +154,8 @@ path_to_file += seperator
 
 template_ver = 1
 vel_model_ver = config['vel_model_ver']
+vel_model_type = config['vel_model_type']
+use_topography = config['use_topography']
 ## Load Files
 
 # Load region
@@ -225,9 +227,9 @@ Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., 
 ## building travel time step for each station
 
 ## Load velocity model
-load_model_type = 1
+# load_model_type = 1
 
-if load_model_type == 1:
+if vel_model_type == 1:
 	z = np.load(path_to_file + '1d_velocity_model.npz')
 	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
 	z.close()
@@ -237,7 +239,7 @@ if load_model_type == 1:
 	Vp = vp[ip_nearest]
 	Vs = vs[ip_nearest]
 
-elif load_model_type == 2:
+elif vel_model_type == 2:
 
 	z = np.load(path_to_file + '3d_velocity_model.npz')
 	x_vel, vp_vel, vs_vel = z['X'], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
@@ -248,52 +250,7 @@ elif load_model_type == 2:
 	Vp = vp_vel[ip_nearest]
 	Vs = vs_vel[ip_nearest]
 
-	use_topography = False
-	if use_topography == True:
-		z = np.load(path_to_file + 'surface_elevation.npz')
-		Points = z['Points']
-		z.close()
-		## Determine average spacing of points (to find a buffer for missing values)
-		# avg_distance = tree.query(ftrns1(Points[np.random.choice(len(Points), size = int(len(Points)/10))]), k = 5)[0][:,1::].mean()
-		# buffer_distance = 5.0*avg_distance ## Beyond this distance to points, will assume zero elevation
-		
-		## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
-		tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
-		x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
-		x11_s, x12_s = np.meshgrid(x1_s, x2_s)
-		xx_surface = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
-		ip_match = tree.query(ftrns1(np.concatenate((xx_surface, np.zeros((len(xx_surface),1))), axis = 1)))
-		val = Points[ip_match[1],2] ## Surface elevations of regular grid
-		hull = ConvexHull(Points[:,0:2])
-		ioutside_hull = np.where(in_hull(xx_surface,  hull.points[hull.vertices]) == 0)[0]
-		val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
-		xx_surface = np.concatenate((xx_surface, val.reshape(-1,1)), axis = 1)
-		# np.savez_compressed(path_to_file + 'surface_elevation.npz', Points = Points, xx_surface = xx_surface)
-
-		## Check if stations are beneath surface
-		tol_elev_val = 100.0 ## Stations must be within 100 meters of being beneath surface
-		tree = cKDTree(ftrns1(xx_surface))
-		unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
-		dist_near = tree.query(ftrns1(locs))[0]
-		dist_perturb = tree.query(unit_out)[0]
-		iabove_surface = np.where(dist_perturb > dist_near)[0]
-		if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - xx_surface[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
-
-		## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
-		inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
-		unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1.0*np.ones((len(inear_surface),1))), axis = 1))
-		dist_near = tree.query(xx[inear_surface])[0]
-		dist_perturb = tree.query(unit_out)[0]
-		iabove_surface = np.where(dist_perturb > dist_near)[0]
-		
-		## Set points above surface to air wave speeds (or find a way to mask)
-		Vp[inear_surface[iabove_surface]] = 343.0
-		Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
-
-
-
-
-elif load_model_type == 3:
+elif vel_model_type == 3:
 
 	z = h5py.File(path_to_file + 'Vel_models.hdf5', 'r') ## Using a series of 1d velocity models for different areas
 	Depths_l, Coor_l, Vp_l, Vs_l, Radius_l = [], [], [], [], []
@@ -331,6 +288,48 @@ elif load_model_type == 3:
 			Vp[i1] = Vp_l[i][imatch_depth]
 			Vs[i1] = Vs_l[i][imatch_depth]
 			print('Finished %d'%i)
+
+## Apply topography clipping to velocity model
+if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.npz') == True):
+
+	## Load "Points" field that specifies surface elevation (columns of lat, lon, elevation (meters)). Points outside convex hull of Points will be treated as zero elevation.
+	z = np.load(path_to_file + 'surface_elevation.npz')
+	Points = z['Points']
+	z.close()
+	
+	## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
+	tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
+	x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
+	x11_s, x12_s = np.meshgrid(x1_s, x2_s)
+	xx_surface = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
+	ip_match = tree.query(ftrns1(np.concatenate((xx_surface, np.zeros((len(xx_surface),1))), axis = 1)))
+	val = Points[ip_match[1],2] ## Surface elevations of regular grid
+	hull = ConvexHull(Points[:,0:2])
+	ioutside_hull = np.where(in_hull(xx_surface,  hull.points[hull.vertices]) == 0)[0]
+	val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
+	xx_surface = np.concatenate((xx_surface, val.reshape(-1,1)), axis = 1)
+	if os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == False:
+		np.savez_compressed(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project, xx_surface = xx_surface)
+		
+	## Check if stations are beneath surface
+	tol_elev_val = 100.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
+	tree = cKDTree(ftrns1(xx_surface))
+	unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
+	dist_near = tree.query(ftrns1(locs))[0]
+	dist_perturb = tree.query(unit_out)[0]
+	iabove_surface = np.where(dist_perturb > dist_near)[0]
+	if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - xx_surface[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
+
+	## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
+	inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
+	unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1.0*np.ones((len(inear_surface),1))), axis = 1))
+	dist_near = tree.query(xx[inear_surface])[0]
+	dist_perturb = tree.query(unit_out)[0]
+	iabove_surface = np.where(dist_perturb > dist_near)[0]
+	
+	## Set points above surface to air wave speeds (or find a way to mask)
+	Vp[inear_surface[iabove_surface]] = 343.0 ## Assumed acoustic p wave speed
+	Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
 
 ## Using 3D domain, so must use actual station coordinates
 locs_ref = np.copy(locs)
