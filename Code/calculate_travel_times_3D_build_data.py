@@ -237,7 +237,7 @@ if vel_model_type == 1:
 	z.close()
 	depths_fine = np.arange(depths.min(), depths.max() + dx_depth/10.0, dx_depth/10.0)
 	vp_fine = np.interp(depths_fine, depths[iarg], vp[iarg])
-	vs_fine = np.interp(depths_fine, depths[iarg], vp[iarg])
+	vs_fine = np.interp(depths_fine, depths[iarg], vs[iarg])
 
 	tree = cKDTree(depths_fine.reshape(-1,1))
 	ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
