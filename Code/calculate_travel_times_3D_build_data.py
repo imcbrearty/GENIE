@@ -267,14 +267,15 @@ elif load_model_type == 2:
 		
 		## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface
 		tree = cKDTree(ftrns1(xx_surface))
-		unit_out = ftrns1(ftrns2(np.copy(xx)) + np.concatenate((np.zeros((len(xx),2)), 1000.0*np.ones((len(xx),1))), axis = 1))
-		dist_near = tree.query(xx)[0]
+		inear_surface = np.where(ftrns2(xx)[:,2] >= (0.9*(dist_range[1] - dist_range[0]) + dist_range[0]))[0]
+		unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1000.0*np.ones((len(inear_surface),1))), axis = 1))
+		dist_near = tree.query(xx[inear_surface])[0]
 		dist_perturb = tree.query(unit_out)[0]
 		iabove_surface = np.where(dist_perturb > dist_near)[0]
 
 		## Set points above surface to air wave speeds (or find a way to mask)
-		Vp[iabove_surface] = 343.0
-		Vs[iabove_surface] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
+		Vp[inear_surface[iabove_surface]] = 343.0
+		Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
 
 
 elif load_model_type == 3:
