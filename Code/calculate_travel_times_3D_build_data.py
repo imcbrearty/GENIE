@@ -50,7 +50,7 @@ def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_core
 		phi_v = (x13 - yval[0,2])**2
 
 		phi = np.sqrt(phi_xy + phi_v)
-		phi = phi - phi.min() - np.mean(dx_v) ## Why include np.mean(dx_v)?
+		phi = phi - phi.min() - np.mean(dx_v)/5.0 ## Why include np.mean(dx_v)?
 
 		v = np.copy(h).reshape(x11.shape) # correct?
 		v1 = np.copy(h1).reshape(x11.shape) # correct?
