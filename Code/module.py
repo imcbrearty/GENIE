@@ -1219,7 +1219,8 @@ class TravelTimesPN(nn.Module):
 		self.merge = nn.Sequential(nn.Linear(2*n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_phases))
 
 		## Embed source [3]
-		self.fc3_1 = nn.Linear(3 + 2 + 1, n_hidden)
+		# self.fc3_1 = nn.Linear(3 + 2 + 1, n_hidden)
+		self.fc3_1 = nn.Linear(3, n_hidden)
 		self.fc3_2 = nn.Linear(n_hidden, n_hidden)
 		self.fc3_3 = nn.Linear(n_hidden, n_hidden)
 		self.fc3_4 = nn.Linear(n_hidden, n_embed)
@@ -1275,13 +1276,13 @@ class TravelTimesPN(nn.Module):
 
 		return self.fc3_4(x1)
 
-	# def embed_src(self, src):
-
-	# 	return self.fc3_block(self.norm_pos(self.ftrns1(src)))
-
 	def embed_src(self, src):
 
-		return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), src[:,0:2]/self.scale_angles, src[:,[2]]/self.scale_depths), dim = 1))
+		return self.fc3_block(self.norm_pos(self.ftrns1(src)))
+
+	# def embed_src(self, src):
+
+	# 	return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), src[:,0:2]/self.scale_angles, src[:,[2]]/self.scale_depths), dim = 1))
 
 	def src_proj(self, src):
 
