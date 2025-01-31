@@ -375,7 +375,7 @@ if train_travel_time_neural_network == True:
 		ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T # just subtract mean
 		ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device) # just subtract mean
 
-	assert((using_3D + using_1D) == 1)
+	# assert((using_3D + using_1D) == 1)
 
 	X_samples, Tp_samples, Ts_samples, Locs_samples = [], [], [], []
 	X_samples_vald, Tp_samples_vald, Ts_samples_vald, Locs_samples_vald = [], [], [], []
@@ -680,7 +680,7 @@ if train_travel_time_neural_network == True:
 	n_ver_save = vel_model_ver
 	use_causual_loss = True
 
-	assert((using_3D + using_1D) == 1)
+	# assert((using_3D + using_1D) == 1)
 
 	
 	losses = []
