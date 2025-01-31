@@ -347,8 +347,8 @@ if compute_reference_times == True:
 	pass
 
 ## Determine which stations have data
-ver_vel_model = 1
-st_sta = glob.glob(path_to_file + 'TravelTimeData/*station*ver_%d.npz'%ver_vel_model)
+# ver_vel_model = 1
+st_sta = glob.glob(path_to_file + 'TravelTimeData/*station*ver_%d.npz'%vel_model_ver)
 iarg = np.argsort([int(st_sta[j].split('/')[-1].split('_')[5]) for j in range(len(st_sta))])
 st_sta = [st_sta[j] for j in iarg]
 sta_ind = np.array([int(st_sta[j].split('/')[-1].split('_')[5]) for j in range(len(st_sta))]).astype('int')
@@ -1006,13 +1006,13 @@ if train_travel_time_neural_network == True:
 
 				loss_initial = loss_func(trgt_vel, vel_pred)
 
-				loss = 0.85*loss + 0.15*loss_initial
+				loss_vald = 0.85*loss_vald + 0.15*loss_initial
 
 
-		print('%d %0.8f %0.8f'%(i, loss.item(), loss_vald.item()))
-		losses_vald.append(loss_vald.item())
-		losses_pde_vald.append(loss_pde_p.item() + loss_pde_s.item())
-		losses_data_vald.append(loss_data.item())
+			print('%d %0.8f %0.8f'%(i, loss.item(), loss_vald.item()))
+			losses_vald.append(loss_vald.item())
+			losses_pde_vald.append(loss_pde_p.item() + loss_pde_s.item())
+			losses_data_vald.append(loss_data.item())
 
 	phase = 'p_s'
 	path_save = path_to_file + '1D_Velocity_Models_Regional' + seperator
@@ -1328,6 +1328,17 @@ if train_travel_time_neural_network == True:
 		vel_pred_levels.append(np.expand_dims(m.vmodel(src_pos_cart, src_embed).cpu().detach().numpy(), axis = 0))
 	vel_pred_levels = inorm_vel(np.vstack(vel_pred_levels))
 
+	if make_plot == True:
+		plt.figure()
+		plt.plot(vel_pred[:,0], x3/1000.0, label = 'Vp')
+		plt.plot(vel_pred[:,1], x3/1000.0, label = 'Vs')
+		plt.legend()
+		plt.xlabel('Velocity (m/s)')
+		plt.ylabel('Depth (km)')
+		fig = plt.gcf()
+		fig.set_size_inches([15,12])
+		fig.savefig(path_to_file + 'Plots' + seperator + 'velocity_as_function_of_depth_physics_ver_%d.png'%n_ver_save, bbox_inches = 'tight', pad_inches = 0.2)
+	
 	np.savez_compressed(path_to_file + 'training_results_ver_%d.npz'%n_ver_save, trv_out = trv_out.cpu().detach().numpy(), vel_pred = vel_pred, vel_pred_levels = vel_pred_levels, pos_contour = x_contour, xx1 = xx1, x3 = x3, losses = losses, losses_vald = losses_vald, losses_pde = losses_pde, losses_pde_vald = losses_pde_vald, losses_data = losses_data, losses_data_vald = losses_data_vald)
 
 
