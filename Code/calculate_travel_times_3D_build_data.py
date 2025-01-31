@@ -152,7 +152,7 @@ path_to_file = str(pathlib.Path().absolute())
 seperator =  '\\' if '\\' in path_to_file else '/'
 path_to_file += seperator
 
-template_ver = 1
+# template_ver = 1
 vel_model_ver = config['vel_model_ver']
 vel_model_type = config['vel_model_type']
 use_topography = config['use_topography']
@@ -164,9 +164,9 @@ lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['
 z.close()
 
 # Load templates
-z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-x_grids = z['x_grids']
-z.close()
+# z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
+# x_grids = z['x_grids']
+# z.close()
 
 # Load stations
 z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
