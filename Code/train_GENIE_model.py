@@ -131,8 +131,8 @@ if (load_training_data == True) or (build_training_data == True):
 	if (path_to_data[-1] != '/')*(path_to_data[-1] != '\\'):
 		path_to_data = path_to_data + seperator
 
-if (use_topography == True)*(os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == True):
-	surface_profile = np.load(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project)['surface_profile']
+if use_topography == True:
+	surface_profile = np.load(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project)['surface_profile'] # (os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == True)
 	tree_surface = cKDTree(surface_profile[:,0:2])
 
 ## Load specific subsets of stations to train on in addition to random
