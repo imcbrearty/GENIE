@@ -695,6 +695,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
 		self.ndim_feat = ndim_arv_in + ndim_extra
 		self.use_phase_types = use_phase_types
+		self.n_phases = ndim_out
 
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
@@ -734,11 +735,14 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 			ikeep = torch.where(((torch.abs(rel_t_p) < 2.0*torch.sqrt(self.t_kernel_sq)) + (torch.abs(rel_t_s) < 2.0*torch.sqrt(self.t_kernel_sq))).reshape(-1) > 0)[0].cpu().detach().numpy() ## Either query is within the threshold amount of time
 			# edges = edges[:,ikeep]
 			edges = torch.cat((edges[0][ikeep].reshape(1,-1), edges[1][ikeep].reshape(1,-1)), dim = 0).contiguous()
-			src_index = src_index[ikeep]
+			src_index = src_index[ikeep]		
 		
 		N = n_arv # still correct?
 		M = n_arv*n_src
 
+		if len(src_index) == 0:
+			return torch.zeros(n_src, n_arv, self.n_phases).to(self.device)
+		
 		out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = arrival, sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick, atime = tpick, phase = phase_label, size = (N, M)).mean(1)))) # M is output. Taking mean over heads
 
 		return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
