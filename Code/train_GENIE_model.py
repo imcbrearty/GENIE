@@ -63,6 +63,7 @@ k_time_edges = config['k_time_edges']
 use_physics_informed = config['use_physics_informed']
 use_phase_types = config['use_phase_types']
 use_subgraph = config['use_subgraph']
+use_topography = config['use_topography']
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
     k_nearest_pairs = config['k_nearest_pairs']	
@@ -129,6 +130,9 @@ if (load_training_data == True) or (build_training_data == True):
 	n_ver_training_data = train_config['n_ver_training_data'] ## Version of training files
 	if (path_to_data[-1] != '/')*(path_to_data[-1] != '\\'):
 		path_to_data = path_to_data + seperator
+
+if use_topography == True:
+	surface_profile = np.load(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project)['surface_profile']
 
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
