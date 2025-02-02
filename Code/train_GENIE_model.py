@@ -399,7 +399,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if use_topography == True: ## Don't simulate any sources in the air
 		imatch = tree_surface.query(src_positions[:,0:2])[1]
 		ifind_match = np.where(src_positions[:,2] > surface_profile[imatch,2])[0]
-		src_positions[ifind_match,2] = np.random.rand(len(imatch))*(surface_profile[imatch[ifind_match],2] - depth_range[0]) + depth_range[0]
+		src_positions[ifind_match,2] = np.random.rand(len(ifind_match))*(surface_profile[imatch[ifind_match],2] - depth_range[0]) + depth_range[0]
 	
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
