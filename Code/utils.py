@@ -446,7 +446,7 @@ def kmeans_packing_fit_sources(srcs, scale_x, offset_x, ndim, n_clusters, ftrns1
 	def sample_sources(n):
 
 		xlat = ftrns2(ftrns1(srcs[np.random.choice(len(srcs), size = n),0:3]) + np.random.randn(n,3)*blur_sigma)
-		iwhere = np.where(((x_lat[:,2] < offset_x[0,2]) + (x_lat[:,2] > (offset_x[0,2] + scale_x[0,2]))) > 0)[0]
+		iwhere = np.where(((xlat[:,2] < offset_x[0,2]) + (xlat[:,2] > (offset_x[0,2] + scale_x[0,2]))) > 0)[0]
 		xlat[iwhere,2] = np.random.rand(len(iwhere))*scale_x[0,2] + offset_x[0,2]
 
 		return xlat
