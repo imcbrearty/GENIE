@@ -131,8 +131,9 @@ if (load_training_data == True) or (build_training_data == True):
 	if (path_to_data[-1] != '/')*(path_to_data[-1] != '\\'):
 		path_to_data = path_to_data + seperator
 
-if use_topography == True:
+if (use_topography == True)*(os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == True):
 	surface_profile = np.load(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project)['surface_profile']
+	tree_surface = cKDTree(surface_profile[:,0:2])
 
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
@@ -395,6 +396,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		sample_random_depths = -sample_random_depths*(scale_x[0,2] - 2e3) + (offset_x[0,2] + scale_x[0,2] - 2e3) # Project along axis, going negative direction. Removing 2e3 on edges.
 		src_positions[:,2] = sample_random_depths
 
+	if use_topography == True: ## Don't simulate any sources in the air
+		imatch = tree_surface.query(src_positions[:,0:2])[1]
+		ifind_match = np.where(src_positions[:,2] > surface_profile[imatch,2])[0]
+		src_positions[ifind_match,2] = np.random.rand(len(imatch))*(surface_profile[imatch[ifind_match],2] - depth_range[0]) + depth_range[0]
+	
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
 	use_uniform_distance_threshold = False
