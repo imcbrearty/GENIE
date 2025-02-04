@@ -332,7 +332,7 @@ n_batches = int(np.floor(len(tsteps)/n_batch))
 n_extra = len(tsteps) - n_batches*n_batch
 n_overlap = int(t_win/step) # check this
 
-if use_small_src_t_kernel_check == True: ## Overlap is overwritten due to mask
+if (use_small_src_t_kernel_check == True)*(pred_params[2] < 5.0): ## Overlap is overwritten due to mask
 	n_overlap = 1.0
 
 
