@@ -68,7 +68,7 @@ eps: 15.0 # The normalization and clipping window during arrival embedding and s
 k_sta_edges: 8 # or 10 are reasonable choices
 k_spc_edges: 15
 k_time_edges: 10
-t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
+# t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
 
 ## Use subgraph
