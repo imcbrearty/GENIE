@@ -331,6 +331,7 @@ if use_adaptive_window == True:
 	n_resolution = 9 ## The discretization of the source time function output
 	t_win = np.round(np.copy(np.array([2*pred_params[2]]))[0], 2) ## Set window size to the source kernel width (i.e., prediction window is of length +/- src_t_kernel, or [-src_t_kernel + t0, t0 + src_t_kernel])
 	dt_win = np.diff(np.linspace(-t_win/2.0, t_win/2.0, n_resolution))[0]
+	assert(t_win == pred_params[0])
 else:
 	dt_win = 1.0 ## Default version
 
