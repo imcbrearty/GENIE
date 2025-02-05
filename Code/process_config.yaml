@@ -27,9 +27,11 @@ n_query_grid: 10000 ## This is the number of spatial points to save initial spac
 
 thresh: 0.3 # Threshold to declare detection (previously, ~0.15 - 0.2 was effective, but recent changes to synthetic data tend to make higher thresholds also effective (e.g., even ~0.5 - 0.8 may be usable))
 thresh_assoc: 0.3 # Threshold to declare src-arrival association
-spr: 1 # Sampling rate to save temporal predictions (may still cause some issues if this is changed from 1 s for now)
-tc_win: 5.0 # Temporal window (s) to link events in Local Marching
-sp_win: 15000.0 # Distance (m) to link events in Local Marching. Generally both of these on the order of training kernel sizes
+
+# spr: 1 # Sampling rate to save temporal predictions (may still cause some issues if this is changed from 1 s for now)
+# tc_win: 5.0 # Temporal window (s) to link events in Local Marching
+# sp_win: 15000.0 # Distance (m) to link events in Local Marching. Generally both of these on the order of training kernel sizes
+
 break_win: 15.0 # Temporal window to find disjoint groups of sources, 
 ## so can run Local Marching without memory issues.
 spr_picks: 1 # Assumed sampling rate of picks (e.g., spr_picks = 1 means absolute time, spr_picks = 100 means 100 Hz sampling rate). Note, previous default was spr_picks = 100.
@@ -39,8 +41,9 @@ d_win: 0.25 ## Lat and lon window to re-locate initial source detetections with 
 d_win_depth: 10000.0 ## Depth window to re-locate initial source detetections with refined sampling over (should be proportional to the label kernel widths)
 dx_depth: 50.0 ## Depth resolution to locate events with travel time based re-location (unused, if using differential evolution location)
 
-step: 5.0 ## (For more accurate processing, choose 2 s; more efficient processing choose 5 s) Temporal step size to predict source outputs over, and stack overlapping portions (must be less than default source window prediction is 10 s)
-step_abs: 1.0 ## Time resolution to save the initial space-time predictions. Don't change this for now.
+step_size: 'full' ## Or 'partial' (for 3x overlap and stacking, with increased computational cost)
+# step: 5.0 ## (For more accurate processing, choose 2 s; more efficient processing choose 5 s) Temporal step size to predict source outputs over, and stack overlapping portions (must be less than default source window prediction is 10 s)
+# step_abs: 1.0 ## Time resolution to save the initial space-time predictions. Don't change this for now.
 
 use_quality_check: True ## If True, check all associated picks and set a maximum allowed relative error after obtaining initial location
 max_relative_error: 0.2 ## 0.15 corresponds to 15% maximum relative error allowed
