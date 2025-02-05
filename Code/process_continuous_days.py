@@ -328,11 +328,13 @@ if use_adaptive_window == True:
 else:
 	dt_win = 1.0 ## Default version
 
-step_size = 'full'
-if step_size == 'full':
+# step_size = process_config['step_size'] # 'full'
+if process_config['step_size'] == 'full':
 	step = n_resolution*dt_win
-elif step_size == 'partial':
+	n_overlap = 1.0
+elif process_config['step_size'] == 'partial':
 	step = (n_resolution/3)*dt_win
+	n_overlap = 3.0 ## Check this
 	assert(use_adaptive_window == True)
 	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
 	
@@ -348,10 +350,7 @@ print('Doing 1 s steps, to avoid issue of repeating time samples')
 n_batch = 1
 n_batches = int(np.floor(len(tsteps)/n_batch))
 n_extra = len(tsteps) - n_batches*n_batch
-n_overlap = int(t_win/step) # check this
-
-if (use_small_src_t_kernel_check == True)*(pred_params[2] < 5.0): ## Overlap is overwritten due to mask
-	n_overlap = 1.0
+# n_overlap = int(t_win/step) # check this
 
 
 n_samples = int(250e3)
