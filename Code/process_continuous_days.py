@@ -305,25 +305,34 @@ if load_model == True:
 failed = []
 plot_on = False
 
-use_small_src_t_kernel_check = True ## Since output is not stable at edges if src_t_kernel is too small, should mask out these values (note: will be corrected with adaptive window size based on src_t_kernel)
-if use_small_src_t_kernel_check == True:
-	if pred_params[2] < 5.0: ## src_t_kernel
-		print('Overwriting step parameters and masking the edges of output prediction')
-		t_mask = np.ones((1,11)) ## hard coded for torch.arange(-t_win/2.0, t_win/2.0 + 1.0) with t_win = 10
-		t_mask[0,0:3] = 0
-		t_mask[0,-3::] = 0
-		step = 5.0
-else:
-	t_mask = np.ones((1,11))
+# use_small_src_t_kernel_check = True ## Since output is not stable at edges if src_t_kernel is too small, should mask out these values (note: will be corrected with adaptive window size based on src_t_kernel)
+# if use_small_src_t_kernel_check == True:
+# 	if pred_params[2] < 5.0: ## src_t_kernel
+# 		print('Overwriting step parameters and masking the edges of output prediction')
+# 		t_mask = np.ones((1,11)) ## hard coded for torch.arange(-t_win/2.0, t_win/2.0 + 1.0) with t_win = 10
+# 		t_mask[0,0:3] = 0
+# 		t_mask[0,-3::] = 0
+# 		step = 5.0
+# else:
+# 	t_mask = np.ones((1,11))
 
 day_len = 3600*24
 t_win = config['t_win']
-tsteps = np.arange(0, day_len, step) ## Fixed solution grid.
-tsteps_abs = np.arange(-t_win/2.0, day_len + t_win/2.0 + 1, step_abs) ## Fixed solution grid, assume 1 second
+
+use_adaptive_window = True
+if use_adaptive_window == True:
+	n_resolution = 9 ## The discretization of the source time function output
+	t_win = np.round(np.copy(np.array([2*pred_params[2]]))[0], 2) ## Set window size to the source kernel width (i.e., prediction window is of length +/- src_t_kernel, or [-src_t_kernel + t0, t0 + src_t_kernel])
+	dt_win = np.diff(np.linspace(-t_win/2.0, t_win/2.0, n_resolution))[0]
+	step_abs = dt_win ## Overwrite step_abs
+else:
+	dt_win = 1.0 ## Default version
+
+tsteps = np.arange(0, day_len, step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
+tsteps_abs = np.arange(-t_win/2.0, day_len + t_win/2.0 + step_abs, step_abs) ## Fixed solution grid, assume 1 second
 tree_tsteps = cKDTree(tsteps_abs.reshape(-1,1))
 
-tsteps_abs_cat = cKDTree(tsteps.reshape(-1,1)) ## Make this tree, so can look up nearest time for all cat.
-
+# tsteps_abs_cat = cKDTree(tsteps.reshape(-1,1)) ## Make this tree, so can look up nearest time for all cat.
 print('Doing 1 s steps, to avoid issue of repeating time samples')
 
 
@@ -393,9 +402,9 @@ else:
 # Window over which to "relocate" each 
 # event with denser sampling from GNN output
 d_deg = 0.018 ## Is this discretization being preserved?
-x1 = np.arange(-d_win, d_win + d_deg, d_deg)
-x2 = np.arange(-d_win, d_win + d_deg, d_deg)
-x3 = np.arange(-d_win_depth, d_win_depth + d_win_depth/5.0, d_win_depth/5.0)
+x1 = np.linspace(-d_win, d_win, 15)
+x2 = np.linspace(-d_win, d_win, 15)
+x3 = np.linspace(-d_win_depth, d_win_depth, 15)
 x11, x12, x13 = np.meshgrid(x1, x2, x3)
 xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 X_offset = np.copy(xx)
@@ -630,7 +639,7 @@ for cnt, strs in enumerate([0]):
 				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i0]).to(device), torch.Tensor(Masks[i0]).to(device), torch.Tensor(lp_times[i0]).to(device), torch.Tensor(lp_stations[i0]).long().to(device), torch.Tensor(lp_phases[i0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], X_query_cart, tq)
 
 				# Out_1[:,ip_need[1]] += out[0][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
-				Out_2[:,ip_need[1]] += t_mask[0,0:-1].reshape(1,-1)*out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
+				Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
 				# out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
 				
 				if (np.mod(i0, 50) == 0) + ((np.mod(i0, 5) == 0)*(out[1].max().item() > 0.075)):
@@ -795,7 +804,7 @@ for cnt, strs in enumerate([0]):
 				
 				# note, trv_out_sources, is already on cuda, may cause memory issue with too many sources
 				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], X_query_1_cart_list[i], tq)
-				Out_refined[i] +=t_mask*out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
+				Out_refined[i] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 
 		srcs_refined = []
 		for i in range(srcs_slice.shape[0]):
