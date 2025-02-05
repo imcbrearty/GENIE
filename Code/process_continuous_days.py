@@ -328,6 +328,15 @@ if use_adaptive_window == True:
 else:
 	dt_win = 1.0 ## Default version
 
+step_size = 'full'
+if step_size == 'full':
+	step = n_resolution*dt_win
+elif step_size == 'partial':
+	step = (n_resolution/3)*dt_win
+	assert(use_adaptive_window == True)
+	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
+	
+
 tsteps = np.arange(0, day_len, step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
 tsteps_abs = np.arange(-t_win/2.0, day_len + t_win/2.0 + step_abs, step_abs) ## Fixed solution grid, assume 1 second
 tree_tsteps = cKDTree(tsteps_abs.reshape(-1,1))
@@ -434,7 +443,7 @@ x_src_query = locs.mean(0).reshape(1,-1) # arbitrary point to query source-arriv
 x_src_query_cart = torch.Tensor(ftrns1(x_src_query))
 tq_sample = torch.rand(n_src_query)*t_win - t_win/2.0 # Note this part!
 tq_sample = torch.zeros(1)
-tq = torch.arange(-t_win/2.0, t_win/2.0 + 1.0).reshape(-1,1).float().to(device)
+tq = torch.arange(-t_win/2.0, t_win/2.0 + dt_win, dt_win).reshape(-1,1).float().to(device)
 
 yr, mo, dy = date[0], date[1], date[2]
 date = np.array([yr, mo, dy])
@@ -633,13 +642,14 @@ for cnt, strs in enumerate([0]):
 					continue ## It will fail if len(lp_times[i0]) == 0!
 
 				## Note: this is repeated, for each pass of the x_grid loop.
-				ip_need = tree_tsteps.query(tsteps_abs[tsteps_slice_indices[i0]] + np.arange(-t_win/2.0, t_win/2.0).reshape(-1,1))
+				ip_need = tree_tsteps.query(tsteps_abs[tsteps_slice_indices[i0]] + np.arange(-t_win/2.0, t_win/2.0 + dt_win, dt_win).reshape(-1,1)) # tq
 
 				## Need x_src_query_cart and trv_out_src
 				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i0]).to(device), torch.Tensor(Masks[i0]).to(device), torch.Tensor(lp_times[i0]).to(device), torch.Tensor(lp_stations[i0]).long().to(device), torch.Tensor(lp_phases[i0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], X_query_cart, tq)
 
 				# Out_1[:,ip_need[1]] += out[0][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
-				Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
+				# Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
+				Out_2[:,ip_need[1]] += out[1][:,:,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
 				# out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
 				
 				if (np.mod(i0, 50) == 0) + ((np.mod(i0, 5) == 0)*(out[1].max().item() > 0.075)):
@@ -651,6 +661,7 @@ for cnt, strs in enumerate([0]):
 
 	xq = np.copy(X_query)
 	ts = np.copy(tsteps_abs)
+	assert(np.diff(ts)[0] == dt_win)
 
 	use_sparse_peak_finding = False
 	if use_sparse_peak_finding == True:
@@ -665,7 +676,7 @@ for cnt, strs in enumerate([0]):
 				trace[iz2[ifind_x]] = Out_2_sparse[ifind_x,2]
 				
 				# ip = np.where(Out[:,i] > thresh)[0]
-				ip = find_peaks(trace, height = thresh, distance = int(2*spr)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
+				ip = find_peaks(trace, height = thresh, distance = int(src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
 				if len(ip[0]) > 0: # why use xq here?
 					val = np.concatenate((xq[i,:].reshape(1,-1)*np.ones((len(ip[0]),3)), ts[ip[0]].reshape(-1,1), ip[1]['peak_heights'].reshape(-1,1)), axis = 1)
 					srcs_init.append(val)		
@@ -678,7 +689,7 @@ for cnt, strs in enumerate([0]):
 		srcs_init = []
 		for i in range(Out.shape[0]):
 			# ip = np.where(Out[:,i] > thresh)[0]
-			ip = find_peaks(Out[i,:], height = thresh, distance = int(2*spr)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
+			ip = find_peaks(Out[i,:], height = thresh, distance = int(src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
 			if len(ip[0]) > 0: # why use xq here?
 				val = np.concatenate((xq[i,:].reshape(1,-1)*np.ones((len(ip[0]),3)), ts[ip[0]].reshape(-1,1), ip[1]['peak_heights'].reshape(-1,1)), axis = 1)
 				srcs_init.append(val)
