@@ -1206,7 +1206,7 @@ max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))
 mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, device = device).to(device)
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
 loss_func = torch.nn.MSELoss()
-
+np.random.seed() ## randomize seed
 
 losses = np.zeros(n_epochs)
 mx_trgt_1, mx_trgt_2, mx_trgt_3, mx_trgt_4 = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
