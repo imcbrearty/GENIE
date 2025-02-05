@@ -324,7 +324,7 @@ plot_on = False
 # 	t_mask = np.ones((1,11))
 
 day_len = 3600*24
-t_win = config['t_win']
+# t_win = config['t_win']
 
 use_adaptive_window = True
 if use_adaptive_window == True:
@@ -334,6 +334,7 @@ if use_adaptive_window == True:
 	assert(t_win == pred_params[0])
 else:
 	dt_win = 1.0 ## Default version
+	t_win = 10.0
 
 # step_size = process_config['step_size'] # 'full'
 if process_config['step_size'] == 'full':
@@ -505,7 +506,7 @@ for cnt, strs in enumerate([0]):
 
 			# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
 			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(locs_use, x_grids[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, device = device)
-			A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, locs_use, x_grids[i], A_src_in_sta, max_t, device = device)
+			A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, locs_use, x_grids[i], A_src_in_sta, max_t, t_win = t_win, device = device)
 			spatial_vals = torch.Tensor((x_grids[i][A_src_in_prod[1].cpu().detach().numpy()] - locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()])/scale_x_extend).to(device)
 			A_src_in_prod = Data(x = spatial_vals, edge_index = A_src_in_prod)
 			
