@@ -100,6 +100,14 @@ src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source 
 src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
 t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
 
+use_adaptive_window = True
+if use_adaptive_window == True:
+	n_resolution = 9 ## The discretization of the source time function output
+	t_win = np.round(np.copy(np.array([2*src_t_kernel]))[0], 2) ## Set window size to the source kernel width (i.e., prediction window is of length +/- src_t_kernel, or [-src_t_kernel + t0, t0 + src_t_kernel])
+	dt_win = np.diff(np.linspace(-t_win/2.0, t_win/2.0, n_resolution))[0]
+else:
+	dt_win = 1.0 ## Default version
+
 ## Dataset parameters
 load_training_data = train_config['load_training_data']
 build_training_data = train_config['build_training_data'] ## If try, will use system argument to build a set of data
@@ -332,7 +340,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	offset_x = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
 	n_sta = locs.shape[0]
 
-	t_slice = np.arange(-t_win/2.0, t_win/2.0 + 1.0, 1.0)
+	t_slice = np.arange(-t_win/2.0, t_win/2.0 + dt_win, dt_win)
 
 	tsteps = np.arange(0, T + dt, dt)
 	tvec = np.arange(-tscale*4, tscale*4 + dt, dt)
@@ -1584,7 +1592,7 @@ for i in range(n_restart_step, n_epochs):
 	
 		
 		tq_sample = torch.rand(n_src_query).to(device)*t_win - t_win/2.0
-		tq = torch.arange(-t_win/2.0, t_win/2.0 + 1.0).reshape(-1,1).float().to(device)
+		tq = torch.arange(-t_win/2.0, t_win/2.0 + dt_win, dt_win).reshape(-1,1).float().to(device)
 
 		if len(lp_srcs[i0]) > 0:
 			tq_sample[0:len(lp_srcs[i0])] = torch.Tensor(lp_srcs[i0][:,3]).to(device)
