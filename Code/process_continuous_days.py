@@ -106,20 +106,26 @@ n_query_grid = process_config['n_query_grid']
 
 thresh = process_config['thresh'] # Threshold to declare detection
 thresh_assoc = process_config['thresh_assoc'] # Threshold to declare src-arrival association
-spr = process_config['spr'] # Sampling rate to save temporal predictions
-tc_win = process_config['tc_win'] # Temporal window (s) to link events in Local Marching
-sp_win = process_config['sp_win'] # Distance (m) to link events in Local Marching
+
+## removed
+# spr = process_config['spr'] # Sampling rate to save temporal predictions
+# tc_win = process_config['tc_win'] # Temporal window (s) to link events in Local Marching
+# sp_win = process_config['sp_win'] # Distance (m) to link events in Local Marching
+
 break_win = process_config['break_win'] # Temporal window to find disjoint groups of sources, 
 ## so can run Local Marching without memory issues.
 spr_picks = process_config['spr_picks'] # Assumed sampling rate of picks 
 ## (can be 1 if absolute times are used for pick time values)
 
-d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
-d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
-dx_depth = process_config['dx_depth'] ## Depth resolution to locate events with travel time based re-location
+## Removed
+# d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
+# d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
 
-step = process_config['step']
-step_abs = process_config['step_abs']
+dx_depth = 50.0 ## This is not longer used (unless particle swarm location is used) # process_config['dx_depth'] ## Depth resolution to locate events with travel time based re-location
+
+## removed
+# step = process_config['step']
+# step_abs = process_config['step_abs']
 
 use_quality_check = process_config['use_quality_check'] ## If True, check all associated picks and set a maximum allowed relative error after obtaining initial location
 max_relative_error = process_config['max_relative_error'] ## 0.15 corresponds to 15% maximum relative error allowed
@@ -199,6 +205,12 @@ z.close()
 ## Create path to write files
 write_training_file = path_to_file + 'GNN_TrainedModels/' + name_of_project + '_'
 
+z = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_step_load, n_ver_load))
+training_params = z['training_params']
+graph_params = z['graph_params']
+pred_params = z['pred_params']
+z.close()
+
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
 
@@ -270,11 +282,6 @@ if (use_differential_evolution_location == False)*(config['train_travel_time_neu
 else:
 	hull = []
 
-z = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_step_load, n_ver_load))
-training_params = z['training_params']
-graph_params = z['graph_params']
-pred_params = z['pred_params']
-z.close()
 
 
 ## Check if knn is working on cuda
@@ -324,7 +331,6 @@ if use_adaptive_window == True:
 	n_resolution = 9 ## The discretization of the source time function output
 	t_win = np.round(np.copy(np.array([2*pred_params[2]]))[0], 2) ## Set window size to the source kernel width (i.e., prediction window is of length +/- src_t_kernel, or [-src_t_kernel + t0, t0 + src_t_kernel])
 	dt_win = np.diff(np.linspace(-t_win/2.0, t_win/2.0, n_resolution))[0]
-	step_abs = dt_win ## Overwrite step_abs
 else:
 	dt_win = 1.0 ## Default version
 
@@ -337,11 +343,21 @@ elif process_config['step_size'] == 'partial':
 	n_overlap = 3.0 ## Check this
 	assert(use_adaptive_window == True)
 	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
-	
+
+# pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
+tc_win = pred_params[1]*1.25 # process_config['tc_win'] # Temporal window (s) to link events in Local Marching
+sp_win = pred_params[3]*1.25 # process_config['sp_win'] # Distance (m) to link events in Local Marching
+d_win = pred_params[3]*1.25/110e3 ## Converting km to degrees, roughly
+d_win_depth = pred_params[4]*1.25  ## proportional to depth kernel
+
+# d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
+# d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
+
 
 tsteps = np.arange(0, day_len, step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
-tsteps_abs = np.arange(-t_win/2.0, day_len + t_win/2.0 + step_abs, step_abs) ## Fixed solution grid, assume 1 second
+tsteps_abs = np.arange(-t_win/2.0, day_len + t_win/2.0 + dt_win, dt_win) ## Fixed solution grid, assume 1 second
 tree_tsteps = cKDTree(tsteps_abs.reshape(-1,1))
+
 
 # tsteps_abs_cat = cKDTree(tsteps.reshape(-1,1)) ## Make this tree, so can look up nearest time for all cat.
 print('Doing 1 s steps, to avoid issue of repeating time samples')
@@ -353,7 +369,7 @@ n_extra = len(tsteps) - n_batches*n_batch
 # n_overlap = int(t_win/step) # check this
 
 
-n_samples = int(250e3)
+# n_samples = int(250e3)
 plot_on = False
 save_on = True
 
