@@ -98,7 +98,7 @@ src_t_arv_kernel = train_config['src_t_arv_kernel'] # Kernel for arrival associa
 src_x_kernel = train_config['src_x_kernel'] # Kernel for source label, horizontal distance (m)
 src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
 src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
-t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
+# t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
 
 use_adaptive_window = True
 if use_adaptive_window == True:
@@ -107,6 +107,7 @@ if use_adaptive_window == True:
 	dt_win = np.diff(np.linspace(-t_win/2.0, t_win/2.0, n_resolution))[0]
 else:
 	dt_win = 1.0 ## Default version
+	t_win = 10.0
 
 ## Dataset parameters
 load_training_data = train_config['load_training_data']
