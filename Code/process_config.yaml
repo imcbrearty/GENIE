@@ -41,7 +41,7 @@ spr_picks: 1 # Assumed sampling rate of picks (e.g., spr_picks = 1 means absolut
 # d_win_depth: 10000.0 ## Depth window to re-locate initial source detetections with refined sampling over (should be proportional to the label kernel widths)
 # dx_depth: 50.0 ## Depth resolution to locate events with travel time based re-location (unused, if using differential evolution location)
 
-step_size: 'full' ## Or 'partial' (for 3x overlap and stacking, with increased computational cost)
+step_size: 'full' ## 'full' or 'partial' (partial uses 3x overlap and stacking, with increased computational cost)
 # step: 5.0 ## (For more accurate processing, choose 2 s; more efficient processing choose 5 s) Temporal step size to predict source outputs over, and stack overlapping portions (must be less than default source window prediction is 10 s)
 # step_abs: 1.0 ## Time resolution to save the initial space-time predictions. Don't change this for now.
 
