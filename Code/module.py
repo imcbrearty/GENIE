@@ -1507,6 +1507,25 @@ class NNInterp(nn.Module):
 		n_feat = vals.shape[1]
 
 		return vals, query, n_feat
+		
+	def global_sum_pool(x, batch, size=None):
+		## From: "https://pytorch-geometric.readthedocs.io/en/latest/generated/torch_geometric.nn.pool.global_mean_pool.html"
+		"""
+		Globally pool node embeddings into graph embeddings, via elementwise mean.
+		Pooling function takes in node embedding [num_nodes x emb_dim] and
+		batch (indices) and outputs graph embedding [num_graphs x emb_dim].
+	
+		Args:
+			x (torch.tensor): Input node embeddings
+			batch (torch.tensor): Batch tensor that indicates which node
+			belongs to which graph
+			size (optional): Total number of graphs. Can be auto-inferred.
+	
+		Returns: Pooled graph embeddings
+	
+		"""
+		size = batch.max().item() + 1 if size is None else size
+		return scatter(x, batch, dim=0, dim_size=size, reduce='sum')
 
 	def discrete_veroinal_cell(self, grid):
 
@@ -1642,7 +1661,7 @@ class NNInterp(nn.Module):
 			ind_grab = np.hstack([self.Inds[i] for i in ip])
 			weights = torch.vstack([self.Weights[i] for i in ip])
 			batch = np.hstack([i*np.ones(len(self.Inds[i])) for i in ip])
-			vals_interp = global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
+			vals_interp = self.global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
 
 		return vals_interp
 
@@ -1659,7 +1678,7 @@ class NNInterp(nn.Module):
 		ind_grab = np.hstack([Inds[i] for i in range(len(query))])
 		weights = torch.vstack([Weights[i] for i in range(len(query))])
 		batch = np.hstack([i*np.ones(len(Inds[i])) for i in range(len(query))])
-		vals_interp = global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
+		vals_interp = self.global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
 
 		return vals_interp
 
@@ -1717,7 +1736,7 @@ class NNInterp(nn.Module):
 
 		ind_grab = np.hstack(Inds)
 		weights = torch.vstack([Weights[i] for i in range(len(query))])		
-		vals_interp = global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
+		vals_interp = self.global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
 
 		return vals_interp
 
@@ -1774,7 +1793,7 @@ class NNInterp(nn.Module):
 
 		ind_grab = np.hstack(Inds)
 		weights = torch.vstack([Weights[i] for i in range(len(query))])		
-		vals_interp = global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
+		vals_interp = self.global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
 
 		return vals_interp
 
@@ -1864,7 +1883,7 @@ class NNInterp(nn.Module):
 
 		ind_grab = np.hstack(Inds)
 		weights = torch.vstack([Weights[i] for i in range(len(query))])		
-		# vals_interp = global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
+		# vals_interp = self.global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
 
 		return ind_grab, weights, batch
 
