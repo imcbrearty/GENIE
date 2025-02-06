@@ -1508,7 +1508,7 @@ class NNInterp(nn.Module):
 
 		return vals, query, n_feat
 		
-	def global_sum_pool(x, batch, size=None):
+	def global_sum_pool(self, x, batch, size = None):
 		## From: "https://pytorch-geometric.readthedocs.io/en/latest/generated/torch_geometric.nn.pool.global_mean_pool.html"
 		"""
 		Globally pool node embeddings into graph embeddings, via elementwise mean.
