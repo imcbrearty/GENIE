@@ -374,6 +374,8 @@ elif use_topography == True: ## If no surface profile saved, then interpolate a 
 	## Average the profile
 	edges_surface = knn(torch.Tensor(ftrns1(surface_profile)), torch.Tensor(ftrns1(surface_profile)), k = 15).flip(0).contiguous()
 	surface_profile[:,2] = scatter(torch.Tensor(surface_profile[edges_surface[0].cpu().detach().numpy(),2].reshape(-1,1)), edges_surface[1], dim = 0, reduce = 'mean').cpu().detach().numpy().reshape(-1)
+else:
+	surface_profile = None
 
 # d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
 # d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
@@ -1410,7 +1412,7 @@ for cnt, strs in enumerate([0]):
 			assert(ind_s_perm_slice.min() > -1)
 
 		if use_differential_evolution_location == True:
-			xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, device = device)
+			xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, surface_profile = surface_profile, device = device)
 		else:
 			xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
 		
@@ -1513,7 +1515,7 @@ for cnt, strs in enumerate([0]):
 						continue
 				
 				if use_differential_evolution_location == True:
-					xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, device = device)
+					xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, surface_profile = surface_profile, device = device)
 				else:
 					xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
 				
