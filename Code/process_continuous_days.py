@@ -146,6 +146,7 @@ torch.set_grad_enabled(False)
 
 compute_magnitudes = process_config['compute_magnitudes']
 min_log_amplitude_val = process_config['min_log_amplitude_val']
+use_topography = process_config['use_topography']
 process_known_events = process_config['process_known_events']
 load_prebuilt_sampling_grid = process_config['load_prebuilt_sampling_grid']
 use_expanded_competitive_assignment = process_config['use_expanded_competitive_assignment']
@@ -359,6 +360,17 @@ sp_win = pred_params[3]*1.25 # process_config['sp_win'] # Distance (m) to link e
 d_win = pred_params[3]*1.25/110e3 ## Converting km to degrees, roughly
 d_win_depth = pred_params[4]*1.25  ## proportional to depth kernel
 src_t_kernel = pred_params[2] ## temporal source kernel size
+
+## Make topography surface
+if (use_topography == True)*(os.path.isfile(path_to_file + 'Grids' + seperator + '%s_surface_elevation.npz'%name_of_project) == True):
+	surface_profile = np.load(path_to_file + 'Grids' + seperator + '%s_surface_elevation.npz'%name_of_project)['surface_profile']
+elif use_topography == True: ## If no surface profile saved, then interpolate a regular grid based on saved station elevations
+	n_surface = 100 ## Default resolution of surface
+	x1_surface, x2_surface = np.linspace(lat_range_extend[0], lat_range_extend[1], n_surface), np.linspace(lon_range_extend[0], lon_range_extend[1], n_surface)
+	x11_surface, x12_surface = np.meshgrid(x1_surface, x2_surface)
+	surface_profile = np.concatenate((x11_surface.reshape(-1,1), x12_surface.reshape(-1,1), np.zeros((len(x11_surface.reshape(-1)),1))), axis = 1)
+	tree_sta = cKDTree(ftrns1(locs))
+	surface_profile[:,2] = locs[tree_sta.query(ftrns1(surface_profile))[1],2]
 
 # d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
 # d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
