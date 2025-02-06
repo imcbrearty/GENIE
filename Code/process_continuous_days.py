@@ -371,6 +371,9 @@ elif use_topography == True: ## If no surface profile saved, then interpolate a 
 	surface_profile = np.concatenate((x11_surface.reshape(-1,1), x12_surface.reshape(-1,1), np.zeros((len(x11_surface.reshape(-1)),1))), axis = 1)
 	tree_sta = cKDTree(ftrns1(locs))
 	surface_profile[:,2] = locs[tree_sta.query(ftrns1(surface_profile))[1],2]
+	## Average the profile
+	edges_surface = knn(torch.Tensor(ftrns1(surface_profile)), torch.Tensor(ftrns1(surface_profile)), k = 15).flip(0).contiguous()
+	surface_profile[:,2] = scatter(torch.Tensor(surface_profile[edges_surface[0].cpu().detach().numpy(),2].reshape(-1,1)), edges_surface[1], dim = 0, reduce = 'mean').cpu().detach().numpy().reshape(-1)
 
 # d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
 # d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
