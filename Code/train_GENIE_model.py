@@ -1032,7 +1032,7 @@ def sample_picks(P, locs_abs, t_sample_win = 120.0, windows = [40e3, 150e3, 300e
 	for j in range(num_picks):
 		for k in range(len(t_win_ball)):
 			ichoose = np.random.choice(n_picks)
-			ifind_ball = np.array(tree_times.query_ball_point(np.array([P[ichoose,0]]).reshape(-1,1), r = t_win_ball[k])[0])
+			ifind_ball = np.array(tree_times.query_ball_point(np.array([P[ichoose,0]]).reshape(-1,1), r = t_win_ball[k])[0]).astype('int')
 			ineighbors = edges[0][np.array(tree_edges.query_ball_point(np.array([P[ichoose,1]]).reshape(-1,1), r = 0)[0])]
 			size_intersection = len(list(set(ineighbors).intersection(P[ifind_ball,1].astype('int'))))
 			Ratio_neighbors[k].append(size_intersection/k_sta)
