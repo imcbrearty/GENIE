@@ -219,6 +219,7 @@ offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
 scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
 
+
 rbest_cuda = torch.Tensor(rbest).to(device)
 mn_cuda = torch.Tensor(mn).to(device)
 
@@ -351,6 +352,7 @@ tc_win = pred_params[1]*1.25 # process_config['tc_win'] # Temporal window (s) to
 sp_win = pred_params[3]*1.25 # process_config['sp_win'] # Distance (m) to link events in Local Marching
 d_win = pred_params[3]*1.25/110e3 ## Converting km to degrees, roughly
 d_win_depth = pred_params[4]*1.25  ## proportional to depth kernel
+src_t_kernel = pred_params[2] ## temporal source kernel size
 
 # d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
 # d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
