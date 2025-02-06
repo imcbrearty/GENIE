@@ -1236,9 +1236,9 @@ def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, l
 			if x.ndim == 1:
 				x = x.reshape(-1,1)
 
-			ind1 = np.maximum(np.minimum(np.floor(x[0,:]/dx1).astype('int'), nlen1), 0)
-			ind2 = np.maximum(np.minimum(np.floor(x[1,:]/dx1).astype('int'), nlen2), 0)
-			surf_elev = surface_profile[ind1, ind2, 2]
+			ind1 = np.maximum(np.minimum(np.floor(x[0,:]/dx1).astype('int'), nlen1 - 1), 0)
+			ind2 = np.maximum(np.minimum(np.floor(x[1,:]/dx2).astype('int'), nlen2 - 1), 0)
+			surf_elev = surface_profile[ind1 + ind2*nlen1, 2]
 			prob_mask = np.ones(x.shape[1])
 			prob_mask[x[2,:] > surf_elev] = 1e5
 	
