@@ -1200,26 +1200,57 @@ def competitive_assignment_split(w, sta_inds, cost, min_val = 0.02, restrict = N
 
 	return assignments, sources_active
 
-def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, sig_t = 1.5, weight = [1.0,1.0], popsize = 100, maxiter = 1000, device = 'cpu', disp = True, vectorized = True):
+def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, sig_t = 1.5, weight = [1.0,1.0], popsize = 100, maxiter = 1000, device = 'cpu', surface_profile = None, disp = True, vectorized = True):
 
 	if (len(arv_p) + len(arv_s)) == 0:
 		return np.nan*np.ones((1,3)), np.nan
 
-	def likelihood_estimate(x):
+	if surface_profile is None:
 
-		# x = x.reshape(-1,3)
-		if x.ndim == 1:
-			x = x.reshape(-1,1)
+		def likelihood_estimate(x):
 
-		pred = trv(torch.Tensor(locs_use).to(device), torch.Tensor(x.T).to(device)).cpu().detach().numpy()
-		# sig_arv = np.concatenate((f_linear(pred[:,ind_p,0]), f_linear(pred[:,ind_s,1])), axis = 1)
-		# det_vals = np.prod(sig_arv, axis = 1) # *np.prod(sig_s, axis = 1)
-		# det_vals = 0.0 # np.prod(sig_p, axis = 1) # *np.prod(sig_s, axis = 1)
-		pred_vals = remove_mean(np.concatenate((pred[:,ind_p,0], pred[:,ind_s,1]), axis = 1), 1)
-		logprob = -0.5*np.sum(((trgt - pred_vals)**2)*weight_vec/(f_linear(pred_vals)**2), axis = 1)/n_picks
+			# x = x.reshape(-1,3)
+			if x.ndim == 1:
+				x = x.reshape(-1,1)
+	
+			pred = trv(torch.Tensor(locs_use).to(device), torch.Tensor(x.T).to(device)).cpu().detach().numpy()
+			# sig_arv = np.concatenate((f_linear(pred[:,ind_p,0]), f_linear(pred[:,ind_s,1])), axis = 1)
+			# det_vals = np.prod(sig_arv, axis = 1) # *np.prod(sig_s, axis = 1)
+			# det_vals = 0.0 # np.prod(sig_p, axis = 1) # *np.prod(sig_s, axis = 1)
+			pred_vals = remove_mean(np.concatenate((pred[:,ind_p,0], pred[:,ind_s,1]), axis = 1), 1)
+			logprob = -0.5*np.sum(((trgt - pred_vals)**2)*weight_vec/(f_linear(pred_vals)**2), axis = 1)/n_picks
+	
+			return -1.0*logprob
+	
+	else:
 
-		return -1.0*logprob
+		## Use surface to zero out probabilities in air
+		x1_dim = np.unique(surface_profile[:,0])
+		x2_dim = np.unique(surface_profile[:,1])
+		nlen1, nlen2 = len(x1_dim), len(x2_dim)
+		dx1, dx2 = np.diff(x1_dim)[0], np.diff(x2_dim)[0]
 
+		def likelihood_estimate(x):
+	
+			# x = x.reshape(-1,3)
+			if x.ndim == 1:
+				x = x.reshape(-1,1)
+
+			ind1 = np.maximum(np.minimum(np.floor(x[0,:]/dx1).astype('int'), nlen1), 0)
+			ind2 = np.maximum(np.minimum(np.floor(x[1,:]/dx1).astype('int'), nlen2), 0)
+			surf_elev = surface_profile[ind1, ind2, 2]
+			prob_mask = np.ones(x.shape[1])
+			prob_mask[x[2,:] > surf_elev] = 1e5
+	
+			pred = trv(torch.Tensor(locs_use).to(device), torch.Tensor(x.T).to(device)).cpu().detach().numpy()
+			# sig_arv = np.concatenate((f_linear(pred[:,ind_p,0]), f_linear(pred[:,ind_s,1])), axis = 1)
+			# det_vals = np.prod(sig_arv, axis = 1) # *np.prod(sig_s, axis = 1)
+			# det_vals = 0.0 # np.prod(sig_p, axis = 1) # *np.prod(sig_s, axis = 1)
+			pred_vals = remove_mean(np.concatenate((pred[:,ind_p,0], pred[:,ind_s,1]), axis = 1), 1)
+			logprob = -0.5*np.sum(((trgt - pred_vals)**2)*weight_vec/(f_linear(pred_vals)**2), axis = 1)/n_picks
+	
+			return -1.0*(logprob*prob_mask)
+	
 	n_loc = locs_use.shape[1]
 	n_picks = len(arv_p) + len(arv_s)
 	trgt = remove_mean(np.concatenate((arv_p, arv_s), axis = 0).reshape(1, -1), 1)
