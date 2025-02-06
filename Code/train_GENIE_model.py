@@ -1596,7 +1596,8 @@ for i in range(n_restart_step, n_epochs):
 		tq = torch.arange(-t_win/2.0, t_win/2.0 + dt_win, dt_win).reshape(-1,1).float().to(device)
 
 		if len(lp_srcs[i0]) > 0:
-			tq_sample[0:len(lp_srcs[i0])] = torch.Tensor(lp_srcs[i0][:,3]).to(device)
+			ifind_src = np.where(np.abs(lp_srcs[i0][:,3]) <= t_win/2.0)[0]
+			tq_sample[0:len(ifind_src)] = torch.Tensor(lp_srcs[i0][ifind_src,3]).to(device)
 
 		if use_phase_types == False:
 			Inpts[i0][:,2::] = 0.0 ## Phase type informed features zeroed out
