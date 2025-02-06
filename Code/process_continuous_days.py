@@ -347,7 +347,7 @@ elif step_size == 'partial':
 	n_overlap = 3.0 ## Check this
 	assert(use_adaptive_window == True)
 	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
-elif step_size == 'half'
+elif step_size == 'half':
 	step = int(np.floor((n_resolution/2)))*dt_win
 	n_overlap = 2.0 ## Check this
 	assert(use_adaptive_window == True)
