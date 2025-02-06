@@ -732,7 +732,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 			## Find which values have offset times that exceed max time, and ignore these edges (does this work?)
 			rel_t_p = (tpick[edges[0]] - (trv_src[:,:,0][src_index, ipick[edges[0]]] + stime[src_index])).reshape(-1,1).detach()
 			rel_t_s = (tpick[edges[0]] - (trv_src[:,:,1][src_index, ipick[edges[0]]] + stime[src_index])).reshape(-1,1).detach()
-			ikeep = torch.where(((torch.abs(rel_t_p) < 2.0*torch.sqrt(self.t_kernel_sq)) + (torch.abs(rel_t_s) < 2.0*torch.sqrt(self.t_kernel_sq))).reshape(-1) > 0)[0].cpu().detach().numpy() ## Either query is within the threshold amount of time
+			ikeep = torch.where(((torch.abs(rel_t_p) < 2.5*torch.sqrt(self.t_kernel_sq)) + (torch.abs(rel_t_s) < 2.5*torch.sqrt(self.t_kernel_sq))).reshape(-1) > 0)[0].cpu().detach().numpy() ## Either query is within the threshold amount of time
 			# edges = edges[:,ikeep]
 			edges = torch.cat((edges[0][ikeep].reshape(1,-1), edges[1][ikeep].reshape(1,-1)), dim = 0).contiguous()
 			src_index = src_index[ikeep]		
