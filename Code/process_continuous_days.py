@@ -338,12 +338,18 @@ else:
 	t_win = 10.0
 
 # step_size = process_config['step_size'] # 'full'
-if process_config['step_size'] == 'full':
+step_size = process_config['step_size']
+if step_size == 'full':
 	step = n_resolution*dt_win
 	n_overlap = 1.0
-elif process_config['step_size'] == 'partial':
+elif step_size == 'partial':
 	step = (n_resolution/3)*dt_win
 	n_overlap = 3.0 ## Check this
+	assert(use_adaptive_window == True)
+	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
+elif step_size == 'half'
+	step = int(np.floor((n_resolution/2)))*dt_win
+	n_overlap = 2.0 ## Check this
 	assert(use_adaptive_window == True)
 	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
 
@@ -668,9 +674,13 @@ for cnt, strs in enumerate([0]):
 
 				# Out_1[:,ip_need[1]] += out[0][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
 				# Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
-				Out_2[:,ip_need[1]] += out[1][:,:,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
+
+				if step_size == 'half': ## In this case, must drop last index (so all points are stacked over equally; this is hard-coded for an output size of 9 steps)
+					Out_2[:,ip_need[1][0:-1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
+				else:
+					Out_2[:,ip_need[1]] += out[1][:,:,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
+			
 				# out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
-				
 				if (np.mod(i0, 50) == 0) + ((np.mod(i0, 5) == 0)*(out[1].max().item() > 0.075)):
 					print('%d %d %0.2f'%(n, i0, out[1].max().item()))
 					# out_cumulative_max = 0.0 # Reset moving detection metric print output
