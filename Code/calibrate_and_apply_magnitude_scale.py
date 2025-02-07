@@ -755,7 +755,28 @@ if apply_magnitude_model == True:
 		print('r2 score: %0.4f'%(r2_score(srcs_ref[Matches[:,0],4], mag_pred[Matches[:,1]])))
 		print('mean residual: %0.4f (+/- %0.4f)'%(res_mag.mean(), res_mag.std()))
 
+		# print('Quantiles of mag distribution:')
+		# print(np.round(np.quantile(Mag_pred, np.arange(0, 1.1, 0.1)), 2))
+		# print('Quantiles of reference mag distribution:')
+		# print(np.round(np.quantile(srcs_ref[:,4], np.arange(0, 1.1, 0.1)), 2))
+
+	
 	if write_catalog_file == True: ## Can also write to individual files, and create the summary catalog file
 		z = h5py.File(path_to_file + '%s_catalog_ver_%d.hdf5'%(name_of_project, n_catalog_ver), 'a')
 		z['mags'] = mag_pred
 		z.close()
+
+		## Write catalog to csv file
+		f = open(path_to_file + '%s_catalog_file_ver_%d.csv'%(name_of_project, n_catalog_ver), 'w')
+		f.write('ID, datetime, latitude, longitude, depth(km), magnitude, Num_p_picks, Num_s_picks, spatial_sigma(m), detection_value \n')
+		for i in range(len(srcs)):
+			time = UTCDateTime(int(Times[i,0]), int(Times[i,1]), int(Times[i,2])) + srcs[i,3]
+			f.write('%d, %s, %0.4f, %0.4f, %0.4f, %0.4f, %d, %d, %0.4f, %0.4f \n'%(i, str(time), srcs[i,0], srcs[i,1], srcs[i,2], mag_pred[i], cnt_p[i], cnt_s[i], srcs_sigma[i], srcs_w[i]))
+		f.close()
+
+		# f = open(path_to_file + '%s_catalog_matched_events_ver_%d.csv'%(name_of_project, n_catalog_ver), 'w')
+		# f.write('ID, datetime, latitude, longitude, depth(km), magnitude, Num_p_picks, Num_s_picks, spatial_sigma(m), detection_value \n')
+		# for i in range(len(srcs)):
+		# 	time = UTCDateTime(int(Times[i,0]), int(Times[i,1]), int(Times[i,2])) + srcs[i,3]
+		# 	f.write('%d, %s, %0.4f, %0.4f, %0.4f, %0.4f, %d, %d, %0.4f, %0.4f \n'%(i, str(time), srcs[i,0], srcs[i,1], srcs[i,2], mag_pred[i], cnt_p[i], cnt_s[i], srcs_sigma[i], srcs_w[i]))
+		# f.close()
