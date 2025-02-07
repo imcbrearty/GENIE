@@ -424,13 +424,13 @@ for year in years:
 
 os.makedirs(path_to_file + 'Plots', exist_ok=True)
 os.makedirs(path_to_file + 'GNN_TrainedModels', exist_ok=True)
-os.makedirs(path_to_file + 'TravelTimeData', exist_ok=True)
 os.makedirs(path_to_file + 'Grids', exist_ok=True)
 os.makedirs(path_to_file + '1D_Velocity_Models_Regional', exist_ok=True)
 
 n_ver_velocity_model = 1
 seperator = '\\' if '\\' in path_to_file else '/'
 shutil.copy(path_to_file + '1d_velocity_model.npz', path_to_file + '1D_Velocity_Models_Regional' + seperator + f'{config["name_of_project"]}_1d_velocity_model_ver_{n_ver_velocity_model}.npz')
+os.makedirs(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData', exist_ok=True)
 
 
 if (load_initial_files == True)*(use_pretrained_model == False):
