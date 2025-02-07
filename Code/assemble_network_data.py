@@ -424,6 +424,7 @@ for year in years:
 
 os.makedirs(path_to_file + 'Plots', exist_ok=True)
 os.makedirs(path_to_file + 'GNN_TrainedModels', exist_ok=True)
+os.makedirs(path_to_file + 'TravelTimeData', exist_ok=True)
 os.makedirs(path_to_file + 'Grids', exist_ok=True)
 os.makedirs(path_to_file + '1D_Velocity_Models_Regional', exist_ok=True)
 
