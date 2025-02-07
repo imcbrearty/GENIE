@@ -54,7 +54,7 @@ dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved quer
 save_dense_travel_time_data: False # Save the dense travel times (only necessary if not training travel time neural network)
 train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
 use_relative_1d_profile: True # If False, the 1D profile is treated as absolute; if True, the 1D profile is shifted so zero depth occurs at each stations elevation
-use_phase_types: True ## If False, then assume no phase type information is known on picks (e.g., fifth column of picks, P[:.4] is not used)
+
 using_3D: False # Not fully implemented yet, must adjust travel time calculations and load 3d travel time neural network
 using_1D: True
 
@@ -75,6 +75,10 @@ k_time_edges: 10
 use_subgraph: False
 max_deg_offset: 1.5
 k_nearest_pairs: 30
+
+## Other model parameters
+use_phase_types: True ## If False, then assume no phase type information is known on picks (e.g., fifth column of picks, P[:.4] is not used)
+use_absolute_pos: False ## If True, append the absolute station and source coordinates in the input feature (e.g., allows some extra `specilization' during training to specific areas; approach should be used tentatitevly)
 
 ## Additional training params
 device: 'cuda' # or 'cpu'
