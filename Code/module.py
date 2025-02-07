@@ -1932,7 +1932,7 @@ class Magnitude(nn.Module):
 
 		## Setup like regular log_amp = C1 * Mag + C2 * log_dist_depths_0 + C3 * log_dist_depths + Bias (for each phase type)
 		self.mag_coef = nn.Parameter(torch.ones(2))
-		self.epicenter_spatial_coef = nn.Parameter(-torch.ones(2))
+		self.epicenter_spatial_coef = nn.Parameter(torch.ones(2))
 		self.depth_spatial_coef = nn.Parameter(torch.zeros(2))
 		# self.bias = nn.Parameter(torch.zeros(locs.shape[0], grid.shape[0], 2), requires_grad = True).to(device)
 		self.bias = nn.Parameter(torch.zeros(grid.shape[0], locs.shape[0], 2))
