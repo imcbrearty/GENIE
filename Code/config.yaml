@@ -15,6 +15,7 @@ client : 'IRIS'
 network: 'HV'
 pre_load_stations: False # If True, then skip download stations during make_initial_files.py; instead, stations.npz is assumed to already exist with locs and stas as the two fields.
 use_physics_informed: True ## If true, must run the "build" and "train" scripts seperately for the travel times and load a 3D (or 1D) velocity model
+use_topography: False ## If True, create the "surface_elevation.npz" file in the main project folder, saved with numpy array with "Points" (with columns of lat, lon, and elevation (m)). Can be arbitrary structured set of points (areas outside convex hull of Points will be trated as zero elevation.
 
 degree_padding: 0.25 # This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
 number_of_grids: 5 # Number of distinct spatial graphs to create (this reduced slight bias that can result from only using one spatial graph)
@@ -23,8 +24,9 @@ number_of_spatial_nodes: 500 # Number of nodes per spatial graph
 load_initial_files: [False]
 use_pretrained_model: [None]
 
-vel_model_type: 1 ## 1: 1d_velocity_model file is used; 2: 3d_velocity_model is used; 3: a series of 1d velocity models is used to construct a 3d model 
-use_topography: False ## If True, create the "surface_elevation.npz" file in the main project folder, saved with numpy array with "Points" (with columns of lat, lon, and elevation). Can be arbitrary structured set of points (areas outside convex hull of Points will be trated as zero elevation.
+vel_model_type: 1 ## 1: 1d_velocity_model file is used; 2: 3d_velocity_model is used; 3: a series of 1d velocity models is used to construct a 3d model. 
+## If using a 3D model, save a file called '3d_velocity_model.npz' in the main directory, with fields: z['X'], z['Vp'], z['Vs']; where X is a numpy array of positions with columns of (lat, lon, depth (m))
+## with depth in meters and negative below sea level and positive above sea level. The entries in vectors Vp and Vs must correspond to velocity values (m/s) for P and S waves. X can be an unstructured set of points; we use nearest neighbor interpolation to map it to a regular grid.
 
 velocity_model:
   Depths: [-40000, -35000, -30000, -25000, -20000, -15000, -10000, -5000, 0, 5000]
