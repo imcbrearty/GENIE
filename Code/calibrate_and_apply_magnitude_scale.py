@@ -699,16 +699,21 @@ if apply_magnitude_model == True:
 		if np.mod(i, 50) == 0:
 			print(i)
 
-	Mag_pred = np.hstack(Mag_pred)
+	mag_pred = np.hstack(Mag_pred)
 
 	if len(Matches) > 0:
 
-		res_mag = Mag_pred[Matches[:,1]] - srcs_ref[Matches[:,0],4]
+		res_mag = mag_pred[Matches[:,1]] - srcs_ref[Matches[:,0],4]
 
 		print('Station corrections:')
 		print(Mag.bias)
 
 		print('\n Magnitude residual quantiles:')
 		print(np.round(np.quantile(res_mag, np.arange(0, 1.1, 0.1)), 2))
-		print('r2 score: %0.4f'%(r2_score(srcs_ref[Matches[:,0],4], Mag_pred[Matches[:,1]])))
+		print('r2 score: %0.4f'%(r2_score(srcs_ref[Matches[:,0],4], mag_pred[Matches[:,1]])))
 		print('mean residual: %0.4f (+/- %0.4f)'%(res_mag.mean(), res_mag.std()))
+
+	if write_catalog_file == True: ## Can also write to individual files, and create the summary catalog file
+		z = h5py.File(path_to_file + '%s_catalog_ver_%d.hdf5'%(name_of_project, n_catalog_ver), 'a')
+		z['mags'] = mag_pred
+		z.close()
