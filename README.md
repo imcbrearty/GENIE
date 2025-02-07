@@ -12,7 +12,7 @@ Note that this is an early release of the code. Increased documentation, more th
 
 For now, the basic workflow is to (i). install dependencies in "install_dependencies.txt", (ii). run the "make_initial_files.py" script to initialize station, region, and velocity model files, (iii). run "assemble_network_data.py" for an input set of stations and spatial region, which sets up the directory and initilizes required variables, (iv). run "calculate_travel_times_3D_build_data.py" and "calculate_travel_times_3D_train_model.py" to compute the travel time grid of P and S phases over the region of interest, for a chosen velocity model, (v). run "train_GENIE_model.py" to train the GNN for the given application, and (vi). run "process_continuous_days.py" to compute predictions and build an earthquake catalog for a given set of input picks, and the current trained GNN and velocity model.
 
-The config files can be used to adjust most parameters. Also, station, region, and 1D velocity model files can be created following the same format as shown in make_initial_files.py without actually having to run make_initial_files.py.
+The config files can be used to adjust most parameters. Also, station, region, and 1D or 3D velocity model files can be created following the same format as shown in make_initial_files.py without actually having to run make_initial_files.py.
 
 Pre-trained GNN's, and pre-computed travel time fields will be supplied in the future, to faciliate easier use and allow users to only have to run steps (i-iii), and (vi). above. Running additional re-location techniques like NonLinLoc or HypoDD with the associated picks from this model can often improve event location accuracies.
 
