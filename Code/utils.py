@@ -65,19 +65,35 @@ def ecef2lla(x, a = 6378137.0, e = 8.18191908426215e-2):
 	alt[k] = np.abs(x[k,2]) - b
 	return np.concatenate((180.0*lat[:,None]/np.pi, 180.0*lon[:,None]/np.pi, alt[:,None]), axis = 1)
 
+# def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2]), device = 'cpu'):
+# 	# x = x.astype('float')
+# 	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
+# 	a = a.to(device)
+# 	e = e.to(device)
+# 	p = p.detach().clone().float().to(device) # why include detach here?
+# 	pi = torch.Tensor([np.pi]).to(device)
+# 	p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1).to(device)
+# 	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0])**2)
+# 	# results:
+# 	x = (N + p[:,2])*torch.cos(p[:,0])*torch.cos(p[:,1])
+# 	y = (N + p[:,2])*torch.cos(p[:,0])*torch.sin(p[:,1])
+# 	z = ((1-e**2)*N + p[:,2])*torch.sin(p[:,0])
+
+# 	return torch.cat((x.view(-1,1), y.view(-1,1), z.view(-1,1)), dim = 1)
+
 def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2]), device = 'cpu'):
 	# x = x.astype('float')
 	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
 	a = a.to(device)
 	e = e.to(device)
-	p = p.detach().clone().float().to(device) # why include detach here?
+	# p = p.detach().clone().float().to(device) # why include detach here?
 	pi = torch.Tensor([np.pi]).to(device)
-	p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1).to(device)
-	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0])**2)
+	# p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1).to(device)
+	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0]*pi/180.0)**2)
 	# results:
-	x = (N + p[:,2])*torch.cos(p[:,0])*torch.cos(p[:,1])
-	y = (N + p[:,2])*torch.cos(p[:,0])*torch.sin(p[:,1])
-	z = ((1-e**2)*N + p[:,2])*torch.sin(p[:,0])
+	x = (N + p[:,2])*torch.cos(p[:,0]*pi/180.0)*torch.cos(p[:,1]*pi/180.0)
+	y = (N + p[:,2])*torch.cos(p[:,0]*pi/180.0)*torch.sin(p[:,1]*pi/180.0)
+	z = ((1-e**2)*N + p[:,2])*torch.sin(p[:,0]*pi/180.0)
 
 	return torch.cat((x.view(-1,1), y.view(-1,1), z.view(-1,1)), dim = 1)
 
@@ -323,6 +339,163 @@ def kmeans_packing_sampling_points(scale_x, offset_x, ndim, n_clusters, ftrns1, 
 
 	return V_results[ibest], V_results, Losses, losses, rz
 
+def kmeans_packing_spherical(scale_x, offset_x, ndim, n_clusters, ftrns1, ftrns2, n_batch = 3000, n_steps = 5000, weights = [1.0, 1.0, 2.0], n_sim = 1, lr = 0.01):
+
+	# ftrns1_sphere_unit = lambda pos: lla2ecef(pos, e = 0.0, a = 1.0) # a = 6378137.0, e = 8.18191908426215e-2
+	# ftrns2_sphere_unit = lambda pos: ecef2lla(pos, e = 0.0, a = 1.0)
+
+	ftrns1_sphere_unit = lambda pos: lla2ecef(pos, a = 1.0, e = 0.0) # a = 6378137.0, e = 8.18191908426215e-2
+	ftrns2_sphere_unit = lambda pos: ecef2lla(pos, a = 1.0, e = 0.0)
+	from scipy.stats import beta
+
+	if weights is not None:
+		weights = np.array(weights).reshape(1,-1)
+	else:
+		weights = np.array([1.0, 1.0, 1.0]).reshape(1,-1)
+
+	def spherical_packing_nodes(n, use_depth_scale = True, use_rotate = True, izero = 0.65):
+
+		## Based on The Fibonacci Lattice
+		## https://extremelearning.com.au/evenly-distributing-points-on-a-sphere/
+
+		# n = 30000
+		i = np.arange(0, n).astype('float') + 0.5
+		phi = np.arccos(1 - 2*i/n)
+		goldenRatio = (1 + 5**0.5)/2
+		theta = 2*np.pi * i / goldenRatio
+		x, y, z = np.cos(theta) * np.sin(phi), np.sin(theta) * np.sin(phi), np.cos(phi);
+		xlat = ftrns2_sphere_unit(np.concatenate((x.reshape(-1,1), y.reshape(-1,1), z.reshape(-1,1)), axis = 1))
+
+		if use_rotate == True:
+			rand_val = [np.random.rand()*2.0*np.pi for i in range(3)]
+			rotate = rotation_matrix_full_precision(rand_val[0], rand_val[1], rand_val[2])
+			xlat = ftrns2_sphere_unit(ftrns1_sphere_unit(xlat) @ rotate)
+
+		if use_depth_scale is not None:
+			xlat[:,2] = offset_x[0][2] + np.random.rand()*scale_x[0][2]
+
+			if izero is not None:
+
+				ichoose = np.random.choice(len(xlat), size = int(izero*len(xlat)))
+				xlat[ichoose,2] = (1.0 - beta.rvs(1.0, 3.0, size = len(ichoose)))*scale_x[0,2] + offset_x[0,2]
+
+				ichoose = np.random.choice(len(xlat), size = int(izero*len(xlat)))
+				xlat[ichoose,2] = (1.0 - beta.rvs(1.0, 12.0, size = len(ichoose)))*scale_x[0,2] + offset_x[0,2]
+
+		return xlat
+
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v = spherical_packing_nodes(n_clusters)
+				v1 = ftrns1(np.copy(v)*weights)
+				v = ftrns1(v) # np.random.rand(n_clusters, ndim)*scale_x + offset_x
+				# v1 = ftrns1(v1)
+
+			tree = cKDTree(v1)
+			x = spherical_packing_nodes(n_batch)
+			x1 = ftrns1(np.copy(x)*weights)
+			x = ftrns1(x)
+			q, ip = tree.query(x1)
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = spherical_packing_nodes(n_batch)
+		x1 = ftrns1(np.copy(x)*weights)
+		x = ftrns1(x)		
+		q, ip = tree.query(x1)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return ftrns2(V_results[ibest]), V_results, Losses, losses, rz
+
+def kmeans_packing_fit_sources(srcs, scale_x, offset_x, ndim, n_clusters, ftrns1, ftrns2, n_batch = 3000, n_steps = 5000, blur_sigma = 30e3, weights = [1.0, 1.0, 2.0], n_sim = 1, lr = 0.01):
+
+	# ftrns1_sphere_unit = lambda pos: lla2ecef(pos, e = 0.0, a = 1.0) # a = 6378137.0, e = 8.18191908426215e-2
+	# ftrns2_sphere_unit = lambda pos: ecef2lla(pos, e = 0.0, a = 1.0)
+
+	ftrns1_sphere_unit = lambda pos: lla2ecef(pos, a = 1.0, e = 0.0) # a = 6378137.0, e = 8.18191908426215e-2
+	ftrns2_sphere_unit = lambda pos: ecef2lla(pos, a = 1.0, e = 0.0)
+	from scipy.stats import beta
+
+	if weights is not None:
+		weights = np.array(weights).reshape(1,-1)
+	else:
+		weights = np.array([1.0, 1.0, 1.0]).reshape(1,-1)
+
+	def sample_sources(n):
+
+		xlat = ftrns2(ftrns1(srcs[np.random.choice(len(srcs), size = n),0:3]) + np.random.randn(n,3)*blur_sigma)
+		iwhere = np.where(((xlat[:,2] < offset_x[0,2]) + (xlat[:,2] > (offset_x[0,2] + scale_x[0,2]))) > 0)[0]
+		xlat[iwhere,2] = np.random.rand(len(iwhere))*scale_x[0,2] + offset_x[0,2]
+
+		return xlat
+
+	V_results = []
+	Losses = []
+	for n in range(n_sim):
+
+		losses, rz = [], []
+		for i in range(n_steps):
+			if i == 0:
+				v = sample_sources(n_clusters)
+				v1 = ftrns1(np.copy(v)*weights)
+				v = ftrns1(v) # np.random.rand(n_clusters, ndim)*scale_x + offset_x
+				# v1 = ftrns1(v1)
+
+			tree = cKDTree(v1)
+			x = sample_sources(n_batch)
+			x1 = ftrns1(np.copy(x)*weights)
+			x = ftrns1(x)
+			q, ip = tree.query(x1)
+
+			rs = []
+			ipu = np.unique(ip)
+			for j in range(len(ipu)):
+				ipz = np.where(ip == ipu[j])[0]
+				# update = x[ipz,:].mean(0) - v[ipu[j],:] # which update rule?
+				update = (x[ipz,:] - v[ipu[j],:]).mean(0)
+				v[ipu[j],:] = v[ipu[j],:] + lr*update
+				rs.append(np.linalg.norm(update)/np.sqrt(ndim))
+
+			rz.append(np.mean(rs)) # record average update size.
+
+			if np.mod(i, 10) == 0:
+				print('%d %f'%(i, rz[-1]))
+
+		# Evaluate loss (5 times batch size)
+		x = sample_sources(n_batch)
+		x1 = ftrns1(np.copy(x)*weights)
+		x = ftrns1(x)		
+		q, ip = tree.query(x1)
+		Losses.append(q.mean())
+		V_results.append(np.copy(v))
+
+	Losses = np.array(Losses)
+	ibest = np.argmin(Losses)
+
+	return ftrns2(V_results[ibest]), V_results, Losses, losses, rz
+
 ### TRAVEL TIMES ###
 
 def interp_3D_return_function_adaptive(X, Xmin, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
@@ -546,66 +719,119 @@ def load_files_with_travel_times(path_to_file, name_of_project, template_ver, ve
 
 	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
 
-def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
+def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs', return_model = False, use_physics_informed = False):
 
-	from module import TravelTimes
-	seperator = '\\' if '\\' in path_to_file else '/'
+	if use_physics_informed == False:
 	
-	z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_%s_losses_ver_%d.npz'%(phase, n_ver_load))
-	n_phases = z['out1'].shape[1]
-	scale_val = float(z['scale_val'])
-	trav_val = float(z['trav_val'])
-	z.close()
+		from module import TravelTimes
+		seperator = '\\' if '\\' in path_to_file else '/'
+		
+		z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+		n_phases = len(z['v_mean'])
+		scale_val = float(z['scale_val'])
+		trav_val = float(z['trav_val'])
+		z.close()
+		
+		m = TravelTimes(ftrns1, ftrns2, scale_val = scale_val, trav_val = trav_val, n_phases = n_phases, device = device).to(device)
+		m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
+		
+		if return_model == False:
+			m.eval()
 	
-	m = TravelTimes(ftrns1, ftrns2, scale_val = scale_val, trav_val = trav_val, n_phases = n_phases, device = device).to(device)
-	m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
-	m.eval()
-
-	if method == 'relative pairs':
-
-		trv = lambda sta_pos, src_pos: m.forward_relative(sta_pos, src_pos, method = 'pairs')
-
-	if method == 'direct':
-
-		trv = lambda sta_pos, src_pos: m.forward_relative(sta_pos, src_pos, method = 'direct')
+		if method == 'relative pairs':
 	
-	return trv
-
-def load_travel_time_neural_network_physics_informed(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
-
-	from module import TravelTimesPN
-	seperator = '\\' if '\\' in path_to_file else '/'
+			trv = lambda sta_pos, src_pos: m.forward_relative(sta_pos, src_pos, method = 'pairs')
 	
-	z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_load))
-	n_phases = z['out1'].shape[1]
-	v_mean, scale_params = z['v_mean'], z['scale_params']
-	# scale_val = float(z['scale_val'])
-	# trav_val = float(z['trav_val'])
-	z.close()
-
-	max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor = scale_params
+		if method == 'direct':
 	
-	norm_pos = lambda x: x/max_dist
-	norm_time = lambda t: t/max_time
-	norm_vel = lambda v: v/vp_max
+			trv = lambda sta_pos, src_pos: m.forward_relative(sta_pos, src_pos, method = 'direct')
 
-	inorm_pos = lambda x: x*max_dist
-	inorm_time = lambda t: t*max_time
-	inorm_vel = lambda v: v*vp_max	
+		if return_model == True:
+
+			return m
+
+		else:
+		
+			return trv
+
+	else:
+
+		from module import VModel, TravelTimesPN
+		seperator = '\\' if '\\' in path_to_file else '/'
+		
+		z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+		n_phases = len(z['v_mean'])
+		v_mean, scale_params = z['v_mean'], z['scale_params']
+		# scale_val = float(z['scale_val'])
+		# trav_val = float(z['trav_val'])
+		z.close()
 	
-	m = TravelTimesPN(ftrns1, ftrns2, n_phases = n_phases, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
-	m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
-	m.eval()
-
-	if method == 'relative pairs':
-
-		trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'pairs')
-
-	if method == 'direct':
-
-		trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'direct')
+		max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor = scale_params
+		
+		norm_pos = lambda x: x/max_dist
+		norm_time = lambda t: t/max_time
+		norm_vel = lambda v: v/vp_max
 	
-	return trv
+		inorm_pos = lambda x: x*max_dist
+		inorm_time = lambda t: t*max_time
+		inorm_vel = lambda v: v*vp_max	
+		
+		m = TravelTimesPN(ftrns1, ftrns2, n_phases = n_phases, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
+		m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
+		if return_model == False:
+			m.eval()
+	
+		if method == 'relative pairs':
+	
+			trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'pairs')
+	
+		if method == 'direct':
+	
+			trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'direct')
+
+		if return_model == True:
+
+			return m
+
+		else:
+		
+			return trv		
+
+# def load_travel_time_neural_network_physics_informed(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
+
+# 	from module import TravelTimesPN
+# 	seperator = '\\' if '\\' in path_to_file else '/'
+	
+# 	z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+# 	n_phases = z['out1'].shape[1]
+# 	v_mean, scale_params = z['v_mean'], z['scale_params']
+# 	# scale_val = float(z['scale_val'])
+# 	# trav_val = float(z['trav_val'])
+# 	z.close()
+
+# 	max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor = scale_params
+	
+# 	norm_pos = lambda x: x/max_dist
+# 	norm_time = lambda t: t/max_time
+# 	norm_vel = lambda v: v/vp_max
+
+# 	inorm_pos = lambda x: x*max_dist
+# 	inorm_time = lambda t: t*max_time
+# 	inorm_vel = lambda v: v*vp_max	
+	
+# 	m = TravelTimesPN(ftrns1, ftrns2, n_phases = n_phases, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
+# 	m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
+# 	m.eval()
+
+# 	if method == 'relative pairs':
+
+# 		trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'pairs')
+
+# 	if method == 'direct':
+
+# 		trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'direct')
+	
+# 	return trv
 
 def load_station_corrections(trv, locs, path_to_file, name_of_project, n_ver_corrections, ftrns1_diff, ind_use = None, trv_direct = None, device = 'cpu'):
 
@@ -647,14 +873,24 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 
 	for i in range(len(x_grids)):
 
-		trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+		# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+
+		if locs.shape[0]*x_grids[i].shape[0] > 150e3:
+			trv_out_l = []
+			for j in range(locs.shape[0]):
+				trv_out = trv(torch.Tensor(locs[j,:].reshape(1,-1)).to(device), torch.Tensor(x_grids[i]).to(device))
+				trv_out_l.append(trv_out.cpu().detach().numpy())
+			trv_out = torch.Tensor(np.concatenate(trv_out_l, axis = 1)).to(device)
+		else:
+			trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+		
 		x_grids_trv.append(trv_out.cpu().detach().numpy())
 
 		edge_index = knn(torch.Tensor(ftrns1(x_grids[i])).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device), k = k_spc_edges).flip(0).contiguous()
 		edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
 		x_grids_edges.append(edge_index)
 
-	max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # + 10.0
+	max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # *1.1 # + 10.0
 
 	for i in range(len(x_grids)):
 

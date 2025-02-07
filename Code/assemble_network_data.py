@@ -408,12 +408,19 @@ else:
 np.savez_compressed(path_to_file + f'{config["name_of_project"]}_stations.npz', locs = locs, stas = stas, rbest = rbest, mn = mn)
 
 ## Make necessary directories
+if os.path.isfile(path_to_file + '%s_process_days_list_ver_1.txt'%config["name_of_project"]) == 0:
+	f = open(path_to_file + '%s_process_days_list_ver_1.txt'%config["name_of_project"], 'w')
+	for j in range(5): ## Arbitrary 5 days to process
+		f.write('%d/%d/%d \n'%(years[0], 1, j)) ## Process days list (write which days want to process)
+	f.close()
 
 os.makedirs(path_to_file + 'Picks', exist_ok=True)
 os.makedirs(path_to_file + 'Catalog', exist_ok=True)
+os.makedirs(path_to_file + 'Calibration', exist_ok=True)
 for year in years:
 	os.makedirs(path_to_file + f'Picks/{year}', exist_ok=True)
 	os.makedirs(path_to_file + f'Catalog/{year}', exist_ok=True)
+	os.makedirs(path_to_file + f'Calibration/{year}', exist_ok=True)
 
 os.makedirs(path_to_file + 'Plots', exist_ok=True)
 os.makedirs(path_to_file + 'GNN_TrainedModels', exist_ok=True)
@@ -423,6 +430,7 @@ os.makedirs(path_to_file + '1D_Velocity_Models_Regional', exist_ok=True)
 n_ver_velocity_model = 1
 seperator = '\\' if '\\' in path_to_file else '/'
 shutil.copy(path_to_file + '1d_velocity_model.npz', path_to_file + '1D_Velocity_Models_Regional' + seperator + f'{config["name_of_project"]}_1d_velocity_model_ver_{n_ver_velocity_model}.npz')
+os.makedirs(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData', exist_ok=True)
 
 
 if (load_initial_files == True)*(use_pretrained_model == False):

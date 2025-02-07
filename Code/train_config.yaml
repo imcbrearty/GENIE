@@ -60,9 +60,9 @@ total_bias: 0.03 ## Total possible bias on travel times (uniform across stations
 
 ## Training params list 3
 dist_range : [15000, 400000] # This is the distance range over which to simulate theoretical moveouts of picks per event. Should scale with domain size.
-max_rate_events : 100 # 350 # 450 # Average rate of events per T window of time (e.g., T = 3 hrs, so 500*8 = 4000 events/day)
-max_miss_events : 225 # 225 # 325 # Average rate of missed picks per station per T window of time. Note: this parameter does not work quite as intended; it is overwritten by miss_pick_fraction below
-max_false_events : 125 # 250 # 250 # Average rate of false picks per station per T window of time (e.g., T = 3 hrs, so 250*8 = 2000 false picks / station / day)
+max_rate_events : 50 # 350 # 450 # Average rate of events per T window of time (e.g., T = 3 hrs, so 500*8 = 4000 events/day)
+max_miss_events : 100 # 225 # 325 # Average rate of missed picks per station per T window of time. Note: this parameter does not work quite as intended; it is overwritten by miss_pick_fraction below
+max_false_events : 1.5 # Now by default represents the ratio of false picks to true picks (with use_false_ratio_value == True in train_GENIE_model.py) (Previous behavior: average rate of false picks per station per T window of time (e.g., T = 3 hrs, so 250*8 = 2000 false picks / station / day)
 miss_pick_fraction : [0.1, 0.5] # False # Average ratio of missed picks (if this is not False, it re-scales the miss pick rate to this ratio of true picks)
 T : 10800 # Time window to simualate synthetic data. More variability occurs per-batch, when T is longer. Note that this parameter trades off with max_rate_events, max_miss_events and max_false_events.
 dt : 30 # Time resolution to allow synthetic data parameters to vary in time, during the T window of synthetic data
@@ -75,12 +75,26 @@ use_preferential_sampling : True ## This concentrates more of the samples around
 use_extra_nearby_moveouts : True ## This up-samples the amount of sources with moveouts only to nearby stations (e.g., it uses ~half of the distance range set in dist_range for 50% of events)
 use_shallow_sources : False
 
+## Use reference density for source distribution
+use_reference_spatial_density: False ## If True, must store reference sources in "Calibration/"yr"/"project_name"_reference_2023_1_3_ver_1.npz with field "srcs_ref"
+spatial_sigma: 20000.0 ## The amount of spatial smoothing to the reference catalog
+min_magnitude_ref: 1.5 ## Min magnitude to consider for reference catalog
+percentile_threshold_ref: 0.00001 ## Take all areas of > kernel Gaussian estimation probability as the "uniform" area to sample sources within
+n_reference_clusters: 10000 ## The amount of "quasi-uniiform" nodes to obtain for representing the source catalog distribution
+n_frac_reference_catalog: 0.8 ## The amount of sources to simulate from the reference catalog coordinates compared to background
+
+
 ## Extra dataset parameters
 build_training_data : False ## Pre-build training data (rather than building inside training loop)
 load_training_data : False ## Load the pre-built training data during training
+optimize_training_data : False ## Optimize the training parameters
 path_to_data : '' ## Specify absolute path to the training data folder
 n_ver_training_data : 1 ## Training data version
 n_batches_per_job : 250 ## Number of batches of data to create per job array index when building dataset
 refresh_subnetworks : True ## If true, always reload the subnetworks to be updated with subnetworks available in current pick files
+
+## Restart settings
+restart_training: False ## Set to True to restart training at the below save step (note: by default model only saves every 1000 steps)
+n_restart_step: 0
 
 # training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]

@@ -1,5 +1,5 @@
 name_of_project: 'Mayotte'
-num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost)
+# num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost). Note: now this is done with n_jobs below
 vel_model_ver: 1 ## Which travel time version to save when running calculate travel times
 
 ## Note, when running continuous days processing a number of parameters are also set in process_config
@@ -14,6 +14,8 @@ time_range: # This sets up the Catalog and Pick files to have these years initia
 client : 'IRIS'
 network: 'HV'
 pre_load_stations: False # If True, then skip download stations during make_initial_files.py; instead, stations.npz is assumed to already exist with locs and stas as the two fields.
+use_physics_informed: True ## If true, must run the "build" and "train" scripts seperately for the travel times and load a 3D (or 1D) velocity model
+use_topography: False ## If True, create the "surface_elevation.npz" file in the main project folder, saved with numpy array with "Points" (with columns of lat, lon, and elevation (m)). Can be arbitrary structured set of points (areas outside convex hull of Points will be trated as zero elevation.
 
 degree_padding: 0.25 # This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
 number_of_grids: 5 # Number of distinct spatial graphs to create (this reduced slight bias that can result from only using one spatial graph)
@@ -22,10 +24,15 @@ number_of_spatial_nodes: 500 # Number of nodes per spatial graph
 load_initial_files: [False]
 use_pretrained_model: [None]
 
-velocity_model:
-  Depths: [-40000, -35000, -30000, -25000, -20000, -15000, -10000, -5000, 0, 5000]
-  Vp: [8200, 8200, 8150, 8100, 8050, 7400, 6800, 6100, 2900, 2900]
-  Vs: [4700, 4700, 4650, 4600, 4600, 4200, 3800, 3400, 1800, 1800]
+vel_model_type: 1 ## 1: 1d_velocity_model file is used; 2: 3d_velocity_model is used; 3: a series of 1d velocity models is used to construct a 3d model. 
+## If using a 3D model (vel_model_type = 2), save a file called '3d_velocity_model.npz' in the main directory, with fields: z['X'], z['Vp'], z['Vs']; where X is a numpy array of positions with columns of (lat, lon, depth (m))
+## with depth in meters and negative below sea level and positive above sea level. The entries in vectors Vp and Vs must correspond to velocity values (m/s) for P and S waves. 
+## X can be an unstructured set of points; we use nearest neighbor interpolation to map it to a regular grid.
+
+velocity_model: ## This is the model that's used when using "vel_model_type = 1"
+  Depths: [-40000, -35000, -30000, -25000, -20000, -15000, -10000, -5000, 0, 5000] ## Must be in meters with increasing values, and positive above sea level, and neative below sea level
+  Vp: [8200, 8200, 8150, 8100, 8050, 7400, 6800, 6100, 2900, 2900] ## m/s
+  Vs: [4700, 4700, 4650, 4600, 4600, 4200, 3800, 3400, 1800, 1800] ## m/s
 
 ### ASSEMBLE NETWORK DATA ###
 with_density: False
@@ -46,19 +53,36 @@ depth_steps:
 dx: 500.0 # Cartesian distance between nodes in FMM computation
 d_deg: 0.005 # Degree distance between saved interpolation query points
 dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved query points
+n_jobs: 1 ## Number of jobs to do the travel time calculations (note: you must run "calculate_travel_times_3D_build_data.py 0", and "calculate_travel_times_3D_build_data.py 1", for all i = 0 ... (n_jobs - 1))
 
 save_dense_travel_time_data: False # Save the dense travel times (only necessary if not training travel time neural network)
 train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
 use_relative_1d_profile: True # If False, the 1D profile is treated as absolute; if True, the 1D profile is shifted so zero depth occurs at each stations elevation
+
 using_3D: False # Not fully implemented yet, must adjust travel time calculations and load 3d travel time neural network
 using_1D: True
+
+## Set model hyper-parameters (these can scale with the application domain size)
+use_updated_model_definition: True
+scale_rel: 30000.0 # The normalization scale between source-source edges
+scale_t: 10.0 # The normalization scale during temporal attention
+eps: 15.0 # The normalization and clipping window during arrival embedding and source-station-arrival attention
 
 ## Graph params
 k_sta_edges: 8 # or 10 are reasonable choices
 k_spc_edges: 15
 k_time_edges: 10
-t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
+# t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
 ## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
+
+## Use subgraph
+use_subgraph: False
+max_deg_offset: 1.5
+k_nearest_pairs: 30
+
+## Other model parameters
+use_phase_types: True ## If False, then assume no phase type information is known on picks (e.g., fifth column of picks, P[:.4] is not used)
+use_absolute_pos: False ## If True, append the absolute station and source coordinates in the input feature (e.g., allows some extra `specilization' during training to specific areas; approach should be used tentatitevly)
 
 ## Additional training params
 device: 'cuda' # or 'cpu'
