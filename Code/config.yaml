@@ -59,8 +59,6 @@ save_dense_travel_time_data: False # Save the dense travel times (only necessary
 train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
 use_relative_1d_profile: True # If False, the 1D profile is treated as absolute; if True, the 1D profile is shifted so zero depth occurs at each stations elevation
 
-using_3D: False # Not fully implemented yet, must adjust travel time calculations and load 3d travel time neural network
-using_1D: True
 
 ## Set model hyper-parameters (these can scale with the application domain size)
 use_updated_model_definition: True
