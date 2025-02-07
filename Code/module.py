@@ -946,7 +946,7 @@ elif use_updated_model_definition == True:
 			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 			
 			if self.use_absolute_pos == True:
-				Slice = torch.cat((Slice, locs_use_cart[A_src_in_sta[0]]/self.scale_rel, x_temp_cuda_cart[A_src_in_sta[1]]/self.scale_rel), dim = 1)
+				Slice = torch.cat((Slice, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
 			pos_rel_sta = (locs_use_cart[A_src_in_sta[0][A_in_sta[0]]] - locs_use_cart[A_src_in_sta[0][A_in_sta[1]]])/self.scale_rel # self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
 			pos_rel_src = (x_temp_cuda_cart[A_src_in_sta[1][A_in_src[0]]] - x_temp_cuda_cart[A_src_in_sta[1][A_in_src[1]]])/self.scale_rel # self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
@@ -975,7 +975,7 @@ elif use_updated_model_definition == True:
 			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
 			if self.use_absolute_pos == True:
-				s = torch.cat((s, locs_use_cart[A_src_in_sta[0]]/self.scale_rel, x_temp_cuda_cart[A_src_in_sta[1]]/self.scale_rel), dim = 1)
+				s = torch.cat((s, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 			
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # A_src_in_sta, locs_use_cart, x_temp_cuda_cart # detach x_latent. Just a "reference"
 			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size
@@ -1017,7 +1017,7 @@ elif use_updated_model_definition == True:
 			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 
 			if self.use_absolute_pos == True:
-				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/self.scale_rel, x_temp_cuda_cart[self.A_src_in_sta[1]]/self.scale_rel), dim = 1)		
+				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)		
 			
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
@@ -1036,7 +1036,7 @@ elif use_updated_model_definition == True:
 			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
 			if self.use_absolute_pos == True:
-				s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/self.scale_rel, x_temp_cuda_cart[self.A_src_in_sta[1]]/self.scale_rel), dim = 1)
+				s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 			
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart # detach x_latent. Just a "reference"
 			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta)
@@ -1054,7 +1054,7 @@ elif use_updated_model_definition == True:
 			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 
 			if self.use_absolute_pos == True:
-				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/self.scale_rel, x_temp_cuda_cart[self.A_src_in_sta[1]]/self.scale_rel), dim = 1)
+				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 			
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
