@@ -358,14 +358,14 @@ argvs = sys.argv
 if len(argvs) == 1:
 	argvs.append(0)
 
-n_jobs = 50
+n_jobs = config['n_jobs']
 n_batch = int(np.ceil(len(locs)/n_jobs))
 ind_use = [np.arange(n_batch) + n_batch*i for i in range(n_jobs)]
 if n_jobs > 1:
 	ind_use[-1] = np.arange(ind_use[-2][-1] + 1, len(locs))
 ind_use = ind_use[int(argvs[1])]
 
-vel_model_ver = 1
+# vel_model_ver = 1
 use_relative_1d_profile = False
 
 compute_reference_times = True
