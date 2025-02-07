@@ -771,7 +771,7 @@ if apply_magnitude_model == True:
 		f.write('ID, datetime, latitude, longitude, depth(km), magnitude, Num_p_picks, Num_s_picks, spatial_sigma(m), detection_value \n')
 		for i in range(len(srcs)):
 			time = UTCDateTime(int(Times[i,0]), int(Times[i,1]), int(Times[i,2])) + srcs[i,3]
-			f.write('%d, %s, %0.4f, %0.4f, %0.4f, %0.4f, %d, %d, %0.4f, %0.4f \n'%(i, str(time), srcs[i,0], srcs[i,1], srcs[i,2], mag_pred[i], cnt_p[i], cnt_s[i], srcs_sigma[i], srcs_w[i]))
+			f.write('%d, %s, %0.4f, %0.4f, %0.4f, %0.4f, %d, %d, %0.4f, %0.4f \n'%(i, str(time), srcs[i,0], srcs[i,1], -1.0*srcs[i,2]/1000.0, mag_pred[i], cnt_p[i], cnt_s[i], srcs_sigma[i], srcs_w[i]))
 		f.close()
 
 		# f = open(path_to_file + '%s_catalog_matched_events_ver_%d.csv'%(name_of_project, n_catalog_ver), 'w')
