@@ -563,7 +563,6 @@ for i in range(len(srcs)):
 	if phase_p.shape[1] < 6:
 		phase_p = np.concatenate((phase_p, np.zeros((len(phase_p),1))), axis = 1)
 		phase_s = np.concatenate((phase_s, np.ones((len(phase_s),1))), axis = 1)
-
 	if len(phase_p) > 0:
 		phase_p[:,0] = phase_p[:,0] - srcs[i,3] ## Subtract origin time
 		cnt_reassigned_phase_p += (phase_p[:,4] == 1).sum()
@@ -576,6 +575,7 @@ for i in range(len(srcs)):
 		phase_s[:,4] = 1.0
 		phase_s[:,5] = i ## Save source index for each arrival
 		arrivals.append(phase_s)
+		
 arrivals = np.vstack(arrivals)
 n_arrivals = len(arrivals)
 print('Total picks %d'%n_arrivals)
@@ -628,6 +628,9 @@ loss_func = nn.MSELoss()
 
 n_updates = 5000
 n_batch = 500
+use_difference_loss = True
+iuse_p = np.where([len(Picks_P[i]) >= 2 for i in range(len(Picks_P))])[0]
+iuse_s = np.where([len(Picks_S[i]) >= 2 for i in range(len(Picks_S))])[0]
 
 ## Applying fitting
 losses = []
@@ -660,6 +663,40 @@ for i in range(n_updates):
 	loss1 = loss_func(torch.log10(amp_p), log_amp_p)
 	loss2 = loss_func(torch.log10(amp_s), log_amp_s)
 	loss = 0.5*loss1 + 0.5*loss2
+
+	if use_difference_loss == True: ## If True, also compute pairwise log_amplitude differences (for different stations, and fixed sources), since
+		## these cancel out the effect of the magnitude; and hence, this provides an unsupervised target to constrain the amplitude-distance
+		## attenuation relationships (i.e., Trugman, 2024; SRL: A High‐Precision Earthquake Catalog for Nevada).
+		ichoose_p = np.random.choice(iuse_p, size = int(n_batch/2))
+		ichoose_s = np.random.choice(iuse_s, size = int(n_batch/2))
+		ichoose_p1 = [np.random.choice(len(Picks_P[ichoose_p[j]]), size = 2, replace = False) for j in range(len(ichoose_p))]
+		ichoose_s1 = [np.random.choice(len(Picks_S[ichoose_s[j]]), size = 2, replace = False) for j in range(len(ichoose_s))]
+		
+		ind_p1, ind_p2 = np.array([Picks_P[ichoose_p[j]][ichoose_p1[j][0],1] for j in range(len(ichoose_p))]), np.array([Picks_P[ichoose_p[j]][ichoose_p1[j][1],1] for j in range(len(ichoose_p))])
+		amp_p1, amp_p2 = np.array([Picks_P[ichoose_p[j]][ichoose_p1[j][0],2] for j in range(len(ichoose_p))]), np.array([Picks_P[ichoose_p[j]][ichoose_p1[j][1],2] for j in range(len(ichoose_p))])
+
+		ind_s1, ind_s2 = np.array([Picks_S[ichoose_s[j]][ichoose_s1[j][0],1] for j in range(len(ichoose_s))]), np.array([Picks_S[ichoose_s[j]][ichoose_s1[j][1],1] for j in range(len(ichoose_s))])
+		amp_s1, amp_s2 = np.array([Picks_S[ichoose_s[j]][ichoose_s1[j][0],2] for j in range(len(ichoose_s))]), np.array([Picks_S[ichoose_s[j]][ichoose_s1[j][1],2] for j in range(len(ichoose_s))])
+
+		## Differential P amplitude loss
+		log_amp_p1 = Mag.train(torch.Tensor(ind_p1).long().to(device), torch.Tensor(srcs[ichoose_p,0:3]).to(device), torch.ones(len(ichoose_p)).to(device), torch.zeros(len(ind_p1)).long().to(device)) ## Note: effect of magnitude  will be canceled out
+		log_amp_p2 = Mag.train(torch.Tensor(ind_p2).long().to(device), torch.Tensor(srcs[ichoose_p,0:3]).to(device), torch.ones(len(ichoose_p)).to(device), torch.zeros(len(ind_p2)).long().to(device)) ## Note: effect of magnitude  will be canceled out
+		log_amp_p_diff = log_amp_p1 - log_amp_p2
+		trgt_amp_p_diff = torch.Tensor(np.log10(amp_p1) - np.log10(amp_p2)).to(device)
+		loss_diff_p = loss_func(log_amp_p_diff, trgt_amp_p_diff)
+
+		## Differential S amplitude loss
+		log_amp_s1 = Mag.train(torch.Tensor(ind_s1).long().to(device), torch.Tensor(srcs[ichoose_s,0:3]).to(device), torch.ones(len(ichoose_s)).to(device), torch.ones(len(ind_s1)).long().to(device)) ## Note: effect of magnitude  will be canceled out
+		log_amp_s2 = Mag.train(torch.Tensor(ind_s2).long().to(device), torch.Tensor(srcs[ichoose_s,0:3]).to(device), torch.ones(len(ichoose_s)).to(device), torch.ones(len(ind_s2)).long().to(device)) ## Note: effect of magnitude  will be canceled out
+		log_amp_s_diff = log_amp_s1 - log_amp_s2
+		trgt_amp_s_diff = torch.Tensor(np.log10(amp_s1) - np.log10(amp_s2)).to(device)
+		loss_diff_s = loss_func(log_amp_s_diff, trgt_amp_s_diff)
+
+		loss_diff = 0.5*loss_diff_p + 0.5*loss_diff_s
+
+		## Take the mean loss
+		loss = 0.5*loss + 0.5*loss_diff
+
 
 	loss.backward()
 	optimizer.step()
