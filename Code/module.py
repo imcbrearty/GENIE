@@ -1913,10 +1913,10 @@ class NNInterp(nn.Module):
 		return ind_grab, weights, batch
 
 ## Magnitude class
-class MagPred(nn.Module):
+class Magnitude(nn.Module):
 	def __init__(self, locs, grid, ftrns1_diff, ftrns2_diff, k = 1, device = 'cuda'):
-		# super(MagPred, self).__init__(aggr = 'max') # node dim
-		super(MagPred, self).__init__() # node dim
+		# super(Magnitude, self).__init__(aggr = 'max') # node dim
+		super(Magnitude, self).__init__() # node dim
 
 		## Predict magnitudes with trainable coefficients,
 		## and spatial-reciver biases (with knn interp k)
