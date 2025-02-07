@@ -255,10 +255,10 @@ class TrvTimesCorrection(nn.Module):
 			return self.Interp(self.x_grid, src, self.coefs[:,sta_ind,:], self.coefs_ker[:,sta_ind,:])
 
 ## Magnitude class
-class Magnitude(nn.Module):
+class MagnitudeBackup(nn.Module):
 	def __init__(self, x_grid, locs_ref, ftrns1_diff, interp_type = 'anisotropic', k = 15, sig = 10.0, device = 'cpu'):
 		# super(MagPred, self).__init__(aggr = 'max') # node dim
-		super(Magnitude, self).__init__() # node dim
+		super(MagnitudeBackup, self).__init__() # node dim
 
 		# In elliptical coordinates
 		self.x_grid = x_grid
