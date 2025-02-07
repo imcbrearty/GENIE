@@ -1233,8 +1233,8 @@ weights = torch.Tensor([0.1, 0.4, 0.25, 0.25]).to(device)
 lat_range_interior = [lat_range[0], lat_range[1]]
 lon_range_interior = [lon_range[0], lon_range[1]]
 
-n_restart = False
-n_restart_step = 0
+n_restart = train_config['restart_training']
+n_restart_step = train_config['n_restart_step']
 if n_restart == False:
 	n_restart_step = 0 # overwrite to 0, if restart is off
 
