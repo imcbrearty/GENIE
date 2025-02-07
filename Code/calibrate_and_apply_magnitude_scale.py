@@ -309,7 +309,7 @@ tree_stas = cKDTree(ftrns1(locs))
 cnt_inc = 0
 min_num_sta = None # 5
 n_catalog_ver = 1
-
+use_quality_filter = False
 
 for i in range(len(days)):
 	yr, mo, dy = days[i,:]
@@ -353,6 +353,11 @@ for i in range(len(days)):
 		num_sta_found = np.array([len(np.unique(np.concatenate((z['Picks/%d_Picks_P_perm'%j][:,1], z['Picks/%d_Picks_S_perm'%j][:,1]), axis = 0))) for j in range(len(srcs))])
 		ikeep = np.array(list(set(ikeep).intersection(np.where(num_sta_found >= min_num_sta)[0]))).astype('int')
 
+	if use_quality_filter == True:
+		ifind_del = np.where((np.log10(sigma) > np.quantile(np.log10(sigma), 0.8))*(srcs_w < np.quantile(srcs_w, 0.2)))[0]
+		ikeep = np.array(list(set(ikeep).intersection(np.delete(np.arange(len(srcs)), ifind_del, axis = 0)))).astype('int')
+		print('Removing %d/%d of events due to filter'%(len(ifind_del), len(srcs)))
+	
 	## Subset sources
 	srcs_ref = srcs_ref[ikeep1]
 	srcs = srcs[ikeep]
