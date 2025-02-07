@@ -1979,7 +1979,7 @@ class Magnitude(nn.Module):
 		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1(src*self.zvec) - self.ftrns1(self.locs[ind]*self.zvec), dim = 1) + fudge)
 		pw_log_dist_depths = torch.log10(abs(src[:,2].view(-1) - self.locs[ind,2].view(-1)) + fudge)
 
-		sta_ind = ind.repeat_interleave(k)
+		sta_ind = ind.repeat_interleave(self.k)
 		inds = knn(self.grid_cart/1000.0, self.ftrns1(src)/1000.0, k = self.k)[1] # .reshape(-1,self.k) ## for each of the second one, find indices in the first
 		## Can directly use torch_scatter to coalesce the data
 
