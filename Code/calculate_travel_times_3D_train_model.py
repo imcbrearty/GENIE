@@ -352,7 +352,7 @@ if compute_reference_times == True:
 
 ## Determine which stations have data
 # ver_vel_model = 1
-st_sta = glob.glob(path_to_file + '1D_Velocity_Models_Regional/TravelTimeData/*station*ver_%d.npz'%vel_model_ver)
+st_sta = glob.glob(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData' + seperator + '*station*ver_%d.npz'%vel_model_ver)
 iarg = np.argsort([int(st_sta[j].split('/')[-1].split('_')[5]) for j in range(len(st_sta))])
 st_sta = [st_sta[j] for j in iarg]
 sta_ind = np.array([int(st_sta[j].split('/')[-1].split('_')[5]) for j in range(len(st_sta))]).astype('int')
