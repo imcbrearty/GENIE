@@ -394,5 +394,5 @@ if compute_reference_times == True:
 			tp = mp(ftrns1(X))
 			ts = ms(ftrns1(X))
 
-			np.savez_compressed(path_to_file + 'TravelTimeData' + seperator + '%s_1d_velocity_model_station_%d_ver_%d.npz'%(name_of_project, j, vel_model_ver), X = X, xx = xx, loc = locs_ref[j], locs_ref = locs_ref, Tp_interp = tp, Ts_interp = ts, Tp = results[0], Ts = results[1], Vp = Vp, Vs = Vs, Vp_interp = Vp_interp, Vs_interp = Vs_interp, depth_grid = depth_grid)
+			np.savez_compressed(path_to_file + '1D_Velocity_Models_Regional/TravelTimeData' + seperator + '%s_1d_velocity_model_station_%d_ver_%d.npz'%(name_of_project, j, vel_model_ver), X = X, xx = xx, loc = locs_ref[j], locs_ref = locs_ref, Tp_interp = tp, Ts_interp = ts, Tp = results[0], Ts = results[1], Vp = Vp, Vs = Vs, Vp_interp = Vp_interp, Vs_interp = Vs_interp, depth_grid = depth_grid)
 
