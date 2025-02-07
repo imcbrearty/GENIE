@@ -1,5 +1,5 @@
 name_of_project: 'Mayotte'
-num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost)
+# num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost). Note: now this is done with n_jobs below
 vel_model_ver: 1 ## Which travel time version to save when running calculate travel times
 
 ## Note, when running continuous days processing a number of parameters are also set in process_config
@@ -50,6 +50,7 @@ depth_steps:
 dx: 500.0 # Cartesian distance between nodes in FMM computation
 d_deg: 0.005 # Degree distance between saved interpolation query points
 dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved query points
+n_jobs: 1 ## Number of jobs to do the travel time calculations (note: you must run "calculate_travel_times_3D_build_data.py 0", and "calculate_travel_times_3D_build_data.py 1", for all i = 0 ... (n_jobs - 1))
 
 save_dense_travel_time_data: False # Save the dense travel times (only necessary if not training travel time neural network)
 train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
