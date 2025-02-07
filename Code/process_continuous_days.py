@@ -437,8 +437,8 @@ if compute_magnitudes == True:
 	try:
 		n_mag_ver = 1
 		mags_supp = np.load(path_to_file + 'trained_magnitude_model_supplemental_ver_%d.npz'%n_mag_ver)
-		grid, kgrid = mags_supp['grid'], int(mags_supp['kgrid'])
-		mags = MagPred(torch.Tensor(locs).to(device), torch.Tensor(grid).to(device), ftrns1_diff, ftrns2_diff, k = kgrid, device = device)
+		mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
+		mags = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device)
 		mags.load_state_dict(torch.load(path_to_file + 'trained_magnitude_model_ver_%d.hdf5'%n_mag_ver, map_location = device))
 		loaded_mag_model = True
 		print('Will compute magnitudes since a magnitude model was loaded')
