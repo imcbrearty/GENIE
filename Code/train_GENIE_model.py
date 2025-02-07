@@ -1563,8 +1563,6 @@ for i in range(n_restart_step, n_epochs):
 		## and true labels
 		x_src_query = np.random.rand(n_src_query,3)*scale_x_extend + offset_x_extend
 
-		if len(lp_srcs[i0]) > 0:
-			x_src_query[0:len(lp_srcs[i0]),0:3] = lp_srcs[i0][:,0:3]
 
 		n_frac_focused_association_queries = 0.2 # concentrate 10% of association queries around true sources
 		n_concentration_focused_association_queries = 0.03 # 3% of scale of domain
@@ -1583,6 +1581,9 @@ for i in range(n_restart_step, n_epochs):
 			x_query_focused = np.maximum(np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), x_query_focused)
 			x_query_focused = np.minimum(np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1), x_query_focused)
 			x_src_query[ind_overwrite_focused_queries] = x_query_focused
+
+		if len(lp_srcs[i0]) > 0:
+			x_src_query[0:len(lp_srcs[i0]),0:3] = lp_srcs[i0][:,0:3]
 		
 		x_src_query_cart = ftrns1(x_src_query)
 		
@@ -1604,7 +1605,7 @@ for i in range(n_restart_step, n_epochs):
 
 		if len(lp_srcs[i0]) > 0:
 			ifind_src = np.where(np.abs(lp_srcs[i0][:,3]) <= t_win/2.0)[0]
-			tq_sample[0:len(ifind_src)] = torch.Tensor(lp_srcs[i0][ifind_src,3]).to(device)
+			tq_sample[ifind_src] = torch.Tensor(lp_srcs[i0][ifind_src,3]).to(device)
 
 		if use_phase_types == False:
 			Inpts[i0][:,2::] = 0.0 ## Phase type informed features zeroed out
