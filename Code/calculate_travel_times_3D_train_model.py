@@ -470,7 +470,7 @@ if train_travel_time_neural_network == True:
 
 				z = np.load(st_sta[inc])
 				p = 1.0/np.maximum(tp, 0.1)
-				isample = np.sort(np.random.choice(len(p), size = n_per_station, p = p/p.sum(), replace = False))
+				isample = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station, len(p)), p = p/p.sum(), replace = False))
 
 				X_samples.append(X[isample])
 				if compute_reference_times == True:
@@ -485,7 +485,7 @@ if train_travel_time_neural_network == True:
 				n_per_station = int(100000/scale_factor)
 				# z = np.load(st_sta[inc])
 				p = (1.0/np.maximum(tp, 0.1))**2
-				isample = np.sort(np.random.choice(len(p), size = n_per_station, p = p/p.sum(), replace = False))
+				isample = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station, len(p)), p = p/p.sum(), replace = False))
 
 				X_samples.append(X[isample])
 				if compute_reference_times == True:
@@ -501,7 +501,7 @@ if train_travel_time_neural_network == True:
 				n_per_station = int(100000/scale_factor)
 				# z = np.load(st_sta[inc])
 				p = 1.0/np.maximum(tp.max() - tp, 0.1)
-				isample = np.sort(np.random.choice(len(p), size = n_per_station, p = p/p.sum(), replace = False))
+				isample = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station, len(p)), p = p/p.sum(), replace = False))
 
 				X_samples.append(X[isample])
 				if compute_reference_times == True:
@@ -516,7 +516,7 @@ if train_travel_time_neural_network == True:
 				n_per_station = int(100000/scale_factor)
 				# z = np.load(st_sta[inc])
 				p = 1.0*np.ones(X.shape[0]) # /np.maximum(Tp_interp[:,n].max() - Tp_interp[:,n], 0.1)
-				isample = np.sort(np.random.choice(len(p), size = n_per_station, p = p/p.sum(), replace = False))
+				isample = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station, len(p)), p = p/p.sum(), replace = False))
 				isample_vald = np.random.choice(np.delete(np.arange(len(p)), isample, axis = 0), size = 10000)
 
 				X_samples.append(X[isample])
