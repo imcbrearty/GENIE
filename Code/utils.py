@@ -526,7 +526,7 @@ def interp_3D_return_function_adaptive(X, Xmin, Dx, Mn, Tp, Ts, N, ftrns1, ftrns
 
 	return lambda y, x: evaluate_func(y, ftrns1(x))
 
-def interp_1D_velocity_model_to_3D_travel_times(X, locs, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2, device = 'cuda'):
+def interp_1D_velocity_model_to_3D_travel_times(X, locs, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2, method = 'pairs', device = 'cuda'):
 
 	i1 = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1], [1,1,0], [1,0,1], [0,1,1], [1,1,1]])
 	x10, x20, x30 = Xmin
@@ -536,32 +536,64 @@ def interp_1D_velocity_model_to_3D_travel_times(X, locs, Xmin, X0, Dx, Mn, Tp, T
 
 	print('Check way X0 is used')
 
-	def evaluate_func(y, x):
+	if method == 'pairs':
+	
+		def evaluate_func(y, x):
+	
+			y, x = y.cpu().detach().numpy(), x.cpu().detach().numpy()
+	
+			ind_depth = np.tile(np.argmin(np.abs(y[:,2].reshape(-1,1) - depth_grid), axis = 1), x.shape[0])
+			rel_pos = (np.expand_dims(x, axis = 1) - np.expand_dims(y*mask, axis = 0)).reshape(-1,3)
+			rel_pos[:,0:2] = np.abs(rel_pos[:,0:2]) ## Postive relative pos, relative to X0.
+			x_relative = X0 + rel_pos
+	
+			xv = x_relative - Xmin[None,:]
+			nx = np.shape(rel_pos)[0] # nx is the number of query points in x
+			nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
+			nz_vals1 = np.minimum(nz_vals, N - 2)
+	
+			nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
+	
+			val_p = Tp[nz,ind_depth]
+			val_s = Ts[nz,ind_depth]
+	
+			x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
+			x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
+	
+			val_p = np.sum(val_p*x0, axis = 0).reshape(-1, y.shape[0])
+			val_s = np.sum(val_s*x0, axis = 0).reshape(-1, y.shape[0])
+	
+			return torch.Tensor(np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)).to(device)
 
-		y, x = y.cpu().detach().numpy(), x.cpu().detach().numpy()
+	elif method == 'direct': ## Not finished being implemented yet
 
-		ind_depth = np.tile(np.argmin(np.abs(y[:,2].reshape(-1,1) - depth_grid), axis = 1), x.shape[0])
-		rel_pos = (np.expand_dims(x, axis = 1) - np.expand_dims(y*mask, axis = 0)).reshape(-1,3)
-		rel_pos[:,0:2] = np.abs(rel_pos[:,0:2]) ## Postive relative pos, relative to X0.
-		x_relative = X0 + rel_pos
-
-		xv = x_relative - Xmin[None,:]
-		nx = np.shape(rel_pos)[0] # nx is the number of query points in x
-		nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
-		nz_vals1 = np.minimum(nz_vals, N - 2)
-
-		nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
-
-		val_p = Tp[nz,ind_depth]
-		val_s = Ts[nz,ind_depth]
-
-		x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
-		x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
-
-		val_p = np.sum(val_p*x0, axis = 0).reshape(-1, y.shape[0])
-		val_s = np.sum(val_s*x0, axis = 0).reshape(-1, y.shape[0])
-
-		return torch.Tensor(np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)).to(device)
+		def evaluate_func(y, x):
+	
+			y, x = y.cpu().detach().numpy(), x.cpu().detach().numpy()
+	
+			ind_depth = np.tile(np.argmin(np.abs(y[:,2].reshape(-1,1) - depth_grid), axis = 1), x.shape[0])
+			rel_pos = x - y*mask
+			rel_pos[:,0:2] = np.abs(rel_pos[:,0:2]) ## Postive relative pos, relative to X0.
+			x_relative = X0 + rel_pos
+	
+			xv = x_relative - Xmin[None,:]
+			nx = np.shape(rel_pos)[0] # nx is the number of query points in x
+			nz_vals = np.array([np.rint(np.floor(xv[:,0]/Dx[0])),np.rint(np.floor(xv[:,1]/Dx[1])),np.rint(np.floor(xv[:,2]/Dx[2]))]).T
+			nz_vals1 = np.minimum(nz_vals, N - 2)
+	
+			nz = (np.reshape(np.dot((np.repeat(nz_vals1, 8, axis = 0) + repmat(i1,nx,1)),Mn.T),(nx,8)).T).astype('int')
+	
+			val_p = Tp[nz,ind_depth]
+			val_s = Ts[nz,ind_depth]
+	
+			x0 = np.reshape(xv,(1,nx,3)) - Xv[nz,:]
+			x0 = (1 - abs(x0[:,:,0])/Dx[0])*(1 - abs(x0[:,:,1])/Dx[1])*(1 - abs(x0[:,:,2])/Dx[2])
+	
+			val_p = np.sum(val_p*x0, axis = 0).reshape(-1, y.shape[0])
+			val_s = np.sum(val_s*x0, axis = 0).reshape(-1, y.shape[0])
+	
+			return torch.Tensor(np.concatenate((val_p[:,:,None], val_s[:,:,None]), axis = 2)).to(device)
+		
 
 	return lambda y, x: evaluate_func(y, x)
 
