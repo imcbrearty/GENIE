@@ -1,5 +1,5 @@
 name_of_project: 'Mayotte'
-# num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost). Note: now this is done with n_jobs below
+num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost). Note: now this is done with n_jobs below
 vel_model_ver: 1 ## Which travel time version to save when running calculate travel times
 
 ## Note, when running continuous days processing a number of parameters are also set in process_config
