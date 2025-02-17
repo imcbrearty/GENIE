@@ -1512,7 +1512,7 @@ class NNInterp(nn.Module):
 			ind_grab = np.hstack([Inds[i] for i in range(len(query))])
 			weights = torch.vstack([Weights[i] for i in range(len(query))])
 			batch = np.hstack([i*np.ones(len(Inds[i])) for i in range(len(query))])
-			vals_interp = global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
+			vals_interp = self.global_sum_pool(vals[ind_grab]*weights, torch.Tensor(batch).long().to(self.device))
 
 	## Define (efficient) query functions.
 	## Note, for some of these, the initial "determine_connected_cells_for_query" should not be necessary. (nor is it necessarily worth running?)
@@ -1583,6 +1583,8 @@ class NNInterp(nn.Module):
 
 			n_len.append(n_slice)
 			batch.append(i*np.ones(n_slice))
+			if np.mod(i, int(len(self.pos))/10) == 0:
+				print('Finished veroinal cell %d'%i)
 
 		## Output
 		max_dist = np.array(max_dist)
