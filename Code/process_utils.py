@@ -1450,3 +1450,90 @@ def maximize_bipartite_assignment(cat, srcs, ftrns1, ftrns2, temporal_win = 10.0
 	res = np.vstack(res)
 
 	return results, res, assignment_vectors, unique_cat_ind, unique_src_ind
+
+## Interpolation class
+class NNInterp_Direct(nn.Module):
+	def __init__(self, pos, ftrns1, ftrns1_diff, device = 'cpu', n_res = 11, dx = None, scale_x = 1000.0):
+		super(NNInterp_Direct, self).__init__()
+
+		## Increase n_res for more accuracy
+
+		## pos is reference nodes (nodes with pre-defined values)
+		## grid is the "sampling grid", used to compute mass weights
+		## and determine reference nodes in pos for each veroinal cell
+
+		# self.pos = torch.Tensor(np.copy(pos)).to(device)
+		# self.grid = torch.Tensor(np.copy(grid)).to(device)
+
+
+		self.scale_x = scale_x
+		self.device = device
+		self.ftrns1 = ftrns1
+		self.ftrns1_diff = ftrns1_diff
+		self.tree = cKDTree(ftrns1(pos)/self.scale_x)
+		self.pos_cuda = torch.Tensor(ftrns1(pos)/self.scale_x).to(device)
+		self.n_pos = len(pos)
+
+		## Find average nearest neighbor distance
+		if dx is None:
+			irand_query = np.random.choice(len(pos), size = 1000)
+			dx = np.quantile(self.tree.query(ftrns1(pos[irand_query])/self.scale_x, k = 5)[0][:,1::].mean(1), 0.8)*self.scale_x/n_res # /2.0
+
+
+		x1 = np.linspace(0, n_res*dx, n_res) - n_res*dx/2.0
+		x11, x12, x13 = np.meshgrid(x1, x1, x1)
+		self.xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+		self.x_grid = x1
+		self.n_axis = len(x1)
+		self.n_grid = len(self.xx)
+		# self.batch = torch.zeros(self.n_grid).to(device)
+		self.batch = np.zeros(self.n_grid) # .to(device)
+		print('Dimension length: %0.4f'%(x1.max() - x1.min()))
+		print('Grid size: %d'%(len(pos)))
+		print('Query size: %d'%(self.n_grid))
+
+	def forward(self, vals, x_query):
+
+		st1 = time.time()
+
+		assert(len(vals) == self.n_pos) ## Input field measured on reference grid, and query points
+		query_points = (ftrns1(x_query).repeat(self.n_grid, axis = 0) + np.tile(self.xx, (len(x_query), 1)))/self.scale_x
+
+
+		edges_ref = self.tree.query(query_points) ## Nearest reference node to all grid
+
+
+		dist_query = np.linalg.norm(query_points - ftrns1(x_query).repeat(self.n_grid, axis = 0)/self.scale_x, axis = 1)
+
+
+		batch = np.hstack([self.batch + i for i in range(len(x_query))])
+
+		## Find points assigned to query
+		iwhere = np.where(dist_query <= edges_ref[0])[0] ## Points which are nearest to the query (These are only points relevent to each query)
+		print('Ratio used %0.4f'%(len(iwhere)/len(dist_query)))
+		batch_slice = batch[iwhere] ## Query indices
+		neighbor_slice = edges_ref[1][iwhere]
+
+
+		# pdb.set_trace()
+		neighbor_slice_batched = (neighbor_slice + batch_slice*self.n_pos).astype('int')
+		vals_slice = vals[neighbor_slice]
+
+
+		## Stack for each query
+		vals_query = scatter(torch.ones(len(batch_slice),1).to(self.device), torch.Tensor(batch_slice).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
+
+		## Find unique query points (in batched indicy representation)
+		iunique = np.unique(neighbor_slice_batched).astype('int')
+
+		iunique_vals = torch.Tensor(vals[np.mod(iunique, self.n_pos).astype('int')]).to(device)
+
+		tree_perm = cKDTree(iunique.reshape(-1,1))
+		neighbor_slice_batched_perm = tree_perm.query(neighbor_slice_batched.reshape(-1,1))[1]
+
+		vals_per_slice = scatter(torch.ones(len(neighbor_slice_batched_perm),1).to(self.device), torch.Tensor(neighbor_slice_batched_perm).long().to(self.device), dim = 0, dim_size = len(iunique), reduce = 'sum')
+		query_ind = np.floor(iunique/self.n_pos).astype('int')
+
+		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
+
+		return vals_pred
