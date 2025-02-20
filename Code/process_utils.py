@@ -1452,9 +1452,9 @@ def maximize_bipartite_assignment(cat, srcs, ftrns1, ftrns2, temporal_win = 10.0
 	return results, res, assignment_vectors, unique_cat_ind, unique_src_ind
 
 ## Interpolation class
-class NNInterp_Direct(nn.Module):
+class NNInterp(nn.Module):
 	def __init__(self, pos, ftrns1, ftrns1_diff, device = 'cpu', n_res = 11, dx = None, scale_x = 1000.0):
-		super(NNInterp_Direct, self).__init__()
+		super(NNInterp, self).__init__()
 
 		## Increase n_res for more accuracy
 
