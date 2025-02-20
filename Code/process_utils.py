@@ -1495,6 +1495,8 @@ class NNInterp(nn.Module):
 	def forward(self, vals, x_query):
 
 		st1 = time.time()
+		if np.ndim(vals) == 1:
+			vals = vals.reshape(-1,1)
 
 		assert(len(vals) == self.n_pos) ## Input field measured on reference grid, and query points
 		query_points = (ftrns1(x_query).repeat(self.n_grid, axis = 0) + np.tile(self.xx, (len(x_query), 1)))/self.scale_x
