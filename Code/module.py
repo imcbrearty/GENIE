@@ -102,19 +102,19 @@ else:
 			self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
 	
 			self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
-			self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask + ndim_proj + 1, n_hidden)
+			self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 	
 			self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
-			self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask + ndim_proj + 1, n_hidden)
+			self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 			self.activate11 = nn.PReLU() # can extend to each channel
 			self.activate12 = nn.PReLU() # can extend to each channel
 			self.activate1 = nn.PReLU() # can extend to each channel
 	
 			self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
-			self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask + ndim_proj + 1, out_channels)
+			self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
 	
 			self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
-			self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask + ndim_proj + 1, out_channels)
+			self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
 			self.activate21 = nn.PReLU() # can extend to each channel
 			self.activate22 = nn.PReLU() # can extend to each channel
 			self.activate2 = nn.PReLU() # can extend to each channel
@@ -150,15 +150,15 @@ else:
 	
 			return tr # the new embedding.
 	
-		def message(self, x_j, message_type = 1):
+		# def message(self, x_j, message_type = 1):
 
-			if message_type == 1:
+		# 	if message_type == 1:
 			
-				return torch.cat((x_j, self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+		# 		return torch.cat((x_j, self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 
-			elif message_type == 2:
+		# 	elif message_type == 2:
 
-				return torch.cat((x_j, self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+		# 		return torch.cat((x_j, self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 
 		# def forward(self, tr, mask, A_in_sta, A_in_src): # A_src_in_sta, pos_loc, pos_src
 	
@@ -399,19 +399,19 @@ else:
 			self.init_trns = nn.Linear(in_channels + n_dim_latent + n_dim_mask, n_hidden)
 	
 			self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
-			self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask + ndim_proj + 1, n_hidden)
+			self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 	
 			self.l1_t2_1 = nn.Linear(n_hidden, n_hidden)
-			self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask + ndim_proj + 1, n_hidden)
+			self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 			self.activate11 = nn.PReLU() # can extend to each channel
 			self.activate12 = nn.PReLU() # can extend to each channel
 			self.activate1 = nn.PReLU() # can extend to each channel
 	
 			self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
-			self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask + ndim_proj + 1, out_channels)
+			self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
 	
 			self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
-			self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask + ndim_proj + 1, out_channels)
+			self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
 			self.activate21 = nn.PReLU() # can extend to each channel
 			self.activate22 = nn.PReLU() # can extend to each channel
 			self.activate2 = nn.PReLU() # can extend to each channel
@@ -449,15 +449,15 @@ else:
 	
 			return tr # the new embedding.
 	
-		def message(self, x_j, message_type = 1):
+		# def message(self, x_j, message_type = 1):
 
-			if message_type == 1:
+		# 	if message_type == 1:
 			
-				return torch.cat((x_j, self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+		# 		return torch.cat((x_j, self.pos_rel_sta), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 		
-			elif message_type == 2:
+		# 	elif message_type == 2:
 
-				return torch.cat((x_j, self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+		# 		return torch.cat((x_j, self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 
 		# def forward(self, tr, latent, mask1, mask2, A_in_sta, A_in_src): # A_src_in_sta, pos_loc, pos_src
 	
@@ -948,20 +948,20 @@ elif use_updated_model_definition == True:
 			if self.use_absolute_pos == True:
 				Slice = torch.cat((Slice, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
-			pos_rel_sta = (locs_use_cart[A_src_in_sta[0][A_in_sta[0]]] - locs_use_cart[A_src_in_sta[0][A_in_sta[1]]]) # /self.scale_rel # self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-			pos_rel_src = (x_temp_cuda_cart[A_src_in_sta[1][A_in_src[0]]] - x_temp_cuda_cart[A_src_in_sta[1][A_in_src[1]]]) # /self.scale_rel # self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-			dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
-			dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
-			pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
-			pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
-			## Embed edge features
-			pos_rel_sta = torch.sign(pos_rel_sta)*torch.exp(-0.5*(pos_rel_sta**2)/(self.scale_rel**2))
-			pos_rel_src = torch.sign(pos_rel_src)*torch.exp(-0.5*(pos_rel_src**2)/(self.scale_rel**2))
+			# pos_rel_sta = (locs_use_cart[A_src_in_sta[0][A_in_sta[0]]] - locs_use_cart[A_src_in_sta[0][A_in_sta[1]]]) # /self.scale_rel # self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+			# pos_rel_src = (x_temp_cuda_cart[A_src_in_sta[1][A_in_src[0]]] - x_temp_cuda_cart[A_src_in_sta[1][A_in_src[1]]]) # /self.scale_rel # self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+			# dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
+			# dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
+			# pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
+			# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
+			# ## Embed edge features
+			# pos_rel_sta = torch.sign(pos_rel_sta)*torch.exp(-0.5*(pos_rel_sta**2)/(self.scale_rel**2))
+			# pos_rel_src = torch.sign(pos_rel_src)*torch.exp(-0.5*(pos_rel_src**2)/(self.scale_rel**2))
 
-			self.DataAggregation.pos_rel_sta = pos_rel_sta
-			self.DataAggregation.pos_rel_src = pos_rel_src
-			self.DataAggregationAssociationPhase.pos_rel_sta = pos_rel_sta
-			self.DataAggregationAssociationPhase.pos_rel_src = pos_rel_src
+			# self.DataAggregation.pos_rel_sta = pos_rel_sta
+			# self.DataAggregation.pos_rel_src = pos_rel_src
+			# self.DataAggregationAssociationPhase.pos_rel_sta = pos_rel_sta
+			# self.DataAggregationAssociationPhase.pos_rel_src = pos_rel_src
 			
 			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) # A_src_in_sta, locs_use_cart, x_temp_cuda_cart # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
@@ -991,16 +991,16 @@ elif use_updated_model_definition == True:
 	
 		def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, pos_loc, pos_src):
 
-			pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]]) # /self.scale_rel # self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-			pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]]) # /self.scale_rel # self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-			dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
-			dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
-			pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
-			pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
+			# pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]]) # /self.scale_rel # self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+			# pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]]) # /self.scale_rel # self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+			# dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
+			# dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
+			# pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
+			# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
 
-			## Embed edge features
-			pos_rel_sta = torch.sign(pos_rel_sta)*torch.exp(-0.5*(pos_rel_sta**2)/(self.scale_rel**2))
-			pos_rel_src = torch.sign(pos_rel_src)*torch.exp(-0.5*(pos_rel_src**2)/(self.scale_rel**2))
+			# ## Embed edge features
+			# pos_rel_sta = torch.sign(pos_rel_sta)*torch.exp(-0.5*(pos_rel_sta**2)/(self.scale_rel**2))
+			# pos_rel_src = torch.sign(pos_rel_src)*torch.exp(-0.5*(pos_rel_src**2)/(self.scale_rel**2))
 			
 			self.A_in_sta = A_in_sta
 			self.A_in_src = A_in_src
@@ -1012,10 +1012,10 @@ elif use_updated_model_definition == True:
 			self.A_edges_s = A_edges_s
 			self.dt_partition = dt_partition
 			self.tlatent = tlatent
-			self.DataAggregation.pos_rel_sta = pos_rel_sta
-			self.DataAggregation.pos_rel_src = pos_rel_src
-			self.DataAggregationAssociationPhase.pos_rel_sta = pos_rel_sta
-			self.DataAggregationAssociationPhase.pos_rel_src = pos_rel_src
+			# self.DataAggregation.pos_rel_sta = pos_rel_sta
+			# self.DataAggregation.pos_rel_src = pos_rel_src
+			# self.DataAggregationAssociationPhase.pos_rel_sta = pos_rel_sta
+			# self.DataAggregationAssociationPhase.pos_rel_src = pos_rel_src
 		
 		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
@@ -1077,7 +1077,7 @@ elif use_updated_model_definition == True:
 	
 			return y, x
 
-  
+
 #### EXTRA
 class TravelTimes(nn.Module):
 
