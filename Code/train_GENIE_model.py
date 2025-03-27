@@ -304,7 +304,7 @@ training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_r
 dist_range = train_config['dist_range'] # Should be chosen proportional to physical domain size
 max_rate_events = train_config['max_rate_events']
 max_miss_events = train_config['max_miss_events']
-max_false_events = train_config['max_false_events']
+max_false_events = train_config['max_rate_events']*train_config['max_false_events'] # Make max_false_events an absolute value, but it's based on the ratio of the value in the config file times the event rate
 miss_pick_fraction = train_config['miss_pick_fraction']
 T = train_config['T']
 dt = train_config['dt']
@@ -321,7 +321,7 @@ use_shallow_sources = train_config['use_shallow_sources']
 use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, use_false_ratio_value = True, plot_on = False, verbose = False, skip_graphs = False, return_only_data = False):
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, return_only_data = False):
 
 	if verbose == True:
 		st = time.time()
@@ -510,8 +510,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	## Base false events
 	station_false_rate_eval = 0.5*station_false_rate + 0.5*global_false_rate
 
-	if use_false_ratio_value == True: ## If true, use the ratio of real events to guide false picks
-		station_false_rate_eval = max_false_events*np.mean(miss_pick_fraction)*station_false_rate_eval*(global_event_rate.mean()/station_false_rate_eval.mean()) # station_false_rate_eval
+	# if use_false_ratio_value == True: ## If true, use the ratio of real events to guide false picks
+	# 	station_false_rate_eval = max_false_events*np.mean(miss_pick_fraction)*station_false_rate_eval*(global_event_rate.mean()/station_false_rate_eval.mean()) # station_false_rate_eval
 
 	vals = np.random.poisson(dt*station_false_rate_eval/T) # This scaling, assigns to each bin the number of events to achieve correct, on averge, average
 
@@ -1078,11 +1078,11 @@ def evaluate_bayesian_objective(x, n_random = 30, t_sample_win = 120.0, windows 
 	training_params_3[1][1] = x[5] # dist_range[1]
 	training_params_3[2] = x[6] # max_rate_events
 	training_params_3[3] = x[7] # max_miss_events
-	training_params_3[4] = x[8] # max_false_events
+	training_params_3[4] = x[6]*x[8] # max_false_events (input of false rate to generate is an absolute number, not the ratio, which is x[8])
 	training_params_3[5][0] = x[9] # miss_pick_fraction[0]
 	training_params_3[5][1] = x[10] # miss_pick_fraction[0]
 
-	arrivals = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, use_false_ratio_value = True, return_only_data = True)
+	arrivals = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, return_only_data = True)
 
 	P = np.copy(arrivals)
 
