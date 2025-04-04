@@ -554,9 +554,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		iz = np.where(arrivals[:,4] >= 0)[0]
 		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 
-	## If true, return only the synthetic arrivals
-	if return_only_data == True:
-		return arrivals
 	
 	## Check which sources are active
 	source_tree_indices = cKDTree(arrivals[:,2].reshape(-1,1))
@@ -566,6 +563,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] # subset of sources
 	src_times_active = src_times[active_sources]
 
+	## If true, return only the synthetic arrivals
+	if return_only_data == True:
+		srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitude.reshape(-1,1)), axis = 1)
+		data = [arrivals, srcs, active_sources]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
+		return data
+	
 	inside_interior = ((src_positions[:,0] < lat_range[1])*(src_positions[:,0] > lat_range[0])*(src_positions[:,1] < lon_range[1])*(src_positions[:,1] > lon_range[0]))
 
 	iwhere_real = np.where(arrivals[:,-1] > -1)[0]
@@ -1082,7 +1085,7 @@ def evaluate_bayesian_objective(x, n_random = 30, t_sample_win = 120.0, windows 
 	training_params_3[5][0] = x[9] # miss_pick_fraction[0]
 	training_params_3[5][1] = x[10] # miss_pick_fraction[0]
 
-	arrivals = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, return_only_data = True)
+	arrivals = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, return_only_data = True)[0]
 
 	P = np.copy(arrivals)
 
