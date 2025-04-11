@@ -1200,7 +1200,7 @@ def competitive_assignment_split(w, sta_inds, cost, min_val = 0.02, restrict = N
 
 	return assignments, sources_active
 
-def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, sig_t = 1.5, weight = [1.0,1.0], popsize = 50, maxiter = 1000, device = 'cpu', surface_profile = None, disp = True, vectorized = True):
+def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, sig_t = 1.5, weight = [1.0,1.0], popsize = 35, maxiter = 1000, device = 'cpu', surface_profile = None, disp = True, vectorized = True):
 
 	if (len(arv_p) + len(arv_s)) == 0:
 		return np.nan*np.ones((1,3)), np.nan
