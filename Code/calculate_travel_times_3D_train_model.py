@@ -669,6 +669,12 @@ if train_travel_time_neural_network == True:
 	scale_params = [max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor]
 	m = TravelTimesPN(ftrns1_diff, ftrns2_diff, n_phases = 2, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
 
+	## The travel time model is trained with PINN loss (Raissi et al., 2017) and synthetic data simulated with the fast marching method (Sethian. 1996).
+	## It follows a similar approach as the original PINN for travel times in seismology (Smith et al., 2020). However it uses several architechtural features
+	## inspired from follow on work, such as seperating the velocity model and travel time predictions into two seperate neural networks, and factorizing the
+	## travel times into a homogenous moveout and heterogenous component (Sun et al., 2024). We further use the sinusoid activation (Sitzmann et al., 2020),
+	## which by being infinitely differentiable, have been shown to improve PINNs.
+	
 
 	# m_p = TravelTimes(ftrns1_diff, ftrns2_diff, n_phases = 1, device = device).to(device)
 	# m_s = TravelTimes(ftrns1_diff, ftrns2_diff, n_phases = 1, device = device).to(device)
