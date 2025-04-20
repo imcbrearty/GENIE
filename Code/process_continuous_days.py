@@ -710,6 +710,7 @@ for cnt, strs in enumerate([0]):
 	ts = np.copy(tsteps_abs)
 	assert(np.diff(ts)[0] == dt_win)
 
+	print('Begin peak finding')
 	use_sparse_peak_finding = False
 	if use_sparse_peak_finding == True:
 
@@ -761,6 +762,7 @@ for cnt, strs in enumerate([0]):
 	else:
 		srcs_groups_l.append(srcs_init)
 
+	print('Begin local marching')
 	srcs_l = []
 	scale_depth_clustering = 0.2
 	for i in range(len(srcs_groups_l)):
@@ -802,6 +804,7 @@ for cnt, strs in enumerate([0]):
 	## This section is memory intensive if lots of sources are detected.
 	## Can "loop" over segements of sources, to keep the cost for manegable.
 
+	print('Begin sources refined')
 	srcs_refined_l = []
 	trv_out_srcs_l = []
 	Out_p_save_l = []
@@ -971,6 +974,7 @@ for cnt, strs in enumerate([0]):
 	
 	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach()
 
+	print('Begin competetive assignment')
 	iargsort = np.argsort(srcs_refined[:,3])
 	srcs_refined = srcs_refined[iargsort]
 	trv_out_srcs = trv_out_srcs[iargsort]
