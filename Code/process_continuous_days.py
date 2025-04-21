@@ -1359,8 +1359,11 @@ for cnt, strs in enumerate([0]):
 
 					srcs_retained.append(srcs_refined[arv_src_slice[srcs_active[j]]].reshape(1,-1))
 
-					p_assign = np.concatenate((unique_picks[arv_ind_slice[assignments[j][0]],:], cnt_src*np.ones(len(assignments[j][0])).reshape(-1,1)), axis = 1) ## Note: could concatenate ip_picks, if desired here, so all picks in Picks_P lists know the index of the absolute pick index.
-					s_assign = np.concatenate((unique_picks[arv_ind_slice[assignments[j][1]],:], cnt_src*np.ones(len(assignments[j][1])).reshape(-1,1)), axis = 1)
+					wp_val = wp_slice[srcs_active[j], assignments[j][0]]
+					ws_val = ws_slice[srcs_active[j], assignments[j][1]]
+					
+					p_assign = np.concatenate((unique_picks[arv_ind_slice[assignments[j][0]],:], cnt_src*np.ones(len(assignments[j][0])).reshape(-1,1), wp_val.reshape(-1,1)), axis = 1) ## Note: could concatenate ip_picks, if desired here, so all picks in Picks_P lists know the index of the absolute pick index.
+					s_assign = np.concatenate((unique_picks[arv_ind_slice[assignments[j][1]],:], cnt_src*np.ones(len(assignments[j][1])).reshape(-1,1), ws_val.reshape(-1,1)), axis = 1)
 					p_assign_perm = np.copy(p_assign)
 					s_assign_perm = np.copy(s_assign)
 					p_assign_perm[:,1] = perm_vec[p_assign_perm[:,1].astype('int')]
