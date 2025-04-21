@@ -618,7 +618,7 @@ for cnt, strs in enumerate([0]):
 
 	skip_quiescent_intervals = True
 	if skip_quiescent_intervals == True:
-		min_pick_window = min_required_picks ## Check windows with at least this many picks
+		min_pick_window = min_required_picks if min_required_picks != False else 1 ## Check windows with at least this many picks
 		times_ind_need = []
 		sc_inc = 0
 		## Find time window where < min_pick_window occur on the input set, and do not process
