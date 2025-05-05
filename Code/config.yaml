@@ -61,7 +61,7 @@ use_relative_1d_profile: True # If False, the 1D profile is treated as absolute;
 
 
 ## Set model hyper-parameters (these can scale with the application domain size)
-use_updated_model_definition: True
+use_updated_model_definition: False ## Note: switching this back
 scale_rel: 30000.0 # The normalization scale between source-source edges
 scale_t: 10.0 # The normalization scale during temporal attention
 eps: 15.0 # The normalization and clipping window during arrival embedding and source-station-arrival attention
