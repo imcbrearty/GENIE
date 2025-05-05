@@ -640,8 +640,8 @@ k_stations = 15
 # max_source_pair_distance_check = 10e3
 
 n_ver_catalog = 1
-ext_save = '/scratch/users/imcbrear/Ridgecrest/'
-ext_save_dir = 'DoubleDifferenceData/'
+ext_save = path_to_file
+ext_save_dir = ext_save + 'DoubleDifferenceData/'
 
 
 use_global_load = True
