@@ -567,11 +567,9 @@ Picks_S = []
 c1, c2 = 0, 0
 
 # n_ver_events = 1
-# ext_save =  # '/scratch/users/imcbrear/GLocation/'
 
 
 shutil.copyfile(path_to_file + '%s_catalog_ver_%d.hdf5'%(name_of_project, n_catalog_ver), path_to_file + '%s_catalog_ver_%s_copy_%d.hdf5'%(name_of_project, n_catalog_ver, argvs[1]))
-# shutil.copyfile(ext_save + 'merged_%s_catalog_all_ver_%d.hdf5'%(name_of_project, n_ver_events), '/scratch/users/imcbrear/GCalifornia/merged_catalog_central_ver_%d_copy_%d.hdf5'%(n_ver_events, int(argvs[1])))
 
 z = h5py.File(path_to_file + '%s_catalog_ver_%s_copy_%d.hdf5'%(name_of_project, n_catalog_ver, argvs[1]), 'r')
 keys_list = list(z.keys())

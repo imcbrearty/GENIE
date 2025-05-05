@@ -546,8 +546,8 @@ n_ver_save = 1
 
 inpt_sources = True
 use_double_diff = True
-use_absolute = True
-use_sta_corr = True
+use_absolute = False
+use_sta_corr = False
 use_calibration = False
 use_mask = False
 use_diff = False
@@ -555,8 +555,8 @@ use_memory = True
 
 
 n_ver_load_files = 1
-path_save = '/oak/stanford/groups/beroza/imcbrear/Ridgecrest/DoubleDifferenceModels/'
-path_data = '/scratch/users/imcbrear/Ridgecrest/DoubleDifferenceData/'
+path_save = path_to_file + 'DoubleDifferenceModels/'
+path_data = path_to_file + 'DoubleDifferenceData/'
 assert((use_double_diff + use_absolute + use_sta_corr + use_calibration + use_diff) > 0)
 
 m = GNN_Location(ftrns1, ftrns2, inpt_sources = inpt_sources, use_sta_corr = use_sta_corr, use_memory = use_memory, use_mask = use_mask, use_aggregation = False, use_attention = False, device = device).to(device)
@@ -628,7 +628,7 @@ scale_memory = torch.Tensor([5000.0, 5000.0, 5000.0, 5.0]).reshape(1,-1).to(devi
 
 ## Also measure moving residual of each source and pick
 
-load_model = False
+load_model = True
 if load_model == True:
 
 	n_restart_step = 16000
@@ -653,6 +653,7 @@ else:
 
 if use_diff == True:
 
+	## If using HypoDD format for loss function
 	f = open(path_to_file + 'dt.cc', 'r')
 	lines = f.readlines()
 	f.close()
@@ -789,6 +790,8 @@ for i in range(n_restart_step, n_epochs):
 		if use_sta_corr == False:
 			pred_c = torch.zeros(pred_c.shape).to(device)
 
+		# moi
+
 		if use_buffer == True:
 
 			## Only update buffers for sources with degree > min_degree, in this sub-graph?
@@ -901,6 +904,8 @@ for i in range(n_restart_step, n_epochs):
 			## Produces loss_sta
 
 		#### Compute double difference residual ######
+
+		# moi
 
 		# assert(node_types[A_src_in_sta[1][A_prod_src_src[:,ifind_edges]].cpu().detach().numpy()].max() == 1) ## Level two nodes are not compared against
 		# assert(Residuals[node_])
@@ -1028,6 +1033,8 @@ for i in range(n_restart_step, n_epochs):
 
 			weight_vec_phase = torch.ones(len(trgt_diff)).to(device)
 			weight_vec_phase[values_slice[:,0] == 1] = 0.5
+
+			# moi
 
 			loss_diff = (weight_vec_phase*values_slice[:,2]*torch.abs(trgt_diff - pred_diff)).mean()/n_batch # (0.5*loss_p_diff + 0.5*loss_s_diff)/n_batch			
 
