@@ -4,7 +4,7 @@ A graph neural based earthquake relocation framework
 
 ## Applying the model
 
-First run "build_initial_files.py" to convert the catalog earthquake data to one reference file
+First run "build_initial_files.py" to convert the catalog earthquake data to one reference file.
 
 Then run "build_subsets_of_paired_sources.py" to build the sets of training input graphs.
 
