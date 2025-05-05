@@ -1,5 +1,9 @@
 # Graph Double Difference (GraphDD)
 
+A graph double difference based earthquake relocation framework.
+
+## Applying the model
+
 First run "build_initial_files.py" to convert the catalog earthquaked data to one reference file
 
 Then run "build_subsets_of_paired_sources.py" to build the sets of training input graphs.
@@ -10,4 +14,6 @@ These scripts assume you have setup a GENIE environment for a study region of in
 
 Different training loss terms can be selected in "train_double_difference_model.py", and different graph construction parameters in "build_subsets_of_paired_sources.py".
 
-The method is described in "Double Difference Earthquake Location with Graph Neural Networks" (https://arxiv.org/abs/2410.19323v1)
+## Extra Information
+
+The method is described in https://arxiv.org/abs/2410.19323v1.
