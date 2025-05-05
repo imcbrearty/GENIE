@@ -546,8 +546,8 @@ n_ver_save = 1
 
 inpt_sources = True
 use_double_diff = True
-use_absolute = False
-use_sta_corr = False
+use_absolute = True
+use_sta_corr = True
 use_calibration = False
 use_mask = False
 use_diff = False
