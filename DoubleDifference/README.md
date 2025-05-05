@@ -1,6 +1,6 @@
 # Graph Double Difference (GraphDD)
 
-A graph neural based earthquake relocation framework.
+A graph neural based earthquake relocation framework
 
 ## Applying the model
 
