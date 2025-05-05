@@ -628,7 +628,7 @@ scale_memory = torch.Tensor([5000.0, 5000.0, 5000.0, 5.0]).reshape(1,-1).to(devi
 
 ## Also measure moving residual of each source and pick
 
-load_model = True
+load_model = False
 if load_model == True:
 
 	n_restart_step = 16000
