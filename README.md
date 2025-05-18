@@ -16,10 +16,6 @@ The config files can be used to adjust most parameters. Also, station, region, a
 
 Pre-trained GNN's, and pre-computed travel time fields will be supplied in the future, to faciliate easier use and allow users to only have to run steps (i-iii), and (vi). above. Running additional re-location techniques like NonLinLoc or HypoDD with the associated picks from this model can often improve event location accuracies.
 
-## Tutorials
-
-Look in Examples/Ferndale.zip for example trained models and applications to real data.
-
 ## Extra information
 
 The pre-print is given at https://arxiv.org/abs/2209.07086. The datasets used in this study are available in https://github.com/imcbrearty/GENIE/tree/main/BSSA.
@@ -27,3 +23,7 @@ The pre-print is given at https://arxiv.org/abs/2209.07086. The datasets used in
 For a description of a related GNN architecture applied to source localization from discrete pick datasets, see https://ieeexplore.ieee.org/document/9897468, https://arxiv.org/abs/2203.05144, https://arxiv.org/abs/2410.19323
 
 Preliminary results of the method are shown here, https://www.scec.org/meetings/2021/am/poster/227, https://www.scec.org/meetings/2023/am/poster/013
+
+## Tutorials
+
+Look in Examples/Ferndale.zip for example trained models and applications to real data.
