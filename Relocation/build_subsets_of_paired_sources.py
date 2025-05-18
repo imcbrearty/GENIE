@@ -631,7 +631,7 @@ use_radius_station_graph = False
 
 n_seed = 30
 n_neighbors = 30
-max_source_pair_distance = 2.5e3
+max_source_pair_distance = 10e3 # 2.5e3
 max_station_pair_distance = 30e3
 scale_input_offsets = 100e3
 k_stations = 15
