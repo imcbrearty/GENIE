@@ -1795,6 +1795,58 @@ for cnt, strs in enumerate([0]):
 
 		success_count = success_count + 1
 		file_save.close()
+
+		write_HypoDD_file = True
+		if write_HypoDD_file == True:
+			
+			mags = np.copy(mag_trv)
+			icheck_p = np.where([len(Picks_P[j]) > 0 for j in range(len(srcs_trv))])[0]
+			icheck_s = np.where([len(Picks_S[j]) > 0 for j in range(len(srcs_trv))])[0]
+			min_assoc_val = min([min([Picks_P[j][:,-1].min() for j in icheck_p]), min([Picks_S[j][:,-1].min() for j in icheck_s])])
+			max_assoc_val = max([max([Picks_P[j][:,-1].max() for j in icheck_p]), max([Picks_S[j][:,-1].max() for j in icheck_s])])
+			
+			max_assoc_val = max([1.0, max_assoc_val])
+			pval = np.polyfit([min_assoc_val, max_assoc_val], [0.5, 1.0], 1)
+			pmap = lambda x: np.polyval(pval, x)
+
+			# Why re-compute these
+			trv_out1 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
+			trv_out1_all = trv(torch.Tensor(locs).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
+			
+			trv_out2 = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
+			trv_out2_all = np.nan*np.zeros((srcs_trv.shape[0], locs.shape[0], 2))
+			ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
+			if len(ifind_not_nan) > 0:
+			    trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_trv[ifind_not_nan,0:3]).to(device)).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
+			    trv_out2_all[ifind_not_nan,:,:] = trv(torch.Tensor(locs).to(device), torch.Tensor(srcs_trv[ifind_not_nan,0:3]).to(device)).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
+			    
+			res_p = [trv_out2_all[j,Picks_P[j][:,1].astype('int'),0] - Picks_P[j][:,0] for j in range(len(srcs_trv))]
+			res_s = [trv_out2_all[j,Picks_S[j][:,1].astype('int'),1] - Picks_S[j][:,0] for j in range(len(srcs_trv))]
+			rms = np.array([np.linalg.norm(np.concatenate((res_p[j], res_s[j]), axis = 0))/np.sqrt(len(res_p[j]) + len(res_s[j])) for j in range(len(srcs_trv))])
+			
+			# ph2dt accepts hypocenter, followed by its travel time data in the following format:
+			#, YR, MO, DY, HR, MN, SC, LAT, LON, DEP, MAG, EH, EZ, RMS, ID
+
+			ext_save = path_to_file + 'Catalog' + seperator + '%d'%yr + seperator + '%s_ph2dt_file_%d_%d_%d_ver_%d.txt'%(name_of_project, date[0], date[1], date[2], n_save_ver)
+			
+			f = open(ext_save, 'w')
+			for i in range(len(srcs_trv)):
+			
+				t0 = UTCDateTime(date[0], date[1], date[2]) + srcs_trv[i,3]
+				sec_res = t0 - UTCDateTime(t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second)
+			
+				f.write('# %d %d %d %d %d %0.3f %0.4f %0.4f %0.3f %0.3f %0.3f %0.3f %0.3f %d \n'%(t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second + sec_res, srcs_trv[i,0], srcs_trv[i,1], -1.0*srcs_trv[i,2]/1000.0, mags[i], srcs_sigma[i]/1000.0, srcs_sigma[i]/1000.0, rms[i], i + 1))
+			
+				for j in range(len(Picks_P[i])):
+					f.write('%s %0.3f %0.2f %s \n'%(stas[int(Picks_P[i][j,1])], Picks_P[i][j,0] - srcs_trv[i,3], pmap(Picks_P[i][j,-1]), 'P'))
+			
+				for j in range(len(Picks_S[i])):
+					f.write('%s %0.3f %0.2f %s \n'%(stas[int(Picks_S[i][j,1])], Picks_S[i][j,0] - srcs_trv[i,3], pmap(Picks_S[i][j,-1]), 'S'))
+			
+			f.close()
+			
+			print('Saved HypoDD ph2dt file')
+			print(f)			
 		
 		print('Detected %d events'%(len(srcs_trv)))
 		print('Finished saving file %d %d %d'%(date[0], date[1], date[2]))
