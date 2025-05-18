@@ -16,6 +16,9 @@ The config files can be used to adjust most parameters. Also, station, region, a
 
 Pre-trained GNN's, and pre-computed travel time fields will be supplied in the future, to faciliate easier use and allow users to only have to run steps (i-iii), and (vi). above. Running additional re-location techniques like NonLinLoc or HypoDD with the associated picks from this model can often improve event location accuracies.
 
+## Tutorials
+
+Look in Examples/Ferndale.zip for example trained models and applications to real data.
 
 ## Extra information
 
