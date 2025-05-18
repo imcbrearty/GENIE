@@ -642,6 +642,8 @@ k_stations = 15
 n_ver_catalog = 1
 ext_save = path_to_file
 ext_save_dir = ext_save + 'DoubleDifferenceData/'
+if os.path.isdir(ext_save_dir) == False:
+    os.mkdir(ext_save_dir)
 
 
 use_global_load = True
