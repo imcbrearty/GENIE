@@ -1808,6 +1808,9 @@ for cnt, strs in enumerate([0]):
 			max_assoc_val = max([1.0, max_assoc_val])
 			pval = np.polyfit([min_assoc_val, max_assoc_val], [0.5, 1.0], 1)
 			pmap = lambda x: np.polyval(pval, x)
+			use_fixed_pmap = True
+			if use_fixed_pmap == True:
+				pmap = lambda x: x ## Do not apply transformation, so catalogs will be consistent between days
 
 			# Why re-compute these
 			trv_out1 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
@@ -1846,7 +1849,8 @@ for cnt, strs in enumerate([0]):
 			f.close()
 			
 			print('Saved HypoDD ph2dt file')
-			print(f)			
+			print(f)
+			print('\n')
 		
 		print('Detected %d events'%(len(srcs_trv)))
 		print('Finished saving file %d %d %d'%(date[0], date[1], date[2]))
