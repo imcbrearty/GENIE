@@ -57,7 +57,7 @@ n_jobs: 1 ## Number of jobs to do the travel time calculations (note: you must r
 
 save_dense_travel_time_data: False # Save the dense travel times (only necessary if not training travel time neural network)
 train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
-use_relative_1d_profile: True # If False, the 1D profile is treated as absolute; if True, the 1D profile is shifted so zero depth occurs at each stations elevation
+use_relative_1d_profile: False # If False, the 1D profile is treated as absolute; if True, the 1D profile is shifted so zero depth occurs at each stations elevation
 
 
 ## Set model hyper-parameters (these can scale with the application domain size)
