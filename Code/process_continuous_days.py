@@ -438,8 +438,8 @@ if compute_magnitudes == True:
 		n_mag_ver = 1
 		mags_supp = np.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d_supplemental.npz'%n_mag_ver)
 		mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
-		mags = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device)
-		mags.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
+		Mag = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device)
+		Mag.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
 		loaded_mag_model = True
 		print('Will compute magnitudes since a magnitude model was loaded')
 	
@@ -1635,62 +1635,83 @@ for cnt, strs in enumerate([0]):
 	# min_log_amplitude_val = -2.0 ## Choose this value to ignore very small amplitudes
 	if (compute_magnitudes == True)*(loaded_mag_model == True):
 		
+		# mag_r = []
+		# mag_trv = []
+		# quant_range = [0.1, 0.9]
+	
+		# for i in range(srcs_refined.shape[0]):
+
+		# 	if (len(Picks_P[i]) + len(Picks_S[i])) > 0: # Does this fail on one pick?
+
+		# 		ind_p = torch.Tensor(Picks_P[i][:,1]).long()
+		# 		ind_s = torch.Tensor(Picks_S[i][:,1]).long()
+		# 		log_amp_p = torch.Tensor(np.log10(Picks_P[i][:,2]))
+		# 		log_amp_s = torch.Tensor(np.log10(Picks_S[i][:,2]))
+
+		# 		src_r_val = torch.Tensor(srcs_refined[i,0:3].reshape(-1,3))
+		# 		src_trv_val = torch.Tensor(srcs_trv[i,0:3].reshape(-1,3))
+
+		# 		ind_val = torch.cat((ind_p, ind_s), dim = 0)
+		# 		log_amp_val = torch.cat((log_amp_p, log_amp_s), dim = 0)
+
+		# 		log_amp_val[log_amp_val < min_log_amplitude_val] = -torch.Tensor([np.inf]) # This measurments are artifacts
+
+		# 		phase_val = torch.Tensor(np.concatenate((np.zeros(len(Picks_P[i])), np.ones(len(Picks_S[i]))), axis = 0)).long()
+
+		# 		inot_zero = np.where(np.isinf(log_amp_val.cpu().detach().numpy()) == 0)[0]
+		# 		if len(inot_zero) == 0:
+		# 			mag_r.append(np.nan)
+		# 			mag_trv.append(np.nan)
+		# 			continue
+
+		# 		pred_r_val = mags(torch.Tensor(srcs_refined[i,0:3]).reshape(1,-1), ind_val[inot_zero], log_amp_val[inot_zero], phase_val[inot_zero]).cpu().detach().numpy().reshape(-1)
+		# 		pred_trv_val = mags(torch.Tensor(srcs_trv[i,0:3]).reshape(1,-1), ind_val[inot_zero], log_amp_val[inot_zero], phase_val[inot_zero]).cpu().detach().numpy().reshape(-1)
+
+
+		# 		if len(ind_val) > 3:
+		# 			qnt_vals = np.quantile(pred_r_val, [quant_range[0], quant_range[1]])
+		# 			iwhere_val = np.where((pred_r_val > qnt_vals[0])*(pred_r_val < qnt_vals[1]))[0]
+		# 			mag_r.append(np.median(pred_r_val[iwhere_val]))
+
+		# 			qnt_vals = np.quantile(pred_trv_val, [quant_range[0], quant_range[1]])
+		# 			iwhere_val = np.where((pred_trv_val > qnt_vals[0])*(pred_trv_val < qnt_vals[1]))[0]
+		# 			mag_trv.append(np.median(pred_trv_val[iwhere_val]))
+
+		# 		else:
+
+		# 			mag_r.append(np.median(pred_r_val))
+		# 			mag_trv.append(np.median(pred_trv_val))
+
+		# 	else:
+
+		# 		# No picks to estimate magnitude.
+		# 		mag_r.append(np.nan)
+		# 		mag_trv.append(np.nan)
+
+		# mag_r = np.hstack(mag_r)
+		# mag_trv = np.hstack(mag_trv)
+
 		mag_r = []
 		mag_trv = []
-		quant_range = [0.1, 0.9]
-	
+		
 		for i in range(srcs_refined.shape[0]):
+		
+			ind_p, log_amp_p = Picks_P[i][:,1].astype('int'), np.log10(Picks_P[i][:,2])
+			ind_s, log_amp_s = Picks_S[i][:,1].astype('int'), np.log10(Picks_S[i][:,2])
 
-			if (len(Picks_P[i]) + len(Picks_S[i])) > 0: # Does this fail on one pick?
-
-				ind_p = torch.Tensor(Picks_P[i][:,1]).long()
-				ind_s = torch.Tensor(Picks_S[i][:,1]).long()
-				log_amp_p = torch.Tensor(np.log10(Picks_P[i][:,2]))
-				log_amp_s = torch.Tensor(np.log10(Picks_S[i][:,2]))
-
-				src_r_val = torch.Tensor(srcs_refined[i,0:3].reshape(-1,3))
-				src_trv_val = torch.Tensor(srcs_trv[i,0:3].reshape(-1,3))
-
-				ind_val = torch.cat((ind_p, ind_s), dim = 0)
-				log_amp_val = torch.cat((log_amp_p, log_amp_s), dim = 0)
-
-				log_amp_val[log_amp_val < min_log_amplitude_val] = -torch.Tensor([np.inf]) # This measurments are artifacts
-
-				phase_val = torch.Tensor(np.concatenate((np.zeros(len(Picks_P[i])), np.ones(len(Picks_S[i]))), axis = 0)).long()
-
-				inot_zero = np.where(np.isinf(log_amp_val.cpu().detach().numpy()) == 0)[0]
-				if len(inot_zero) == 0:
-					mag_r.append(np.nan)
-					mag_trv.append(np.nan)
-					continue
-
-				pred_r_val = mags(torch.Tensor(srcs_refined[i,0:3]).reshape(1,-1), ind_val[inot_zero], log_amp_val[inot_zero], phase_val[inot_zero]).cpu().detach().numpy().reshape(-1)
-				pred_trv_val = mags(torch.Tensor(srcs_trv[i,0:3]).reshape(1,-1), ind_val[inot_zero], log_amp_val[inot_zero], phase_val[inot_zero]).cpu().detach().numpy().reshape(-1)
-
-
-				if len(ind_val) > 3:
-					qnt_vals = np.quantile(pred_r_val, [quant_range[0], quant_range[1]])
-					iwhere_val = np.where((pred_r_val > qnt_vals[0])*(pred_r_val < qnt_vals[1]))[0]
-					mag_r.append(np.median(pred_r_val[iwhere_val]))
-
-					qnt_vals = np.quantile(pred_trv_val, [quant_range[0], quant_range[1]])
-					iwhere_val = np.where((pred_trv_val > qnt_vals[0])*(pred_trv_val < qnt_vals[1]))[0]
-					mag_trv.append(np.median(pred_trv_val[iwhere_val]))
-
-				else:
-
-					mag_r.append(np.median(pred_r_val))
-					mag_trv.append(np.median(pred_trv_val))
-
-			else:
-
-				# No picks to estimate magnitude.
-				mag_r.append(np.nan)
-				mag_trv.append(np.nan)
+			mag_p = Mag(torch.Tensor(ind_p).long().to(device), torch.Tensor(srcs_refined[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_p).to(device), torch.zeros(len(ind_p)).long().to(device))
+			mag_s = Mag(torch.Tensor(ind_s).long().to(device), torch.Tensor(srcs_refined[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_s).to(device), torch.ones(len(ind_s)).long().to(device))
+			mag_pred = np.median(np.concatenate((mag_p.cpu().detach().numpy().reshape(-1), mag_s.cpu().detach().numpy().reshape(-1)), axis = 0))
+			mag_r.append(mag_pred)
+			
+			mag_p = Mag(torch.Tensor(ind_p).long().to(device), torch.Tensor(srcs_trv[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_p).to(device), torch.zeros(len(ind_p)).long().to(device))
+			mag_s = Mag(torch.Tensor(ind_s).long().to(device), torch.Tensor(srcs_trv[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_s).to(device), torch.ones(len(ind_s)).long().to(device))
+			mag_pred = np.median(np.concatenate((mag_p.cpu().detach().numpy().reshape(-1), mag_s.cpu().detach().numpy().reshape(-1)), axis = 0))
+			mag_trv.append(mag_pred)
 
 		mag_r = np.hstack(mag_r)
 		mag_trv = np.hstack(mag_trv)
-
+	
 	else:
 
 		mag_r = np.nan*np.ones(srcs_trv.shape[0])
