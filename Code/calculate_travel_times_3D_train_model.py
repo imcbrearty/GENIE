@@ -294,10 +294,15 @@ if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.np
 	z = np.load(path_to_file + 'surface_elevation.npz')
 	Points = z['Points']
 	z.close()
+
+	## Concatenate station elevations
+	Points = np.concatenate((Points, locs), axis = 0)
 	
 	## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
 	tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
-	x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
+	x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg/5.0, d_deg/5.0), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg/5.0, d_deg/5.0)
+
+	
 	x11_s, x12_s = np.meshgrid(x1_s, x2_s)
 	surface_profile = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
 	ip_match = tree.query(ftrns1(np.concatenate((surface_profile, np.zeros((len(surface_profile),1))), axis = 1)))
@@ -310,7 +315,7 @@ if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.np
 		np.savez_compressed(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project, surface_profile = surface_profile)
 		
 	## Check if stations are beneath surface
-	tol_elev_val = 100.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
+	tol_elev_val = 150.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
 	tree = cKDTree(ftrns1(surface_profile))
 	unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
 	dist_near = tree.query(ftrns1(locs))[0]
