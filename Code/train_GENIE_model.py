@@ -89,7 +89,7 @@ min_magnitude_ref = train_config['min_magnitude_ref'] # 1.5
 percentile_threshold_ref = train_config['percentile_threshold_ref'] # 0.1
 n_reference_clusters = train_config['n_reference_clusters'] # 10000 ## The amount of "quasi-uniiform" nodes to obtain for representing the source catalog distribution
 n_frac_reference_catalog = train_config['n_frac_reference_catalog'] # 0.8 ## The amount of sources to simulate from the reference catalog coordinates compared to background
-
+use_amplitudes = train_config['use_amplitudes']
 
 ## Prediction params
 kernel_sig_t = train_config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
@@ -143,6 +143,14 @@ if (load_training_data == True) or (build_training_data == True):
 if use_topography == True:
 	surface_profile = np.load(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project)['surface_profile'] # (os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == True)
 	tree_surface = cKDTree(surface_profile[:,0:2])
+
+if use_amplitudes == True:
+	n_mag_ver = 1
+	mags_supp = np.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d_supplemental.npz'%n_mag_ver)
+	mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
+	Mag = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
+	Mag.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
+	print('Will use amplitudes since a magnitude model was loaded')
 
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
@@ -319,7 +327,7 @@ else:
 use_preferential_sampling = train_config['use_preferential_sampling']
 use_shallow_sources = train_config['use_shallow_sources']
 use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
-training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
+training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts, use_amplitudes]
 
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, return_only_data = False):
 
@@ -331,7 +339,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	n_spc_query, n_src_query = training_params
 	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias = training_params_2
-	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts = training_params_3
+	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts, use_amplitudes = training_params_3
 
 	assert(np.floor(n_sta_range[0]*locs.shape[0]) > k_sta_edges)
 
@@ -500,7 +508,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	arrivals = np.delete(arrivals, idel, axis = 0)
 	n_events = len(src_times)
-
+	
+	
 	icoda = np.where(np.random.rand(arrivals.shape[0]) < coda_rate)[0]
 	if len(icoda) > 0:
 		false_coda_arrivals = np.random.rand(len(icoda))*(coda_win[1] - coda_win[0]) + coda_win[0] + arrivals[icoda,0] + arrivals[icoda,3]
@@ -554,6 +563,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		iz = np.where(arrivals[:,4] >= 0)[0]
 		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 
+	if use_amplitudes == True:
+		## Compute amplitudes of picks
+		itrue = np.where(arrivals[:,2] > -1)[0] ## Real picks
+		ifalse = np.where(arrivals[:,2] == -1)[0] ## False picks
+	
 	
 	## Check which sources are active
 	source_tree_indices = cKDTree(arrivals[:,2].reshape(-1,1))
