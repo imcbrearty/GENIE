@@ -83,6 +83,8 @@ percentile_threshold_ref: 0.00001 ## Take all areas of > kernel Gaussian estimat
 n_reference_clusters: 10000 ## The amount of "quasi-uniiform" nodes to obtain for representing the source catalog distribution
 n_frac_reference_catalog: 0.8 ## The amount of sources to simulate from the reference catalog coordinates compared to background
 
+## Amplitudes
+use_amplitudes : False
 
 ## Extra dataset parameters
 build_training_data : False ## Pre-build training data (rather than building inside training loop)
