@@ -563,10 +563,13 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		iz = np.where(arrivals[:,4] >= 0)[0]
 		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 
+	## Need to calibrate the magnitude-distance tradeoff
 	if use_amplitudes == True:
 		## Compute amplitudes of picks
 		itrue = np.where(arrivals[:,2] > -1)[0] ## Real picks
 		ifalse = np.where(arrivals[:,2] == -1)[0] ## False picks
+		log_amp_p = ## 
+		log_amp_s = ## 
 	
 	
 	## Check which sources are active
