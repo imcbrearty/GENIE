@@ -150,6 +150,10 @@ if use_amplitudes == True:
 	mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
 	Mag = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
 	Mag.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
+	dist_supp = np.load(path_to_file + 'Grids' + seperator + 'distance_magnitude_model_ver_%d.npz'%(n_mag_ver))
+	poly_dist_p, poly_dist_s, min_dist = dist_supp['dist_p'], dist_supp['dist_s'], dist_supp['min_dist']
+	pdist_p = lambda mag: np.maximum(min_dist[0], np.polyval(poly_dist_p, mag))
+	pdist_s = lambda mag: np.maximum(min_dist[1], np.polyval(poly_dist_s, mag))
 	print('Will use amplitudes since a magnitude model was loaded')
 
 ## Load specific subsets of stations to train on in addition to random
