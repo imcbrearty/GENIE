@@ -1489,7 +1489,7 @@ class Magnitude(nn.Module):
 		self.zvec = torch.Tensor([1.0,1.0,0.0]).reshape(1,-1).to(device)
 
 	## Need to double check these routines
-	def log_amplitudes(self, ind, src, mag, phase):
+	def log_amplitudes(self, ind, src, mag, phase, return_corrections = False):
 
 		## Input src: n_srcs x 3;
 		## ind: indices into absolute locs array (can repeat, for phase types)
@@ -1510,9 +1510,15 @@ class Magnitude(nn.Module):
 		# log_amp = mag*torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device)) + self.epicenter_spatial_coef[phase]*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
 		log_amp = mag*torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device)) - self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
 
-		return log_amp
+		if return_corrections == True:
 
-	def train(self, ind, src, mag, phase):
+			return log_amp, bias
+		
+		else:
+		
+			return log_amp
+
+	def train(self, ind, src, mag, phase, return_corrections = False):
 
 		## Input src: n_srcs x 3;
 		## ind: indices into absolute locs array (can repeat, for phase types)
@@ -1537,7 +1543,13 @@ class Magnitude(nn.Module):
 		# log_amp = mag*torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device)) + self.epicenter_spatial_coef[phase]*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
 		log_amp = mag*torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device)) - self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
 
-		return log_amp
+		if return_corrections == True:
+
+			return log_amp, bias
+		
+		else:
+		
+			return log_amp
 	
 	## Note, closer between amplitudes and forward
 	def forward(self, ind, src, log_amp, phase):
