@@ -909,10 +909,14 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		## Then, can apply the Magnitude model here to reduce the amplitude measurements to magnitude features on the Cartesian product
 		zero_vec = torch.zeros(len(ind_select)).long().to(device)
 		one_vec = torch.ones(len(ind_select)).long().to(device)
-		mag_pred_p = Mag.mag(torch.Tensor(Trv_subset_p[ind_select,1].astype('int')).long().to(device), torch.Tensor(x_grids[Grid_indices[i]][Trv_subset_p[ind_select,2].astype('int')]).to(device), torch.Tensor(log_amp_p_val[ind_select]).to(device), zero_vec).cpu().detach().numpy()
-		mag_pred_s = Mag.mag(torch.Tensor(Trv_subset_s[ind_select,1].astype('int')).long().to(device), torch.Tensor(x_grids[Grid_indices[i]][Trv_subset_s[ind_select,2].astype('int')]).to(device), torch.Tensor(log_amp_s_val[ind_select]).to(device), one_vec).cpu().detach().numpy()
-		mag_pred_p1 = Mag.mag(torch.Tensor(Trv_subset_p[ind_select,1].astype('int')).long().to(device), torch.Tensor(x_grids[Grid_indices[i]][Trv_subset_p[ind_select,2].astype('int')]).to(device), torch.Tensor(log_amp_p1_val[ind_select]).to(device), zero_vec).cpu().detach().numpy()
-		mag_pred_s1 = Mag.mag(torch.Tensor(Trv_subset_s[ind_select,1].astype('int')).long().to(device), torch.Tensor(x_grids[Grid_indices[i]][Trv_subset_s[ind_select,2].astype('int')]).to(device), torch.Tensor(log_amp_s1_val[ind_select]).to(device), one_vec).cpu().detach().numpy()
+		p_index = torch.Tensor(Trv_subset_p[ind_select,1].astype('int')).long().to(device)
+		s_index = torch.Tensor(Trv_subset_s[ind_select,1].astype('int')).long().to(device)
+		src_p = torch.Tensor(x_grids[grid_select][Trv_subset_p[ind_select,2].astype('int')]).to(device)
+		src_s = torch.Tensor(x_grids[grid_select][Trv_subset_s[ind_select,2].astype('int')]).to(device)
+		mag_pred_p = Mag.mag(p_index, src_p, torch.Tensor(log_amp_p_val[ind_select]).to(device), zero_vec).cpu().detach().numpy()
+		mag_pred_s = Mag.mag(s_index, src_s, torch.Tensor(log_amp_s_val[ind_select]).to(device), one_vec).cpu().detach().numpy()
+		mag_pred_p1 = Mag.mag(p_index, src_p, torch.Tensor(log_amp_p1_val[ind_select]).to(device), zero_vec).cpu().detach().numpy()
+		mag_pred_s1 = Mag.mag(s_index, src_s, torch.Tensor(log_amp_s1_val[ind_select]).to(device), one_vec).cpu().detach().numpy()
 		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 5] = mag_pred_p/scale_mag
 		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 6] = mag_pred_s/scale_mag
 		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 7] = mag_pred_p1/scale_mag
