@@ -1632,8 +1632,8 @@ for i in range(n_restart_step, n_epochs):
 			tq_sample[ifind_src] = torch.Tensor(lp_srcs[i0][ifind_src,3]).to(device)
 
 		if use_phase_types == False:
-			Inpts[i0][:,2::] = 0.0 ## Phase type informed features zeroed out
-			Masks[i0][:,2::] = 0.0
+			Inpts[i0][:,2:4] = 0.0 ## Phase type informed features zeroed out
+			Masks[i0][:,2:4] = 0.0
 
 		# Pre-process tensors for Inpts and Masks
 		input_tensor_1 = torch.Tensor(Inpts[i0]).to(device) # .reshape(-1, 4)
