@@ -817,7 +817,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ip_s_pad = ip_s.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
 	ip_p_pad = np.minimum(np.maximum(ip_p_pad, 0), n_arvs - 1) 
 	ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
-	pdb.set_trace()
+	# pdb.set_trace()
 
 	## Can add sign information here
 	diff_rel_t = np.abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0])
@@ -889,6 +889,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	lp_meta = []
 	lp_srcs = []
 
+	scale_mag = 5.0
 	thresh_mask = 0.01
 	for i in range(n_batch):
 		# Create inputs and mask
@@ -903,11 +904,23 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
 		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
 		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
-		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
+		
+		## If this is subsetting source nodes (note, check which source graph is being used) and station indices (check, absolute station indices)
+		## Then, can apply the Magnitude model here to reduce the amplitude measurements to magnitude features on the Cartesian product
+		zero_vec = torch.zeros(len(ind_select)).long().to(device)
+		one_vec = torch.ones(len(ind_select)).long().to(device)
+		mag_pred_p = Mag.mag(torch.Tensor(Trv_subset_p[ind_select,1].astype('int')).long().to(device), torch.Tensor(x_grids[Grid_indices[i]][Trv_subset_p[ind_select,2].astype('int')]).to(device), torch.Tensor(log_amp_p_val[ind_select]).to(device), zero_vec).cpu().detach().numpy()
+		mag_pred_s = Mag.mag(torch.Tensor(Trv_subset_s[ind_select,1].astype('int')).long().to(device), torch.Tensor(x_grids[Grid_indices[i]][Trv_subset_s[ind_select,2].astype('int')]).to(device), torch.Tensor(log_amp_s_val[ind_select]).to(device), one_vec).cpu().detach().numpy()
+		mag_pred_p1 = Mag.mag(torch.Tensor(Trv_subset_p[ind_select,1].astype('int')).long().to(device), torch.Tensor(x_grids[Grid_indices[i]][Trv_subset_p[ind_select,2].astype('int')]).to(device), torch.Tensor(log_amp_p1_val[ind_select]).to(device), zero_vec).cpu().detach().numpy()
+		mag_pred_s1 = Mag.mag(torch.Tensor(Trv_subset_s[ind_select,1].astype('int')).long().to(device), torch.Tensor(x_grids[Grid_indices[i]][Trv_subset_s[ind_select,2].astype('int')]).to(device), torch.Tensor(log_amp_s1_val[ind_select]).to(device), one_vec).cpu().detach().numpy()
+		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 5] = mag_pred_p/scale_mag
+		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 6] = mag_pred_s/scale_mag
+		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 7] = mag_pred_p1/scale_mag
+		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 8] = mag_pred_s1/scale_mag
 
 		trv_out = x_grids_trv[grid_select][:,sta_select,:] ## Subsetting, into sliced indices.
 		Inpts.append(inpt[:,sta_select,:]) # sub-select, subset of stations.
-		Masks.append(1.0*(inpt[:,sta_select,:] > thresh_mask))
+		Masks.append(1.0*(inpt[:,sta_select,0:4] > thresh_mask))
 		Trv_out.append(trv_out)
 		Locs.append(locs[sta_select])
 		X_fixed.append(x_grids[grid_select])
@@ -1758,8 +1771,9 @@ for i in range(n_restart_step, n_epochs):
 			tq_sample[ifind_src] = torch.Tensor(lp_srcs[i0][ifind_src,3]).to(device)
 
 		if use_phase_types == False:
-			Inpts[i0][:,2:4] = 0.0 ## Phase type informed features zeroed out
-			Masks[i0][:,2:4] = 0.0
+			izero = np.array([2,3,6,7]) ## Phase type informed features
+			Inpts[i0][:,izero] = 0.0 ## Phase type informed features zeroed out
+			Masks[i0][:,2::] = 0.0
 
 		# Pre-process tensors for Inpts and Masks
 		input_tensor_1 = torch.Tensor(Inpts[i0]).to(device) # .reshape(-1, 4)
