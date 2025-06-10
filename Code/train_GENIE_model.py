@@ -23,6 +23,7 @@ from torch_scatter import scatter
 from numpy.matlib import repmat
 import pathlib
 import glob
+import pdb
 import sys
 
 from utils import *
@@ -143,18 +144,6 @@ if (load_training_data == True) or (build_training_data == True):
 if use_topography == True:
 	surface_profile = np.load(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project)['surface_profile'] # (os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == True)
 	tree_surface = cKDTree(surface_profile[:,0:2])
-
-if use_amplitudes == True:
-	n_mag_ver = 1
-	mags_supp = np.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d_supplemental.npz'%n_mag_ver)
-	mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
-	Mag = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
-	Mag.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
-	dist_supp = np.load(path_to_file + 'Grids' + seperator + 'distance_magnitude_model_ver_%d.npz'%(n_mag_ver))
-	poly_dist_p, poly_dist_s, min_dist = dist_supp['dist_p'], dist_supp['dist_s'], dist_supp['min_dist']
-	pdist_p = lambda mag: np.maximum(min_dist[0], np.polyval(poly_dist_p, mag))
-	pdist_s = lambda mag: np.maximum(min_dist[1], np.polyval(poly_dist_s, mag))
-	print('Will use amplitudes since a magnitude model was loaded')
 
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
@@ -292,7 +281,74 @@ if use_reference_spatial_density == True:
 		
 		if load_reference_density == True:
 			np.savez_compressed(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver, srcs_ref = srcs_ref)
-						      
+
+if use_amplitudes == True:
+	n_mag_ver = 1
+	mags_supp = np.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d_supplemental.npz'%n_mag_ver)
+	mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
+	Mag = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
+	Mag.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
+	mags_supp.close()
+
+	use_softplus = True
+	dist_supp = np.load(path_to_file + 'Grids' + seperator + 'distance_magnitude_model_ver_%d.npz'%(n_mag_ver))
+	if use_softplus == False:
+		poly_dist_p, poly_dist_s, min_dist = dist_supp['dist_p'], dist_supp['dist_s'], dist_supp['min_dist']
+		pdist_p = lambda mag: np.maximum(min_dist[0], np.polyval(poly_dist_p, mag))
+		pdist_s = lambda mag: np.maximum(min_dist[1], np.polyval(poly_dist_s, mag))
+	else:
+		dist_params = dist_supp['params']
+		pdist_p = lambda mag: dist_params[4]*(1.0/dist_params[1])*np.log(1.0 + np.exp(dist_params[1]*mag)) + dist_params[0]
+		pdist_s = lambda mag: dist_params[4]*(1.0/dist_params[3])*np.log(1.0 + np.exp(dist_params[3]*mag)) + dist_params[2]
+	mag_vals = np.arange(-3.0, 10.0, 0.01)
+	dist_vals_p = pdist_p(mag_vals)
+	dist_vals_s = pdist_s(mag_vals)
+	dist_supp.close()
+	print('Will use amplitudes since a magnitude model was loaded')
+
+	## Load emperical distribution of pick amplitudes
+	n_rand_choose = 100
+	st_load = glob.glob(path_to_file + 'Picks/19*') # Load years 1900's
+	st_load.extend(glob.glob(path_to_file + 'Picks/20*')) # Load years 2000's
+	iarg = np.argsort([int(st_load[i].split(seperator)[-1]) for i in range(len(st_load))])
+	st_load = [st_load[i] for i in iarg]
+
+	st_load_l = []
+	for i in range(len(st_load)):
+		# st = glob.glob(st_load[i] + seperator + '*ver_%d.npz'%(n_ver_picks))
+		st = glob.glob(st_load[i] + seperator + '*ver_*.npz')
+		if len(st) > 0:
+			st_load_l.extend(st)
+	iperm = np.random.permutation(len(st_load_l))
+	iperm = iperm[0:np.minimum(n_rand_choose, len(st_load_l))]
+	st_load = [st_load_l[i] for i in iperm]
+
+	log_amp_emperical = []
+	log_amp_ind_emperical = []
+	q_range_emperical = np.linspace(0, 1, 30)
+	n_range_emperical = len(q_range_emperical)
+	log_amp_sta_distb = []
+	for i in range(len(st_load)):
+		z = np.load(st_load[i])
+		P = z['P']
+		z.close()
+		log_amp_emperical.append(np.log10(P[:,2]))
+		log_amp_ind_emperical.append(P[:,1].astype('int'))
+	log_amp_emperical = np.hstack(log_amp_emperical)
+	log_amp_ind_emperical = np.hstack(log_amp_ind_emperical)
+	tree_ind = cKDTree(log_amp_ind_emperical.reshape(-1,1))
+	log_amp_inds = tree_ind.query_ball_point(np.arange(len(locs)).reshape(-1,1), r = 0)
+	for i in range(len(locs)):
+		if len(log_amp_inds[i]) == 0:
+			log_amp_sta_distb.append(np.quantile(log_amp_emperical, q_range_emperical).reshape(1,-1))
+		else:
+			log_amp_sta_distb.append(np.quantile(log_amp_emperical[log_amp_inds[i]], q_range_emperical).reshape(1,-1))
+	log_amp_sta_distb = np.vstack(log_amp_sta_distb)
+	log_amp_sta_distb_diff = np.diff(log_amp_sta_distb, axis = 1)
+
+	# days = days[iarg]
+	# print('Loading %d detected files for comparisons'%len(days))
+
 ## Training synthic data parameters
 
 ## Training params list 2
@@ -399,6 +455,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	
 	n_src = len(src_times)
 	src_positions = np.random.rand(n_src, 3)*scale_x + offset_x
+
+	## Will overwrite these magnitudes
 	src_magnitude = np.random.rand(n_src)*7.0 - 1.0 # magnitudes, between -1.0 and 7 (uniformly)
 
 	if use_reference_spatial_density == True:
@@ -460,7 +518,22 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			dist_thresh = beta(2,5).rvs(size = n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
 			ireplace = np.random.choice(len(dist_thresh), size = int(0.15*len(dist_thresh)), replace = False)
 			dist_thresh[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-	
+		
+	if use_amplitudes == True:
+		mag_ratio = [0.75, 1.25]
+		## Need to "match" these distances to the magnitude scale
+		## One option: overwrite the distance sampling to sample realistic distances
+		## for a given magnitude. And specify the magnitude sampling distribution
+		## Or, use the current distance values, and find a corresponding magnitude (perhaps
+		## with noise)
+		# pdb.set_trace()
+		## First approach, we estimate magnitude from the distance value, and add a pertubation
+		imag1 = np.argmin(np.abs(dist_thresh - dist_vals_p.reshape(1,-1)), axis = 1)
+		imag2 = np.argmin(np.abs(dist_thresh - dist_vals_s.reshape(1,-1)), axis = 1)
+		mag_scale = np.random.rand(len(dist_thresh))*(mag_ratio[1] - mag_ratio[0]) + mag_ratio[0]
+		src_magnitude = mag_scale*(0.5*mag_vals[imag1] + 0.5*mag_vals[imag2])
+
+
 	# create different distance dependent thresholds.
 	dist_thresh_p = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None] # Increased sig from 20e3 to 25e3 # Decreased to 10 km
 	dist_thresh_s = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None]
@@ -569,11 +642,36 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	## Need to calibrate the magnitude-distance tradeoff
 	if use_amplitudes == True:
+		ratio_amplitudes = [0.5, 1.5] ## Per source (correlated noise)
+		ratio_amplitudes_sta = [0.5, 1.5] ## Per station (iid noise)
+		ratio_phases = [0.75, 1.25]
 		## Compute amplitudes of picks
-		itrue = np.where(arrivals[:,2] > -1)[0] ## Real picks
+		itrue_p = np.where((arrivals[:,2] > -1)*(arrivals[:,4] == 0))[0] ## Real picks
+		itrue_s = np.where((arrivals[:,2] > -1)*(arrivals[:,4] == 1))[0] ## Real picks
 		ifalse = np.where(arrivals[:,2] == -1)[0] ## False picks
-		log_amp_p = ## 
-		log_amp_s = ## 
+
+		log_amp_p = Mag.train(torch.Tensor(arrivals[itrue_p,1].astype('int')).long().to(device), torch.Tensor(src_positions[arrivals[itrue_p,2].astype('int'),0:3]).to(device), torch.Tensor(src_magnitude[arrivals[itrue_p,2].astype('int')]).to(device), torch.zeros(len(itrue_p)).long().to(device)).cpu().detach().numpy() # 1## 
+		log_amp_s = Mag.train(torch.Tensor(arrivals[itrue_s,1].astype('int')).long().to(device), torch.Tensor(src_positions[arrivals[itrue_s,2].astype('int'),0:3]).to(device), torch.Tensor(src_magnitude[arrivals[itrue_s,2].astype('int')]).to(device), torch.ones(len(itrue_s)).long().to(device)).cpu().detach().numpy() # 1## 
+		per_source_scale = np.random.rand(n_src)*(ratio_amplitudes[1] - ratio_amplitudes[0]) + ratio_amplitudes[0]
+		per_source_scale_p = np.random.rand(n_src)*(ratio_phases[1] - ratio_phases[0]) + ratio_phases[0]
+		per_source_scale_s = np.random.rand(n_src)*(ratio_phases[1] - ratio_phases[0]) + ratio_phases[0]
+		per_pick_scale_p = np.random.rand(len(itrue_p))*(ratio_amplitudes_sta[1] - ratio_amplitudes_sta[0]) + ratio_amplitudes_sta[0]
+		per_pick_scale_s = np.random.rand(len(itrue_s))*(ratio_amplitudes_sta[1] - ratio_amplitudes_sta[0]) + ratio_amplitudes_sta[0]
+
+		## Add noise; note, b = log(a); y = log(ac) = log(a) + log(c) = b + log(c)
+		log_amp_p = log_amp_p + np.log10(per_pick_scale_p) + np.log10(per_source_scale[arrivals[itrue_p,2].astype('int')]) + np.log10(per_source_scale_p[arrivals[itrue_p,2].astype('int')])
+		log_amp_s = log_amp_s + np.log10(per_pick_scale_s) + np.log10(per_source_scale[arrivals[itrue_s,2].astype('int')]) + np.log10(per_source_scale_s[arrivals[itrue_s,2].astype('int')])
+		irand_quantile = np.random.choice(n_range_emperical - 1, size = len(ifalse))
+		log_amp_false = log_amp_sta_distb[arrivals[ifalse,1].astype('int'), irand_quantile] + np.random.rand(len(ifalse))*log_amp_sta_distb_diff[arrivals[ifalse,1].astype('int'), irand_quantile]
+		log_amp = np.nan*np.ones(len(arrivals))
+		log_amp[itrue_p] = log_amp_p
+		log_amp[itrue_s] = log_amp_s
+		log_amp[ifalse] = log_amp_false
+		assert(np.isnan(log_amp).sum() == 0)
+
+		# mag_p = Mag.mag(torch.Tensor(arrivals[itrue_p,1].astype('int')).long().to(device), torch.Tensor(src_positions[arrivals[itrue_p,2].astype('int'),0:3]).to(device), torch.Tensor(log_amp_p).to(device), torch.zeros(len(itrue_p)).long().to(device))
+		# mag_s = Mag.mag(torch.Tensor(arrivals[itrue_s,1].astype('int')).long().to(device), torch.Tensor(src_positions[arrivals[itrue_s,2].astype('int'),0:3]).to(device), torch.Tensor(log_amp_s).to(device), torch.ones(len(itrue_s)).long().to(device))
+		# pdb.set_trace()
 	
 	
 	## Check which sources are active
@@ -635,6 +733,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if len(lp_concat) == 0:
 		lp_concat = np.array([0]) # So it doesnt fail?
 	arrivals_select = arrivals[lp_concat]
+	log_amp_select = log_amp[lp_concat]
 	phase_observed_select = phase_observed[lp_concat]
 
 	Trv_subset_p = []
@@ -693,12 +792,14 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	arrivals_offset = np.hstack([-time_samples[i] + i*offset_per_batch + offset_per_station*arrivals[lp[i],1] for i in range(n_batch)]) ## Actually, make disjoint, both in station axis, and in batch number.
 	one_vec = np.concatenate((np.ones(1), np.zeros(4)), axis = 0).reshape(1,-1)
 	arrivals_select = np.vstack([arrivals[lp[i]] for i in range(n_batch)]) + arrivals_offset.reshape(-1,1)*one_vec ## Does this ever fail? E.g., when there's a missing station's
+	# arrivals_select = np.vstack([arrivals[lp[i]] for i in range(n_batch)]) + arrivals_offset.reshape(-1,1)*one_vec ## Does this ever fail? E.g., when there's a missing station's
 	n_arvs = arrivals_select.shape[0]
 
 	# Rather slow!
 	iargsort = np.argsort(arrivals_select[:,0])
 	arrivals_select = arrivals_select[iargsort]
 	phase_observed_select = phase_observed_select[iargsort]
+	log_amp_select = log_amp_select[iargsort]
 
 	iwhere_p = np.where(phase_observed_select == 0)[0]
 	iwhere_s = np.where(phase_observed_select == 1)[0]
@@ -716,9 +817,20 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ip_s_pad = ip_s.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
 	ip_p_pad = np.minimum(np.maximum(ip_p_pad, 0), n_arvs - 1) 
 	ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
+	pdb.set_trace()
 
-	rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-	rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
+	## Can add sign information here
+	diff_rel_t = np.abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0])
+	iarg_rel_p = np.argmin(diff_rel_t, axis = 1)
+	ivec = np.arange(diff_rel_t.shape[0])
+	rel_t_p = diff_rel_t[ivec,iarg_rel_p] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+	log_amp_p_val = log_amp_select[ip_p_pad[ivec,iarg_rel_p]]
+
+	diff_rel_t = np.abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0])
+	iarg_rel_s = np.argmin(diff_rel_t, axis = 1)
+	ivec = np.arange(diff_rel_t.shape[0])
+	rel_t_s = diff_rel_t[ivec,iarg_rel_s] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+	log_amp_s_val = log_amp_select[ip_s_pad[ivec,iarg_rel_s]]
 
 	## With phase type information
 	ip_p1 = np.searchsorted(arrivals_select[iwhere_p,0], query_time_p)
@@ -729,15 +841,28 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ip_p1_pad = np.minimum(np.maximum(ip_p1_pad, 0), n_arvs_p - 1) 
 	ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
 
+	null_log_amp = -10.0
 	if len(iwhere_p) > 0:
-		rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		# rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		diff_rel_t = np.abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0])
+		iarg_rel_p = np.argmin(diff_rel_t, axis = 1)
+		ivec = np.arange(diff_rel_t.shape[0])
+		rel_t_p1 = diff_rel_t[ivec,iarg_rel_p] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		log_amp_p1_val = log_amp_select[iwhere_p[ip_p1_pad[ivec,iarg_rel_p]]]
 	else:
 		rel_t_p1 = np.zeros(rel_t_p.shape)
+		log_amp_p1_val = null_log_amp*np.ones(rel_t_p.shape)
 
 	if len(iwhere_s) > 0:
-		rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
+		# rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
+		diff_rel_t = np.abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0])
+		iarg_rel_s = np.argmin(diff_rel_t, axis = 1)
+		ivec = np.arange(diff_rel_t.shape[0])
+		rel_t_s1 = diff_rel_t[ivec,iarg_rel_s] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		log_amp_s1_val = log_amp_select[iwhere_p[ip_s1_pad[ivec,iarg_rel_s]]]
 	else:
 		rel_t_s1 = np.zeros(rel_t_s.shape)
+		log_amp_s1_val = null_log_amp*np.ones(rel_t_s.shape)
 		
 
 	Inpts = []
@@ -773,11 +898,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		n_spc = x_grids[grid_select].shape[0]
 		n_sta_slice = len(sta_select)
 
-		inpt = np.zeros((x_grids[Grid_indices[i]].shape[0], n_sta, 4)) # Could make this smaller (on the subset of stations), to begin with.
+		inpt = np.zeros((x_grids[Grid_indices[i]].shape[0], n_sta, 8)) # Could make this smaller (on the subset of stations), to begin with.
 		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
 		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
 		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
 		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
+		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
 
 		trv_out = x_grids_trv[grid_select][:,sta_select,:] ## Subsetting, into sliced indices.
 		Inpts.append(inpt[:,sta_select,:]) # sub-select, subset of stations.
@@ -917,7 +1043,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		Lbls_query.append(lbls_query)
 
 	srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitude.reshape(-1,1)), axis = 1)
-	data = [arrivals, srcs, active_sources]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
+	data = [arrivals, srcs, active_sources, log_amp]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
 
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
@@ -2265,7 +2391,6 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
-
 
 
 
