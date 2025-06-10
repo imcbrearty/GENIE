@@ -27,6 +27,9 @@ import yaml
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
+with open('train_config.yaml', 'r') as file:
+    train_config = yaml.safe_load(file)
+
 use_updated_model_definition = config['use_updated_model_definition']
 scale_rel = config['scale_rel'] # 30e3
 scale_t = config['scale_t'] # 10.0
@@ -35,6 +38,7 @@ eps = config['eps'] # 15.0
 # use_updated_model_definition = True
 use_phase_types = config['use_phase_types']
 use_absolute_pos = config['use_absolute_pos']
+use_amplitudes = train_config['use_amplitudes']
 
 device = torch.device('cuda') ## or use cpu
 
@@ -790,7 +794,11 @@ if use_updated_model_definition == False:
 			super(GCN_Detection_Network_extended, self).__init__()
 			# Define modules and other relavent fixed objects (scaling coefficients.)
 			# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
-			self.DataAggregation = DataAggregation(4, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
+			if use_amplitudes == False:
+				self.DataAggregation = DataAggregation(4, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
+			else:
+				self.DataAggregation = DataAggregation(8, 15).to(device) # output size is latent size for (half of) bipartite code # , 15				
+			
 			self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 3).to(device) # 30, 15
 			self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
 			self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
@@ -918,7 +926,11 @@ elif use_updated_model_definition == True:
 			super(GCN_Detection_Network_extended, self).__init__()
 			# Define modules and other relavent fixed objects (scaling coefficients.)
 			# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
-			self.DataAggregation = DataAggregationEdges(4, 15, use_absolute_pos = use_absolute_pos).to(device) # output size is latent size for (half of) bipartite code # , 15
+			if use_amplitudes == False:
+				self.DataAggregation = DataAggregationEdges(4, 15, use_absolute_pos = use_absolute_pos).to(device) # output size is latent size for (half of) bipartite code # , 15
+			else:
+				self.DataAggregation = DataAggregationEdges(8, 15, use_absolute_pos = use_absolute_pos).to(device) # output size is latent size for (half of) bipartite code # , 15	
+		
 			self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 3).to(device) # 30, 15
 			self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
 			self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
