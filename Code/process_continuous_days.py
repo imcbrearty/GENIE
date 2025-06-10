@@ -676,8 +676,12 @@ for cnt, strs in enumerate([0]):
 			
 			if use_phase_types == False:
 				for i in range(len(Inpts)):
-					Inpts[i][:,2:4] = 0.0 ## Phase type informed features zeroed out
+					# Inpts[i][:,2:4] = 0.0 ## Phase type informed features zeroed out
+					# Masks[i][:,2:4] = 0.0
+					izero = np.array([2,3,6,7]) ## Phase type informed features
+					Inpts[i][:,izero] = 0.0 ## Phase type informed features zeroed out
 					Masks[i][:,2:4] = 0.0
+
 			
 			for i0 in range(len(tsteps_slice)):
 
@@ -853,7 +857,8 @@ for cnt, strs in enumerate([0]):
 			
 			if use_phase_types == False:
 				for i in range(len(Inpts)):
-					Inpts[i][:,2:4] = 0.0 ## Phase type informed features zeroed out
+					izero = np.array([2,3,6,7]) ## Phase type informed features
+					Inpts[i][:,izero] = 0.0 ## Phase type informed features zeroed out
 					Masks[i][:,2:4] = 0.0
 		
 			for i in range(srcs_slice.shape[0]):
@@ -923,7 +928,8 @@ for cnt, strs in enumerate([0]):
 			
 			if use_phase_types == False:
 				for i in range(len(Inpts)):
-					Inpts[i][:,2:4] = 0.0 ## Phase type informed features zeroed out
+					izero = np.array([2,3,6,7]) ## Phase type informed features
+					Inpts[i][:,izero] = 0.0 ## Phase type informed features zeroed out
 					Masks[i][:,2:4] = 0.0
 			
 			if inc == 0:
