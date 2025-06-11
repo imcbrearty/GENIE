@@ -20,7 +20,7 @@ Pre-trained GNN's, and pre-computed travel time fields will be supplied in the f
 
 For a new project, first download the GitHub repo and navigate to the "Code" folder. Then (before running any .py codes),
 
-First, (i). create the "stations.txt" (or "stations.npz") file. The station file must contain columns of (station name, latitude, longitude, elevation (m)); seperated by commas or spaces.
+First, (i). create the "stations.txt" (or "stations.npz") file. The station file must contain columns of (station name, latitude, longitude, elevation (m)); seperated by commas or spaces. An example "stations.txt" file is shown in the Code folder.
 
 Then, set the (ii). region, (iii). velocity model, (iv). travel time calculation discretization parameters and (v). source graph parameters in "config.yaml".
 
