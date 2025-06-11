@@ -26,7 +26,7 @@ Then, set the (ii). region, (iii). velocity model, (iv). travel time calculation
 
 Then, (vi). load the pick data in the GENIE format directly (saved as .npz files), or as .csv files in "Picks/2022/2022_12_20_ver_1.csv" format (where for any day 'Picks/%d/%d_%d_%d_ver_1.csv'%(year, year, month, day)). For these .csv files, the columns are simply: (station name, pick time (seconds), amplitude, pick probability, phase type); where station names must correspond with station names in the "stations.txt" file, and where "phase type" entries are either 0 and 1's, or "P" and "S", for P and S picks, respectively.
 
-Then (vii). set the synthetic training data parameters in "train_config.yaml"
+Then (vii). set the synthetic training data parameters in "train_config.yaml".
 
 Now the (i) - (vi) set of python scripts described in "Applying the model" can be run implement the model.
 
