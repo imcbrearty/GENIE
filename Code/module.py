@@ -817,7 +817,7 @@ if use_updated_model_definition == False:
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
 	
-		def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+		def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, log_amp, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
@@ -868,7 +868,7 @@ if use_updated_model_definition == False:
 			# self.pos_rel_sta = pos_rel_sta
 			# self.pos_rel_src = pos_rel_src
 		
-		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, log_amp, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
@@ -899,7 +899,7 @@ if use_updated_model_definition == False:
 	
 			return y, x, arv_p, arv_s
 
-		def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, t_query):
+		def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, log_amp, locs_use_cart, x_temp_cuda_cart, x_query_cart, t_query):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
@@ -951,7 +951,7 @@ elif use_updated_model_definition == True:
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
 	
-		def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+		def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, log_amp, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
@@ -1029,7 +1029,7 @@ elif use_updated_model_definition == True:
 			self.DataAggregationAssociationPhase.pos_rel_sta = pos_rel_sta
 			self.DataAggregationAssociationPhase.pos_rel_src = pos_rel_src
 		
-		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, log_amp, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
@@ -1066,7 +1066,7 @@ elif use_updated_model_definition == True:
 	
 			return y, x, arv_p, arv_s
 
-		def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, t_query):
+		def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, log_amp, locs_use_cart, x_temp_cuda_cart, x_query_cart, t_query):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
