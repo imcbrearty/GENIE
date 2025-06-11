@@ -98,7 +98,7 @@ if __name__ == '__main__':
                 if ',' in lines[j]:
                     line = list(filter(lambda x: len(x) > 0, lines[j].strip().split(',')))
                 else:
-                    line = list(filter(lambda x: len(x) > 0, lines[j].strip().split(',')))
+                    line = list(filter(lambda x: len(x) > 0, lines[j].strip().split(' ')))
                 stas.append(line[0])
                 locs.append(np.array([float(line[1]), float(line[2]), float(line[3])]).reshape(1,-1))
             stas = np.hstack(stas).astype('U9')
