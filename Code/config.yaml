@@ -1,25 +1,25 @@
-name_of_project: 'Mayotte'
+name_of_project: 'Ferndale'
 num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost). Note: now this is done with n_jobs below
 vel_model_ver: 1 ## Which travel time version to save when running calculate travel times
 
 ## Note, when running continuous days processing a number of parameters are also set in process_config
 
-latitude_range: [18.8, 20.3] # Latitude range of the region that will be processed
-longitude_range: [-156.1, -154.7] # Longitude range of the region that will be processed
-depth_range: [-40000, 5000] # Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
+latitude_range: [39.3, 41.2] # Latitude range of the region that will be processed
+longitude_range: [-125.0, -123.0] # Longitude range of the region that will be processed
+depth_range: [-40000, 2000] # Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
 time_range: # This sets up the Catalog and Pick files to have these years initialized
   start: '2018-01-01'
   end: '2023-01-01'
 
 client : 'IRIS'
 network: 'HV'
-pre_load_stations: False # If True, then skip download stations during make_initial_files.py; instead, stations.npz is assumed to already exist with locs and stas as the two fields.
+pre_load_stations: True # If True, then skip download stations during make_initial_files.py; instead, stations.npz is assumed to already exist with locs and stas as the two fields.
 use_physics_informed: True ## If true, must run the "build" and "train" scripts seperately for the travel times and load a 3D (or 1D) velocity model
 use_topography: False ## If True, create the "surface_elevation.npz" file in the main project folder, saved with numpy array with "Points" (with columns of lat, lon, and elevation (m)). Can be arbitrary structured set of points (areas outside convex hull of Points will be trated as zero elevation.
 
-degree_padding: 0.25 # This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
+degree_padding: 0.1 # This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
 number_of_grids: 5 # Number of distinct spatial graphs to create (this reduced slight bias that can result from only using one spatial graph)
-number_of_spatial_nodes: 500 # Number of nodes per spatial graph
+number_of_spatial_nodes: 250 # Number of nodes per spatial graph
 
 load_initial_files: [False]
 use_pretrained_model: [None]
