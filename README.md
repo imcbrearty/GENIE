@@ -24,9 +24,9 @@ First, (i). create the "stations.txt" (or "stations.npz") file. The station file
 
 Then, set the (ii). region, (iii). velocity model, (iv). travel time calculation discretization parameters and (v). source graph parameters in "config.yaml".
 
-Then, (vi). load the pick data in the GENIE format directly (saved as .npz files), or as .csv files in "Picks/2022/2022_12_20_ver_1.csv" format (where for any day 'Picks/%d/%d_%d_%d_ver_1.csv'%(year, year, month, day)). For these .csv files, the columns are simply: (station name, pick time (seconds), amplitude, pick probability, phase type); where station names must correspond with station names in the "stations.txt" file, and where "phase type" entries are either 0 and 1's, or "P" and "S", for P and S picks, respectively.
+Then, (vi). save the pick data in a single file called "picks.csv" in the main folder, or as .csv files in "Picks/2022/2022_12_20_ver_1.csv" format (where for any day 'Picks/%d/%d_%d_%d_ver_1.csv'%(year, year, month, day)), or in the GENIE format directly (saved as .npz files per day). For the .csv files, the columns are simply: (station name, pick times (UTC date time format), amplitude, pick probability, phase type); where station names must correspond with station names in the "stations.txt" file, and where "phase type" entries are either 0 and 1's, or "P" and "S", for P and S picks, respectively.
 
-Then (vii). set the synthetic training data parameters in "train_config.yaml".
+Then (vii). set the synthetic training data parameters in "train_config.yaml". The main parameters to adjust are the label kernel sizes ("Prediction params"), the max distance range of moveouts of events (dist_range), and the average event rates, false pick, and missed pick rates. The average fraction of the total set of stations in "stations.txt" to use for any given input graph can also be specified by "n_sta_range".
 
 Now the (i) - (vi) set of python scripts described in "Applying the model" can be run implement the model.
 
