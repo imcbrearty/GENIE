@@ -103,6 +103,7 @@ if __name__ == '__main__':
                 locs.append(np.array([float(line[1]), float(line[2]), float(line[3])]).reshape(1,-1))
             stas = np.hstack(stas).astype('U9')
             locs = np.vstack(locs)
+            print('Saving station .npz file')
             np.savez_compressed(base_path + 'stations.npz', locs = locs, stas = stas)       
         else:
              raise Exception('No station file loaded; create the "stations.txt" or "stations.npz" file; see GitHub "Setup Details" section for more information')
