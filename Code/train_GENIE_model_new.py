@@ -607,10 +607,10 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			magnitude = src_magnitude[i]
 			print(f"Magnitude: {magnitude}")
 			print(f"Source position: {src_positions[i,0:2]}")
-			center = src_positions[i,0:2]
+			center = ftrns1(src_positions)[i,0:2]
 
 			# Radial function parameters based on magnitude
-			p = 3 # TODO: tune this
+			p = 2 # TODO: tune this
 			sigma_radial_p = pdist_p(magnitude) / 6  # P-wave detection radius
 			sigma_radial_s = pdist_s(magnitude) / 6  # S-wave detection radius (typically larger)
 			
