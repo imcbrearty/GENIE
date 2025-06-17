@@ -1401,6 +1401,9 @@ np.random.seed() ## randomize seed
 tree_stas = cKDTree(ftrns1(locs))
 if use_amplitudes == True:
 	mz.Mag = Mags
+	mz.LocalSliceLgCollapseP.Mag = Mags
+	mz.LocalSliceLgCollapseS.Mag = Mags
+	mz.Arrivals.Mag = Mags
 
 losses = np.zeros(n_epochs)
 mx_trgt_1, mx_trgt_2, mx_trgt_3, mx_trgt_4 = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
@@ -1868,7 +1871,11 @@ for i in range(n_restart_step, n_epochs):
 
 
 		if use_amplitudes == True:
-			mz.Mag.ivec = tree_stas.query(ftrns1(Locs[i0]))[1]
+			imatch_vec = torch.Tensor(tree_stas.query(ftrns1(Locs[i0]))[1]).long().to(device)
+			mz.Mag.ivec = imatch_vec
+			mz.LocalSliceLgCollapseP.ivec = imatch_vec
+			mz.LocalSliceLgCollapseS.ivec = imatch_vec
+			mz.Arrivals.ivec = imatch_vec
 
 		# Call the model with pre-processed tensors
 		out = mz(*input_tensors)
