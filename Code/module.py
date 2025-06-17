@@ -839,8 +839,9 @@ if use_updated_model_definition == False:
 			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
-			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, log_amp, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size
-			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, log_amp, s, tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+			src_pos = self.ftrns2(x_temp_cuda_cart)[A_src_in_sta[1]]
+			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, log_amp, s, tlatent[:,0].reshape(-1,1), src_pos, n_temp, n_sta) ## arv_p and arv_s will be same size
+			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, log_amp, s, tlatent[:,1].reshape(-1,1), src_pos, n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, arv_p, arv_s, tpick, ipick, phase_label, log_amp) # trv_out_q[:,ipick,0].view(-1)
 			
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
@@ -892,8 +893,9 @@ if use_updated_model_definition == False:
 			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
-			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, log_amp, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta)
-			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, log_amp, s, self.tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+			src_pos = self.ftrns2(x_temp_cuda_cart)[self.A_src_in_sta[1]]
+			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, log_amp, s, self.tlatent[:,0].reshape(-1,1), src_pos, n_temp, n_sta)
+			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, log_amp, s, self.tlatent[:,1].reshape(-1,1), src_pos, n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, arv_p, arv_s, tpick, ipick, phase_label, log_amp) # trv_out_q[:,ipick,0].view(-1)
 			
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
@@ -995,8 +997,9 @@ elif use_updated_model_definition == True:
 				s = torch.cat((s, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 			
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # A_src_in_sta, locs_use_cart, x_temp_cuda_cart # detach x_latent. Just a "reference"
-			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, log_amp, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size
-			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, log_amp, s, tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+			src_pos = self.ftrns2(x_temp_cuda_cart)[A_src_in_sta[1]]
+			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, log_amp, s, tlatent[:,0].reshape(-1,1), src_pos, n_temp, n_sta) ## arv_p and arv_s will be same size
+			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, log_amp, s, tlatent[:,1].reshape(-1,1), src_pos, n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, arv_p, arv_s, tpick, ipick, phase_label, log_amp) # trv_out_q[:,ipick,0].view(-1)
 			
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
@@ -1060,8 +1063,9 @@ elif use_updated_model_definition == True:
 				s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 			
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart # detach x_latent. Just a "reference"
-			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, log_amp, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta)
-			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, log_amp, s, self.tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+			src_pos = self.ftrns2(x_temp_cuda_cart)[self.A_src_in_sta[1]]
+			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, log_amp, s, self.tlatent[:,0].reshape(-1,1), src_pos, n_temp, n_sta)
+			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, log_amp, s, self.tlatent[:,1].reshape(-1,1), src_pos, n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, arv_p, arv_s, tpick, ipick, phase_label, log_amp) # trv_out_q[:,ipick,0].view(-1)
 			
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
