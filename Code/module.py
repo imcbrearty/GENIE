@@ -581,9 +581,9 @@ class LocalSliceLgCollapse(MessagePassing):
 
 		sliced_edges = sliced_edges[:,ikeep] # only use times within range. (need to specify target node cardinality)
 		if self.phase_type == 'P':
-			mag = self.Mag.mag(ipick[sliced_edges[1]], src_pos[sliced_edges[0]], log_amp[sliced_edges[1]], torch.zeros(sliced_edges.shape[1]).to(self.device)).detach()/self.scale_mag
+			mag = self.Mag.mag(ipick[sliced_edges[1]], src_pos[sliced_edges[0]], log_amp[sliced_edges[1]], torch.zeros(sliced_edges.shape[1]).long().to(self.device)).detach()/self.scale_mag
 		elif self.phase_type == 'S':
-			mag = self.Mag.mag(ipick[sliced_edges[1]], src_pos[sliced_edges[0]], log_amp[sliced_edges[1]], torch.ones(sliced_edges.shape[1]).to(self.device)).detach()/self.scale_mag
+			mag = self.Mag.mag(ipick[sliced_edges[1]], src_pos[sliced_edges[0]], log_amp[sliced_edges[1]], torch.ones(sliced_edges.shape[1]).long().to(self.device)).detach()/self.scale_mag
 		
 		out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), phase = phase_label, edge_attr = mag, size = (N, M))))
 
@@ -675,8 +675,8 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		ifind = torch.where(stindex[edge_index[0]] < stindex[-1])[0] ## Avoid null index
 		mag_p = -2.0*torch.ones(edge_index.shape[1]).to(self.device)
 		mag_s = -2.0*torch.ones(edge_index.shape[1]).to(self.device)
-		mag_p[ifind] = self.Mag.mag(stindex[edge_index[0][ifind]], src[sindex[ifind]], logamp[edge_index[0][ifind]], torch.zeros(len(ifind)).to(self.device)).detach()
-		mag_s[ifind] = self.Mag.mag(stindex[edge_index[0][ifind]], src[sindex[ifind]], logamp[edge_index[0][ifind]], torch.ones(len(ifind)).to(self.device)).detach()
+		mag_p[ifind] = self.Mag.mag(stindex[edge_index[0][ifind]], src[sindex[ifind]], logamp[edge_index[0][ifind]], torch.zeros(len(ifind)).long().to(self.device)).detach()
+		mag_s[ifind] = self.Mag.mag(stindex[edge_index[0][ifind]], src[sindex[ifind]], logamp[edge_index[0][ifind]], torch.ones(len(ifind)).long().to(self.device)).detach()
 		mag_p = mag_p/self.scale_mag
 		mag_s = mag_s/self.scale_mag
 		
