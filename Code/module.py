@@ -831,7 +831,7 @@ if use_updated_model_definition == False:
 			self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, phase_type = 'S', device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3, device = device).to(device)
 			# self.ArrivalS = StationSourceAttention(30, 15, 1, 15, n_heads = 3).to(device)
-			self.Mag = []
+			self.Mag = None
 	
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
@@ -968,7 +968,7 @@ elif use_updated_model_definition == True:
 			self.use_absolute_pos = use_absolute_pos
 			self.scale_rel = self.DataAggregation.scale_rel
 			# self.ArrivalS = StationSourceAttention(30, 15, 1, 15, n_heads = 3).to(device)
-			self.Mag = []
+			self.Mag = None
 	
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
