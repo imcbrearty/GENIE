@@ -285,7 +285,76 @@ if use_reference_spatial_density == True:
 		
 		if load_reference_density == True:
 			np.savez_compressed(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver, srcs_ref = srcs_ref)
-						      
+
+use_amplitudes = True
+if use_amplitudes == True:
+	n_mag_ver = 1
+	mags_supp = np.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d_supplemental.npz'%n_mag_ver)
+	mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
+	Mag = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
+	Mag.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
+	Mags = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
+	Mags.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
+	# Mags.bias = torch.cat((Mags.bias, Mags.bias.mean(0, keepdims = True)), dim = 0) ## Append one entry for the "null" vector
+	mags_supp.close()
+
+	use_softplus = True
+	dist_supp = np.load(path_to_file + 'Grids' + seperator + 'distance_magnitude_model_ver_%d.npz'%(n_mag_ver))
+	if use_softplus == False:
+		poly_dist_p, poly_dist_s, min_dist = dist_supp['dist_p'], dist_supp['dist_s'], dist_supp['min_dist']
+		pdist_p = lambda mag: np.maximum(min_dist[0], np.polyval(poly_dist_p, mag))
+		pdist_s = lambda mag: np.maximum(min_dist[1], np.polyval(poly_dist_s, mag))
+	else:
+		dist_params = dist_supp['params']
+		pdist_p = lambda mag: dist_params[4]*(1.0/dist_params[1])*np.log(1.0 + np.exp(dist_params[1]*mag)) + dist_params[0]
+		pdist_s = lambda mag: dist_params[4]*(1.0/dist_params[3])*np.log(1.0 + np.exp(dist_params[3]*mag)) + dist_params[2]
+	mag_vals = np.arange(-3.0, 10.0, 0.01)
+	dist_vals_p = pdist_p(mag_vals)
+	dist_vals_s = pdist_s(mag_vals)
+	dist_supp.close()
+	print('Will use amplitudes since a magnitude model was loaded')
+
+	## Load emperical distribution of pick amplitudes
+	n_rand_choose = 100
+	st_load = glob.glob(path_to_file + 'Picks/19*') # Load years 1900's
+	st_load.extend(glob.glob(path_to_file + 'Picks/20*')) # Load years 2000's
+	iarg = np.argsort([int(st_load[i].split(seperator)[-1]) for i in range(len(st_load))])
+	st_load = [st_load[i] for i in iarg]
+
+	st_load_l = []
+	for i in range(len(st_load)):
+		# st = glob.glob(st_load[i] + seperator + '*ver_%d.npz'%(n_ver_picks))
+		st = glob.glob(st_load[i] + seperator + '*ver_*.npz')
+		if len(st) > 0:
+			st_load_l.extend(st)
+	iperm = np.random.permutation(len(st_load_l))
+	iperm = iperm[0:np.minimum(n_rand_choose, len(st_load_l))]
+	st_load = [st_load_l[i] for i in iperm]
+
+	log_amp_emperical = []
+	log_amp_ind_emperical = []
+	q_range_emperical = np.linspace(0, 1, 30)
+	n_range_emperical = len(q_range_emperical)
+	log_amp_sta_distb = []
+	for i in range(len(st_load)):
+		z = np.load(st_load[i])
+		P = z['P']
+		z.close()
+		log_amp_emperical.append(np.log10(P[:,2]))
+		log_amp_ind_emperical.append(P[:,1].astype('int'))
+	log_amp_emperical = np.hstack(log_amp_emperical)
+	log_amp_ind_emperical = np.hstack(log_amp_ind_emperical)
+	tree_ind = cKDTree(log_amp_ind_emperical.reshape(-1,1))
+	log_amp_inds = tree_ind.query_ball_point(np.arange(len(locs)).reshape(-1,1), r = 0)
+	for i in range(len(locs)):
+		if len(log_amp_inds[i]) == 0:
+			log_amp_sta_distb.append(np.quantile(log_amp_emperical, q_range_emperical).reshape(1,-1))
+		else:
+			log_amp_sta_distb.append(np.quantile(log_amp_emperical[log_amp_inds[i]], q_range_emperical).reshape(1,-1))
+	log_amp_sta_distb = np.vstack(log_amp_sta_distb)
+	log_amp_sta_distb_diff = np.diff(log_amp_sta_distb, axis = 1)
+
+					      
 ## Training synthic data parameters
 
 ## Training params list 2
@@ -326,7 +395,7 @@ use_shallow_sources = train_config['use_shallow_sources']
 use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = True, verbose = False, skip_graphs = False, return_only_data = False):
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, return_only_data = False):
 	"""
 	Generate synthetic seismic data for training the GENIE neural network.
 	
@@ -571,7 +640,69 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		plt.grid(True)
 		plt.savefig(f'{checkpoint_dir}/2_stations_and_sources.png')
 		plt.close()
-	
+
+
+	# Generate distance thresholds for detection (simulates magnitude-distance relationship)
+	use_uniform_distance_threshold = False
+	## This previously sampled a uniform distribution by default, now it samples a skewed
+	## distribution of the maximum source-reciever distances allowed for each event.
+	if use_uniform_distance_threshold == True:
+		# Simple uniform distribution of detection distances
+		dist_thresh = np.random.rand(n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
+	else:
+		## Use beta distribution to generate more samples with smaller moveouts
+		# Use beta distribution to favor smaller distances (more realistic)
+		# This creates more training examples with nearby sources
+		
+		if use_extra_nearby_moveouts == True:
+		
+			## For half of samples, use only half of range supplied
+			## (this is to increase training for sources that span only small range of network)
+
+			n1 = int(n_src*0.3)
+			n2 = int(n_src*0.3)
+			n3 = n_src - n1 - n2
+
+			dist_thresh1 = beta(2,5).rvs(size = n1).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
+			# Replace 15% with even more nearby sources using beta(1,5)
+			ireplace = np.random.choice(len(dist_thresh1), size = int(0.15*len(dist_thresh1)), replace = False)
+			dist_thresh1[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
+
+			# Group 2: Half distance range (more local sources)
+			dist_thresh2 = beta(2,5).rvs(size = n2).reshape(-1,1)*(dist_range[1] - dist_range[0])/2.0 + dist_range[0]
+			ireplace = np.random.choice(len(dist_thresh2), size = int(0.15*len(dist_thresh2)), replace = False)
+			dist_thresh2[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0])/2.0 + dist_range[0]
+
+			# Group 3: Third distance range (very local sources)
+			dist_thresh3 = beta(2,5).rvs(size = n3).reshape(-1,1)*(dist_range[1] - dist_range[0])/3.0 + dist_range[0]
+			ireplace = np.random.choice(len(dist_thresh3), size = int(0.15*len(dist_thresh3)), replace = False)
+			dist_thresh3[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0])/3.0 + dist_range[0]
+
+			# Combine all groups
+			dist_thresh = np.concatenate((dist_thresh1, dist_thresh2, dist_thresh3), axis = 0)
+		
+		else:
+			# Standard beta distribution favoring smaller distances
+			dist_thresh = beta(2,5).rvs(size = n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
+			# Replace 15% with very nearby sources
+			ireplace = np.random.choice(len(dist_thresh), size = int(0.15*len(dist_thresh)), replace = False)
+			dist_thresh[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
+
+
+	if use_amplitudes == True:
+		mag_ratio = [0.85, 1.15]
+		## Need to "match" these distances to the magnitude scale
+		## One option: overwrite the distance sampling to sample realistic distances
+		## for a given magnitude. And specify the magnitude sampling distribution
+		## Or, use the current distance values, and find a corresponding magnitude (perhaps
+		## with noise)
+		# pdb.set_trace()
+		## First approach, we estimate magnitude from the distance value, and add a pertubation
+		imag1 = np.argmin(np.abs(dist_thresh - dist_vals_p.reshape(1,-1)), axis = 1)
+		imag2 = np.argmin(np.abs(dist_thresh - dist_vals_s.reshape(1,-1)), axis = 1)
+		mag_scale = np.random.rand(len(dist_thresh))*(mag_ratio[1] - mag_ratio[0]) + mag_ratio[0]
+		src_magnitude = mag_scale*(0.5*mag_vals[imag1] + 0.5*mag_vals[imag2])
+
 
 	## ====================================================================================
 	## BLOCK TO CHANGE IN THE ORIGINAL CODE
@@ -612,7 +743,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			# Radial function parameters based on magnitude
 			p = 2 # TODO: tune this
 			sigma_radial_p = pdist_p(magnitude) / 6  # P-wave detection radius
-			sigma_radial_s = pdist_s(magnitude) / 6  # S-wave detection radius (typically larger)
+			sigma_radial_s = pdist_s(magnitude) / 6  # S-wave detection radius
 			
 			# scaling factor for the radial function
 			scale_factor = 0.95 # TUNABLE: 0.95 is a good default value, but can be tuned to get better results.
@@ -2852,10 +2983,3 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
-
-
-
-
-
-
-

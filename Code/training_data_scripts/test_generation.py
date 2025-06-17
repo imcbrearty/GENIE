@@ -46,7 +46,7 @@ def main():
     # Experiment configuration
     # -----------------------------
     # Magnitude of the cluster
-    magnitude = 1.0
+    magnitude = 2.0
     # Radial function sigma_radial, controls the spreading of the cluster.
     p = 3 # TODO: tune this
     sigma_radial = pdist_p(magnitude)/ 6
@@ -107,7 +107,7 @@ def main():
     
     # Create and save visualization
     print('Plotting experiment results...')
-    os.makedirs('figures/magnitude', exist_ok=True)
+    os.makedirs('figures', exist_ok=True)
     plot_experiment_results_extended(points, runs, k_neighbours=k_neighbours, p=p)
     print('Plotting done.')
 
