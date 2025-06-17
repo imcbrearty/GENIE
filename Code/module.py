@@ -551,6 +551,7 @@ class LocalSliceLgCollapse(MessagePassing):
 		self.use_phase_types = use_phase_types
 		self.phase_type = phase_type
 		self.scale_mag = 10.0
+		self.Mag = None
 
 	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, log_amp, inpt, tlatent, src_pos, n_temp, n_sta, k_infer = 10): # reference k nearest spatial points
 
@@ -616,6 +617,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		self.ndim_feat = ndim_arv_in + ndim_extra
 		self.use_phase_types = use_phase_types
 		self.scale_mag = 10.0
+		self.Mag = None
 
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
