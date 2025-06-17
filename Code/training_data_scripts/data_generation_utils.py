@@ -68,14 +68,15 @@ def prepare_station_coordinates(locs, dropout_rate=0.1, scale=111320):
 #     return W
 
 def knn_weights(coords, k=8):
-    """Compute binary k-nearest neighbour weight matrix using scikit-learn.
+    """Compute binary k-nearest neighbour adjacency matrix using scikit-learn.
     
     Args:
         coords (np.ndarray): Array of shape (N, 2) containing point coordinates
         k (int): Number of nearest neighbors to consider
         
     Returns:
-        list: List of lists containing (neighbor_index, weight) tuples where weight is 1.0
+        np.ndarray: Binary adjacency matrix of shape (N, N) where each element (i,j) is 1
+                   if point j is a k-nearest neighbor of point i, and 0 otherwise
     """
     # Initialize and fit the nearest neighbors model
     nn = NearestNeighbors(n_neighbors=k, algorithm='auto')
@@ -84,27 +85,29 @@ def knn_weights(coords, k=8):
     # Get k nearest neighbors for each point
     distances, indices = nn.kneighbors(coords)
     
-    # Create binary weight matrix
+    # Create binary adjacency matrix
     N = coords.shape[0]
-    W = [[] for _ in range(N)]
+    W = np.zeros((N, N))
     for i in range(N):
         neighbors = indices[i]
         for j in neighbors:
             if i != j:  # Skip self-loops
-                W[i].append((j, 1.0))  # Binary weight: 1.0 for neighbors
+                W[i, j] = 1.0  # Binary weight: 1.0 for neighbors
     return W
 
 def morans_I_binary(selected, W):
     """Calculate Moran's I for binary selection vector using sparse W."""
+    N = W.shape[0]
     y = selected.astype(float)
     k = y.sum()
-    if k == 0 or k == len(y):
+    if k == 0 or k == len(y):  # Return 0 if no points or all points are selected
         return 0.0
     y_bar = k / len(y)
     num = 0.0
     row_sum = 0.0
-    for i, neighbours in enumerate(W):
-        for j, w in neighbours:
+    for i in range(N):
+        for j in range(N):
+            w = W[i, j]
             num += w * (y[i] - y_bar) * (y[j] - y_bar)
             row_sum += w
     denom = np.sum((y - y_bar) ** 2)
@@ -186,15 +189,13 @@ def generate_noise(points, sigma_noise, cholesky_matrix=None):
     
     z = np.random.multivariate_normal(np.zeros(len(points)), np.identity(len(points)))
     noise = L @ z
-    print(f'  [DEBUG] noise min: {noise.min()}, max: {noise.max()}')
-    print(f'  [DEBUG] noise mean: {noise.mean()}, std: {noise.std()}')
     return noise
 
 def logistic(x, sigma_logistic=1.0):
     """Logistic function with scaling parameter sigma_radial."""
-    print(f'  [DEBUG] x: {x.min()}, {x.max()}')
-    print(f'  [DEBUG] sigma_logistic: {sigma_logistic}')
-    print(f'  [DEBUG] 1 / (1 + np.exp(-x/sigma_logistic)): {1 / (1 + np.exp(-x/sigma_logistic)).min()}, {1 / (1 + np.exp(-x/sigma_logistic)).max()}')
+    # print(f'  [DEBUG] x: {x.min()}, {x.max()}')
+    # print(f'  [DEBUG] sigma_logistic: {sigma_logistic}')
+    # print(f'  [DEBUG] 1 / (1 + np.exp(-x/sigma_logistic)): {1 / (1 + np.exp(-x/sigma_logistic)).min()}, {1 / (1 + np.exp(-x/sigma_logistic)).max()}')
     return 1 / (1 + np.exp(-x/sigma_logistic))
 
 def compute_final_probabilities(radial_pdf, noise, lambda_corr=0.5, sigma_logistic=1.0, decaying_factor=25):
@@ -227,7 +228,7 @@ def compute_final_probabilities(radial_pdf, noise, lambda_corr=0.5, sigma_logist
 
     return pdf_final
 
-def run_single_experiment(points, sigma_radial, sigma_noise, sigma_logistic=1.0, lambda_corr=0.5, p=2, scale_factor=1.0):
+def run_single_experiment(points, sigma_radial, sigma_noise, sigma_logistic=1.0, lambda_corr=0.5, p=2, scale_factor=1.0, center=None):
     """Run a single experiment with the given parameters.
     
     Args:
@@ -246,12 +247,14 @@ def run_single_experiment(points, sigma_radial, sigma_noise, sigma_logistic=1.0,
     angle, length1, length2, _, inv_cov = generate_ellipse_parameters(scale_factor)
     
     # Generate random center
-    x_min, x_max = points[:, 0].min(), points[:, 0].max()
-    y_min, y_max = points[:, 1].min(), points[:, 1].max()
-    center = np.array([
-        np.random.uniform(x_min, x_max),
-        np.random.uniform(y_min, y_max)
-    ])
+    if center is None:
+        print(f"Generating random center")
+        x_min, x_max = points[:, 0].min(), points[:, 0].max()
+        y_min, y_max = points[:, 1].min(), points[:, 1].max()
+        center = np.array([
+            np.random.uniform(x_min, x_max),
+            np.random.uniform(y_min, y_max)
+        ])
     
     # Compute initial probabilities
     radial_pdf = radial_function(points, center, inv_cov, sigma_radial, p, scale_factor)
@@ -398,13 +401,11 @@ def create_visualization(points, initial_idx, final_idx, noise_pdf, radial_pdf, 
     plt.savefig(os.path.join('figures', 'magnitude', filename), bbox_inches='tight', dpi=300)  # Increased DPI for better quality
     plt.close()
 
-    print(f'  [DEBUG] grid_pdf_final shape: {grid_pdf_final.shape}, min/max: {grid_pdf_final.min()}/{grid_pdf_final.max()}')
     assert not np.isnan(grid_pdf_final).any(), 'grid_pdf_final contains NaN!'
 
 
 def plot_experiment_results(points, runs, k_neighbours=8, p=2):
-    print('[DEBUG] plot_experiment_results: points shape:', points.shape)
-    print('[DEBUG] plot_experiment_results: runs count:', len(runs))
+
     assert points.shape[0] > 0, 'No points to plot!'
     
     # Precompute weights once
@@ -681,7 +682,6 @@ def plot_experiment_results_extended(points, runs, k_neighbours=8, p=2):
         # Create filename with parameters
         filename = f'scale{scale_factor:.1f}_id{run_idx+1}_angle{np.degrees(angle):.1f}_len{length1:.1f}_{length2:.1f}_p{p}_extended.png'
         plt.savefig(os.path.join('figures', 'magnitude', filename), bbox_inches='tight')
-        plt.show()
         plt.close()
     
     print(f"Generated {len(runs)} extended figures successfully!")

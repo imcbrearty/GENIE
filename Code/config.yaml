@@ -88,3 +88,6 @@ max_number_pick_association_labels_per_sample: 1500 # Max number of picks to com
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
+# Add this parameter to your existing config.yaml file to enable radial Cholesky synthetic data generation
+use_radial_cholesky: True  # Set to true to use your radial Cholesky method for spatially correlated sources
