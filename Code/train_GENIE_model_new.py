@@ -618,7 +618,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			scale_factor = 0.95 # TUNABLE: 0.95 is a good default value, but can be tuned to get better results.
 
 			# Covariance matrix/kernel distances sigma_radial, controls the spreading of the cluster.
-			sigma_noise = max_noise_spread / 8 #TODO: tune this # adjust between small (tight cluster, many points, small values) and big (one big cluster, few points, large values)
+			sigma_noise = max_noise_spread / 8 # 15km is fine for now # adjust between small (tight cluster, many points, small values) and big (one big cluster, few points, large values)
 
 			# Logistic function sigma_radial, controls the roughness of cluster border
 			threshold_logistic = 4 # TUNABLE (very binary) 0 < threshol_logistic <= ~4 (diffused) (can be more than 3 but the values are below)
@@ -654,8 +654,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				center=center
 			)
 
-			plot_experiment_results_extended(locs_geographic, [experiment_result_p, experiment_result_s], k_neighbours=8, p=3)
-
+			if plot_on:
+				plot_experiment_results_extended(locs_geographic, [experiment_result_p, experiment_result_s], k_neighbours=8, p=3)
+				
 			# Get the selected station indices for P-waves
 			selected_stations_p = experiment_result_p['final_idx']
 			if len(selected_stations_p) > 0:
