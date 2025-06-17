@@ -540,7 +540,7 @@ else:
 # 		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
 
 class LocalSliceLgCollapse(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, device = 'cuda'):
+	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, phase_type = 'P', device = 'cuda'):
 		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
 		self.fc1 = nn.Linear(ndim_in + n_edge + 1, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
 		self.fc2 = nn.Linear(n_hidden, ndim_out)
@@ -549,7 +549,7 @@ class LocalSliceLgCollapse(MessagePassing):
 		self.eps = eps
 		self.device = device
 		self.use_phase_types = use_phase_types
-		self.phase_type = 'P'
+		self.phase_type = phase_type
 		self.scale_mag = 10.0
 
 	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, log_amp, inpt, tlatent, src_pos, n_temp, n_sta, k_infer = 10): # reference k nearest spatial points
