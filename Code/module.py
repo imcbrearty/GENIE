@@ -542,15 +542,16 @@ else:
 class LocalSliceLgCollapse(MessagePassing):
 	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, device = 'cuda'):
 		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
-		self.fc1 = nn.Linear(ndim_in + n_edge, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
+		self.fc1 = nn.Linear(ndim_in + n_edge + 1, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
 		self.fc2 = nn.Linear(n_hidden, ndim_out)
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
 		self.eps = eps
 		self.device = device
 		self.use_phase_types = use_phase_types
+		self.phase_type = 'P'
 
-	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, log_amp, inpt, tlatent, n_temp, n_sta, k_infer = 10): # reference k nearest spatial points
+	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, log_amp, inpt, tlatent, src_pos, n_temp, n_sta, k_infer = 10): # reference k nearest spatial points
 
 		## Assert is problem?
 		# k_infer = int(len(A_edges)/(n_sta*len(dt_partition)))
@@ -577,14 +578,19 @@ class LocalSliceLgCollapse(MessagePassing):
 			ikeep = torch.Tensor([]).long().to(device)
 
 		sliced_edges = sliced_edges[:,ikeep] # only use times within range. (need to specify target node cardinality)
-		out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), phase = phase_label, size = (N, M))))
+		if self.phase_type == 'P':
+			mag = self.Mag.mag(ipick[sliced_edges[1]], src_pos[sliced_edges[0]], log_amp[sliced_edges[1]], torch.zeros(sliced_edges.shape[1]).to(self.device)).detach()
+		elif self.phase_type == 'S':
+			mag = self.Mag.mag(ipick[sliced_edges[1]], src_pos[sliced_edges[0]], log_amp[sliced_edges[1]], torch.ones(sliced_edges.shape[1]).to(self.device)).detach()
+		
+		out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), phase = phase_label, edge_attr = mag, size = (N, M))))
 
 		return out
 
 	## Adding back after removed
-	def message(self, x_j, pos_i, pos_j, phase_i):
+	def message(self, x_j, pos_i, pos_j, phase_i, edge_attr):
 
-		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
+		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i, edge_attr), dim = -1))) # note scaling of relative time
 
 class StationSourceAttentionMergedPhases(MessagePassing):
 	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, device = device):
@@ -809,8 +815,8 @@ if use_updated_model_definition == False:
 	
 			self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
 			self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
-			self.LocalSliceLgCollapseP = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
-			self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
+			self.LocalSliceLgCollapseP = LocalSliceLgCollapse(30, 15, phase_type = 'P', device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
+			self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, phase_type = 'S', device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3, device = device).to(device)
 			# self.ArrivalS = StationSourceAttention(30, 15, 1, 15, n_heads = 3).to(device)
 			self.Mag = []
@@ -944,8 +950,8 @@ elif use_updated_model_definition == True:
 	
 			self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
 			self.DataAggregationAssociationPhase = DataAggregationAssociationPhaseEdges(15, 15, use_absolute_pos = use_absolute_pos).to(device) # need to add concatenation
-			self.LocalSliceLgCollapseP = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
-			self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
+			self.LocalSliceLgCollapseP = LocalSliceLgCollapse(30, 15, phase_type = 'P', device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
+			self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, phase_type = 'S', device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3, device = device).to(device)
 			self.use_absolute_pos = use_absolute_pos
 			self.scale_rel = self.DataAggregation.scale_rel
