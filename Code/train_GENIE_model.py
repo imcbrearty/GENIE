@@ -288,6 +288,9 @@ if use_amplitudes == True:
 	mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
 	Mag = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
 	Mag.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
+	Mags = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
+	Mags.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
+	# Mags.bias = torch.cat((Mags.bias, Mags.bias.mean(0, keepdims = True)), dim = 0) ## Append one entry for the "null" vector
 	mags_supp.close()
 
 	use_softplus = True
@@ -1395,6 +1398,9 @@ mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, device = device).t
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
 loss_func = torch.nn.MSELoss()
 np.random.seed() ## randomize seed
+tree_stas = cKDTree(ftrns1(locs))
+if use_amplitudes == True:
+	mz.Mag = Mags
 
 losses = np.zeros(n_epochs)
 mx_trgt_1, mx_trgt_2, mx_trgt_3, mx_trgt_4 = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
@@ -1859,6 +1865,10 @@ for i in range(n_restart_step, n_epochs):
 			torch.Tensor(x_src_query_cart).to(device),
 			tq, tq_sample, trv_out_src
 		]
+
+
+		if use_amplitudes == True:
+			mz.Mag.ivec = tree_stas.query(ftrns1(Locs[i0]))[1]
 
 		# Call the model with pre-processed tensors
 		out = mz(*input_tensors)
