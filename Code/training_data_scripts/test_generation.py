@@ -10,7 +10,7 @@ from data_generation_utils import (
 )
     
 def main():
-    np.random.seed(14)
+    np.random.seed(16)
 
     # -----------------------------
     # Dropout rate
@@ -32,7 +32,7 @@ def main():
     print(f"Number of points: {N}")
     print("Points shape: ", points.shape)
     print(f"Points min: {points.min(axis=0)}, max: {points.max(axis=0)}")
-    print(f"Sample points: {points[:5]}")
+    # print(f"Sample points: {points[:5]}")
 
     # Calculate space size for sigma_noise
     space_size = max(points[:, 0].max() - points[:, 0].min(), 
@@ -46,23 +46,23 @@ def main():
     # Experiment configuration
     # -----------------------------
     # Magnitude of the cluster
-    magnitude = 2.0
+    magnitude = 7.0
     # Radial function sigma_radial, controls the spreading of the cluster.
-    p = 3 # TODO: tune this
-    sigma_radial = pdist_p(magnitude)/ 6
+    p = 2 # TODO: tune this
+    sigma_radial =  1.17 * pdist_p(magnitude)/ 3
     # scaling factor for the radial function
-    scale_factor = 0.95 # TUNABLE: 0.95 is a good default value, but can be tuned to get better results.
+    scale_factor = 0.97 # TUNABLE: 0.95 is a good default value, but can be tuned to get better results.
     
     # Covariance matrix/kernel distances sigma_radial, controls the spreading of the cluster.
-    sigma_noise = max_noise_spread / 4 #TODO: tune this # adjust between small (tight cluster, many points, small values) and big (one big cluster, few points, large values)
+    sigma_noise = max_noise_spread / 8 # adjust between small (tight cluster, many points, small values) and big (one big cluster, few points, large values)
     
     # Logistic function sigma_radial, controls the roughness of cluster border
-    threshold_logistic = 4 # TUNABLE (very binary) 0 < threshol_logistic <= ~4 (diffused) (can be more than 3 but the values are below)
+    threshold_logistic = 3 # TUNABLE (very binary) 0 < threshol_logistic <= ~4 (diffused) (can be more than 3 but the values are below)
     max_value_logistic = 0.99 # < 1, the maximum value of the logistic function for the threshold, don't tune this.
     sigma_logistic = - threshold_logistic / np.log(1/max_value_logistic - 1) 
     
     # Mixing function lambda, controls the correlation between the radial function and the correlated noise
-    lambda_corr = 0.2  # TODO: tune this # adjust between 0 (no correlation) and 1 (max allowed) 
+    lambda_corr = 0.25  # TODO: tune this # adjust between 0 (no correlation) and 1 (max allowed) 
 
     k_neighbours = 10 # TODO: tune this
     # -----------------------------
@@ -84,6 +84,7 @@ def main():
         print(f'Experiment {i+1} done. Initial idx: {run_data["initial_idx"].shape}, Final idx: {run_data["final_idx"].shape}')
         print(f'  Center: {run_data["center"]}, radial_pdf min/max: {run_data["radial_pdf"].min()}/{run_data["radial_pdf"].max()}')
         print(f'  pdf_final min/max: {run_data["pdf_final"].min()}/{run_data["pdf_final"].max()}')
+        # print(f'Final idx: {run_data["final_idx"]}')
         runs.append(run_data)
         # Visualize selection for this run
         # visualize_point_selection(

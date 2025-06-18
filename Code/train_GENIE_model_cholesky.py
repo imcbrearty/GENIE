@@ -395,7 +395,7 @@ use_shallow_sources = train_config['use_shallow_sources']
 use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, return_only_data = False):
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = True, verbose = False, skip_graphs = False, return_only_data = False):
 	"""
 	Generate synthetic seismic data for training the GENIE neural network.
 	
@@ -588,8 +588,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	# Generate random source locations uniformly within extended region
 	src_positions = np.random.rand(n_src, 3)*scale_x + offset_x  # [lat, lon, depth]
 	
-	# Generate random magnitudes uniformly between -1.0 and 6.0
-	src_magnitude = np.random.rand(n_src)*7.0 - 1.0
+	# Generate random magnitudes uniformly between -1.0 and 7.0
+	src_magnitude = np.random.rand(n_src)*8.0 - 1.0
 
 	# ============================================================================
 	# SOURCE POSITION MODIFICATIONS
@@ -742,11 +742,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 			# Radial function parameters based on magnitude
 			p = 2 # TODO: tune this
-			sigma_radial_p = pdist_p(magnitude) / 6  # P-wave detection radius
-			sigma_radial_s = pdist_s(magnitude) / 6  # S-wave detection radius
+			sigma_radial_p = 1.17 * pdist_p(magnitude) / 3  # P-wave detection radius
+			sigma_radial_s = 1.17 * pdist_s(magnitude) / 3  # S-wave detection radius
 			
 			# scaling factor for the radial function
-			scale_factor = 0.95 # TUNABLE: 0.95 is a good default value, but can be tuned to get better results.
+			scale_factor = 0.98 # TUNABLE: 0.95 is a good default value, but can be tuned to get better results.
 
 			# Covariance matrix/kernel distances sigma_radial, controls the spreading of the cluster.
 			sigma_noise = max_noise_spread / 8 # 15km is fine for now # adjust between small (tight cluster, many points, small values) and big (one big cluster, few points, large values)
@@ -757,7 +757,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			sigma_logistic = - threshold_logistic / np.log(1/max_value_logistic - 1) 
 
 			# Mixing function lambda, controls the correlation between the radial function and the correlated noise
-			lambda_corr = 0.2  # TODO: tune this # adjust between 0 (no correlation) and 1 (max allowed) 
+			lambda_corr = 0.25  # TODO: tune this # adjust between 0 (no correlation) and 1 (max allowed) 
 
 			k_neighbours = 8 # TODO: tune this
 
@@ -773,6 +773,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				center=center
 			)
 
+			angle_p, length1_p, length2_p = experiment_result_p['parameters']['angle'], experiment_result_p['parameters']['length1'], experiment_result_p['parameters']['length2']
+			angle_s = (angle_p + np.random.uniform(-np.pi/8, np.pi/8)) % (2*np.pi)
+			length1_s = length1_p * np.random.uniform(0.95, 1.05)
+			length2_s = length2_p * np.random.uniform(0.95, 1.05)
+
 			# Generate S-wave detections (with different parameters)
 			experiment_result_s = run_single_experiment(
 				points=locs_geographic,  # Use 2D station locations as the spatial grid
@@ -782,7 +787,10 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				lambda_corr=lambda_corr,
 				p=p,
 				scale_factor=scale_factor,
-				center=center
+				center=center,
+				angle=angle_s,
+				length1=length1_s,
+				length2=length2_s
 			)
 
 			if plot_on:
@@ -862,7 +870,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		# create different distance dependent thresholds.
 		dist_thresh_p = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None] # Increased sig from 20e3 to 25e3 # Decreased to 10 km
 		dist_thresh_s = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None]
-
+		print(f"Dist thresh p: {dist_thresh_p}")
+		print(f"Dist thresh s: {dist_thresh_s}")
 		# Determine which source-station pairs will generate detections
 		# Add random noise to distances to simulate detection uncertainty
 		ikeep_p1, ikeep_p2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_p))
@@ -1002,7 +1011,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				# Plot the source location
 				plt.scatter(src_positions[src_idx, 1], src_positions[src_idx, 0], 
 						   c='orange', marker='*', s=150, 
-						   label=f'Source {src_idx}', alpha=1.0, 
+						   label=f'Source {src_idx} (M{src_magnitude[src_idx]:.2f})', alpha=1.0, 
 						   edgecolors='black', linewidth=1)
 				
 				# Plot arrival connections with low alpha
@@ -1015,7 +1024,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				
 				plt.xlabel('Longitude')
 				plt.ylabel('Latitude')
-				plt.title(f'Source {src_idx}: {p_arrivals_count} P-arrivals, {s_arrivals_count} S-arrivals\nMoran\'s I = {morans_i:.3f}')
+				plt.title(f'Source {src_idx} (M{src_magnitude[src_idx]:.2f}): {p_arrivals_count} P-arrivals, {s_arrivals_count} S-arrivals\nMoran\'s I = {morans_i:.3f}')
 				plt.legend()
 				plt.gca().set_aspect('equal', 'box')
 				plt.ticklabel_format(style='sci', axis='both', scilimits=(0,0))
@@ -1029,7 +1038,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		# Also create the original combined overview figure
 		plt.figure(figsize=(12, 8))
 		plt.scatter(locs[:, 1], locs[:, 0], c='blue', marker='^', label='Stations', s=100)
-		plt.scatter(src_positions[:, 1], src_positions[:, 0], c='red', marker='*', label='Sources', s=150)
+		
+		# Plot sources with magnitude information
+		for i in range(len(src_positions)):
+			plt.scatter(src_positions[i, 1], src_positions[i, 0], 
+					   c='red', marker='*', s=150,
+					   label=f'Source {i} (M{src_magnitude[i]:.2f})' if i < 5 else None)  # Only label first 5 sources to avoid overcrowding
 		
 		# Plot arrival connections
 		print(f"Plotting {len(arrivals)} arrivals")
@@ -1045,7 +1059,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		
 		plt.xlabel('Longitude')
 		plt.ylabel('Latitude')
-		plt.title('Checkpoint 3: Station and Source Distribution with Arrivals (Overview)')
+		plt.title('Checkpoint 3: Station and Source Distribution with Arrivals (Overview)\nMagnitudes shown for first 5 sources')
 		plt.legend()
 		plt.grid(True)
 		plt.savefig(f'{checkpoint_dir}/3_stations_sources_arrivals_overview.png')

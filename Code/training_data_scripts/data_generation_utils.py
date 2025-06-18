@@ -152,11 +152,14 @@ def radial_function(points, center, inv_cov, sigma_radial, p=2, scale_factor=1.0
     return radial_pdf
 
 
-def generate_ellipse_parameters(scale_factor=1.0):
+def generate_ellipse_parameters(scale_factor=1.0, angle=None, length1=None, length2=None):
     """Generate random ellipse parameters."""
-    angle = np.random.uniform(0, 2*np.pi)
-    length1 = np.random.uniform(0.7, 1.3) * scale_factor # TODO: tune this
-    length2 = np.random.uniform(0.7, 1.3) * scale_factor
+    if angle is None:
+        angle = np.random.uniform(0, 2*np.pi)
+    if length1 is None: 
+        length1 = np.random.uniform(0.8, 1.2) * scale_factor # TODO: tune this
+    if length2 is None:
+        length2 = np.random.uniform(0.8, 1.2) * scale_factor
     
     R = np.array([[np.cos(angle), -np.sin(angle)],
                   [np.sin(angle), np.cos(angle)]])
@@ -198,7 +201,7 @@ def logistic(x, sigma_logistic=1.0):
     # print(f'  [DEBUG] 1 / (1 + np.exp(-x/sigma_logistic)): {1 / (1 + np.exp(-x/sigma_logistic)).min()}, {1 / (1 + np.exp(-x/sigma_logistic)).max()}')
     return 1 / (1 + np.exp(-x/sigma_logistic))
 
-def compute_final_probabilities(radial_pdf, noise, lambda_corr=0.5, sigma_logistic=1.0, decaying_factor=25):
+def compute_final_probabilities(radial_pdf, noise, lambda_corr=0.5, sigma_logistic=1.0, decaying_factor=200):
     """Compute final selection probabilities."""
     # =========== Option 1: adding dumbly =============
     # Add the noise to the pdf values
@@ -220,15 +223,15 @@ def compute_final_probabilities(radial_pdf, noise, lambda_corr=0.5, sigma_logist
         return radial_pdf
     
     def g_step(radial_pdf, decaying_factor=25):  # decaying_factor = 25 => decays from 0.25
-        return 1 - (1 - radial_pdf)**decaying_factor
+        return 1 - np.power((1 - radial_pdf), decaying_factor)
 
     noise_pdf = 2 * (logistic(noise, sigma_logistic) - 0.5) # between -1 and 1
 
-    pdf_final = np.clip(radial_pdf + lambda_corr * g_step(radial_pdf) * noise_pdf, 0, 1)
+    pdf_final = np.clip(radial_pdf + lambda_corr * g_step(radial_pdf, decaying_factor) * noise_pdf, 0, 1)
 
     return pdf_final
 
-def run_single_experiment(points, sigma_radial, sigma_noise, sigma_logistic=1.0, lambda_corr=0.5, p=2, scale_factor=1.0, center=None):
+def run_single_experiment(points, sigma_radial, sigma_noise, sigma_logistic=1.0, lambda_corr=0.25, p=2, scale_factor=1.0, center=None, angle=None, length1=None, length2=None):
     """Run a single experiment with the given parameters.
     
     Args:
@@ -244,7 +247,7 @@ def run_single_experiment(points, sigma_radial, sigma_noise, sigma_logistic=1.0,
         dict: Dictionary containing experiment results and parameters
     """
     # Generate ellipse parameters
-    angle, length1, length2, _, inv_cov = generate_ellipse_parameters(scale_factor)
+    angle, length1, length2, _, inv_cov = generate_ellipse_parameters(scale_factor, angle, length1, length2)
     
     # Generate random center
     if center is None:
