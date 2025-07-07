@@ -492,12 +492,33 @@ yr, mo, dy = date[0], date[1], date[2]
 date = np.array([yr, mo, dy])
 
 P, ind_use = load_picks(path_to_file, date, spr_picks = spr_picks, n_ver = n_ver_picks)
-# P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
+# P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)		
 
 if use_phase_types == False:
 	P[:,4] = 0 ## No phase types
 locs_use = locs[ind_use]
 arrivals_tree = cKDTree(P[:,0][:,None])
+
+## Load magnitude model for amplitudes
+if use_amplitudes == True:
+	n_mag_ver = 1
+	mags_supp = np.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d_supplemental.npz'%n_mag_ver)
+	mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
+	Mags = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
+	Mags.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
+	# Mags.bias = torch.cat((Mags.bias, Mags.bias.mean(0, keepdims = True)), dim = 0) ## Append one entry for the "null" vector
+	mags_supp.close()
+
+	for mz in mz_list:
+		mz.Mag = Mags
+		mz.LocalSliceLgCollapseP.Mag = Mags
+		mz.LocalSliceLgCollapseS.Mag = Mags
+		mz.Arrivals.Mag = Mags
+		mz.Mag.ivec = ind_use # imatch_vec
+		mz.LocalSliceLgCollapseP.ivec = ind_use # imatch_vec
+		mz.LocalSliceLgCollapseS.ivec = ind_use # imatch_vec
+		mz.Arrivals.ivec = ind_use # imatch_vec
+
 
 use_updated_input = True
 dt_embed_discretize = np.round(pred_params[1]/10.0, 2) # 0.05 ## Picks are discretized to this amount if using updated input to speed up input
