@@ -65,6 +65,7 @@ use_physics_informed = config['use_physics_informed']
 use_phase_types = config['use_phase_types']
 use_subgraph = config['use_subgraph']
 use_topography = config['use_topography']
+use_amplitudes = config['use_amplitudes']
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
     k_nearest_pairs = config['k_nearest_pairs']	
@@ -90,7 +91,6 @@ min_magnitude_ref = train_config['min_magnitude_ref'] # 1.5
 percentile_threshold_ref = train_config['percentile_threshold_ref'] # 0.1
 n_reference_clusters = train_config['n_reference_clusters'] # 10000 ## The amount of "quasi-uniiform" nodes to obtain for representing the source catalog distribution
 n_frac_reference_catalog = train_config['n_frac_reference_catalog'] # 0.8 ## The amount of sources to simulate from the reference catalog coordinates compared to background
-use_amplitudes = train_config['use_amplitudes']
 
 ## Prediction params
 kernel_sig_t = train_config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
