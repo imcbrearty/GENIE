@@ -514,10 +514,10 @@ if use_amplitudes == True:
 		mz.LocalSliceLgCollapseP.Mag = Mags
 		mz.LocalSliceLgCollapseS.Mag = Mags
 		mz.Arrivals.Mag = Mags
-		mz.Mag.ivec = ind_use # imatch_vec
-		mz.LocalSliceLgCollapseP.ivec = ind_use # imatch_vec
-		mz.LocalSliceLgCollapseS.ivec = ind_use # imatch_vec
-		mz.Arrivals.ivec = ind_use # imatch_vec
+		mz.Mag.ivec = torch.Tensor(ind_use).long().to(device) # imatch_vec
+		mz.LocalSliceLgCollapseP.ivec = torch.Tensor(ind_use).long().to(device) # imatch_vec
+		mz.LocalSliceLgCollapseS.ivec = torch.Tensor(ind_use).long().to(device) # imatch_vec
+		mz.Arrivals.ivec = torch.Tensor(ind_use).long().to(device) # imatch_vec
 
 
 use_updated_input = True
