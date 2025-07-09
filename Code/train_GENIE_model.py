@@ -729,12 +729,14 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if len(iwhere_p) > 0:
 		rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
 	else:
-		rel_t_p1 = np.zeros(rel_t_p.shape)
+		# rel_t_p1 = np.zeros(rel_t_p.shape)
+		rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
 
 	if len(iwhere_s) > 0:
 		rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
 	else:
-		rel_t_s1 = np.zeros(rel_t_s.shape)
+		# rel_t_s1 = np.zeros(rel_t_s.shape)
+		rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
 		
 
 	Inpts = []
