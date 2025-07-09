@@ -638,6 +638,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	# use_stable_association_labels = True
 	## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
+	iexcess_noise = []
 	if use_stable_association_labels == True: ## It turns out association results are fairly sensitive to this choice
 		# thresh_noise_max = 2.5 # ratio of sig_t*travel time considered excess noise
 		# min_misfit_allowed = 1.0 # min misfit time for establishing excess noise (now set in train_config.yaml)
@@ -646,13 +647,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
 		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
 		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
+			init_phase_type = arrivals[iz[iexcess_noise],4]
 			arrivals[iz[iexcess_noise],2] = -1
 			arrivals[iz[iexcess_noise],3] = 0
 			arrivals[iz[iexcess_noise],4] = -1
+			
 	else: ## This was the original version
 		iz = np.where(arrivals[:,4] >= 0)[0]
 		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 
+	
 	## Need to calibrate the magnitude-distance tradeoff
 	if use_amplitudes == True:
 		ratio_amplitudes = [0.5, 1.5] ## Per source (correlated noise)
@@ -709,9 +713,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	if len(iwhere_false) > 0: # For false picks, assign a random phase type
 		phase_observed[iwhere_false] = np.random.randint(0, high = 2, size = len(iwhere_false))
+	if len(iexcess_noise) > 0:
+		phase_observed[iz[iexcess_noise],4] = init_phase_type ## These "false" picks are only false because they have unusually high travel time error, but the phase type should not be randomly chosen 
 
+	
 	perturb_phases = True # For true picks, randomly flip a fraction of phases
 	if (len(phase_observed) > 0)*(perturb_phases == True):
+		frac_perturb_interval = [0.1, 0.3]
+		frac_perturb_sample = np.random.rand()*(frac_perturb_interval[1] - frac_perturb_interval[0]) + frac_perturb_interval[0]
+		if len(iexcess_noise) > 0:
+			iwhere_real = np.sort(np.array(list(set(iwhere_real).union(iz[iexcess_noise])))).astype('int')
 		n_switch = int(np.random.rand()*(0.2*len(iwhere_real))) # switch up to 20% phases
 		iflip = np.random.choice(iwhere_real, size = n_switch, replace = False)
 		phase_observed[iflip] = np.mod(phase_observed[iflip] + 1, 2)
