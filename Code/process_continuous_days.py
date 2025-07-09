@@ -1353,11 +1353,11 @@ for cnt, strs in enumerate([0]):
 			ws_slice_init = np.copy(ws_slice)
 			
 			use_modified_weights = True
-                        if use_modified_weights == True:
-                                scale_weights = 0.2
-                                wp_slice[wp_slice > 0] = wp_slice[wp_slice > 0]*scale_weights + 1.0
-                                ws_slice[ws_slice > 0] = ws_slice[ws_slice > 0]*scale_weights + 1.0
-                                cost_value = 1.0*min_required_picks
+			if use_modified_weights == True:
+				scale_weights = 0.2
+				wp_slice[wp_slice > 0] = wp_slice[wp_slice > 0]*scale_weights + 1.0
+				ws_slice[ws_slice > 0] = ws_slice[ws_slice > 0]*scale_weights + 1.0
+				cost_value = 1.0*min_required_picks
 			
 			# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
 			assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
