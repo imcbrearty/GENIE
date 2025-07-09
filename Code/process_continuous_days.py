@@ -381,19 +381,19 @@ else:
 # d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
 
 
-tsteps = np.arange(0, day_len, step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
-tsteps_abs = np.arange(-t_win/2.0, day_len + t_win/2.0 + dt_win, dt_win) ## Fixed solution grid, assume 1 second
-tree_tsteps = cKDTree(tsteps_abs.reshape(-1,1))
+# tsteps = np.arange(0, day_len, step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
+# tsteps_abs = np.arange(-t_win/2.0, day_len + t_win/2.0 + dt_win, dt_win) ## Fixed solution grid, assume 1 second
+# tree_tsteps = cKDTree(tsteps_abs.reshape(-1,1))
 
 
-# tsteps_abs_cat = cKDTree(tsteps.reshape(-1,1)) ## Make this tree, so can look up nearest time for all cat.
-print('Doing 1 s steps, to avoid issue of repeating time samples')
+# # tsteps_abs_cat = cKDTree(tsteps.reshape(-1,1)) ## Make this tree, so can look up nearest time for all cat.
+# print('Doing 1 s steps, to avoid issue of repeating time samples')
 
 
-n_batch = 1
-n_batches = int(np.floor(len(tsteps)/n_batch))
-n_extra = len(tsteps) - n_batches*n_batch
-# n_overlap = int(t_win/step) # check this
+# n_batch = 1
+# n_batches = int(np.floor(len(tsteps)/n_batch))
+# n_extra = len(tsteps) - n_batches*n_batch
+# # n_overlap = int(t_win/step) # check this
 
 
 # n_samples = int(250e3)
@@ -498,6 +498,22 @@ if use_phase_types == False:
 locs_use = locs[ind_use]
 arrivals_tree = cKDTree(P[:,0][:,None])
 
+## Full time window to process
+n_batch = 1 ## Rather than process full day, process window around available picks; ## Even more efficient, only around times of picks - max_moveout.
+use_subset_window = True
+if use_subset_window == True:
+	tsteps = np.arange(np.maximum(0.0, P[:,0].min() - max_t), np.minimum(day_len, P[:,0].max()), step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
+	# tsteps = np.arange(np.round(np.maximum(0.0, P[:,0].min() - max_t)), np.round(np.minimum(day_len, P[:,0].max())), step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
+else:
+	tsteps = np.arange(0.0, day_len, step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
+
+tsteps_abs = np.arange(tsteps.min() - t_win/2.0, tsteps.max() + t_win/2.0 + dt_win, dt_win) ## Fixed solution grid, assume 1 second
+tree_tsteps = cKDTree(tsteps_abs.reshape(-1,1))
+n_batches = int(np.floor(len(tsteps)/n_batch))
+n_extra = len(tsteps) - n_batches*n_batch
+
+
+## Input settings
 use_updated_input = True
 dt_embed_discretize = np.round(pred_params[1]/10.0, 2) # 0.05 ## Picks are discretized to this amount if using updated input to speed up input
 
