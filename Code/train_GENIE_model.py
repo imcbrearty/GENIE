@@ -513,6 +513,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	# if use_false_ratio_value == True: ## If true, use the ratio of real events to guide false picks
 	# 	station_false_rate_eval = max_false_events*np.mean(miss_pick_fraction)*station_false_rate_eval*(global_event_rate.mean()/station_false_rate_eval.mean()) # station_false_rate_eval
 
+	use_clean_data_interval = True
+	if use_clean_data_interval == True:
+		## Remove a section of false picks completely, so very clean events are also shown in training (to stabalize the single input pick per station per phase type case with the attention mechanism)
+		frac_interval = [0.1, 0.3] ## Between 0.1 and 0.3 of the full time window
+		frac_length_sample = np.random.rand()*(frac_interval[1] - frac_interval[0]) + frac_interval[0]
+		interval_length = int(np.floor(station_false_rate_eval.shape[1]*frac_length_sample))
+		ichoose_start = np.random.choice(station_false_rate_eval.shape[1] - interval_length)
+		station_false_rate_eval[:,ichoose_start:(ichoose_start + interval_length)] = 0.0 ## Set false pick rate to zero during this interval, for all stations
+	
+	
 	vals = np.random.poisson(dt*station_false_rate_eval/T) # This scaling, assigns to each bin the number of events to achieve correct, on averge, average
 
 	# How to speed up this part?
