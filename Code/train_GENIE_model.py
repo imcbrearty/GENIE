@@ -551,7 +551,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	## Uses a different bias for both p and s waves, but constant for all stations, for each event
 	if add_bias_scaled_travel_time_noise == True:
 		# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
-		scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
+		# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
+		frac_bias_s_ratio = 0.3
+		scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+		scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
+		scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
 		scale_bias = scale_bias + 1.0
 		arrivals_theoretical = arrivals_theoretical*scale_bias
 	
