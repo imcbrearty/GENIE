@@ -590,7 +590,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if len(iwhere_false) > 0: # For false picks, assign a random phase type
 		phase_observed[iwhere_false] = np.random.randint(0, high = 2, size = len(iwhere_false))
 	if len(iexcess_noise) > 0:
-		phase_observed[iz[iexcess_noise],4] = init_phase_type ## These "false" picks are only false because they have unusually high travel time error, but the phase type should not be randomly chosen 
+		phase_observed[iz[iexcess_noise]] = init_phase_type ## These "false" picks are only false because they have unusually high travel time error, but the phase type should not be randomly chosen 
 
 	perturb_phases = True # For true picks, randomly flip a fraction of phases
 	if (len(phase_observed) > 0)*(perturb_phases == True):
