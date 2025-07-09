@@ -894,8 +894,8 @@ for cnt, strs in enumerate([0]):
 
 		## Dense, spatial view.
 		d_deg = 0.1
-		x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
-		x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
+		x1 = np.linspace(lat_range[0], lat_range[1], 15)
+		x2 = np.linspace(lon_range[0], lon_range[1], 15)
 		x3 = np.array([0.0]) # This value is overwritten in the next step
 		x11, x12, x13 = np.meshgrid(x1, x2, x3)
 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
