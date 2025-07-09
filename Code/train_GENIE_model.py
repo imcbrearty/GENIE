@@ -874,7 +874,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		rel_t_p1 = diff_rel_t[ivec,iarg_rel_p] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
 		log_amp_p1_val = log_amp_select[iwhere_p[ip_p1_pad[ivec,iarg_rel_p]]]
 	else:
-		rel_t_p1 = np.zeros(rel_t_p.shape)
+		# rel_t_p1 = np.zeros(rel_t_p.shape)
+		rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
 		log_amp_p1_val = null_log_amp*np.ones(rel_t_p.shape)
 
 	if len(iwhere_s) > 0:
@@ -885,7 +886,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		rel_t_s1 = diff_rel_t[ivec,iarg_rel_s] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
 		log_amp_s1_val = log_amp_select[iwhere_s[ip_s1_pad[ivec,iarg_rel_s]]]
 	else:
-		rel_t_s1 = np.zeros(rel_t_s.shape)
+		# rel_t_s1 = np.zeros(rel_t_s.shape)
+		rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
 		log_amp_s1_val = null_log_amp*np.ones(rel_t_s.shape)
 		
 
