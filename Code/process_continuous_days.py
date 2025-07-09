@@ -1349,6 +1349,16 @@ for cnt, strs in enumerate([0]):
 			# thresh_assoc = 0.125
 			wp_slice[wp_slice <= thresh_assoc] = 0.0
 			ws_slice[ws_slice <= thresh_assoc] = 0.0
+			wp_slice_init = np.copy(wp_slice)
+			ws_slice_init = np.copy(ws_slice)
+			
+			use_modified_weights = True
+                        if use_modified_weights == True:
+                                scale_weights = 0.2
+                                wp_slice[wp_slice > 0] = wp_slice[wp_slice > 0]*scale_weights + 1.0
+                                ws_slice[ws_slice > 0] = ws_slice[ws_slice > 0]*scale_weights + 1.0
+                                cost_value = 1.0*min_required_picks
+			
 			# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
 			assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
 
@@ -1359,8 +1369,8 @@ for cnt, strs in enumerate([0]):
 
 					srcs_retained.append(srcs_refined[arv_src_slice[srcs_active[j]]].reshape(1,-1))
 
-					wp_val = wp_slice[srcs_active[j], assignments[j][0]]
-					ws_val = ws_slice[srcs_active[j], assignments[j][1]]
+					wp_val = wp_slice_init[srcs_active[j], assignments[j][0]]
+					ws_val = ws_slice_init[srcs_active[j], assignments[j][1]]
 					
 					p_assign = np.concatenate((unique_picks[arv_ind_slice[assignments[j][0]],:], cnt_src*np.ones(len(assignments[j][0])).reshape(-1,1), wp_val.reshape(-1,1)), axis = 1) ## Note: could concatenate ip_picks, if desired here, so all picks in Picks_P lists know the index of the absolute pick index.
 					s_assign = np.concatenate((unique_picks[arv_ind_slice[assignments[j][1]],:], cnt_src*np.ones(len(assignments[j][1])).reshape(-1,1), ws_val.reshape(-1,1)), axis = 1)
