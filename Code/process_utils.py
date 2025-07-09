@@ -43,7 +43,7 @@ class LocalMarching(MessagePassing): # make equivelent version with sum operatio
 		self.device = device
 
 	## Changed dt to 5 s
-	def forward(self, srcs, ftrns1, tc_win = 5, sp_win = 35e3, n_steps_max = 100, tol = 1e-4, scale_depth = 1.0, use_directed = True):
+	def forward(self, srcs, ftrns1, tc_win = 5, sp_win = 35e3, n_steps_max = 100, tol = 1e-12, scale_depth = 1.0, use_directed = True):
 
 		scale_vec = np.array([1.0, 1.0, scale_depth]).reshape(1,-1) ## Use this to down-weight importance of depths
 		## which are sometimes highly seperated for nearby sources, since spatial graphs are usually sparsely populated
