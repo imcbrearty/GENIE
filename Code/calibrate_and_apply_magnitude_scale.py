@@ -713,7 +713,7 @@ for i in range(n_updates):
 	assert(torch.abs(log_amp_s).max().item() < 100)
 
 
-write_training_file = path_to_file + seperator + 'Grids' + seperator
+write_training_file = path_to_file + 'Grids' + seperator
 torch.save(Mag.state_dict(), write_training_file + 'trained_magnitude_model_ver_%d.h5'%(n_ver_save))
 torch.save(optimizer.state_dict(), write_training_file + 'trained_magnitude_model_ver_%d_optimizer.h5'%(n_ver_save))
 np.savez_compressed(write_training_file + 'trained_magnitude_model_ver_%d_supplemental.npz'%(n_ver_save), mag_grid = mag_grid, k_grid = k_grid, losses = losses)
