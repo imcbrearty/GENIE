@@ -34,7 +34,7 @@ from torch.autograd import Variable
 from numpy.matlib import repmat
 from torch_geometric.utils import degree
 from sklearn.metrics import r2_score
-from scipy.stats import chi2
+from scipy.stats import chi2, pearsonr
 import pathlib
 import itertools
 import shutil
