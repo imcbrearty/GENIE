@@ -999,7 +999,10 @@ for cnt, strs in enumerate([0]):
 	Save_picks = [Save_picks[i] for i in iargsort]
 	lp_meta = [lp_meta_l[i] for i in iargsort]
 
-	if (use_expanded_competitive_assignment == False) or (len(srcs_refined) <= 1):
+	## Note: forcing default behavior to always use expanded_competitive_assignment, even with one
+	## source. Must make sure this doesn't cause a bug, but initial tests indicate it still works with one source.
+	## This way, the same updated weighting scheme, and the appending of association likelihoods are consistent
+	if use_expanded_competitive_assignment == False: # or (len(srcs_refined) <= 1):
 
 		Assigned_picks = []
 		Picks_P = []
