@@ -780,3 +780,105 @@ if apply_magnitude_model == True:
 		# 	time = UTCDateTime(int(Times[i,0]), int(Times[i,1]), int(Times[i,2])) + srcs[i,3]
 		# 	f.write('%d, %s, %0.4f, %0.4f, %0.4f, %0.4f, %d, %d, %0.4f, %0.4f \n'%(i, str(time), srcs[i,0], srcs[i,1], srcs[i,2], mag_pred[i], cnt_p[i], cnt_s[i], srcs_sigma[i], srcs_w[i]))
 		# f.close()
+
+## Fit distance dependent association likelihood
+
+m_dist = nn.Sequential(nn.Linear(1, 50), nn.PReLU(), nn.Linear(50, 50), nn.PReLU(), nn.Linear(50, 2), nn.Softplus()).to(device)
+optimizer = optim.Adam(m_dist.parameters(), lr = 0.001)
+assert(len(srcs) == len(mag_pred))
+
+losses = []
+loss_func = nn.L1Loss()
+
+n_batch = 30
+n_updates = 3000
+scale_vec = 100e3
+
+dist_thresh = 0.85 ## Find the 85% percentile distance of the max associated stations 
+
+for i in range(n_updates):
+
+	optimizer.zero_grad()
+	loss_val = 0.0
+
+	i0 = np.random.choice(len(srcs), size = n_batch)
+	src = srcs[i0]
+	mag = torch.Tensor(mag_pred[i0]).reshape(-1,1).to(device)
+
+	dist_p = []
+	dist_s = []
+	for j in range(n_batch):
+
+		ind_p, ind_s = Picks_P[i0[j]][:,1].astype('int'), Picks_S[i0[j]][:,1].astype('int')
+
+		## Random sample p picks
+		src_p = torch.Tensor(ftrns1(srcs[i0[j]].reshape(1,-1).repeat(len(ind_p), axis = 0))).to(device)
+		rec_p = torch.Tensor(ftrns1(locs[ind_p])).to(device)
+		if len(ind_p) > 0:
+			dist_p.append(np.quantile(torch.norm(src_p - rec_p, dim = 1).cpu().detach().numpy()/scale_vec, dist_thresh))
+		else:
+			dist_p.append(-1.0)
+
+		## Random sample s picks
+		src_s = torch.Tensor(ftrns1(srcs[i0[j]].reshape(1,-1).repeat(len(ind_s), axis = 0))).to(device)
+		rec_s = torch.Tensor(ftrns1(locs[ind_s])).to(device)
+		if len(ind_s) > 0:
+			dist_s.append(np.quantile(torch.norm(src_s - rec_s, dim = 1).cpu().detach().numpy()/scale_vec, dist_thresh))
+		else:
+			dist_s.append(-1.0)
+
+	dist_p = torch.Tensor(dist_p).to(device)
+	dist_s = torch.Tensor(dist_s).to(device)
+	mask_p = torch.ones(len(dist_p)).to(device)
+	mask_s = torch.ones(len(dist_s)).to(device)
+	mask_p[dist_p < 0] = 0.0
+	mask_s[dist_s < 0] = 0.0
+
+
+	pred = m_dist(mag)
+
+	loss_val = 0.5*loss_func(dist_p*mask_p, pred[:,0]*mask_p) + 0.5*loss_func(dist_s*mask_s, pred[:,1]*mask_s)
+
+	# loss_val += torch.cat(loss_vals).mean()/n_batch
+
+	loss_val.backward()
+	print('%d %0.4f'%(i, loss_val.item()))
+	optimizer.step()
+	losses.append(loss_val.item())
+
+## Fit linear curve to the amplitude-distance attentuation relationship
+
+mag_vals = np.linspace(mag_pred.min(), mag_pred.max(), 100)
+pred = scale_vec*m_dist(torch.Tensor(mag_vals).to(device).reshape(-1,1)).cpu().detach().numpy()
+dist_p = np.polyfit(mag_vals, pred[:,0], 1)
+dist_s = np.polyfit(mag_vals, pred[:,1], 1)
+dist_p_pred = np.polyval(dist_p, mag_vals)
+dist_s_pred = np.polyval(dist_s, mag_vals)
+s1 = pearsonr(pred[:,0], np.linspace(0, 1, len(pred))).statistic
+s2 = pearsonr(pred[:,1], np.linspace(0, 1, len(pred))).statistic
+s_vals = np.array([s1, s2])
+print('Distance correlation coefficient (P wave): %0.4f'%(s_vals[0]))
+print('Distance correlation coefficient (S wave): %0.4f'%(s_vals[1]))
+
+## Fit a Softplus form to the curve
+def Softplus(params, return_vals = False):
+	alpha1, beta1, alpha2, beta2 = params[0], params[1], params[2], params[3]
+	val1 = scale_vec*(1.0/beta1)*np.log(1 + np.exp(beta1*mag_vals)) + alpha1
+	val2 = scale_vec*(1.0/beta2)*np.log(1 + np.exp(beta2*mag_vals)) + alpha2
+	if return_vals == True:
+		return val1, val2
+	else:
+		return 0.5*np.linalg.norm(val1 - pred[:,0]) + 0.5*np.linalg.norm(val2 - pred[:,1])
+
+bounds = [(0, scale_vec), (1e-5, dist_p[0]*10.0/scale_vec), (0, scale_vec), (1e-5, dist_s[0]*10.0/scale_vec)]
+optim = scipy.optimize.differential_evolution(Softplus, bounds, popsize = 30, maxiter = 1000, disp = True, vectorized = False)
+params = list(optim.x)
+params.append(scale_vec)
+val1, val2 = Softplus(optim.x, return_vals = True)
+s1 = pearsonr(pred[:,0], val1).statistic
+s2 = pearsonr(pred[:,1], val2).statistic
+s_vals1 = np.array([s1, s2])
+print('Distance correlation coefficient (P wave; softplus): %0.4f'%(s_vals1[0]))
+print('Distance correlation coefficient (S wave; softplus): %0.4f'%(s_vals1[1]))
+
+np.savez_compressed(write_training_file + 'distance_magnitude_model_ver_%d.npz'%(n_ver_save), mag_vals = mag_vals, pred = pred, dist_p = dist_p, dist_s = dist_s, dist_p_pred = dist_p_pred, dist_s_pred = dist_s_pred, min_dist = pred.min(0), params = params, val1 = val1, val2 = val2, s_vals = s_vals, s_vals1 = s_vals1)
