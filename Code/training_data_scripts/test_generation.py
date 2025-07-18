@@ -46,10 +46,10 @@ def main():
     # Experiment configuration
     # -----------------------------
     # Magnitude of the cluster
-    magnitude = 7.0
+    magnitude = 6.0
     # Radial function sigma_radial, controls the spreading of the cluster.
-    p = 2 # TODO: tune this
-    sigma_radial =  1.17 * pdist_p(magnitude)/ 3
+    p = 4 # TODO: tune this
+    sigma_radial = pdist_p(magnitude)/ 4
     # scaling factor for the radial function
     scale_factor = 0.97 # TUNABLE: 0.95 is a good default value, but can be tuned to get better results.
     
@@ -62,7 +62,7 @@ def main():
     sigma_logistic = - threshold_logistic / np.log(1/max_value_logistic - 1) 
     
     # Mixing function lambda, controls the correlation between the radial function and the correlated noise
-    lambda_corr = 0.25  # TODO: tune this # adjust between 0 (no correlation) and 1 (max allowed) 
+    lambda_corr = 0.15  # TODO: tune this # adjust between 0 (no correlation) and 1 (max allowed) 
 
     k_neighbours = 10 # TODO: tune this
     # -----------------------------
@@ -70,6 +70,7 @@ def main():
     # Run the experiment N_runs times
     N_runs = 3
     runs = []
+    noise = None
     for i in range(N_runs):
         print(f'Running experiment {i+1}...')
         run_data = run_single_experiment(
@@ -79,20 +80,17 @@ def main():
             sigma_logistic=sigma_logistic,
             lambda_corr=lambda_corr,
             p=p,
-            scale_factor=scale_factor
+            scale_factor=scale_factor,
+            noise=noise,
+            magnitude=magnitude
         )
         print(f'Experiment {i+1} done. Initial idx: {run_data["initial_idx"].shape}, Final idx: {run_data["final_idx"].shape}')
         print(f'  Center: {run_data["center"]}, radial_pdf min/max: {run_data["radial_pdf"].min()}/{run_data["radial_pdf"].max()}')
         print(f'  pdf_final min/max: {run_data["pdf_final"].min()}/{run_data["pdf_final"].max()}')
         # print(f'Final idx: {run_data["final_idx"]}')
         runs.append(run_data)
-        # Visualize selection for this run
-        # visualize_point_selection(
-        #     points,
-        #     run_data['final_idx'],
-        #     title=f'Run {i+1}: Selected Points',
-        #     save_path=f'figures/magnitude/quick_selection_run{i+1}.png'
-        # )
+        if noise is None:   
+            noise = run_data['noise']
         
     # Print summary of results
     print("\nSummary of experiment runs:")

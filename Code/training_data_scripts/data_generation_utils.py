@@ -94,6 +94,27 @@ def knn_weights(coords, k=8):
             if i != j:  # Skip self-loops
                 W[i, j] = 1.0  # Binary weight: 1.0 for neighbors
     return W
+    
+def morans_I_filtered(points, selected, W=None, length_scale=None):
+    """Calculate Moran's I for a subset of points being inside the circle of radius maximum distance between the centroid and one of the selected points.
+    This method first filters the points to create a new selected vector and new W then returns morans_I_binary(new_selected, new_W)
+    """
+    # Find the maximum distance between the centroid and one of the selected points
+    centroid = points[selected].mean(axis=0)
+    filtering_distance = 1.2*np.max(np.linalg.norm(points[selected] - centroid, axis=1))
+    # Create a new selected vector and W
+    new_selected = np.linalg.norm(points - centroid, axis=1) < filtering_distance
+    new_points = points[new_selected]
+    if W is None:
+        # Compute pairwise distances
+        dists = distances(new_points)
+        # Set a characteristic length scale (e.g., median distance or a fraction of max distance)
+        length_scale = (1/4)*np.median(dists[dists > 0])  # TO CHANGE
+        print(f"Length scale: {length_scale}")
+        # Compute weights using a Gaussian kernel: W_ij = exp(-d^2 / (2*length_scale^2))
+        W = np.exp(-dists**2 / (2 * length_scale**2))
+        np.fill_diagonal(W, 0.0)  # Remove self-loops
+    return morans_I_binary(new_selected, W), W
 
 def morans_I_binary(selected, W):
     """Calculate Moran's I for binary selection vector using sparse W."""
@@ -157,9 +178,9 @@ def generate_ellipse_parameters(scale_factor=1.0, angle=None, length1=None, leng
     if angle is None:
         angle = np.random.uniform(0, 2*np.pi)
     if length1 is None: 
-        length1 = np.random.uniform(0.8, 1.2) * scale_factor # TODO: tune this
+        length1 = np.random.uniform(0.9, 1.1)
     if length2 is None:
-        length2 = np.random.uniform(0.8, 1.2) * scale_factor
+        length2 = np.random.uniform(0.9, 1.1)
     
     R = np.array([[np.cos(angle), -np.sin(angle)],
                   [np.sin(angle), np.cos(angle)]])
@@ -201,7 +222,7 @@ def logistic(x, sigma_logistic=1.0):
     # print(f'  [DEBUG] 1 / (1 + np.exp(-x/sigma_logistic)): {1 / (1 + np.exp(-x/sigma_logistic)).min()}, {1 / (1 + np.exp(-x/sigma_logistic)).max()}')
     return 1 / (1 + np.exp(-x/sigma_logistic))
 
-def compute_final_probabilities(radial_pdf, noise, lambda_corr=0.5, sigma_logistic=1.0, decaying_factor=200):
+def compute_final_probabilities(radial_pdf, noise, lambda_corr=0.5, sigma_logistic=1.0, decaying_factor=300):
     """Compute final selection probabilities."""
     # =========== Option 1: adding dumbly =============
     # Add the noise to the pdf values
@@ -231,7 +252,7 @@ def compute_final_probabilities(radial_pdf, noise, lambda_corr=0.5, sigma_logist
 
     return pdf_final
 
-def run_single_experiment(points, sigma_radial, sigma_noise, sigma_logistic=1.0, lambda_corr=0.25, p=2, scale_factor=1.0, center=None, angle=None, length1=None, length2=None):
+def run_single_experiment(points, sigma_radial, sigma_noise, sigma_logistic=1.0, lambda_corr=0.25, p=2, scale_factor=1.0, center=None, angle=None, length1=None, length2=None, noise=None, magnitude=None):
     """Run a single experiment with the given parameters.
     
     Args:
@@ -267,7 +288,8 @@ def run_single_experiment(points, sigma_radial, sigma_noise, sigma_logistic=1.0,
     initial_idx = np.where(initial_mask)[0]
     
     # Phase B: Add noise
-    noise = generate_noise(points, sigma_noise)
+    if noise is None:
+        noise = generate_noise(points, sigma_noise)
     pdf_final = compute_final_probabilities(radial_pdf, noise, lambda_corr, sigma_logistic)
     
     final_mask = np.random.binomial(1, pdf_final)
@@ -289,7 +311,8 @@ def run_single_experiment(points, sigma_radial, sigma_noise, sigma_logistic=1.0,
             'sigma_noise': sigma_noise,
             'sigma_logistic': sigma_logistic,
             'lambda_corr': lambda_corr,
-            'p': p
+            'p': p,
+            'magnitude': magnitude
         }
     }
 
@@ -298,7 +321,7 @@ def calculate_inertia(points, indices):
     if len(indices) == 0:
         return 0.0
     center = points[indices].mean(axis=0)
-    return np.mean((points[indices] - center)**2)
+    return np.sum((points[indices] - center)**2)/len(indices)
 
 # ----------------------------- 
 # Visualization functions, not useful for the experiment, but useful for debugging.
@@ -399,9 +422,9 @@ def create_visualization(points, initial_idx, final_idx, noise_pdf, radial_pdf, 
     plt.tight_layout()
     
     # Save figure
-    os.makedirs('figures/magnitude', exist_ok=True)
+    os.makedirs('figures', exist_ok=True)
     filename = f'scale{scale_factor:.1f}_id{fig_num+1}_angle{np.degrees(angle):.1f}_len{length1:.1f}_{length2:.1f}.png'
-    plt.savefig(os.path.join('figures', 'magnitude', filename), bbox_inches='tight', dpi=300)  # Increased DPI for better quality
+    plt.savefig(os.path.join('figures', filename), bbox_inches='tight', dpi=300)  # Increased DPI for better quality
     plt.close()
 
     assert not np.isnan(grid_pdf_final).any(), 'grid_pdf_final contains NaN!'
@@ -434,7 +457,8 @@ def plot_experiment_results(points, runs, k_neighbours=8, p=2):
         length2 = params['length2']
         scale_factor = params['scale_factor']
         sigma_logistic = params['sigma_logistic']
-        
+        magnitude = params['magnitude']
+        src_position = center
         # Create rotation and covariance matrices
         R = np.array([[np.cos(angle), -np.sin(angle)],
                       [np.sin(angle), np.cos(angle)]])
@@ -515,8 +539,8 @@ def plot_experiment_results(points, runs, k_neighbours=8, p=2):
         plt.tight_layout()
         
         # Create filename with parameters
-        filename = f'scale{scale_factor:.1f}_id{run_idx+1}_angle{np.degrees(angle):.1f}_len{length1:.1f}_{length2:.1f}_p{p}.png'
-        plt.savefig(os.path.join('figures', 'magnitude', filename), bbox_inches='tight')
+        filename = f'magnitudeM{magnitude:.2f}_src{src_position[0]:.2f}_{src_position[1]:.2f}_sigmanoise{sigma_noise:.2f}.png'
+        plt.savefig(os.path.join('figures', filename), bbox_inches='tight')
         plt.show()
         plt.close()
     
@@ -576,6 +600,8 @@ def plot_experiment_results_extended(points, runs, k_neighbours=8, p=2):
         length2 = params['length2']
         scale_factor = params['scale_factor']
         sigma_logistic = params['sigma_logistic']
+        magnitude = params['magnitude']
+        src_position = center
         
         # Create rotation and covariance matrices
         R = np.array([[np.cos(angle), -np.sin(angle)],
@@ -677,14 +703,14 @@ def plot_experiment_results_extended(points, runs, k_neighbours=8, p=2):
         axes[5].set_aspect('equal', 'box')
         
         # Add a main title with all parameters
-        fig.suptitle(f'Figure {run_idx+1}: Scale={scale_factor:.1f}, Angle={np.degrees(angle):.1f}°, Lengths={length1:.2f},{length2:.2f}\nσ={sigma_radial:.2f}, σ_cov={sigma_noise:.2f}, σ_logistic={sigma_logistic:.1e}, λ={lambda_corr:.2f}, p={p}', y=0.95, fontsize=14)
+        fig.suptitle(f'Figure {run_idx+1}: Magnitude=M{magnitude:.2f}, Angle={np.degrees(angle):.1f}°, Lengths={length1:.2f},{length2:.2f}\nσ={sigma_radial:.2f}, σ_cov={sigma_noise:.2f}, σ_logistic={sigma_logistic:.1e}, λ={lambda_corr:.2f}, p={p}', y=0.95, fontsize=14)
         
         # Adjust layout to prevent overlap
         plt.tight_layout(rect=[0, 0, 1, 0.95])
         
         # Create filename with parameters
-        filename = f'scale{scale_factor:.1f}_id{run_idx+1}_angle{np.degrees(angle):.1f}_len{length1:.1f}_{length2:.1f}_p{p}_extended.png'
-        plt.savefig(os.path.join('figures', 'magnitude', filename), bbox_inches='tight')
+        filename = f'M{magnitude:.2f}_src{src_position[0]:.2f}_{src_position[1]:.0f}_cov{sigma_noise:.0f}.png'
+        plt.savefig(os.path.join('figures', filename), bbox_inches='tight')
         plt.close()
     
     print(f"Generated {len(runs)} extended figures successfully!")
