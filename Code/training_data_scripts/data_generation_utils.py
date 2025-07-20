@@ -95,6 +95,28 @@ def knn_weights(coords, k=8):
                 W[i, j] = 1.0  # Binary weight: 1.0 for neighbors
     return W
     
+def compute_W(points, length_scale=None):
+    """Compute weights matrix W for the given points.
+    
+    Args:
+        points (np.ndarray): Array of shape (N, 2) containing point coordinates
+        W (np.ndarray, optional): Precomputed weights matrix. If None, it will be computed.
+        length_scale (float, optional): Characteristic length scale for Gaussian kernel. If None,
+                                        it will be set to a fraction of the median distance.
+        
+    Returns:
+        np.ndarray: Weights matrix W of shape (N, N)
+    """
+        # Compute pairwise distances
+    dists = distances(points)
+    if length_scale is None:
+        # Set a characteristic length scale (e.g., median distance or a fraction of max distance)
+        length_scale = np.clip((1/4)*np.median(dists[dists > 0]), 0, 25000)  # TO CHANGE
+    # Compute weights using a Gaussian kernel: W_ij = exp(-d^2 / (2*length_scale^2))
+    W = np.exp(-dists**2 / (2 * length_scale**2))
+    np.fill_diagonal(W, 0.0)  # Remove self-loops
+    return W
+
 def morans_I_filtered(points, selected, W=None, length_scale=None):
     """Calculate Moran's I for a subset of points being inside the circle of radius maximum distance between the centroid and one of the selected points.
     This method first filters the points to create a new selected vector and new W then returns morans_I_binary(new_selected, new_W)
@@ -106,14 +128,9 @@ def morans_I_filtered(points, selected, W=None, length_scale=None):
     new_selected = np.linalg.norm(points - centroid, axis=1) < filtering_distance
     new_points = points[new_selected]
     if W is None:
-        # Compute pairwise distances
-        dists = distances(new_points)
-        # Set a characteristic length scale (e.g., median distance or a fraction of max distance)
-        length_scale = (1/4)*np.median(dists[dists > 0])  # TO CHANGE
-        print(f"Length scale: {length_scale}")
-        # Compute weights using a Gaussian kernel: W_ij = exp(-d^2 / (2*length_scale^2))
-        W = np.exp(-dists**2 / (2 * length_scale**2))
-        np.fill_diagonal(W, 0.0)  # Remove self-loops
+        W = compute_W(new_points, length_scale=length_scale)
+    else: # W is the matrix for LOCS_USE
+        W = W[new_selected][:, new_selected]  # Filter W to match new points
     return morans_I_binary(new_selected, W), W
 
 def morans_I_binary(selected, W):
@@ -165,7 +182,7 @@ def inv_2x2(matrix):
     det = a * d - b * c
     return np.array([[d, -b], [-c, a]]) / det
 
-def radial_function(points, center, inv_cov, sigma_radial, p=2, scale_factor=1.0):
+def radial_function(points, center, inv_cov, sigma_radial, p=4, scale_factor=1.0):
     """Compute Mahalanobis distances and PDF values."""
     diff = points - center
     mahalanobis2 = np.sqrt(np.sum(diff @ inv_cov * diff, axis=1))
