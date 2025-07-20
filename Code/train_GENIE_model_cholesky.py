@@ -497,11 +497,7 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 	
 	# Unpack prediction parameters (kernel widths for probability functions)
 	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
-
-	print(training_params)
-	print(training_params_2)
-	print(training_params_3)
-	pdb.set_trace()
+	
 	# Unpack training parameters
 	n_spc_query, n_src_query = training_params  # Number of spatial and source queries per batch
 	
@@ -936,13 +932,20 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 	## errors that are from a velocity model different than used for sampling, training, and application, etc.
 	## Uses a different bias for both p and s waves, but constant for all stations, for each event
 	if add_bias_scaled_travel_time_noise == True:
-		# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
-		# Add random scaling bias to travel times (simulates velocity model errors)
-		# Each earthquake gets a different bias, but it's consistent across all stations
-		# This simulates systematic errors in the velocity model used vs. true Earth structure
-		scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0  # Random bias ±total_bias/2
-		scale_bias = scale_bias + 1.0  # Convert to multiplicative factor around 1.0
-		arrivals_theoretical = arrivals_theoretical*scale_bias
+			# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
+			# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
+			# avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
+			# avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
+			# mean_ps_ratio = avg_p_vel/avg_s_vel
+			## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
+			frac_bias_s_ratio = 0.3
+			scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+			scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
+			scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
+			# scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+			# scale_bias_s = 
+			scale_bias = scale_bias + 1.0
+			arrivals_theoretical = arrivals_theoretical*scale_bias
 	
 	# Create index arrays for organizing arrival data
 	arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)  # Origin time for each source-station pair
@@ -1020,13 +1023,13 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 					# Build knn weights matrix for all stations
 					k_neighbors = min(8, len(locs) - 1)  # Ensure k doesn't exceed available stations
 					W = knn_weights(all_station_coords, k=k_neighbors)
-					tensor_knn = torch.Tensor(ftrns1(locs)).to(device)/1000.0
-					edges_stations = remove_self_loops(knn(tensor_knn, tensor_knn, k=k_neighbors))[0].flip(0).contiguous().long()
-					dist_vals = torch.norm(tensor_knn[edges_stations[0]] - tensor_knn[edges_stations[1]], dim=1)
-					# val_min = scatter(dist_vals.reshape(-1, 1))
-					kernel_sta = scatter(dist_vals.reshape(-1, 1), edges_stations[1], dim=0, reduce='min').mean()
-					edges_W = torch.exp(-0.5 * ((dist_vals)**2)/(kernel_sta**2))
-					W = np.zeros(len(locs), len(locs))
+					# tensor_knn = torch.Tensor(ftrns1(locs)).to(device)/1000.0
+					# edges_stations = remove_self_loops(knn(tensor_knn, tensor_knn, k=k_neighbors))[0].flip(0).contiguous().long()
+					# dist_vals = torch.norm(tensor_knn[edges_stations[0]] - tensor_knn[edges_stations[1]], dim=1)
+					# # val_min = scatter(dist_vals.reshape(-1, 1))
+					# kernel_sta = scatter(dist_vals.reshape(-1, 1), edges_stations[1], dim=0, reduce='min').mean()
+					# edges_W = torch.exp(-0.5 * ((dist_vals)**2)/(kernel_sta**2))
+					# W = np.zeros(len(locs), len(locs))
 			
 					# Calculate Moran's I using the binary selection vector
 					morans_i = morans_I_binary(detecting_mask, W)
@@ -1162,7 +1165,7 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 		print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
 
 	# Remove missed picks from arrivals
-	arrivals = np.delete(arrivals, idel, axis = 0)
+	# arrivals = np.delete(arrivals, idel, axis = 0) # NO MISS PICK BE CAREFUL
 	n_events = len(src_times)
 
 	# ============================================================================
@@ -1187,6 +1190,15 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 	# Type 2: Random false picks (noise, cultural signals, etc.)
 	# Combine station-specific and global false pick rates
 	station_false_rate_eval = 0.5*station_false_rate + 0.5*global_false_rate
+
+	use_clean_data_interval = True
+	if use_clean_data_interval == True:
+		## Remove a section of false picks completely, so very clean events are also shown in training (to stabalize the single input pick per station per phase type case with the attention mechanism)
+		frac_interval = [0.1, 0.3] ## Between 0.1 and 0.3 of the full time window
+		frac_length_sample = np.random.rand()*(frac_interval[1] - frac_interval[0]) + frac_interval[0]
+		interval_length = int(np.floor(station_false_rate_eval.shape[1]*frac_length_sample))
+		ichoose_start = np.random.choice(station_false_rate_eval.shape[1] - interval_length)
+		station_false_rate_eval[:,ichoose_start:(ichoose_start + interval_length)] = 0.0 ## Set false pick rate to zero during this interval, for all stations
 
 	# if use_false_ratio_value == True: ## If true, use the ratio of real events to guide false picks
 	# 	station_false_rate_eval = max_false_events*np.mean(miss_pick_fraction)*station_false_rate_eval*(global_event_rate.mean()/station_false_rate_eval.mean()) # station_false_rate_eval
@@ -1215,25 +1227,15 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 	# Type 3: Coherent noise spikes (simultaneous false picks across multiple stations)
 	if int(max_num_spikes*T/(3600*24)) > 0:
 		n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
-		n_spikes_extent = np.random.randint(1, high = n_sta, size = n_spikes) ## This many stations per spike
+		n_spikes_extent = np.random.randint(int(np.floor(n_sta*0.5)), high = n_sta, size = n_spikes) ## This many stations per spike
 		time_spikes = np.random.rand(n_spikes)*T
-
-		# Generate station indices for each spike
 		sta_ind_spikes = [np.random.choice(n_sta, size = n_spikes_extent[j], replace = False) for j in range(n_spikes)]
 		if len(sta_ind_spikes) > 0: ## Add this catch, to avoid error of np.hstack if len(sta_ind_spikes) == 0
 			sta_ind_spikes = np.hstack(sta_ind_spikes)
-			# Add time spread around each spike (simulates finite propagation speed)
 			sta_time_spikes = np.hstack([time_spikes[j] + np.random.randn(n_spikes_extent[j])*spike_time_spread for j in range(n_spikes)])
-			
-			# Create spike arrival array
-			false_arrivals_spikes = np.concatenate((
-				sta_time_spikes.reshape(-1,1),              # Arrival times
-				sta_ind_spikes.reshape(-1,1),               # Station indices
-				-1.0*np.ones((len(sta_ind_spikes),1)),       # Source index = -1 (false)
-				np.zeros((len(sta_ind_spikes),1)),           # Origin time = 0
-				-1.0*np.ones((len(sta_ind_spikes),1))        # Phase type = -1 (false)
-			), axis = 1)
-			arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) #Concatenate on spikes, to the arrivals array
+			false_arrivals_spikes = np.concatenate((sta_time_spikes.reshape(-1,1), sta_ind_spikes.reshape(-1,1), -1.0*np.ones((len(sta_ind_spikes),1)), np.zeros((len(sta_ind_spikes),1)), -1.0*np.ones((len(sta_ind_spikes),1))), axis = 1)
+			arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) ## Concatenate on spikes
+
 
 	# ============================================================================
 	# NOISE ADDITION AND PICK TIME PERTURBATION
@@ -1242,33 +1244,21 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
     # use_stable_association_labels = True
  ## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
 	# Add realistic noise to arrival times and handle excessive noise
+	iexcess_noise = []
 	if use_stable_association_labels == True: ## It turns out association results are fairly sensitive to this choice
 		# thresh_noise_max = 2.5 # ratio of sig_t*travel time considered excess noise
 		# min_misfit_allowed = 1.0 # min misfit time for establishing excess noise (now set in train_config.yaml)
-		# Advanced noise handling: mark very noisy picks as false
-		iz = np.where(arrivals[:,4] >= 0)[0]  # Real picks only
-		# Generate noise proportional to travel time (realistic scaling)
+		iz = np.where(arrivals[:,4] >= 0)[0]
 		noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-		# Find picks with excessive noise (beyond reasonable detection limits)
 		iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
-		
-		# Add noise to arrival times (convert from travel time to absolute time)
-		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values
-		
-    #     arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
-    #     if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
-    #         arrivals[iz[iexcess_noise],2] = -1
-    #         arrivals[iz[iexcess_noise],3] = 0
-    #         arrivals[iz[iexcess_noise],4] = -1
-    # else: ## This was the original version
-
-		# Mark excessively noisy picks as false (simulates poor quality picks)
-		if len(iexcess_noise) > 0:
-			arrivals[iz[iexcess_noise],2] = -1  # Source index = -1
-			arrivals[iz[iexcess_noise],3] = 0   # Origin time = 0
-			arrivals[iz[iexcess_noise],4] = -1  # Phase type = -1
-	else:
-		# Simple noise addition (original version)
+		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
+			init_phase_type = arrivals[iz[iexcess_noise],4]
+			arrivals[iz[iexcess_noise],2] = -1
+			arrivals[iz[iexcess_noise],3] = 0
+			arrivals[iz[iexcess_noise],4] = -1
+	
+	else: ## This was the original version
 		iz = np.where(arrivals[:,4] >= 0)[0]
 		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 
@@ -1310,8 +1300,10 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 	phase_observed = np.copy(arrivals[:,-1]).astype('int')
 
 	# Assign random phase types to false picks (since they don't have real phases)
-	if len(iwhere_false) > 0:
+	if len(iwhere_false) > 0: # For false picks, assign a random phase type
 		phase_observed[iwhere_false] = np.random.randint(0, high = 2, size = len(iwhere_false))
+	if len(iexcess_noise) > 0:
+		phase_observed[iz[iexcess_noise]] = init_phase_type ## These "false" picks are only false because they have unusually high travel time error, but the phase type should not be randomly chosen 
 
 	perturb_phases = True # For true picks, randomly flip a fraction of phases
 	if (len(phase_observed) > 0)*(perturb_phases == True):
@@ -1468,12 +1460,15 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 	if len(iwhere_p) > 0:
 		rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
 	else:
-		rel_t_p1 = np.zeros(rel_t_p.shape)
+		# rel_t_p1 = np.zeros(rel_t_p.shape)
+		rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
 
 	if len(iwhere_s) > 0:
 		rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
 	else:
-		rel_t_s1 = np.zeros(rel_t_s.shape)
+		# rel_t_s1 = np.zeros(rel_t_s.shape)
+		rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+		
 		
 
 	Inpts = []
@@ -1696,12 +1691,12 @@ def sample_picks_mags(event, W=None):
 	
 	# Get station indices
 	if len(picks_p) > 0:
-		p_stations = np.unique(picks_p[:, 1]).astype(int) # TODO: check if this is correct
+		p_stations = np.unique(picks_p[:, 1]).astype(int)
 	else:
 		p_stations = np.array([])
 		
 	if len(picks_s) > 0:
-		s_stations = np.unique(picks_s[:, 1]).astype(int) # TODO: check if this is correct
+		s_stations = np.unique(picks_s[:, 1]).astype(int)
 	else:
 		s_stations = np.array([])
 	
@@ -1724,7 +1719,7 @@ def sample_picks_mags(event, W=None):
 		detecting_mask[all_detecting_stations] = True
 		# Build knn weights matrix for all stations
 		# Build knn weights matrix for all stations
-		k_neighbors = min(8, len(locs_geographic) - 1)  # Ensure k doesn't exceed available stations
+		# k_neighbors = min(8, len(locs_geographic) - 1)  # Ensure k doesn't exceed available stations
 		# tensor_knn = torch.Tensor(ftrns1(locs_use)).to(device)/1000.0
 		# edges_stations = remove_self_loops(knn(tensor_knn, tensor_knn, k=k_neighbors))[0].flip(0).contiguous().long()
 		# dist_vals = torch.norm(tensor_knn[edges_stations[0]] - tensor_knn[edges_stations[1]], dim=1)
@@ -1741,7 +1736,8 @@ def sample_picks_mags(event, W=None):
 		if W is None:
 			morans_i, W = morans_I_filtered(locs_geographic, detecting_mask)
 		else:
-			morans_i, _ = morans_I_filtered(locs_geographic, detecting_mask, W)
+			W_use = W[event['ind_use']][:, event['ind_use']]  # Subset W to only include detecting stations
+			morans_i, _ = morans_I_filtered(locs_geographic, detecting_mask, W_use)
 	else:	
 		morans_i = 0.0
 
@@ -2014,11 +2010,12 @@ def evaluate_bayesian_objective_catalog(x, Trgts_list, events, prob_vector, n_ra
 			noise=noise_p
 		)
 		exp_event = {
+				'ind_use': event['ind_use'],
 				'locs_use': locs_use,
 				'Picks_P_perm': np.hstack([np.zeros((len(experiment_result_p['final_idx']), 1)), np.array(experiment_result_p['final_idx']).reshape(-1,1)]), # Arrival time 0 !!
 				'Picks_S_perm': np.hstack([np.zeros((len(experiment_result_s['final_idx']), 1)), np.array(experiment_result_s['final_idx']).reshape(-1,1)]) # Arrival time 0 !!
 		}
-		Trgt = sample_picks_mags(exp_event, None)[:4]
+		Trgt = sample_picks_mags(exp_event, W)[:4]
 		Trgts.append(Trgt) # [inertia, morans_i, p_number, s_number]
 
 		w1, w2, w3, w4 = 1.0, 0.8, 1.0, 1.0
@@ -2049,40 +2046,40 @@ def evaluate_bayesian_objective_catalog(x, Trgts_list, events, prob_vector, n_ra
 
 def evaluate_bayesian_objective(x, n_random = 30, t_sample_win = 120.0, windows = [40e3, 150e3, 300e3], t_win_ball = [10.0, 15.0, 25.0], return_vals = False): # 	windows = [40e3, 150e3, 300e3], 	
 
-	if use_radial_cholesky == True:
-		# Radial Cholesky parameter assignment
-		training_params_2[4] = x[0] # coda_rate
-		training_params_2[5][1] = x[1] # coda_win[1]
+	# if use_radial_cholesky == True:
+	# 	# Radial Cholesky parameter assignment
+	# 	training_params_2[4] = x[0] # coda_rate
+	# 	training_params_2[5][1] = x[1] # coda_win[1]
 
-		training_params_3[2] = x[2] # max_rate_events
-		training_params_3[3] = x[3] # max_miss_events
-		training_params_3[4] = x[2]*x[4] # max_false_events (absolute value)
-		training_params_3[5][0] = x[5] # miss_pick_fraction[0]
-		training_params_3[5][1] = x[6] # miss_pick_fraction[1]
+	# 	training_params_3[2] = x[2] # max_rate_events
+	# 	training_params_3[3] = x[3] # max_miss_events
+	# 	training_params_3[4] = x[2]*x[4] # max_false_events (absolute value)
+	# 	training_params_3[5][0] = x[5] # miss_pick_fraction[0]
+	# 	training_params_3[5][1] = x[6] # miss_pick_fraction[1]
 
-		# Update global radial Cholesky parameters
-		radial_cholesky_params['scale_factor'] = x[7]
-		radial_cholesky_params['sigma_noise'] = x[8]
-		radial_cholesky_params['sigma_radial_divider'] = x[9]
-		radial_cholesky_params['threshold_logistic'] = x[10]
-		radial_cholesky_params['lambda_corr'] = x[11]
-		radial_cholesky_params['sigma_radial_p_factor'] = x[12]
-		radial_cholesky_params['sigma_radial_s_factor'] = x[13]
+	# 	# Update global radial Cholesky parameters
+	# 	radial_cholesky_params['scale_factor'] = x[7]
+	# 	radial_cholesky_params['sigma_noise'] = x[8]
+	# 	radial_cholesky_params['sigma_radial_divider'] = x[9]
+	# 	radial_cholesky_params['threshold_logistic'] = x[10]
+	# 	radial_cholesky_params['lambda_corr'] = x[11]
+	# 	radial_cholesky_params['sigma_radial_p_factor'] = x[12]
+	# 	radial_cholesky_params['sigma_radial_s_factor'] = x[13]
 
-	else:
-		# Traditional distance-based parameter assignment
-		training_params_2[0] = x[0] # spc_random
-		training_params_2[2] = x[1] # spc_thresh_rand
-		training_params_2[4] = x[2] # coda_rate
-		training_params_2[5][1] = x[3] # coda_win[1]
+	# else:
+	# Traditional distance-based parameter assignment
+	training_params_2[0] = x[0] # spc_random
+	training_params_2[2] = x[1] # spc_thresh_rand
+	training_params_2[4] = x[2] # coda_rate
+	training_params_2[5][1] = x[3] # coda_win[1]
 
-		training_params_3[1][0] = x[4] # dist_range[0]
-		training_params_3[1][1] = x[5] # dist_range[1]
-		training_params_3[2] = x[6] # max_rate_events
-		training_params_3[3] = x[7] # max_miss_events
-		training_params_3[4] = x[6]*x[8] # max_false_events (absolute value)
-		training_params_3[5][0] = x[9] # miss_pick_fraction[0]
-		training_params_3[5][1] = x[10] # miss_pick_fraction[1]
+	training_params_3[1][0] = x[4] # dist_range[0]
+	training_params_3[1][1] = x[5] # dist_range[1]
+	training_params_3[2] = x[6] # max_rate_events
+	training_params_3[3] = x[7] # max_miss_events
+	training_params_3[4] = x[6]*x[8] # max_false_events (absolute value)
+	training_params_3[5][0] = x[9] # miss_pick_fraction[0]
+	training_params_3[5][1] = x[10] # miss_pick_fraction[1]
 
 	arrivals = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, return_only_data = True)[0]
 
@@ -2113,8 +2110,6 @@ def evaluate_bayesian_objective(x, n_random = 30, t_sample_win = 120.0, windows 
 	print(f"Spatial ratio (optimal) residual: {res3}")
 	print(f"Coda rate residual: {res4}")
 	print(f"Number of adjacent picks residual: {res5}")
-	print(f"Inertia residual: {res6}")
-	print(f"Morans_I residual: {res7}")
 	if return_vals == False:
 		return res
 	else:
@@ -2309,7 +2304,7 @@ if optimize_training_data == True:
 
 	## Now apply Bayesian optimization to training parameters
 
-	if use_radial_cholesky == True:
+	if use_radial_cholesky != True:
 		# Bounds for radial Cholesky method parameters
 		bounds = [
 			(0.001, 0.3),    # x[0] coda_rate
@@ -2335,65 +2330,79 @@ if optimize_training_data == True:
 			'sigma_radial_p_factor', 'sigma_radial_s_factor'
 		]
 		
-	else:
-		# Bounds for traditional distance-based method parameters, tight bounds of Ferndale
-		bounds = [(100.0, 5e3),    # x[0] spc_random
-				(100.0, 5e3),    # x[1] spc_thresh_rand  
-				(0.001, 0.3),    # x[2] coda_rate
-				(1.0, 20.0),     # x[3] coda_win
-				(5000.0, 20e3),  # x[4] dist_range[0]
-				(20e3, 250e3),   # x[5] dist_range[1]
-				(5, 250),        # x[6] max_rate_events
-				(5, 250),        # x[7] max_miss_events
-				(0.2, 4.0),      # x[8] max_false_events
-				(0, 0.25),       # x[9] miss_pick_fraction[0]
-				(0.25, 0.4)]     # x[10] miss_pick_fraction[1]
-		
-		strings = [
-			'spc_random', 'spc_thresh_rand', 'coda_rate', 'coda_win[1]', 'dist_range[0]', 
-			'dist_range[1]', 'max_rate_events', 'max_miss_events', 'max_false_events_ratio', 
-			'miss_pick_fraction[0]', 'miss_pick_fraction[1]'
-		]
-
-	# RANDOM SET = NONE !!!
-	optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
-	                  bounds,      # the bounds on each dimension of x
-	                  acq_func="EI",      # the acquisition function
-	                  n_calls=200,         # the number of evaluations of f
-	                  n_random_starts=50,  # the number of random initialization points
-	                  noise='gaussian',       # the noise level (optional)
-	                  random_state=None, # the random seed
-	                  initial_point_generator = 'lhs',
-	                  model_queue_size = 150)
-
-	res, Trgts, arrivals, res_list = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
+	# else:
+	# Bounds for traditional distance-based method parameters, tight bounds of Ferndale
+	bounds = [(100.0, 5e3),    # x[0] spc_random
+			(100.0, 5e3),    # x[1] spc_thresh_rand  
+			(0.001, 0.3),    # x[2] coda_rate
+			(1.0, 20.0),     # x[3] coda_win
+			(5000.0, 20e3),  # x[4] dist_range[0]
+			(20e3, 250e3),   # x[5] dist_range[1]
+			(5, 250),        # x[6] max_rate_events
+			(5, 250),        # x[7] max_miss_events
+			(1.0, 4.0),      # x[8] max_false_events
+			(0, 0.25),       # x[9] miss_pick_fraction[0]
+			(0.25, 0.4)]     # x[10] miss_pick_fraction[1]
 	
-	# Find the latest version number for the output file and increment it ==========
-	import glob
-	latest_ver = 0
-	if use_radial_cholesky == True:
-		pattern = path_to_file + f'Grids/{name_of_project}_optimized_training_data_parameters_ver_*_cholesky.npz'
+	strings = [
+		'spc_random', 'spc_thresh_rand', 'coda_rate', 'coda_win[1]', 'dist_range[0]', 
+		'dist_range[1]', 'max_rate_events', 'max_miss_events', 'max_false_events_ratio', 
+		'miss_pick_fraction[0]', 'miss_pick_fraction[1]'
+	]
+	test_parameters = True
+	if test_parameters == True:
+		print("Testing parameters.")
+		n_tests = 10
+		pdb.set_trace()
+		x = [training_params_2[0], training_params_2[2], training_params_2[4], training_params_2[5][1], training_params_3[1][0], training_params_3[1][1], training_params_3[2] ,training_params_3[3], training_params_3[4], training_params_3[5][0], training_params_3[5][1]]
+		results = [evaluate_bayesian_objective(x, windows=windows, t_win_ball=t_win_ball, t_sample_win=t_sample_win, return_vals=True) for _ in range(n_tests)]
+		results = np.array([np.array(r, dtype=object) for r in results], dtype=object)
+		print(results[:,0])
+		print(f"Res mean: {np.mean(results[:, 0])}")
+		print(f"Res std: {np.std(results[:, 0])}")
+
+		raise ValueError("Test done.")
+
 	else:
-		pattern = path_to_file + f'Grids/{name_of_project}_optimized_training_data_parameters_ver_*.npz'
-	files = glob.glob(pattern)
-	for f in files:
-		m = re.search(r'_ver_(\d+)', f)
-		if m:
-			v = int(m.group(1))
-			if v > latest_ver:
-				latest_ver = v
-	n_ver_optimize_out = latest_ver + 1
-	# ==========
+		# RANDOM SET = NONE !!!
+		optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
+						bounds,      # the bounds on each dimension of x
+						acq_func="EI",      # the acquisition function
+						n_calls=200,         # the number of evaluations of f
+						n_random_starts=50,  # the number of random initialization points
+						noise='gaussian',       # the noise level (optional)
+						random_state=None, # the random seed
+						initial_point_generator = 'lhs',
+						model_queue_size = 150)
 
-	if use_radial_cholesky == True:
-		np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d_cholesky_res%.2f.npz' % (name_of_project, n_ver_optimize_out, res), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings, use_radial_cholesky = use_radial_cholesky, res_list = res_list)
-	else:
-		np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d_res%.2f.npz' % (name_of_project, n_ver_optimize_out, res), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings, use_radial_cholesky = use_radial_cholesky, res_list = res_list)
+		res, Trgts, arrivals, res_list = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
+		
+		# Find the latest version number for the output file and increment it ==========
+		import glob
+		latest_ver = 0
+		if use_radial_cholesky == True:
+			pattern = path_to_file + f'Grids/{name_of_project}_optimized_training_data_parameters_ver_*_cholesky.npz'
+		else:
+			pattern = path_to_file + f'Grids/{name_of_project}_optimized_training_data_parameters_ver_*.npz'
+		files = glob.glob(pattern)
+		for f in files:
+			m = re.search(r'_ver_(\d+)', f)
+			if m:
+				v = int(m.group(1))
+				if v > latest_ver:
+					latest_ver = v
+		n_ver_optimize_out = latest_ver + 1
+		# ==========
 
-	print('Finished optimized training data')
+		if use_radial_cholesky == True:
+			np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d_cholesky_res%.2f.npz' % (name_of_project, n_ver_optimize_out, res), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings, use_radial_cholesky = use_radial_cholesky, res_list = res_list)
+		else:
+			np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d_res%.2f.npz' % (name_of_project, n_ver_optimize_out, res), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings, use_radial_cholesky = use_radial_cholesky, res_list = res_list)
 
-	# error('Data set optimized; call the training script again to build training data')
-	raise ValueError('Data set optimized; call the training script again to build training data')
+		print('Finished optimized training data')
+
+		# error('Data set optimized; call the training script again to build training data')
+		raise ValueError('Data set optimized; call the training script again to build training data')
 
 elif optimize_hyperparameters == True:
 	# https://scikit-optimize.github.io/stable/auto_examples/bayesian-optimization.html
@@ -2413,9 +2422,9 @@ elif optimize_hyperparameters == True:
 	print('Loading %d catalog files for comparisons' % len(catalog_files))
 
 	# Maximum number of real data files to use for computing the target statistics.
-	n_max_days = 365
+	n_max_days = 500
 	pool_size = float('inf')
-	mag_threshold = 5.0
+	mag_threshold = 6.0
 	batch_size = 400
 	if len(catalog_files) > n_max_days:
 		ichoose = np.sort(np.random.choice(len(catalog_files), size=n_max_days, replace=False))
@@ -2461,9 +2470,10 @@ elif optimize_hyperparameters == True:
 						'Id': i
 						}
 					if W is None:
-						inertia, morans_i, p_number, s_number, W = sample_picks_mags(event)
-					else:
-						inertia, morans_i, p_number, s_number, _ = sample_picks_mags(event, None)
+						locs_geographic = ftrns1(locs)[:,0:2]  # Convert from local coords to lat/lon/depth + projection to 2D
+						W = compute_W(locs_geographic)
+			
+					inertia, morans_i, p_number, s_number, _ = sample_picks_mags(event, W)
 
 					event['inertia'] = inertia
 					event['morans_i'] = morans_i
@@ -2522,9 +2532,9 @@ elif optimize_hyperparameters == True:
 		# Bounds for radial Cholesky method parameters
 		bounds = [
 			(0.5, 1.0),      # x[0] scale_factor
-			(1000, 60000),   # x[1] sigma_noise (in meters)
+			(1000, 100000),   # x[1] sigma_noise (in meters)
 			(0.1, 10),         # x[2] sigma_radial_divider
-			(0.1, 8),          # x[3] threshold_logistic
+			(0.1, 10),          # x[3] threshold_logistic
 			(0.005, 0.3),     # x[4] lambda_corr
 			(0.4, 1.6),      # x[5] sigma_radial_p_factor
 			(0.4, 1.6),       # x[6] sigma_radial_s_factor
