@@ -1062,11 +1062,42 @@ def sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_
 
 	return srcs_sample, mags_sample, Features, ichoose, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2]
 
-		# morans_metric_trgt_p = compute_morans_I_metric(W_abs, Inds[ichoose[i]], locs_use_cart_list[i], srcs_samples_cart[i], Picks_P_lists[ichoose[i]])
-		# morans_metric_trgt_s = compute_morans_I_metric(W_abs, Inds[ichoose[i]], locs_use_cart_list[i], srcs_samples_cart[i], Picks_S_lists[ichoose[i]])
 
+def compute_data_misfit_loss(srcs_samples, mags_samples, features, n_mag_bins = 5):
 
+	## Assumes values are > 1e-12
+	def rel_error(x, y, tol = 1e-12): ## x is pred, y is target
+		val = (np.abs(y) > tol)*np.abs(x - y)/np.maximum(1e-12, np.abs(y))
+		return val
 
+	## Assumes features contains the: Morans, Inertia, Cnt, and Intersection variables
+	## Each contains the (pred_p, pred_s, trgt_p, trgt_s), and Intersection (intersection_p, intersection_s)
+	## These metrics are all computed as a "vector" over the batch
+	Morans, Inertia, Cnt, Intersection = features ## Computing relative misfit features
+	misfit_morans_p = rel_error(Morans[0], Morans[2])
+	misfit_morans_s = rel_error(Morans[1], Morans[3])
+	misfit_inertia_p = rel_error(Inertia[0], Inertia[2])
+	misfit_inertia_s = rel_error(Inertia[1], Inertia[3])
+	misfit_cnt_p = rel_error(Cnt[0], Cnt[2])
+	misfit_cnt_s = rel_error(Cnt[1], Cnt[3])
+	misfit_intersection_p = rel_error(Intersection[0], 1.0) ## Target of intersection is "1.0"
+	misfit_intersection_s = rel_error(Intersection[1], 1.0) ## Target of intersection is "1.0"
+
+	## We now bin the errors into magnitude bins
+	mag_bins = np.linspace(np.quantile(mags_sample, 0.02), np.quantile(mags_sample, 0.98), n_mag_bins + 1)
+	mag_bin_width = np.diff(mag_bins[0:2])
+	ip = cKDTree(mags_sample.reshape(-1,1)).query_ball_point(mag_bins.reshape(-1,1) + mag_bin_width/2.0, r = mag_bin_width/2.0)
+
+	## Compute median relative error over batch for each magnitude bin (or could output other quantiles/statistics)
+	q_val = 0.5
+	median_misfit_morans_p_per_mag_bin = np.hstack([np.quantile(misfit_morans_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	median_misfit_morans_s_per_mag_bin = np.hstack([np.quantile(misfit_morans_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	median_misfit_inertia_p_per_mag_bin = np.hstack([np.quantile(misfit_inertia_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	median_misfit_inertia_s_per_mag_bin = np.hstack([np.quantile(misfit_inertia_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	median_misfit_cnt_p_per_mag_bin = np.hstack([np.quantile(misfit_cnt_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	median_misfit_cnt_s_per_mag_bin = np.hstack([np.quantile(misfit_cnt_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	median_misfit_intersection_p_per_mag_bin = np.hstack([np.quantile(misfit_intersection_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	median_misfit_intersection_s_per_mag_bin = np.hstack([np.quantile(misfit_intersection_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
 
 
 ## Create probability sampling vector based on magnitudes
