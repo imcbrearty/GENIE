@@ -1129,7 +1129,7 @@ def compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5,
 		res_vals_p = [res_morans_p_per_mag_bin, res_inertia_p_per_mag_bin, res_cnt_p_per_mag_bin, res_intersection_p_per_mag_bin]
 		res_vals_s = [res_morans_s_per_mag_bin, res_inertia_s_per_mag_bin, res_cnt_s_per_mag_bin, res_intersection_s_per_mag_bin]
 
-		return median_loss, [res_vals_p, res_vals_p]
+		return median_loss, [res_vals_p, res_vals_s]
 
 
 
@@ -1179,6 +1179,20 @@ print('\nData generation time %0.4f for %d samples (with features)'%(time.time()
 st_time = time.time()
 median_loss = compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5, return_diagnostics = False)
 print('\nResidual computation time %0.4f for %d samples (median loss: %0.4f)'%(time.time() - st_time, n_batch, median_loss))
+
+## Compute residuals (with diagnostics)
+st_time = time.time()
+median_loss, [res_vals_p, res_vals_s] = compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5, return_diagnostics = True)
+print('\nResidual computation time %0.4f for %d samples (median loss: %0.4f; with diagnostics) \n'%(time.time() - st_time, n_batch, median_loss))
+labels = ['Morans', 'Inertia', 'Cnts', 'Intersection']
+for inc, r in enumerate(res_vals_p): 
+	# strings_p = [str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))]
+	print('Res on %s, %s (P waves)'%(labels[inc], ' '.join([str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))])))
+print('\n')
+for inc, r in enumerate(res_vals_s): 
+	# strings_p = [str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))]
+	print('Res on %s, %s (S waves)'%(labels[inc], ' '.join([str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))])))
+
 
 for i in range(len(srcs_sample)):
 
