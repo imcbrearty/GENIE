@@ -1029,8 +1029,8 @@ def sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_
 			Cnt_pred_s.append(len(ind_pred_s))
 
 			## [4]. Intersection
-			Intersection_p_ratio.append(len(set(ind_trgt_p).intersection(ind_pred_p))/len(ind_trgt_p))
-			Intersection_s_ratio.append(len(set(ind_trgt_s).intersection(ind_pred_s))/len(ind_trgt_s))
+			Intersection_p_ratio.append((1.0 if (len(ind_trgt_p) > 0) else np.nan)*len(set(ind_trgt_p).intersection(ind_pred_p))/np.maximum(len(ind_trgt_p), 1.0))
+			Intersection_s_ratio.append((1.0 if (len(ind_trgt_s) > 0) else np.nan)*len(set(ind_trgt_s).intersection(ind_pred_s))/np.maximum(len(ind_trgt_s), 1.0))
 
 		## Merge outputs
 		Morans_pred_p = np.hstack(Morans_pred_p)
@@ -1063,7 +1063,7 @@ def sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_
 	return srcs_sample, mags_sample, Features, ichoose, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2]
 
 
-def compute_data_misfit_loss(srcs_samples, mags_samples, features, n_mag_bins = 5, return_diagnostics = False):
+def compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5, return_diagnostics = False):
 
 	## Assumes values are > 1e-12
 	def rel_error(x, y, tol = 1e-12): ## x is pred, y is target
@@ -1087,17 +1087,23 @@ def compute_data_misfit_loss(srcs_samples, mags_samples, features, n_mag_bins = 
 	mag_bins = np.linspace(np.quantile(mags_sample, 0.02), np.quantile(mags_sample, 0.98), n_mag_bins + 1)
 	mag_bin_width = np.diff(mag_bins[0:2])
 	ip = cKDTree(mags_sample.reshape(-1,1)).query_ball_point(mag_bins.reshape(-1,1) + mag_bin_width/2.0, r = mag_bin_width/2.0)
+	inot_nan_p = np.where(np.isnan(Intersection[0]) == 0)[0]
+	inot_nan_s = np.where(np.isnan(Intersection[1]) == 0)[0]
+	ip_p, ip_s = [], [] ## Create sets of sampling indices based on magnitude bins and whether trgts has "any" picks for that phase type
+	for j in range(len(ip)):
+		ip_p.append(np.array(list(set(ip[j]).intersection(inot_nan_p))))
+		ip_s.append(np.array(list(set(ip[j]).intersection(inot_nan_s))))
 
 	## Compute median relative error over batch for each magnitude bin (or could output other quantiles/statistics)
 	q_val = 0.5
-	res_morans_p_per_mag_bin = np.hstack([np.quantile(misfit_morans_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	res_morans_s_per_mag_bin = np.hstack([np.quantile(misfit_morans_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	res_inertia_p_per_mag_bin = np.hstack([np.quantile(misfit_inertia_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	res_inertia_s_per_mag_bin = np.hstack([np.quantile(misfit_inertia_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	res_cnt_p_per_mag_bin = np.hstack([np.quantile(misfit_cnt_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	res_cnt_s_per_mag_bin = np.hstack([np.quantile(misfit_cnt_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	res_intersection_p_per_mag_bin = np.hstack([np.quantile(misfit_intersection_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	res_intersection_s_per_mag_bin = np.hstack([np.quantile(misfit_intersection_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_morans_p_per_mag_bin = np.hstack([np.quantile(misfit_morans_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip_p]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_morans_s_per_mag_bin = np.hstack([np.quantile(misfit_morans_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip_s]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_inertia_p_per_mag_bin = np.hstack([np.quantile(misfit_inertia_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip_p]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_inertia_s_per_mag_bin = np.hstack([np.quantile(misfit_inertia_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip_s]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_cnt_p_per_mag_bin = np.hstack([np.quantile(misfit_cnt_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip_p]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_cnt_s_per_mag_bin = np.hstack([np.quantile(misfit_cnt_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip_s]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_intersection_p_per_mag_bin = np.hstack([np.quantile(misfit_intersection_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip_p]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_intersection_s_per_mag_bin = np.hstack([np.quantile(misfit_intersection_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip_s]) ## Note "j" is a vector of indices for all events within that magnitude bin
 
 	weights = np.array([1.0, 1.0, 1.0, 1.0])
 	weights = weights/weights.sum()
@@ -1154,15 +1160,20 @@ chol_params['random_scale_factor_phase'] = 0.35 ## should be between [0.0,1.0] (
 
 ## Sample a generation
 st_time = time.time()
-n_batch = 100
+n_batch = 1000
 srcs_sample, mags_sample, features, ind_sample, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_samples = n_batch, return_features = False)
 print('\nData generation time %0.4f for %d samples (without features)'%(time.time() - st_time, n_batch))
 
 ## Sample a generation
 st_time = time.time()
-n_batch = 100
+n_batch = 1000
 srcs_sample, mags_sample, features, ind_sample, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_samples = n_batch)
 print('\nData generation time %0.4f for %d samples (with features)'%(time.time() - st_time, n_batch))
+
+## Compute residuals
+st_time = time.time()
+median_loss = compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5, return_diagnostics = False)
+print('Residual computation time %0.4f for %d samples'%(time.time() - st_time, n_batch))
 
 for i in range(len(srcs_sample)):
 
