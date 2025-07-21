@@ -1166,14 +1166,13 @@ print('\nData generation time %0.4f for %d samples (without features)'%(time.tim
 
 ## Sample a generation
 st_time = time.time()
-n_batch = 1000
 srcs_sample, mags_sample, features, ind_sample, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_samples = n_batch)
 print('\nData generation time %0.4f for %d samples (with features)'%(time.time() - st_time, n_batch))
 
 ## Compute residuals
 st_time = time.time()
 median_loss = compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5, return_diagnostics = False)
-print('Residual computation time %0.4f for %d samples'%(time.time() - st_time, n_batch))
+print('\nResidual computation time %0.4f for %d samples (median loss: %0.4f)'%(time.time() - st_time, n_batch, median_loss))
 
 for i in range(len(srcs_sample)):
 
