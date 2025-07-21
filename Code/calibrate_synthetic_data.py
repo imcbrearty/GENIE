@@ -1063,7 +1063,7 @@ def sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_
 	return srcs_sample, mags_sample, Features, ichoose, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2]
 
 
-def compute_data_misfit_loss(srcs_samples, mags_samples, features, n_mag_bins = 5):
+def compute_data_misfit_loss(srcs_samples, mags_samples, features, n_mag_bins = 5, return_diagnostics = False):
 
 	## Assumes values are > 1e-12
 	def rel_error(x, y, tol = 1e-12): ## x is pred, y is target
@@ -1090,14 +1090,35 @@ def compute_data_misfit_loss(srcs_samples, mags_samples, features, n_mag_bins = 
 
 	## Compute median relative error over batch for each magnitude bin (or could output other quantiles/statistics)
 	q_val = 0.5
-	median_misfit_morans_p_per_mag_bin = np.hstack([np.quantile(misfit_morans_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	median_misfit_morans_s_per_mag_bin = np.hstack([np.quantile(misfit_morans_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	median_misfit_inertia_p_per_mag_bin = np.hstack([np.quantile(misfit_inertia_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	median_misfit_inertia_s_per_mag_bin = np.hstack([np.quantile(misfit_inertia_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	median_misfit_cnt_p_per_mag_bin = np.hstack([np.quantile(misfit_cnt_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	median_misfit_cnt_s_per_mag_bin = np.hstack([np.quantile(misfit_cnt_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	median_misfit_intersection_p_per_mag_bin = np.hstack([np.quantile(misfit_intersection_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
-	median_misfit_intersection_s_per_mag_bin = np.hstack([np.quantile(misfit_intersection_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_morans_p_per_mag_bin = np.hstack([np.quantile(misfit_morans_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_morans_s_per_mag_bin = np.hstack([np.quantile(misfit_morans_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_inertia_p_per_mag_bin = np.hstack([np.quantile(misfit_inertia_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_inertia_s_per_mag_bin = np.hstack([np.quantile(misfit_inertia_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_cnt_p_per_mag_bin = np.hstack([np.quantile(misfit_cnt_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_cnt_s_per_mag_bin = np.hstack([np.quantile(misfit_cnt_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_intersection_p_per_mag_bin = np.hstack([np.quantile(misfit_intersection_p[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+	res_intersection_s_per_mag_bin = np.hstack([np.quantile(misfit_intersection_s[j], q_val).reshape(-1,1).squeeze() if len(j) > 0 else 0.0 for j in ip]) ## Note "j" is a vector of indices for all events within that magnitude bin
+
+	weights = np.array([1.0, 1.0, 1.0, 1.0])
+	weights = weights/weights.sum()
+
+	median_loss_p = weights[0]*res_morans_p_per_mag_bin + weights[1]*res_inertia_p_per_mag_bin + weights[2]*res_cnt_p_per_mag_bin + weights[3]*res_intersection_p_per_mag_bin
+	median_loss_s = weights[0]*res_morans_s_per_mag_bin + weights[1]*res_inertia_s_per_mag_bin + weights[2]*res_cnt_s_per_mag_bin + weights[3]*res_intersection_s_per_mag_bin
+
+	## RMS residual over the magnitude bins (and averaged over phase types)
+	median_loss = np.linalg.norm((0.5*median_loss_p + 0.5*median_loss_s))/np.sqrt(n_mag_bins)
+
+	if return_diagnostics == False:
+
+		return median_loss
+
+	else:
+
+		res_vals_p = [res_morans_p_per_mag_bin, res_inertia_p_per_mag_bin, res_cnt_p_per_mag_bin, res_intersection_p_per_mag_bin]
+		res_vals_s = [res_morans_s_per_mag_bin, res_inertia_s_per_mag_bin, res_cnt_s_per_mag_bin, res_intersection_s_per_mag_bin]
+
+		return median_loss, [res_vals_p, res_vals_p]
+
 
 
 ## Create probability sampling vector based on magnitudes
