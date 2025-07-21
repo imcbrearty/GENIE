@@ -1236,7 +1236,7 @@ if plot_on == True:
 
 ########################### Run optimization ###########################
 
-def evaluate_bayesian_objective_evaluate(x, n_batch = n_batch, n_mag_bins = 5):
+def evaluate_bayesian_objective_evaluate(x, n_batch = n_batch, n_mag_bins = 5, return_config = False):
 
 	## Set Cholesky parameters
 	chol_params = {}
@@ -1265,7 +1265,13 @@ def evaluate_bayesian_objective_evaluate(x, n_batch = n_batch, n_mag_bins = 5):
 	# print('\nResidual computation time %0.4f for %d samples (median loss: %0.4f)'%(time.time() - st_time, n_batch, median_loss))
 	print('Loss %0.4f'%median_loss)
 
-	return median_loss
+	if return_config == True:
+
+		return median_loss, chol_params
+
+	else:
+
+		return median_loss
 
 # from sklearn.optimize import gp_minimize
 
