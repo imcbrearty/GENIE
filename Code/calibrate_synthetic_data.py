@@ -1151,6 +1151,7 @@ for j in ip: prob_vec[j] = (len(j) > 0)*(1.0/np.maximum(1.0, len(j)))
 prob_vec = prob_vec/prob_vec.sum()
 assert(prob_vec.min() > 0)
 
+
 ## Set Cholesky parameters
 chol_params = {}
 chol_params['p_exponent'] = 4                   # Radial function exponent (fixed integer)
@@ -1168,9 +1169,11 @@ chol_params['miss_pick_rate'] = [0.0, 0.15]
 chol_params['random_scale_factor_phase'] = 0.35 ## should be between [0.0,1.0] (smaller means less random pertubation to distance threshold)
 
 
+## Choose batch size
+n_batch = 100
+
 ## Sample a generation
 st_time = time.time()
-n_batch = 100
 srcs_sample, mags_sample, features, ind_sample, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_samples = n_batch, return_features = False)
 print('\nData generation time %0.4f for %d samples (without features)'%(time.time() - st_time, n_batch))
 
@@ -1182,18 +1185,21 @@ print('\nData generation time %0.4f for %d samples (with features)'%(time.time()
 ## Compute residuals
 st_time = time.time()
 median_loss = compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5, return_diagnostics = False)
+median_loss_initial = np.copy(median_loss)
 print('\nResidual computation time %0.4f for %d samples (median loss: %0.4f)'%(time.time() - st_time, n_batch, median_loss))
 
 ## Compute residuals (with diagnostics)
 st_time = time.time()
-median_loss, [res_vals_p, res_vals_s], [median_res_vals_p, median_res_vals_p] = compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5, return_diagnostics = True)
+median_loss, [res_vals_p, res_vals_s], [median_res_vals_p, median_res_vals_s] = compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5, return_diagnostics = True)
+median_res_vals_p_init = np.copy(median_res_vals_p)
+median_res_vals_s_init = np.copy(median_res_vals_s)
 print('\nResidual computation time %0.4f for %d samples (median loss: %0.4f; with diagnostics) \n'%(time.time() - st_time, n_batch, median_loss))
 labels = ['Morans', 'Inertia', 'Cnts', 'Intersection']
 for inc, r in enumerate(median_res_vals_p):
 	# strings_p = [str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))]
 	print('Res on %s, %s (P waves)'%(labels[inc], ' '.join([str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))])))
 print('\n')
-for inc, r in enumerate(median_res_vals_p): 
+for inc, r in enumerate(median_res_vals_s): 
 	# strings_p = [str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))]
 	print('Res on %s, %s (S waves)'%(labels[inc], ' '.join([str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))])))
 
@@ -1289,15 +1295,69 @@ bounds = [(1.5, 5.0), # p_exponent
           (0.0, 0.5)] # random_scale_factor_phase
 
 
-optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
-                  bounds,      # the bounds on each dimension of x
-                  acq_func="EI",      # the acquisition function
-                  n_calls=500,         # the number of evaluations of f
-                  n_random_starts=100,  # the number of random initialization points
-                  noise='gaussian',       # the noise level (optional)
-                  random_state=None, # the random seed
-                  initial_point_generator = 'lhs',
-                  model_queue_size = 150)
+n_repeat = 1 ## Set to 1 for no repeat
+zoom_factor = (1/3.0) ## Repeat the optimization and "zoom" the bounds in proportionally closer to the optimal point
+for n in range(n_repeat):
+
+	print('\nStarting optimization iteration %d of %d'%(n + 1, n_repeat))
+
+	if n > 0:
+		x_optimal = optimize.x
+		left_diff = np.array([x_optimal[j] - b[0] for j, b in enumerate(bounds)]) ## How much more point is away from left boundary
+		right_diff = np.array([b[1] - x_optimal[j] for j, b in enumerate(bounds)]) ## How much more right boundary is away from optimal point
+		assert(left_diff.min() >= 0)
+		assert(right_diff.min() >= 0)
+		bounds_copy = [(b[0] + zoom_factor*left_diff[j], b[1] - zoom_factor*right_diff[j]) for j, b in enumerate(bounds)]
+		for j, b in enumerate(bounds_copy): assert((x_optimal[j] >= b[0])*(x_optimal[j] <= b[1]))
+		bounds = [l for l in bounds_copy] ## Copy
+
+	optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
+	                  bounds,      # the bounds on each dimension of x
+	                  acq_func="EI",      # the acquisition function
+	                  n_calls=350,         # the number of evaluations of f
+	                  n_random_starts=100,  # the number of random initialization points
+	                  noise='gaussian',       # the noise level (optional)
+	                  random_state=None, # the random seed
+	                  initial_point_generator = 'lhs',
+	                  model_queue_size = 150)
+
+
+## Plot optimized data
+
+print('\nFinished optimizing')
+x_optimal = optimize.x
+median_loss, chol_params = evaluate_bayesian_objective_evaluate(optimize.x, return_config = True)
+print('Optimal parameters loss: %0.4f (initially %0.4f)'%(median_loss, median_loss_initial))
+
+## Sample a generation
+srcs_sample, mags_sample, features, ind_sample, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_samples = n_batch)
+## Compute residuals (with diagnostics)
+st_time = time.time()
+median_loss, [res_vals_p, res_vals_s], [median_res_vals_p, median_res_vals_s] = compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5, return_diagnostics = True)
+labels = ['Morans', 'Inertia', 'Cnts', 'Intersection']
+
+## Print updated residuals
+print('\nUpdated')
+for inc, r in enumerate(median_res_vals_p):
+	# strings_p = [str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))]
+	print('Res on %s, %s (P waves)'%(labels[inc], ' '.join([str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))])))
+print('\n')
+for inc, r in enumerate(median_res_vals_s): 
+	# strings_p = [str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))]
+	print('Res on %s, %s (S waves)'%(labels[inc], ' '.join([str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))])))
+
+## Print previous residuals
+print('\nInitial')
+for inc, r in enumerate(median_res_vals_p_init):
+	# strings_p = [str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))]
+	print('Res on %s, %s (P waves)'%(labels[inc], ' '.join([str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))])))
+print('\n')
+for inc, r in enumerate(median_res_vals_s_init): 
+	# strings_p = [str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))]
+	print('Res on %s, %s (S waves)'%(labels[inc], ' '.join([str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))])))
+
+
+
 
 # res, Trgts, arrivals = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
 
