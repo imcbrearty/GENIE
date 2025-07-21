@@ -1169,7 +1169,7 @@ chol_params['random_scale_factor_phase'] = 0.35 ## should be between [0.0,1.0] (
 
 ## Sample a generation
 st_time = time.time()
-n_batch = 1000
+n_batch = 100
 srcs_sample, mags_sample, features, ind_sample, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_samples = n_batch, return_features = False)
 print('\nData generation time %0.4f for %d samples (without features)'%(time.time() - st_time, n_batch))
 
