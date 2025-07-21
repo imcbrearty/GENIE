@@ -22,6 +22,7 @@ from torch_scatter import scatter
 from numpy.matlib import repmat
 from obspy.core import UTCDateTime
 from sklearn.cluster import KMeans
+from skopt import gp_minimize
 import pathlib
 import glob
 import pdb
@@ -871,7 +872,7 @@ def sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_
 	max_value_logistic = 0.99 # < 1, the maximum value of the logistic function for the threshold, don't tune this.
 	sigma_logistic = - threshold_logistic / np.log(1/max_value_logistic - 1) 
 	lambda_corr = chol_params['lambda_corr'] 	# Mixing function lambda, controls the correlation between radial function and correlated noise - use optimized value
-	k_neighbours = chol_params['k_neighbours']  # Use from params (though this one isn't optimized)
+	# k_neighbours = chol_params['k_neighbours']  # Use from params (though this one isn't optimized)
 	angle_perturbation = chol_params['angle_perturbation']
 	length_perturbation = chol_params['length_perturbation']
 	miss_pick_rate = chol_params['miss_pick_rate']
@@ -1158,7 +1159,7 @@ chol_params['sigma_noise'] = 60000               # Sigma noise for cluster sprea
 chol_params['sigma_radial_divider'] = 10.0         # Divisor for detection radius calculation
 chol_params['threshold_logistic'] = 8.0           # Logistic function threshold
 chol_params['lambda_corr'] = 0.005                 # Correlation between radial function and noise
-chol_params['k_neighbours'] = 8                  # Number of neighbors for analysis
+# chol_params['k_neighbours'] = 8                  # Number of neighbors for analysis
 chol_params['sigma_radial_p_factor'] = 1.6      # P-wave detection radius factor (before division)
 chol_params['sigma_radial_s_factor'] = 1.4172001463561372      # S-wave detection radius factor (before division)
 chol_params['angle_perturbation'] = 0.5689419133182898      # S-wave angle perturbation range
@@ -1197,33 +1198,106 @@ for inc, r in enumerate(median_res_vals_p):
 	print('Res on %s, %s (S waves)'%(labels[inc], ' '.join([str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))])))
 
 
-for i in range(len(srcs_sample)):
+plot_on = True
+if plot_on == True:
 
-	fig, ax = plt.subplots(2,2, sharex = True, sharey = True)
-	ax[0,0].set_title('%0.3f'%Mags[ind_sample[i]])
-	ax[0,1].set_title('%0.3f'%Mags[ind_sample[i]])
-	locs_use = locs[Inds[ind_sample[i]]]
-	for j in [[0,0], [0,1], [1,0], [1,1]]:
-		ax[j[0], j[1]].scatter(locs_use[:,1], locs_use[:,0], c = 'grey', marker = '^')
-		ax[j[0], j[1]].set_aspect(1.0/np.cos(np.pi*locs_use[:,0].mean()/180.0))
-		ax[j[0], j[1]].scatter(srcs_sample[i,1], srcs_sample[i,0], c = 'm', marker = 's')
-	## Real event (P and S)
-	ax[0,0].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
-	ax[1,0].scatter(locs_use[Picks_S_lists[ind_sample[i]][:,1].astype('int'),1], locs_use[Picks_S_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
-	# ax[0,1].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
-	# ax[1,0].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
-	## Synthetic event (P and S)
-	ind_found_p = ikeep_p2[np.where(ikeep_p1 == i)[0]]
-	ind_found_s = ikeep_s2[np.where(ikeep_s1 == i)[0]]
-	ax[0,1].scatter(locs_use[ind_found_p,1], locs_use[ind_found_p,0], c = 'red', marker = '^')
-	ax[1,1].scatter(locs_use[ind_found_s,1], locs_use[ind_found_s,0], c = 'red', marker = '^')
-	#ax[1,0].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
-	fig.set_size_inches([12,8])
-	fig.savefig(path_to_file + 'Plots' + seperator + 'example_synthetic_data_%d.png'%i)
-	plt.close('all')
+	for i in range(len(srcs_sample)):
 
-	print('Counts %d %d; %d %d'%(len(Picks_P_lists[ind_sample[i]]), len(Picks_S_lists[ind_sample[i]]), len(ind_found_p), len(ind_found_s)))
-# irand = np.random.choice()
+		fig, ax = plt.subplots(2,2, sharex = True, sharey = True)
+		ax[0,0].set_title('%0.3f'%Mags[ind_sample[i]])
+		ax[0,1].set_title('%0.3f'%Mags[ind_sample[i]])
+		locs_use = locs[Inds[ind_sample[i]]]
+		for j in [[0,0], [0,1], [1,0], [1,1]]:
+			ax[j[0], j[1]].scatter(locs_use[:,1], locs_use[:,0], c = 'grey', marker = '^')
+			ax[j[0], j[1]].set_aspect(1.0/np.cos(np.pi*locs_use[:,0].mean()/180.0))
+			ax[j[0], j[1]].scatter(srcs_sample[i,1], srcs_sample[i,0], c = 'm', marker = 's')
+		## Real event (P and S)
+		ax[0,0].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		ax[1,0].scatter(locs_use[Picks_S_lists[ind_sample[i]][:,1].astype('int'),1], locs_use[Picks_S_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		# ax[0,1].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		# ax[1,0].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		## Synthetic event (P and S)
+		ind_found_p = ikeep_p2[np.where(ikeep_p1 == i)[0]]
+		ind_found_s = ikeep_s2[np.where(ikeep_s1 == i)[0]]
+		ax[0,1].scatter(locs_use[ind_found_p,1], locs_use[ind_found_p,0], c = 'red', marker = '^')
+		ax[1,1].scatter(locs_use[ind_found_s,1], locs_use[ind_found_s,0], c = 'red', marker = '^')
+		#ax[1,0].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		fig.set_size_inches([12,8])
+		fig.savefig(path_to_file + 'Plots' + seperator + 'example_synthetic_data_%d.png'%i)
+		plt.close('all')
+
+		print('Counts %d %d; %d %d'%(len(Picks_P_lists[ind_sample[i]]), len(Picks_S_lists[ind_sample[i]]), len(ind_found_p), len(ind_found_s)))
+	# irand = np.random.choice()
+
+########################### End initilization ##########################
+
+
+
+
+########################### Run optimization ###########################
+
+def evaluate_bayesian_objective_evaluate(x, n_batch = n_batch, n_mag_bins = 5):
+
+	## Set Cholesky parameters
+	chol_params = {}
+	chol_params['p_exponent'] = x[0] # 4                   # Radial function exponent (fixed integer)
+	chol_params['scale_factor'] = x[1] # 0.5995930570290529              # Scaling factor for radial function
+	chol_params['sigma_noise'] = x[2] # 60000               # Sigma noise for cluster spreading (in meters)
+	chol_params['sigma_radial_divider'] = x[3] # 10.0         # Divisor for detection radius calculation
+	chol_params['threshold_logistic'] = x[4] # 8.0           # Logistic function threshold
+	chol_params['lambda_corr'] = x[5] # 0.005                 # Correlation between radial function and noise
+	# chol_params['k_neighbours'] = # 8                  # Number of neighbors for analysis
+	chol_params['sigma_radial_p_factor'] = x[6] # 1.6      # P-wave detection radius factor (before division)
+	chol_params['sigma_radial_s_factor'] = x[7] # 1.4172001463561372      # S-wave detection radius factor (before division)
+	chol_params['angle_perturbation'] = x[8] # 0.5689419133182898      # S-wave angle perturbation range
+	chol_params['length_perturbation'] = [1.0 - x[9], 1.0 + x[9]] # [0.8730268537646498, 1.3] # S-wave ellipse length perturbation range
+	chol_params['miss_pick_rate'] = [0.0, x[10]] # [0.0, 0.15]
+	chol_params['random_scale_factor_phase'] = x[11] # 0.35 ## should be between [0.0,1.0] (smaller means less random pertubation to distance threshold)
+
+	## Sample a generation
+	# st_time = time.time()
+	srcs_sample, mags_sample, features, ind_sample, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(prob_vec, chol_params, ftrns1, n_samples = n_batch)
+	# print('\nData generation time %0.4f for %d samples (with features)'%(time.time() - st_time, n_batch))
+
+	## Compute residuals
+	# st_time = time.time()
+	median_loss = compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = n_mag_bins, return_diagnostics = False)
+	# print('\nResidual computation time %0.4f for %d samples (median loss: %0.4f)'%(time.time() - st_time, n_batch, median_loss))
+	print('Loss %0.4f'%median_loss)
+
+	return median_loss
+
+# from sklearn.optimize import gp_minimize
+
+bounds = [(1.5, 5.0), # p_exponent
+          (0.1, 10), # scale_factor
+          (1e3, 150e3), # sigma_noise
+          (0.1, 30.0), # sigma_radial_divider
+          (0.1, 30.0), # threshold_logistic
+          (0.001, 100.0), # lambda_corr
+          (0.1, 10.0), # sigma_radial_p_factor
+          (0.1, 10.0), # sigma_radial_s_factor
+          (0.0, np.pi/2.0), # angle_perturbation
+          (0.0, 0.5), # length_perturbation
+          (0.0, 0.35), # miss_pick_rate
+          (0.0, 0.5)] # random_scale_factor_phase
+
+
+optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
+                  bounds,      # the bounds on each dimension of x
+                  acq_func="EI",      # the acquisition function
+                  n_calls=500,         # the number of evaluations of f
+                  n_random_starts=100,  # the number of random initialization points
+                  noise='gaussian',       # the noise level (optional)
+                  random_state=None, # the random seed
+                  initial_point_generator = 'lhs',
+                  model_queue_size = 150)
+
+# res, Trgts, arrivals = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
+
+# strings = ['spc_random', 'spc_thresh_rand', 'coda_rate', 'coda_win', 'dist_range[0]', 'dist_range[1]', 'max_rate_events', 'max_miss_events', 'max_false_events', 'miss_pick_fraction[0]', 'miss_pick_fraction[0]']
+
+
 
 
 
