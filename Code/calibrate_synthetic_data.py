@@ -1357,6 +1357,37 @@ for inc, r in enumerate(median_res_vals_s_init):
 	print('Res on %s, %s (S waves)'%(labels[inc], ' '.join([str(np.round(r[j],3)) + ',' if j < (len(r) - 1) else str(np.round(r[j],3)) for j in range(len(r))])))
 
 
+plot_on = True
+if plot_on == True:
+
+	for i in range(len(srcs_sample)):
+
+		fig, ax = plt.subplots(2,2, sharex = True, sharey = True)
+		ax[0,0].set_title('%0.3f'%Mags[ind_sample[i]])
+		ax[0,1].set_title('%0.3f'%Mags[ind_sample[i]])
+		locs_use = locs[Inds[ind_sample[i]]]
+		for j in [[0,0], [0,1], [1,0], [1,1]]:
+			ax[j[0], j[1]].scatter(locs_use[:,1], locs_use[:,0], c = 'grey', marker = '^')
+			ax[j[0], j[1]].set_aspect(1.0/np.cos(np.pi*locs_use[:,0].mean()/180.0))
+			ax[j[0], j[1]].scatter(srcs_sample[i,1], srcs_sample[i,0], c = 'm', marker = 's')
+		## Real event (P and S)
+		ax[0,0].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		ax[1,0].scatter(locs_use[Picks_S_lists[ind_sample[i]][:,1].astype('int'),1], locs_use[Picks_S_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		# ax[0,1].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		# ax[1,0].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		## Synthetic event (P and S)
+		ind_found_p = ikeep_p2[np.where(ikeep_p1 == i)[0]]
+		ind_found_s = ikeep_s2[np.where(ikeep_s1 == i)[0]]
+		ax[0,1].scatter(locs_use[ind_found_p,1], locs_use[ind_found_p,0], c = 'red', marker = '^')
+		ax[1,1].scatter(locs_use[ind_found_s,1], locs_use[ind_found_s,0], c = 'red', marker = '^')
+		#ax[1,0].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		fig.set_size_inches([12,8])
+		fig.savefig(path_to_file + 'Plots' + seperator + 'example_synthetic_data_optimized_%d.png'%i)
+		plt.close('all')
+
+		print('Counts %d %d; %d %d'%(len(Picks_P_lists[ind_sample[i]]), len(Picks_S_lists[ind_sample[i]]), len(ind_found_p), len(ind_found_s)))
+	# irand = np.random.choice()
+
 
 
 # res, Trgts, arrivals = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
