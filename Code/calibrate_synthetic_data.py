@@ -1133,7 +1133,7 @@ def compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5,
 		res_vals_p = [misfit_morans_p, misfit_inertia_p, misfit_cnt_p, misfit_intersection_p]
 		res_vals_s = [misfit_morans_s, misfit_inertia_s, misfit_cnt_s, misfit_intersection_s]
 
-		return median_loss, [res_vals_p, res_vals_s], [median_res_vals_p, median_res_vals_p]
+		return median_loss, [res_vals_p, res_vals_s], [median_res_vals_p, median_res_vals_s]
 
 
 
@@ -1327,6 +1327,7 @@ for n in range(n_repeat):
 print('\nFinished optimizing')
 x_optimal = optimize.x
 median_loss, chol_params = evaluate_bayesian_objective_evaluate(optimize.x, return_config = True)
+np.savez_compressed(path_to_file + 'Grids' + seperator + 'optimized_hyperparameters_ver_1.npz', x = x_optimal)
 print('Optimal parameters loss: %0.4f (initially %0.4f)'%(median_loss, median_loss_initial))
 
 ## Sample a generation
