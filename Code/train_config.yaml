@@ -46,7 +46,8 @@ src_depth_kernel: 15000. # Kernel of source label in Cartesian projection, verti
 spc_random : 15000 # Spatial scale to randomly remove true picks from stations ontop of threshold distance per event
 sig_t : 0.03 # Percent of travel time error on pick times (e.g., 3%)
 spc_thresh_rand : 15000 # Spatial scale to randomly shift threshold distance of P and S waves per event
-min_sta_arrival : 6 # Min number of unique stations required for a positive label source event
+min_sta_arrival : 5 # Min number of unique stations required for a positive label source event
+min_pick_arrival : 7 # Min number of picks total required for a positive label source event
 coda_rate : 0.035 # Percent of picks with false coda picks (e.g., 3.5%)
 coda_win : [0, 20.0] # Window that code picks can occur over (e.g., 25 s)
 max_num_spikes : 20 # Number of possible network wide spikes per window T of synthetic data
