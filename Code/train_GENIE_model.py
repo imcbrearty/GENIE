@@ -288,6 +288,7 @@ spc_random = train_config['spc_random']
 sig_t = train_config['sig_t'] # 3 percent of travel time error on pick times
 spc_thresh_rand = train_config['spc_thresh_rand']
 min_sta_arrival = train_config['min_sta_arrival']
+min_pick_arrival = train_config.get('min_pick_arrival', min_sta_arrival)
 coda_rate = train_config['coda_rate'] # 5 percent arrival have code. Probably more than this? Increased from 0.035.
 coda_win = np.array(train_config['coda_win']) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
 max_num_spikes = train_config['max_num_spikes']
