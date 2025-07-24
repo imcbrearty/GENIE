@@ -584,7 +584,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	lp = source_tree_indices.query_ball_point(np.arange(n_events).reshape(-1,1), r = 0)
 	lp_backup = [lp[j] for j in range(len(lp))]
 	n_unique_station_counts = np.array([len(np.unique(arrivals[lp[j],1])) for j in range(n_events)])
-	active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] # subset of sources
+	cnt_p_srcs = np.array([len(np.where(arrivals[lp[j],4] == 0)[0]) for j in range(n_events)])
+	cnt_s_srcs = np.array([len(np.where(arrivals[lp[j],4] == 1)[0]) for j in range(n_events)])
+	# active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] # subset of sources
+	active_sources = np.where(((n_unique_station_counts >= min_sta_arrival)*((cnt_p_srcs + cnt_s_srcs) >= min_pick_arrival)))[0] # subset of sources
+
+	
 	src_times_active = src_times[active_sources]
 
 	## If true, return only the synthetic arrivals
@@ -686,8 +691,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		Sample_indices.append(np.arange(len(ind_sta_select)*n_spc) + sc)
 		sc += len(Sample_indices[-1])
 
+		tree_subset = cKDTree(ind_sta_select.reshape(-1,1))
 		active_sources_per_slice = np.where(np.array([len( np.array(list(set(ind_sta_select).intersection(np.unique(arrivals[lp_backup[j],1])))) ) >= min_sta_arrival for j in lp_src_times_all[i]]))[0]
-
+		cnt_per_slice_p = np.array([len(np.where( (arrivals[lp_backup[j],4] == 0) * (tree_subset.query(arrivals[lp_backup[j],1].reshape(-1,1))[0] == 0) )[0]) for j in lp_src_times_all[i]])
+		cnt_per_slice_s = np.array([len(np.where( (arrivals[lp_backup[j],4] == 1) * (tree_subset.query(arrivals[lp_backup[j],1].reshape(-1,1))[0] == 0) )[0]) for j in lp_src_times_all[i]])
+		active_sources_per_slice = np.array(list(set(active_sources_per_slice).intersection(np.where((cnt_per_slice_p + cnt_per_slice_s) >= min_pick_arrival)[0]))).astype('int')
+		
 		active_sources_per_slice_l.append(active_sources_per_slice)
 
 	Trv_subset_p = np.vstack(Trv_subset_p)
