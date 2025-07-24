@@ -43,12 +43,25 @@ src_x_arv_kernel: 30000. # Kernel for arrival-source association label, horizont
 src_depth_kernel: 30000. # Kernel of source label in Cartesian projection, vertical distance (m)
 
 ## Training params list 2
-spc_random : 7500 # Spatial scale to randomly remove true picks from stations ontop of threshold distance per event
+# spc_random : 7500 # Spatial scale to randomly remove true picks from stations ontop of threshold distance per event
+# sig_t : 0.03 # Percent of travel time error on pick times (e.g., 3%)
+# spc_thresh_rand : 7500 # Spatial scale to randomly shift threshold distance of P and S waves per event
+# min_sta_arrival : 6 # Min number of unique stations required for a positive label source event
+# coda_rate : 0.15 # Percent of picks with false coda picks (e.g., 3.5%)
+# coda_win : [0, 10] # Window that code picks can occur over (e.g., 25 s)
+# max_num_spikes : 100 # Number of possible network wide spikes per window T of synthetic data
+# spike_time_spread : 0.75 # The temporal spread of the network wide spikes
+# s_extra : 0.1 # If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
+# use_stable_association_labels : True # This flag only allows positive association labels that occur within thresh_noise_max ratio of true travel time
+# thresh_noise_max : 2.5 # ratio of sig_t*travel time considered excess noise when using use_stable_association_labels
+# min_misfit_allowed: 1.0 # The minimum time (in seconds), beneath which, differences in theoretical and observed arrival times for true sources have positive association labels (the upper limit set by ratio of travel times, given by thresh_noise_max)
+# total_bias: 0.03 ## Total possible bias on travel times (uniform across stations) for each theoretical moveout curve (helps build in robustness to systematic differences between assumed and true velocity models). Default is 3%
+spc_random : 867 # Spatial scale to randomly remove true picks from stations ontop of threshold distance per event
 sig_t : 0.03 # Percent of travel time error on pick times (e.g., 3%)
-spc_thresh_rand : 7500 # Spatial scale to randomly shift threshold distance of P and S waves per event
+spc_thresh_rand : 4068 # Spatial scale to randomly shift threshold distance of P and S waves per event
 min_sta_arrival : 6 # Min number of unique stations required for a positive label source event
-coda_rate : 0.15 # Percent of picks with false coda picks (e.g., 3.5%)
-coda_win : [0, 10] # Window that code picks can occur over (e.g., 25 s)
+coda_rate : 0.003 # Percent of picks with false coda picks (e.g., 3.5%)
+coda_win : [0, 19.72] # Window that code picks can occur over (e.g., 25 s)
 max_num_spikes : 100 # Number of possible network wide spikes per window T of synthetic data
 spike_time_spread : 0.75 # The temporal spread of the network wide spikes
 s_extra : 0.1 # If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
@@ -56,14 +69,16 @@ use_stable_association_labels : True # This flag only allows positive associatio
 thresh_noise_max : 2.5 # ratio of sig_t*travel time considered excess noise when using use_stable_association_labels
 min_misfit_allowed: 1.0 # The minimum time (in seconds), beneath which, differences in theoretical and observed arrival times for true sources have positive association labels (the upper limit set by ratio of travel times, given by thresh_noise_max)
 total_bias: 0.03 ## Total possible bias on travel times (uniform across stations) for each theoretical moveout curve (helps build in robustness to systematic differences between assumed and true velocity models). Default is 3%
+
+
 # training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max]
 
 ## Training params list 3
-dist_range : [15000, 500000] # This is the distance range over which to simulate theoretical moveouts of picks per event. Should scale with domain size.
-max_rate_events : 229 # 350 # 450 # Average rate of events per T window of time (e.g., T = 3 hrs, so 500*8 = 4000 events/day)
-max_miss_events : 5.0 # 225 # 325 # Average rate of missed picks per station per T window of time. Note: this parameter does not work quite as intended; it is overwritten by miss_pick_fraction below
-max_false_events : 0.2 # Now by default represents the ratio of false picks to true picks (with use_false_ratio_value == True in train_GENIE_model.py) (Previous behavior: average rate of false picks per station per T window of time (e.g., T = 3 hrs, so 250*8 = 2000 false picks / station / day)
-miss_pick_fraction : [0.1, 0.4] # False # Average ratio of missed picks (if this is not False, it re-scales the miss pick rate to this ratio of true picks)
+dist_range : [14164, 66191] # This is the distance range over which to simulate theoretical moveouts of picks per event. Should scale with domain size.
+max_rate_events : 45 # 350 # 450 # Average rate of events per T window of time (e.g., T = 3 hrs, so 500*8 = 4000 events/day)
+max_miss_events : 47.0 # 225 # 325 # Average rate of missed picks per station per T window of time. Note: this parameter does not work quite as intended; it is overwritten by miss_pick_fraction below
+max_false_events : 3.11 # Now by default represents the ratio of false picks to true picks (with use_false_ratio_value == True in train_GENIE_model.py) (Previous behavior: average rate of false picks per station per T window of time (e.g., T = 3 hrs, so 250*8 = 2000 false picks / station / day)
+miss_pick_fraction : [0.21, 0.32] # False # Average ratio of missed picks (if this is not False, it re-scales the miss pick rate to this ratio of true picks)
 T : 10800 # Time window to simualate synthetic data. More variability occurs per-batch, when T is longer. Note that this parameter trades off with max_rate_events, max_miss_events and max_false_events.
 dt : 30 # Time resolution to allow synthetic data parameters to vary in time, during the T window of synthetic data
 tscale : 3600 # Time scale that synthetic data parameters vary in time, during the T window of synthetic data. E.g., the smoothness that synthetic data parameters vary.
@@ -93,24 +108,25 @@ path_to_data : '/scratch/users/gdupuis/CentralCalifornia_latest/CentralCaliforni
 n_ver_training_data : 1 ## Training data version
 n_batches_per_job : 50 ## Number of batches of data to create per job array index when building dataset
 refresh_subnetworks : True ## If true, always reload the subnetworks to be updated with subnetworks available in current pick files
-optimize_hyperparameters : True ## Optimize the hyperparameters of the model
 
 ## Restart settings
 restart_training: False ## Set to True to restart training at the below save step (note: by default model only saves every 1000 steps)
 n_restart_step: 0
 
 # training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources]
-
+optimize_hyperparameters : False ## Optimize the hyperparameters of the model
 use_radial_cholesky: True
 
-p_exponent: 4                   # Radial function exponent (fixed integer)
-scale_factor: 0.5995930570290529              # Scaling factor for radial function
-sigma_noise: 60000               # Sigma noise for cluster spreading (in meters)
-sigma_radial_divider: 10.0         # Divisor for detection radius calculation
-threshold_logistic: 8.0           # Logistic function threshold
-lambda_corr: 0.005                 # Correlation between radial function and noise
+p_exponent: 1.93                   # Radial function exponent (fixed integer)
+scale_factor: 0.5              # Scaling factor for radial function
+sigma_noise: 100000               # Sigma noise for cluster spreading (in meters)
+sigma_radial_divider: 14         # Divisor for detection radius calculation
+threshold_logistic: 10          # Logistic function threshold
+lambda_corr: 0.5                 # Correlation between radial function and noise
 k_neighbours: 8                  # Number of neighbors for analysis
-sigma_radial_p_factor: 1.6      # P-wave detection radius factor (before division)
-sigma_radial_s_factor: 1.4172001463561372      # S-wave detection radius factor (before division)
-angle_perturbation: 0.5689419133182898      # S-wave angle perturbation range
-length_perturbation: [0.8730268537646498, 1.3] # S-wave ellipse length perturbation range
+sigma_radial_p_factor: 5      # P-wave detection radius factor (before division)
+sigma_radial_s_factor: 5      # S-wave detection radius factor (before division)
+angle_perturbation: 1.57      # S-wave angle perturbation range
+length_perturbation: [1.0, 1.0] # S-wave ellipse length perturbation range
+miss_pick_rate: [0.0, 0.34] ## should be between [0.0,1.0] (smaller means less random pertubation to distance threshold)
+random_scale_factor_phase: 0.0 ## should be between [0.0,1.0] (smaller means less random pertubation to distance threshold)
