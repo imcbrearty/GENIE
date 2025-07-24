@@ -296,6 +296,9 @@ if device.type == 'cuda' or device.type == 'cpu':
 	if check_len != 3000: # If it's less than 2 * 10 * 5, there's an issue
 		raise SystemError('Issue with knn on cuda for some versions of pytorch geometric and cuda')
 
+use_only_one_grid = process_config['use_only_one_grid']
+if (use_only_one_grid == True)*(1 == 0): ## Speeds up the initilization of the code by only loading one grid
+	x_grids = np.expand_dims(x_grids[np.random.choice(len(x_grids))], axis = 0)
 x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, device = device)
 x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])).to(device) for i in range(len(x_grids))]
 
@@ -466,7 +469,7 @@ print('Should change this to use all grids, potentially')
 x_grid_ind_list = np.sort(np.random.choice(len(x_grids), size = 1, replace = False)) # 15
 x_grid_ind_list_1 = np.sort(np.random.choice(len(x_grids), size = len(x_grids), replace = False)) # 15
 
-use_only_one_grid = process_config['use_only_one_grid']
+# use_only_one_grid = process_config['use_only_one_grid']
 if use_only_one_grid == True:
 	# x_grid_ind_list_1 = np.array([x_grid_ind_list_1[np.random.choice(len(x_grid_ind_list_l))]])
 	x_grid_ind_list_1 = np.copy(x_grid_ind_list)
