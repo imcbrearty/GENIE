@@ -308,7 +308,7 @@ if use_amplitudes == True:
 	dist_vals_s = pdist_s(mag_vals)
 	dist_supp.close()
 	print('Will use amplitudes since a magnitude model was loaded')
-
+	
 	## Load emperical distribution of pick amplitudes
 	n_rand_choose = 100
 	st_load = glob.glob(path_to_file + 'Picks/19*') # Load years 1900's
@@ -346,6 +346,14 @@ if use_amplitudes == True:
 			log_amp_sta_distb.append(np.quantile(log_amp_emperical, q_range_emperical).reshape(1,-1))
 		else:
 			log_amp_sta_distb.append(np.quantile(log_amp_emperical[log_amp_inds[i]], q_range_emperical).reshape(1,-1))
+	log_amp_sta_distb = np.vstack(log_amp_sta_distb)
+	log_amp_sta_distb_diff = np.diff(log_amp_sta_distb, axis = 1)
+
+else:
+
+	log_amp_random = np.random.rand(10000)*2.0 - 8.0 ## Arbitrary random amplitudes
+	for i in range(len(locs)):
+		log_amp_sta_distb.append(np.quantile(log_amp_random, q_range_emperical).reshape(1,-1))
 	log_amp_sta_distb = np.vstack(log_amp_sta_distb)
 	log_amp_sta_distb_diff = np.diff(log_amp_sta_distb, axis = 1)
 
@@ -667,6 +675,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		log_amp[itrue_s] = log_amp_s
 		log_amp[ifalse] = log_amp_false
 		assert(np.isnan(log_amp).sum() == 0)
+
+	else:
+		ifalse = np.arange(len(arrivals))
+		irand_quantile = np.random.choice(n_range_emperical - 1, size = len(ifalse))
+		log_amp = log_amp_sta_distb[arrivals[ifalse,1].astype('int'), irand_quantile] + np.random.rand(len(ifalse))*log_amp_sta_distb_diff[arrivals[ifalse,1].astype('int'), irand_quantile]
+		
 	
 
 	# use_stable_association_labels = True
@@ -760,6 +774,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if len(lp_concat) == 0:
 		lp_concat = np.array([0]) # So it doesnt fail?
 	arrivals_select = arrivals[lp_concat]
+	log_amp_select = log_amp[lp_concat]
 	phase_observed_select = phase_observed[lp_concat]
 
 	Trv_subset_p = []
@@ -828,7 +843,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	iargsort = np.argsort(arrivals_select[:,0])
 	arrivals_select = arrivals_select[iargsort]
 	phase_observed_select = phase_observed_select[iargsort]
-
+	log_amp_select = log_amp_select[iargsort]
+	
 	iwhere_p = np.where(phase_observed_select == 0)[0]
 	iwhere_s = np.where(phase_observed_select == 1)[0]
 	n_arvs_p = len(iwhere_p)
@@ -846,9 +862,30 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ip_p_pad = np.minimum(np.maximum(ip_p_pad, 0), n_arvs - 1) 
 	ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
 
-	rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-	rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
+#	rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+# 	rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
 
+	if use_amplitudes == True:
+	
+		## Can add sign information here
+		diff_rel_t = np.abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0])
+		iarg_rel_p = np.argmin(diff_rel_t, axis = 1)
+		ivec = np.arange(diff_rel_t.shape[0])
+		rel_t_p = diff_rel_t[ivec,iarg_rel_p] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		log_amp_p_val = log_amp_select[ip_p_pad[ivec,iarg_rel_p]]
+	
+		diff_rel_t = np.abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0])
+		iarg_rel_s = np.argmin(diff_rel_t, axis = 1)
+		ivec = np.arange(diff_rel_t.shape[0])
+		rel_t_s = diff_rel_t[ivec,iarg_rel_s] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		log_amp_s_val = log_amp_select[ip_s_pad[ivec,iarg_rel_s]]
+
+	else:
+
+		rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
+	
+	
 	## With phase type information
 	ip_p1 = np.searchsorted(arrivals_select[iwhere_p,0], query_time_p)
 	ip_s1 = np.searchsorted(arrivals_select[iwhere_s,0], query_time_s)
@@ -858,19 +895,50 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ip_p1_pad = np.minimum(np.maximum(ip_p1_pad, 0), n_arvs_p - 1) 
 	ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
 
-	if len(iwhere_p) > 0:
-		rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-	else:
-		# rel_t_p1 = np.zeros(rel_t_p.shape)
-		rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+	if use_amplitudes == True:
+	
+		null_log_amp = -10.0
+		if len(iwhere_p) > 0:
+			# rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+			diff_rel_t = np.abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0])
+			iarg_rel_p = np.argmin(diff_rel_t, axis = 1)
+			ivec = np.arange(diff_rel_t.shape[0])
+			rel_t_p1 = diff_rel_t[ivec,iarg_rel_p] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+			log_amp_p1_val = log_amp_select[iwhere_p[ip_p1_pad[ivec,iarg_rel_p]]]
+		else:
+			# rel_t_p1 = np.zeros(rel_t_p.shape)
+			rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+			log_amp_p1_val = null_log_amp*np.ones(rel_t_p.shape)
+	
+		if len(iwhere_s) > 0:
+			# rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
+			diff_rel_t = np.abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0])
+			iarg_rel_s = np.argmin(diff_rel_t, axis = 1)
+			ivec = np.arange(diff_rel_t.shape[0])
+			rel_t_s1 = diff_rel_t[ivec,iarg_rel_s] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+			log_amp_s1_val = log_amp_select[iwhere_s[ip_s1_pad[ivec,iarg_rel_s]]]
+		else:
+			# rel_t_s1 = np.zeros(rel_t_s.shape)
+			rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+			log_amp_s1_val = null_log_amp*np.ones(rel_t_s.shape)
 
-	if len(iwhere_s) > 0:
-		rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
 	else:
-		# rel_t_s1 = np.zeros(rel_t_s.shape)
-		rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
-		
 
+
+		if len(iwhere_p) > 0:
+			rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		else:
+			# rel_t_p1 = np.zeros(rel_t_p.shape)
+			rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+	
+		if len(iwhere_s) > 0:
+			rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
+		else:
+			# rel_t_s1 = np.zeros(rel_t_s.shape)
+			rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+			
+	
+	
 	Inpts = []
 	Masks = []
 	Lbls = []
@@ -894,7 +962,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	lp_phases = []
 	lp_meta = []
 	lp_srcs = []
+	lp_amp = []
 
+	scale_mag = 5.0
 	thresh_mask = 0.01
 	for i in range(n_batch):
 		# Create inputs and mask
@@ -904,12 +974,35 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		n_spc = x_grids[grid_select].shape[0]
 		n_sta_slice = len(sta_select)
 
-		inpt = np.zeros((x_grids[Grid_indices[i]].shape[0], n_sta, 4)) # Could make this smaller (on the subset of stations), to begin with.
+		if use_amplitudes == True:
+			inpt = np.zeros((x_grids[Grid_indices[i]].shape[0], n_sta, 8)) # Could make this smaller (on the subset of stations), to begin with.
+		else:	
+			inpt = np.zeros((x_grids[Grid_indices[i]].shape[0], n_sta, 4)) # Could make this smaller (on the subset of stations), to begin with.
+
 		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
 		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
 		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
 		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
 
+		if use_amplitudes == True:
+			## If this is subsetting source nodes (note, check which source graph is being used) and station indices (check, absolute station indices)
+			## Then, can apply the Magnitude model here to reduce the amplitude measurements to magnitude features on the Cartesian product
+			zero_vec = torch.zeros(len(ind_select)).long().to(device)
+			one_vec = torch.ones(len(ind_select)).long().to(device)
+			p_index = torch.Tensor(Trv_subset_p[ind_select,1].astype('int')).long().to(device)
+			s_index = torch.Tensor(Trv_subset_s[ind_select,1].astype('int')).long().to(device)
+			src_p = torch.Tensor(x_grids[grid_select][Trv_subset_p[ind_select,2].astype('int')]).to(device)
+			src_s = torch.Tensor(x_grids[grid_select][Trv_subset_s[ind_select,2].astype('int')]).to(device)
+			mag_pred_p = Mag.mag(p_index, src_p, torch.Tensor(log_amp_p_val[ind_select]).to(device), zero_vec).cpu().detach().numpy()
+			mag_pred_s = Mag.mag(s_index, src_s, torch.Tensor(log_amp_s_val[ind_select]).to(device), one_vec).cpu().detach().numpy()
+			mag_pred_p1 = Mag.mag(p_index, src_p, torch.Tensor(log_amp_p1_val[ind_select]).to(device), zero_vec).cpu().detach().numpy()
+			mag_pred_s1 = Mag.mag(s_index, src_s, torch.Tensor(log_amp_s1_val[ind_select]).to(device), one_vec).cpu().detach().numpy()
+			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 4] = mag_pred_p/scale_mag
+			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 5] = mag_pred_s/scale_mag
+			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 6] = mag_pred_p1/scale_mag
+			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 7] = mag_pred_s1/scale_mag
+			# pdb.set_trace()
+		
 		trv_out = x_grids_trv[grid_select][:,sta_select,:] ## Subsetting, into sliced indices.
 		Inpts.append(inpt[:,sta_select,:]) # sub-select, subset of stations.
 		Masks.append(1.0*(inpt[:,sta_select,:] > thresh_mask))
@@ -922,11 +1015,13 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		perm_vec[sta_select] = np.arange(len(sta_select))
 		meta = arrivals[lp[i],:]
 		phase_vals = phase_observed[lp[i]]
+		log_amp_vals = log_amp[lp[i]]
 		times = meta[:,0]
 		indices = perm_vec[meta[:,1].astype('int')]
 		ineed = np.where(indices > -1)[0]
 		times = times[ineed] ## Overwrite, now. Double check if this is ok.
 		indices = indices[ineed]
+		log_amp_vals = log_amp_vals[ineed]
 		phase_vals = phase_vals[ineed]
 		meta = meta[ineed]
 
@@ -954,7 +1049,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		lp_times.append(times[lex_sort] - time_samples[i])
 		lp_stations.append(indices[lex_sort])
 		lp_phases.append(phase_vals[lex_sort])
-		lp_meta.append(meta[lex_sort]) # final index of meta points into 
+		lp_meta.append(meta[lex_sort]) # final index of meta points into
+		lp_amp.append(log_amp_vals[lex_sort])
 		lp_srcs.append(src_subset)
 
 		if skip_graphs == False:
@@ -1048,12 +1144,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		Lbls_query.append(lbls_query)
 
 	srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitude.reshape(-1,1)), axis = 1)
-	data = [arrivals, srcs, active_sources]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
+	data = [arrivals, srcs, active_sources, log_amp]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
 
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
 
-	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_amp, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
 
