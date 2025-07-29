@@ -614,6 +614,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		self.ndim_feat = ndim_arv_in + ndim_extra
 		self.use_phase_types = use_phase_types
 		self.scale_mag = 10.0
+		self.null_val = -3.0
 		self.Mag = None
 
 		self.activate1 = nn.PReLU()
@@ -670,8 +671,8 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		# ifind = torch.where(edge_index[0] == edge_index[0].max())[0]
 
 		ifind = torch.where(stindex[edge_index[0]] < stindex[-1])[0] ## Avoid null index
-		mag_p = -2.0*torch.ones(edge_index.shape[1],1).to(self.device)
-		mag_s = -2.0*torch.ones(edge_index.shape[1],1).to(self.device)
+		mag_p = self.null_val*torch.ones(edge_index.shape[1],1).to(self.device)
+		mag_s = self.null_val*torch.ones(edge_index.shape[1],1).to(self.device)
 		mag_p[ifind,0] = self.Mag.mag(stindex[edge_index[0][ifind]], src[sindex[ifind]], logamp[edge_index[0][ifind]].reshape(-1), torch.zeros(len(ifind)).long().to(self.device)).detach()
 		mag_s[ifind,0] = self.Mag.mag(stindex[edge_index[0][ifind]], src[sindex[ifind]], logamp[edge_index[0][ifind]].reshape(-1), torch.ones(len(ifind)).long().to(self.device)).detach()
 		mag_p = mag_p/self.scale_mag
