@@ -610,7 +610,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		n_extra_dim = 2 if use_amplitudes is True else 0	
 		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6 + n_extra_dim, n_hidden) # add edge data (observed arrival - theoretical arrival)
 		self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
-		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + n_extra_dim, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
+		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + 2, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
 		self.f_src_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # only use single tranform layer for source embdding (which already has sufficient information)
 
 		self.f_values_1 = nn.Linear(2*ndim_arv_in + ndim_extra + 7 + n_extra_dim, n_hidden) # add second layer transformation.
