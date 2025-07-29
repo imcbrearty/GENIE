@@ -537,15 +537,20 @@ else:
 # 		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
 
 class LocalSliceLgCollapse(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, phase_type = 'P', device = 'cuda'):
+	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, use_amplitudes = use_amplitudes, phase_type = 'P', device = 'cuda'):
 		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
-		self.fc1 = nn.Linear(ndim_in + n_edge + 1, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
+		if use_amplitudes == True:
+			self.fc1 = nn.Linear(ndim_in + n_edge + 1, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
+		else:
+			self.fc1 = nn.Linear(ndim_in + n_edge, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
+		
 		self.fc2 = nn.Linear(n_hidden, ndim_out)
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
 		self.eps = eps
 		self.device = device
 		self.use_phase_types = use_phase_types
+		self.use_amplitudes = use_amplitudes
 		self.phase_type = phase_type
 		self.scale_mag = 10.0
 		self.Mag = None
@@ -577,30 +582,38 @@ class LocalSliceLgCollapse(MessagePassing):
 			ikeep = torch.Tensor([]).long().to(device)
 
 		sliced_edges = sliced_edges[:,ikeep] # only use times within range. (need to specify target node cardinality)
-		if self.phase_type == 'P':
-			mag = self.Mag.mag(ipick[sliced_edges[1]], src_pos[sliced_edges[0]], log_amp[sliced_edges[1]].reshape(-1), torch.zeros(sliced_edges.shape[1]).long().to(self.device)).detach().reshape(-1,1)/self.scale_mag
-		elif self.phase_type == 'S':
-			mag = self.Mag.mag(ipick[sliced_edges[1]], src_pos[sliced_edges[0]], log_amp[sliced_edges[1]].reshape(-1), torch.ones(sliced_edges.shape[1]).long().to(self.device)).detach().reshape(-1,1)/self.scale_mag
-		
-		out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), phase = phase_label, edge_attr = mag, size = (N, M))))
+
+		if self.use_amplitudes == True:
+			if self.phase_type == 'P':
+				mag = self.Mag.mag(ipick[sliced_edges[1]], src_pos[sliced_edges[0]], log_amp[sliced_edges[1]].reshape(-1), torch.zeros(sliced_edges.shape[1]).long().to(self.device)).detach().reshape(-1,1)/self.scale_mag
+			elif self.phase_type == 'S':
+				mag = self.Mag.mag(ipick[sliced_edges[1]], src_pos[sliced_edges[0]], log_amp[sliced_edges[1]].reshape(-1), torch.ones(sliced_edges.shape[1]).long().to(self.device)).detach().reshape(-1,1)/self.scale_mag
+			
+			out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), phase = phase_label, edge_attr = mag, size = (N, M))))
+		else:
+			out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), phase = phase_label, edge_attr = torch.zeros(phase_label.shape).to(self.device), size = (N, M))))			
 
 		return out
 
 	## Adding back after removed
 	def message(self, x_j, pos_i, pos_j, phase_i, edge_attr):
-
-		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i, edge_attr), dim = -1))) # note scaling of relative time
+		if self.use_amplitudes == True:
+			return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i, edge_attr), dim = -1))) # note scaling of relative time
+		else:
+			return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
+			
 
 class StationSourceAttentionMergedPhases(MessagePassing):
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, device = device):
+	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, use_amplitudes = use_amplitudes, device = device):
 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
-
-		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6 + 2, n_hidden) # add edge data (observed arrival - theoretical arrival)
+	
+		n_extra_dim = 2 if use_amplitudes is True else 0	
+		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6 + n_extra_dim, n_hidden) # add edge data (observed arrival - theoretical arrival)
 		self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
-		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + 2, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
+		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + n_extra_dim, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
 		self.f_src_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # only use single tranform layer for source embdding (which already has sufficient information)
 
-		self.f_values_1 = nn.Linear(2*ndim_arv_in + ndim_extra + 7 + 2, n_hidden) # add second layer transformation.
+		self.f_values_1 = nn.Linear(2*ndim_arv_in + ndim_extra + 7 + n_extra_dim, n_hidden) # add second layer transformation.
 		self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
 
 		self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
@@ -613,7 +626,8 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
 		self.ndim_feat = ndim_arv_in + ndim_extra
 		self.use_phase_types = use_phase_types
-		self.scale_mag = 10.0
+		self.use_amplitudes = use_amplitudes
+		self.scale_mag = 5.0
 		self.null_val = -3.0
 		self.Mag = None
 
@@ -670,23 +684,29 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 
 		# ifind = torch.where(edge_index[0] == edge_index[0].max())[0]
 
-		ifind = torch.where(stindex[edge_index[0]] < stindex[-1])[0] ## Avoid null index
-		mag_p = self.null_val*torch.ones(edge_index.shape[1],1).to(self.device)
-		mag_s = self.null_val*torch.ones(edge_index.shape[1],1).to(self.device)
-		mag_p[ifind,0] = self.Mag.mag(stindex[edge_index[0][ifind]], src[sindex[ifind]], logamp[edge_index[0][ifind]].reshape(-1), torch.zeros(len(ifind)).long().to(self.device)).detach()
-		mag_s[ifind,0] = self.Mag.mag(stindex[edge_index[0][ifind]], src[sindex[ifind]], logamp[edge_index[0][ifind]].reshape(-1), torch.ones(len(ifind)).long().to(self.device)).detach()
-		mag_p = mag_p/self.scale_mag
-		mag_s = mag_s/self.scale_mag
+		if self.use_amplitudes == True:
+			ifind = torch.where(stindex[edge_index[0]] < stindex[-1])[0] ## Avoid null index
+			mag_p = self.null_val*torch.ones(edge_index.shape[1],1).to(self.device)
+			mag_s = self.null_val*torch.ones(edge_index.shape[1],1).to(self.device)
+			mag_p[ifind,0] = self.Mag.mag(stindex[edge_index[0][ifind]], src[sindex[ifind]], logamp[edge_index[0][ifind]].reshape(-1), torch.zeros(len(ifind)).long().to(self.device)).detach()
+			mag_s[ifind,0] = self.Mag.mag(stindex[edge_index[0][ifind]], src[sindex[ifind]], logamp[edge_index[0][ifind]].reshape(-1), torch.ones(len(ifind)).long().to(self.device)).detach()
+			mag_p = mag_p/self.scale_mag
+			mag_s = mag_s/self.scale_mag
 		
 		rel_t_p = (atime[edge_index[0]] - (tsrc_p[sindex, stindex[edge_index[0]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p), mag_p, phase_j), dim = 1) # phase[edge_index[0]]
-
 		rel_t_s = (atime[edge_index[0]] - (tsrc_s[sindex, stindex[edge_index[0]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s), mag_s, phase_j), dim = 1) # phase[edge_index[0]]
 
+		if self.use_amplitudes == True:
+			rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p), mag_p, phase_j), dim = 1) # phase[edge_index[0]]
+			rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s), mag_s, phase_j), dim = 1) # phase[edge_index[0]]
+		else:
+			rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p), phase_j), dim = 1) # phase[edge_index[0]]
+			rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s), phase_j), dim = 1) # phase[edge_index[0]]	
+		
 		# Denote self-links by a feature.
 		self_link = (edge_index[0] == torch.remainder(edge_index[1], edge_index[0].max().item())).reshape(-1,1).detach().float() # Each accumulation index (an entry from src cross arrivals). The number of arrivals is edge_index.max() exactly (since tensor is composed of number arrivals + 1)
 		null_link = (edge_index[0] == edge_index[0].max().item()).reshape(-1,1).detach().float()
+		
 		contexts = self.f_src_context_2(self.activate1(self.f_src_context_1(torch.cat((sembed[sindex], stime[sindex].reshape(-1,1).detach(), self_link, null_link), dim = 1)))).view(-1, self.n_heads, self.n_latent)
 		queries = self.f_arrival_query_2(self.activate2(self.f_arrival_query_1(torch.cat((x_j, rel_t_p, rel_t_s), dim = 1)))).view(-1, self.n_heads, self.n_latent)
 		values = self.f_values_2(self.activate3(self.f_values_1(torch.cat((x_j, rel_t_p, rel_t_s, self_link, null_link), dim = 1)))).view(-1, self.n_heads, self.n_latent)
