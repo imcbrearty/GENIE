@@ -352,6 +352,7 @@ if use_amplitudes == True:
 else:
 
 	log_amp_sta_distb = []
+	q_range_emperical = np.linspace(0, 1, 30)
 	log_amp_random = np.random.rand(10000)*2.0 - 8.0 ## Arbitrary random amplitudes
 	for i in range(len(locs)):
 		log_amp_sta_distb.append(np.quantile(log_amp_random, q_range_emperical).reshape(1,-1))
