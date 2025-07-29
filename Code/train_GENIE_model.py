@@ -1005,7 +1005,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		
 		trv_out = x_grids_trv[grid_select][:,sta_select,:] ## Subsetting, into sliced indices.
 		Inpts.append(inpt[:,sta_select,:]) # sub-select, subset of stations.
-		Masks.append(1.0*(inpt[:,sta_select,:] > thresh_mask))
+		Masks.append(1.0*(inpt[:,sta_select,0:4] > thresh_mask))
 		Trv_out.append(trv_out)
 		Locs.append(locs[sta_select])
 		X_fixed.append(x_grids[grid_select])
