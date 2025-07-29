@@ -1149,7 +1149,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
 
-	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_amp, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_amp, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
 
@@ -1603,9 +1603,9 @@ if build_training_data == True:
 		file_index = n_repeat*job_number + n ## Unique file index
 
 		if use_subgraph == True:
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_amp, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
 		else:
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = False)
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_amp, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = False)
 			Inpts = [Inpts[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Inpts))]
 			Masks = [Masks[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Masks))]
 			A_sta_sta_l = [torch.Tensor(A_sta_sta_l[j]).long().to(device) for j in range(len(A_sta_sta_l))]
@@ -1646,6 +1646,7 @@ if build_training_data == True:
 			h['lp_times_%d'%i] = lp_times[i]
 			h['lp_stations_%d'%i] = lp_stations[i]
 			h['lp_phases_%d'%i] = lp_phases[i]
+			h['lp_amp_%d'%i] = lp_amp[i]
 			h['lp_meta_%d'%i] = lp_meta[i]
 			h['lp_srcs_%d'%i] = lp_srcs[i]
 
@@ -1707,7 +1708,7 @@ for i in range(n_restart_step, n_epochs):
 
 		## Build a training batch on the fly
 		if use_subgraph == False:
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_amp, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
 			Inpts = [Inpts[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Inpts))]
 			Masks = [Masks[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Masks))]
 			A_sta_sta_l = [torch.Tensor(A_sta_sta_l[j]).long().to(device) for j in range(len(A_sta_sta_l))]
@@ -1718,7 +1719,7 @@ for i in range(n_restart_step, n_epochs):
 			A_src_in_sta_l = [torch.Tensor(np.concatenate((np.tile(np.arange(Locs[j].shape[0]), len(X_fixed[j])).reshape(1,-1), np.arange(len(X_fixed[j])).repeat(len(Locs[j]), axis = 0).reshape(1,-1)), axis = 0)).long().to(device) for j in range(len(Inpts))]
 
 		if use_subgraph == True:
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_amp, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
 			A_src_in_sta_l = [[] for j in range(len(Inpts))]
 			
 			for n in range(len(Inpts)):
@@ -1764,6 +1765,7 @@ for i in range(n_restart_step, n_epochs):
 			lp_times = []
 			lp_stations = []
 			lp_phases = []
+			lp_amp = []
 			lp_meta = []
 			lp_srcs = []
 			A_sta_sta_l = []
@@ -1792,6 +1794,7 @@ for i in range(n_restart_step, n_epochs):
 			lp_times.append(h['lp_times_%d'%i0][:])
 			lp_stations.append(h['lp_stations_%d'%i0][:])
 			lp_phases.append(h['lp_phases_%d'%i0][:])
+			lp_amp.append(h['lp_amp_%d'%i0][:])
 			lp_meta.append(h['lp_meta_%d'%i0][:])
 			lp_srcs.append(h['lp_srcs_%d'%i0][:])
 			A_sta_sta_l.append(torch.Tensor(h['A_sta_sta_%d'%i0][:]).long().to(device))
@@ -1866,8 +1869,16 @@ for i in range(n_restart_step, n_epochs):
 			tq_sample[ifind_src] = torch.Tensor(lp_srcs[i0][ifind_src,3]).to(device)
 
 		if use_phase_types == False:
-			Inpts[i0][:,2::] = 0.0 ## Phase type informed features zeroed out
-			Masks[i0][:,2::] = 0.0
+			if use_amplitudes == False:
+				Inpts[i0][:,2:4] = 0.0 ## Phase type informed features zeroed out
+				Masks[i0][:,2:4] = 0.0
+				# Inpts[i0][:,] = 0.0 ## Phase type informed features zeroed out
+				# Masks[i0][:,2:4] = 0.0
+			else:
+				Inpts[i0][:,2:4] = 0.0 ## Phase type informed features zeroed out
+				Masks[i0][:,2:4] = 0.0
+				Inpts[i0][:,6::] = 0.0 ## Phase type informed features zeroed out
+				Masks[i0][:,6::] = 0.0				
 
 		# Pre-process tensors for Inpts and Masks
 		input_tensor_1 = torch.Tensor(Inpts[i0]).to(device) # .reshape(-1, 4)
@@ -1906,6 +1917,7 @@ for i in range(n_restart_step, n_epochs):
 			lp_times[i0] = lp_times[i0][isample_picks]
 			lp_stations[i0] = lp_stations[i0][isample_picks]
 			lp_phases[i0] = lp_phases[i0][isample_picks]
+			lp_amp[i0] = lp_amp[i0][isample_picks]
 			lp_meta[i0] = lp_meta[i0][isample_picks]
 
 			assert(len(lp_times[i0]) <= max_number_pick_association_labels_per_sample)
@@ -1917,6 +1929,7 @@ for i in range(n_restart_step, n_epochs):
 			lp_times[i0] = lp_times[i0][isample_picks]
 			lp_stations[i0] = lp_stations[i0][isample_picks]
 			lp_phases[i0] = lp_phases[i0][isample_picks]
+			lp_amp[i0] = lp_amp[i0][isample_picks]
 			lp_meta[i0] = lp_meta[i0][isample_picks]
 		
 		# Continue processing the rest of the inputs
@@ -1932,12 +1945,21 @@ for i in range(n_restart_step, n_epochs):
 			torch.Tensor(lp_times[i0]).to(device),
 			torch.Tensor(lp_stations[i0]).long().to(device),
 			torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
+			torch.Tensor(lp_amp[i0]).reshape(-1, 1).float().to(device),
 			torch.Tensor(ftrns1(Locs[i0])).to(device),
 			torch.Tensor(ftrns1(X_fixed[i0])).to(device),
 			torch.Tensor(ftrns1(X_query[i0])).to(device),
 			torch.Tensor(x_src_query_cart).to(device),
 			tq, tq_sample, trv_out_src
 		]
+
+
+		if use_amplitudes == True:
+			imatch_vec = torch.Tensor(tree_stas.query(ftrns1(Locs[i0]))[1]).long().to(device)
+			mz.Mag.ivec = imatch_vec
+			mz.LocalSliceLgCollapseP.ivec = imatch_vec
+			mz.LocalSliceLgCollapseS.ivec = imatch_vec
+			mz.Arrivals.ivec = imatch_vec
 
 		# Call the model with pre-processed tensors
 		out = mz(*input_tensors)
