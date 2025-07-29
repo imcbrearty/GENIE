@@ -639,6 +639,35 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			false_arrivals_spikes = np.concatenate((sta_time_spikes.reshape(-1,1), sta_ind_spikes.reshape(-1,1), -1.0*np.ones((len(sta_ind_spikes),1)), np.zeros((len(sta_ind_spikes),1)), -1.0*np.ones((len(sta_ind_spikes),1))), axis = 1)
 			arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) ## Concatenate on spikes
 
+	## Need to calibrate the magnitude-distance tradeoff
+	if use_amplitudes == True:
+		ratio_amplitudes = [0.5, 1.5] ## Per source (correlated noise)
+		ratio_amplitudes_sta = [0.5, 1.5] ## Per station (iid noise)
+		ratio_phases = [0.75, 1.25]
+		## Compute amplitudes of picks
+		itrue_p = np.where((arrivals[:,2] > -1)*(arrivals[:,4] == 0))[0] ## Real picks
+		itrue_s = np.where((arrivals[:,2] > -1)*(arrivals[:,4] == 1))[0] ## Real picks
+		ifalse = np.where(arrivals[:,2] == -1)[0] ## False picks
+
+		log_amp_p = Mag.train(torch.Tensor(arrivals[itrue_p,1].astype('int')).long().to(device), torch.Tensor(src_positions[arrivals[itrue_p,2].astype('int'),0:3]).to(device), torch.Tensor(src_magnitude[arrivals[itrue_p,2].astype('int')]).to(device), torch.zeros(len(itrue_p)).long().to(device)).cpu().detach().numpy() # 1## 
+		log_amp_s = Mag.train(torch.Tensor(arrivals[itrue_s,1].astype('int')).long().to(device), torch.Tensor(src_positions[arrivals[itrue_s,2].astype('int'),0:3]).to(device), torch.Tensor(src_magnitude[arrivals[itrue_s,2].astype('int')]).to(device), torch.ones(len(itrue_s)).long().to(device)).cpu().detach().numpy() # 1## 
+		per_source_scale = np.random.rand(n_src)*(ratio_amplitudes[1] - ratio_amplitudes[0]) + ratio_amplitudes[0]
+		per_source_scale_p = np.random.rand(n_src)*(ratio_phases[1] - ratio_phases[0]) + ratio_phases[0]
+		per_source_scale_s = np.random.rand(n_src)*(ratio_phases[1] - ratio_phases[0]) + ratio_phases[0]
+		per_pick_scale_p = np.random.rand(len(itrue_p))*(ratio_amplitudes_sta[1] - ratio_amplitudes_sta[0]) + ratio_amplitudes_sta[0]
+		per_pick_scale_s = np.random.rand(len(itrue_s))*(ratio_amplitudes_sta[1] - ratio_amplitudes_sta[0]) + ratio_amplitudes_sta[0]
+
+		## Add noise; note, b = log(a); y = log(ac) = log(a) + log(c) = b + log(c)
+		log_amp_p = log_amp_p + np.log10(per_pick_scale_p) + np.log10(per_source_scale[arrivals[itrue_p,2].astype('int')]) + np.log10(per_source_scale_p[arrivals[itrue_p,2].astype('int')])
+		log_amp_s = log_amp_s + np.log10(per_pick_scale_s) + np.log10(per_source_scale[arrivals[itrue_s,2].astype('int')]) + np.log10(per_source_scale_s[arrivals[itrue_s,2].astype('int')])
+		irand_quantile = np.random.choice(n_range_emperical - 1, size = len(ifalse))
+		log_amp_false = log_amp_sta_distb[arrivals[ifalse,1].astype('int'), irand_quantile] + np.random.rand(len(ifalse))*log_amp_sta_distb_diff[arrivals[ifalse,1].astype('int'), irand_quantile]
+		log_amp = np.nan*np.ones(len(arrivals))
+		log_amp[itrue_p] = log_amp_p
+		log_amp[itrue_s] = log_amp_s
+		log_amp[ifalse] = log_amp_false
+		assert(np.isnan(log_amp).sum() == 0)
+	
 
 	# use_stable_association_labels = True
 	## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
