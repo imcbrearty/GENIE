@@ -1475,6 +1475,13 @@ optimizer = optim.Adam(mz.parameters(), lr = 0.001)
 loss_func = torch.nn.MSELoss()
 np.random.seed() ## randomize seed
 
+tree_stas = cKDTree(ftrns1(locs))
+if use_amplitudes == True:
+	mz.Mag = Mags
+	mz.LocalSliceLgCollapseP.Mag = Mags
+	mz.LocalSliceLgCollapseS.Mag = Mags
+	mz.Arrivals.Mag = Mags
+
 losses = np.zeros(n_epochs)
 mx_trgt_1, mx_trgt_2, mx_trgt_3, mx_trgt_4 = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
 mx_pred_1, mx_pred_2, mx_pred_3, mx_pred_4 = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
