@@ -706,7 +706,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	## If true, return only the synthetic arrivals
 	if return_only_data == True:
 		srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitude.reshape(-1,1)), axis = 1)
-		data = [arrivals, srcs, active_sources]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
+		data = [arrivals, srcs, active_sources, log_amp] ## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
 		return data
 	
 	inside_interior = ((src_positions[:,0] < lat_range[1])*(src_positions[:,0] > lat_range[0])*(src_positions[:,1] < lon_range[1])*(src_positions[:,1] > lon_range[0]))
