@@ -64,6 +64,7 @@ use_relative_1d_profile: False # If False, the 1D profile is treated as absolute
 use_updated_model_definition: False ## Note: switching this back
 scale_rel: 30000.0 # The normalization scale between source-source edges
 scale_t: 10.0 # The normalization scale during temporal attention
+scale_mag: 5.0 # Normalize the magnitude value when using amplitudes in model
 eps: 15.0 # The normalization and clipping window during arrival embedding and source-station-arrival attention
 
 ## Graph params
