@@ -100,22 +100,22 @@ n_query_grid = process_config['n_query_grid']
 
 thresh = process_config['thresh'] # Threshold to declare detection
 thresh_assoc = process_config['thresh_assoc'] # Threshold to declare src-arrival association
-spr = process_config['spr'] # Sampling rate to save temporal predictions
-tc_win = process_config['tc_win'] # Temporal window (s) to link events in Local Marching
-sp_win = process_config['sp_win'] # Distance (m) to link events in Local Marching
-break_win = process_config['break_win'] # Temporal window to find disjoint groups of sources, 
+# spr = process_config['spr'] # Sampling rate to save temporal predictions
+# tc_win = process_config['tc_win'] # Temporal window (s) to link events in Local Marching
+# sp_win = process_config['sp_win'] # Distance (m) to link events in Local Marching
+# break_win = process_config['break_win'] # Temporal window to find disjoint groups of sources, 
 ## so can run Local Marching without memory issues.
-spr_picks = process_config['spr_picks'] # Assumed sampling rate of picks 
+# spr_picks = process_config['spr_picks'] # Assumed sampling rate of picks 
 ## (can be 1 if absolute times are used for pick time values)
 
-d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
-d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
-dx_depth = process_config['dx_depth'] ## Depth resolution to locate events with travel time based re-location
+# d_win = process_config['d_win'] ## Lat and lon window to re-locate initial source detetections with refined sampling over
+# d_win_depth = process_config['d_win_depth'] ## Depth window to re-locate initial source detetections with refined sampling over
+# dx_depth = process_config['dx_depth'] ## Depth resolution to locate events with travel time based re-location
 
-step = process_config['step']
-step_abs = process_config['step_abs']
+# step = process_config['step']
+# step_abs = process_config['step_abs']
 
-cost_value = process_config['cost_value'] # If use expanded competitve assignment, then this is the fixed cost applied per source
+# cost_value = process_config['cost_value'] # If use expanded competitve assignment, then this is the fixed cost applied per source
 
 
 compute_magnitudes = process_config['compute_magnitudes']
