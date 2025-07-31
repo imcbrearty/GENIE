@@ -36,6 +36,7 @@ with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 	
 eps = config['eps'] # Use this value to set resolution for the temporal embedding grid
+use_amplitudes = config['use_amplitudes']
 
 class LocalMarching(MessagePassing): # make equivelent version with sum operations.
 	def __init__(self, device = 'cpu'):
