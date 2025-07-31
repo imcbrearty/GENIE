@@ -297,11 +297,11 @@ if device.type == 'cuda' or device.type == 'cpu':
 		raise SystemError('Issue with knn on cuda for some versions of pytorch geometric and cuda')
 
 use_only_one_grid = process_config['use_only_one_grid']
-if (use_only_one_grid == True)*(1 == 0): ## Speeds up the initilization of the code by only loading one grid
+# if (use_only_one_grid == True)*(1 == 0): ## Speeds up the initilization of the code by only loading one grid
+if use_only_one_grid == True: ## Speeds up the initilization of the code by only loading one grid
 	x_grids = np.expand_dims(x_grids[np.random.choice(len(x_grids))], axis = 0)
 x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, device = device)
 x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])).to(device) for i in range(len(x_grids))]
-
 # mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff)
 
 load_model = True
