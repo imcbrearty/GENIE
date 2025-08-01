@@ -45,7 +45,11 @@ Follow order of scripts explained in "Applying the model" section. Most of the p
 (iv). Once an initial catalog has been built, it's also straighforward to run the GraphDD relocation scripts to relocate the events. These files are given and described in the "Relocation" directoy.
 
 
-## Using train_GENIE_model.py
+
+## Additional Information:
+
+
+### Using train_GENIE_model.py
 
 To train the model, the training parameters in "train_config.yaml" should be adapted somewhat for different settings. Several parameters that become the inputs to the "generate_synthetic_data" function (defined in lists "training_params", "training_params_2", and "training_params_3") should be edited based on the source domain scale and station distribution. These control things like the average background rate of sources, missed and false pick rates, travel time uncertainity levels, source and spatial label kernel widths, max moveout distances of sources, etc. 
 
@@ -55,7 +59,7 @@ Use the parameter "fixed_subnetworks" in train_config.yaml to train the GNN on s
 
 Note: there are a few fixed scale-dependent parameters in config.yaml, such as "scale_rel", "scale_t" and "eps"; these are used to normalize typical offset distances between nodes, and arival time uncertainities. For small applications (e.g., < 50 km or so), these parameters should typically be decreased from their default values.
 
-## Running process_continuous_days.py
+### Running process_continuous_days.py
 
 Specify which days of picks you want to run by creating the "Project name"_process_days_list_ver_1.txt file in the main directory.    
 
