@@ -82,7 +82,7 @@ spatial_sigma: 20000.0 ## The amount of spatial smoothing to the reference catal
 min_magnitude_ref: 1.5 ## Min magnitude to consider for reference catalog
 percentile_threshold_ref: 0.00001 ## Take all areas of > kernel Gaussian estimation probability as the "uniform" area to sample sources within
 n_reference_clusters: 10000 ## The amount of "quasi-uniiform" nodes to obtain for representing the source catalog distribution
-n_frac_reference_catalog: 0.8 ## The amount of sources to simulate from the reference catalog coordinates compared to background
+n_frac_reference_catalog: 0.5 ## The amount of sources to simulate from the reference catalog coordinates compared to background
 
 
 ## Extra dataset parameters
