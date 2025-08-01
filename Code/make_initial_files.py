@@ -3,6 +3,7 @@ import numpy as np
 from obspy.clients.fdsn import Client
 from obspy.core import UTCDateTime
 import pathlib
+import os
 from utils import load_config
 
 
@@ -75,6 +76,7 @@ if __name__ == '__main__':
 
     if pre_load_stations == False:
         print("Setting up region based on configuration...")
+        print('Downloading stations from Obspy instead of file since pre_load_stations = False')
         stations = setup_region(client, config, t0, tf)
 
         print("Extracting station data...")
@@ -82,9 +84,29 @@ if __name__ == '__main__':
 
     elif pre_load_stations == True:
         print('Loading pre-built station file')
-        z = np.load(base_path + 'stations.npz', allow_pickle = True)
-        locs, stas = z['locs'], z['stas'].astype('U9')
-        z.close()
+        if os.path.isfile(base_path + 'stations.npz') == True:
+            z = np.load(base_path + 'stations.npz', allow_pickle = True)
+            locs, stas = z['locs'], z['stas'].astype('U9')
+            z.close()
+        elif os.path.isfile(base_path + 'stations.txt') == True:
+            f = open(base_path + 'stations.txt', 'r')
+            lines = f.readlines()
+            stas, locs = [], []
+            for j in range(len(lines)):
+                if ('Lat' in lines[j]) or ('lat' in lines[j]) or ('Lon' in lines[j]) or ('lon' in lines[j]):
+                    continue
+                if ',' in lines[j]:
+                    line = list(filter(lambda x: len(x) > 0, lines[j].strip().split(',')))
+                else:
+                    line = list(filter(lambda x: len(x) > 0, lines[j].strip().split(' ')))
+                stas.append(line[0])
+                locs.append(np.array([float(line[1]), float(line[2]), float(line[3])]).reshape(1,-1))
+            stas = np.hstack(stas).astype('U9')
+            locs = np.vstack(locs)
+            print('Saving station .npz file')
+            np.savez_compressed(base_path + 'stations.npz', locs = locs, stas = stas)       
+        else:
+             raise Exception('No station file loaded; create the "stations.txt" or "stations.npz" file; see GitHub "Setup Details" section for more information')
     
     print("Saving files...")
     save_files(base_path, locs, stas, config, years)
