@@ -42,7 +42,7 @@ Follow order of scripts explained in "Applying the model" section. Most of the p
 
 (iii). After an initial catalog has been built for many days and you have saved reference events of a known catalog in "Calibration/" with known magnitudes, you can run "calibrate_and_apply_magnitude_scale.py" to determine how many "matched" events are recovered from the known catalog, compute some summary statistics, and to fit a local magnitude scale using the associated picks and the target magnitudes of the matched events. Then if "compute_magnitudes" is set as True in process_config.yaml, future runs of "process_continuous_days.py" will compute magnitudes of the detected events. A summary of the matched earthquakes and detected events, and their magnitudes are also saved in a .hdf5 file during this calibration.
 
-(iv). Once an initial catalog has been built, it's also straighforward to run the GraphDD relocation scripts to relocate the events. These files are given and described in the "Relocation" directoy.
+(iv). Once an initial catalog has been built, it's straighforward to run the GraphDD relocation scripts to relocate the events. These files are given and described in the "Relocation" directoy.
 
 
 
