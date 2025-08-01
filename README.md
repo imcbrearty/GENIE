@@ -8,7 +8,7 @@ The source code is posted at https://github.com/imcbrearty/GENIE/tree/main/Code.
 
 Note that this is an early release of the code. Increased documentation, more thorough user testing, and pre-trained models will be forthcoming.
 
-The codes for implementing Graph Double Difference (GraphD) will also be supplied in https://github.com/imcbrearty/GENIE/tree/main/Code/Relocation.
+The codes for implementing Graph Double Difference (GraphD) will also be supplied in https://github.com/imcbrearty/GENIE/tree/main/Relocation.
 
 ## Applying the model
 
