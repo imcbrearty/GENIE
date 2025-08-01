@@ -51,9 +51,10 @@ depth_steps:
 
 # Can increase or decrease these as needed
 dx: 500.0 # Cartesian distance between nodes in FMM computation
-d_deg: 0.005 # Degree distance between saved interpolation query points
-dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved query points
 n_jobs: 1 ## Number of jobs to do the travel time calculations (note: you must run "calculate_travel_times_3D_build_data.py 0", and "calculate_travel_times_3D_build_data.py 1", for all i = 0 ... (n_jobs - 1))
+## Can increse or decrease d_deg and dx_depth seperately by uncommenting
+# d_deg: 0.005 # Degree distance between saved interpolation query points
+# dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved query points
 
 save_dense_travel_time_data: False # Save the dense travel times (only necessary if not training travel time neural network)
 train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
@@ -88,3 +89,4 @@ max_number_pick_association_labels_per_sample: 1500 # Max number of picks to com
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
