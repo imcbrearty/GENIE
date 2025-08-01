@@ -6,7 +6,7 @@ Follow order of scripts explained in "Applying the model" section. Most of the p
 
 (i). First, in "config.yaml" set your lat_range, lon_range, depth_range area's of interest (for depth, use meters, where negative is below sea level). It is helpful to choose a representative project_name that will be appended to some of the produced files.
 
-(ii). Choose "pre_load_stations: True", and create the station file (stations.txt : columns of latitude, longitude, depth (m, negative below sea level) prior to running any scripts.
+(ii). Choose "pre_load_stations: True", and create the station file (stations.txt : columns of station name, latitude, longitude, depth (m, negative below sea level) prior to running any scripts.
 
 (iii). Also set the 1D model in config.yaml and choose "vel_model_type: 1", or create the 3d velocity model file "3d_velocity_model.npz", which has three fields; "X", "Vp", "Vs", where X is np.array size (N_points x 3) of columns of lat, lon, depth (m, negative below sea level), and Vp and Vs a corresponding np.array size (N_points) of Vp and Vs (in m/s). If using 3d, then set ""vel_model_type: 2".
 
