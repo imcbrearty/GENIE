@@ -127,9 +127,8 @@ name_of_project = config['name_of_project']
 num_cores = config['num_cores']
 
 dx = config['dx']
-d_deg = config['d_deg']
-dx_depth = config['dx_depth']
-depth_steps = config['depth_steps']
+d_deg = config.get('d_deg', dx/1e5) ## Roughly convert meters to degrees
+dx_depth = config.get('dx_depth', dx)
 
 ## Load travel time neural network settings
 save_dense_travel_time_data = config['save_dense_travel_time_data']
@@ -142,7 +141,7 @@ if use_relative_1d_profile == True:
 	print('Overwritting num cores, because using relative 1d profile option')
 	num_cores = 1
 
-depth_steps = np.arange(depth_steps['min_elevation'], depth_steps['max_elevation'] + depth_steps['elevation_step'], depth_steps['elevation_step']) # Elevation steps to compute travel times from 
+# depth_steps = np.arange(depth_steps['min_elevation'], depth_steps['max_elevation'] + depth_steps['elevation_step'], depth_steps['elevation_step']) # Elevation steps to compute travel times from 
 ## (These are reference points for stations; can be a regular grid, and each station looks up the
 ## travel times with respect to these values. It is discretized (nearest-neighber) rather than continous.
 
