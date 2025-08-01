@@ -13,7 +13,11 @@ time_range: # This sets up the Catalog and Pick files to have these years initia
 
 client : 'IRIS'
 network: 'HV'
+
+
+## Note: it is helpful to set this as True, and then to specify the initial station file yourself in stations.txt or stations.npz
 pre_load_stations: False # If True, then skip download stations during make_initial_files.py; instead, stations.npz is assumed to already exist with locs and stas as the two fields.
+
 use_physics_informed: True ## If true, must run the "build" and "train" scripts seperately for the travel times and load a 3D (or 1D) velocity model
 use_topography: False ## If True, create the "surface_elevation.npz" file in the main project folder, saved with numpy array with "Points" (with columns of lat, lon, and elevation (m)). Can be arbitrary structured set of points (areas outside convex hull of Points will be trated as zero elevation.
 
@@ -44,10 +48,10 @@ number_of_update_steps: 5000
 ### TRAVEL TIMES ###
 ## These are the elevation ranges over which stations might vary
 ## we compute travel times for a range of reciever elevations
-depth_steps:
-  min_elevation: -500 # meters
-  max_elevation: 4000 # meters
-  elevation_step: 150 # meters
+# depth_steps:
+#   min_elevation: -500 # meters
+#   max_elevation: 4000 # meters
+#   elevation_step: 150 # meters
 
 # Can increase or decrease these as needed
 dx: 500.0 # Cartesian distance between nodes in FMM computation
@@ -89,4 +93,5 @@ max_number_pick_association_labels_per_sample: 1500 # Max number of picks to com
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
 
