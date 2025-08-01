@@ -34,4 +34,4 @@ For substantial catalogs (e.g., > 10,000's of events), you should build a large 
 
 ## Extra Information
 
-The method is described in https://arxiv.org/abs/2410.19323v1 and https://earth-planets-space.springeropen.com/articles/10.1186/s40623-025-02251-4.
+The method is described in https://earth-planets-space.springeropen.com/articles/10.1186/s40623-025-02251-4 and https://arxiv.org/abs/2410.19323v1.
