@@ -18,7 +18,7 @@ For substantial catalogs (e.g., > 10,000's of events), you should build a large 
 
 ## To initilize a GENIE environment
 
-(i). First, in "config.yaml" set your lat_range, lon_range, depth_range area's of interest (for depth, use meters, where negative is below sea level).
+(i). First, in "config.yaml" set your lat_range, lon_range, depth_range area's of interest (for depth, use meters, where negative is below sea level). It is helpful to choose a representative project_name that will be appended to some of the produced files.
 
 (ii). Choose "pre_load_stations: True", and create the station file (stations.txt : columns of latitude, longitude, depth (m, negative below sea level) prior to running any scripts.
 
@@ -34,4 +34,4 @@ For substantial catalogs (e.g., > 10,000's of events), you should build a large 
 
 ## Extra Information
 
-The method is described in https://arxiv.org/abs/2410.19323v1.
+The method is described in https://arxiv.org/abs/2410.19323v1 and https://earth-planets-space.springeropen.com/articles/10.1186/s40623-025-02251-4.
