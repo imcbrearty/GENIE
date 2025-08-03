@@ -926,7 +926,7 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 
 	for i in range(len(x_grids)):
 
-		A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations_multiple_grids(x_grids_trv[i], dt = dt_embed, win = t_win, max_t)
+		A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations_multiple_grids(x_grids_trv[i], max_t, dt = dt_embed, win = t_win)
 		x_grids_trv_pointers_p.append(A_edges_time_p)
 		x_grids_trv_pointers_s.append(A_edges_time_s)
 		x_grids_trv_refs.append(dt_partition) # save as cuda tensor, or no?
@@ -1176,5 +1176,6 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
