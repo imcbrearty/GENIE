@@ -666,6 +666,25 @@ def optimize_station_selection(cnt_per_station, n_total):
 
         return sta_grab
 
+def compute_travel_times(trv, locs, x_grids, device = 'cpu'):
+
+	x_grids_trv = []
+	for i in range(len(x_grids)):
+		
+		if locs.shape[0]*x_grids[i].shape[0] > 150e3:
+			trv_out_l = []
+			for j in range(locs.shape[0]):
+				trv_out = trv(torch.Tensor(locs[j,:].reshape(1,-1)).to(device), torch.Tensor(x_grids[i]).to(device))
+				trv_out_l.append(trv_out.cpu().detach().numpy())
+			trv_out = torch.Tensor(np.concatenate(trv_out_l, axis = 1)).to(device)
+		else:
+			trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+		
+		# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+		x_grids_trv.append(trv_out.cpu().detach().numpy())
+
+	return np.vstack(x_grids_trv)
+
 ## ACTUAL UTILS
 def remove_mean(x, axis):
 	
@@ -1177,6 +1196,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
