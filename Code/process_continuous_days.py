@@ -303,7 +303,7 @@ max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))
 # if (use_only_one_grid == True)*(1 == 0): ## Speeds up the initilization of the code by only loading one grid
 if use_only_one_grid == True: ## Speeds up the initilization of the code by only loading one grid
 	grid_choose = np.random.choice(len(x_grids))
-	x_grids = np.expand_dims(x_grids[], axis = 0)
+	x_grids = np.expand_dims(x_grids[grid_choose], axis = 0)
 	x_grids_trv = [x_grids_trv[grid_choose]]
 x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t_ = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = max_t, dt_embed = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device) ## Note: setting time embedding vectors with respect to kernel_sig_t
 assert(max_t_ == max_t)
