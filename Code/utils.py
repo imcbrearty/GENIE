@@ -891,7 +891,7 @@ def load_station_corrections(trv, locs, path_to_file, name_of_project, n_ver_cor
 	## Can we overwrite the function?
 	return TrvTimesCorrection(trv, x_grid_corr, locs_use, coefs, ftrns1_diff, coefs_ker = coefs_ker, interp_type = interp_type, k = k_spc_interp, trv_direct = trv_direct, sig = sig_ker)
 
-def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, dt_embed = 1.0, device = 'cpu'):
+def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, dt_embed = 1.0, t_win = 10.0, device = 'cpu'):
 
 	k_sta_edges, k_spc_edges, k_time_edges = graph_params
 
@@ -926,7 +926,7 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 
 	for i in range(len(x_grids)):
 
-		A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations_multiple_grids(x_grids_trv[i], max_t)
+		A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations_multiple_grids(x_grids_trv[i], dt = dt_embed, win = t_win, max_t)
 		x_grids_trv_pointers_p.append(A_edges_time_p)
 		x_grids_trv_pointers_s.append(A_edges_time_s)
 		x_grids_trv_refs.append(dt_partition) # save as cuda tensor, or no?
@@ -1176,3 +1176,4 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
