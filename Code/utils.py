@@ -602,7 +602,7 @@ def interp_1D_velocity_model_to_3D_travel_times(X, locs, Xmin, X0, Dx, Mn, Tp, T
 def assemble_time_pointers_for_stations(trv_out, dt = 1.0, k = 10, win = 10.0, tbuffer = 10.0):
 
 	n_temp, n_sta = trv_out.shape[0:2]
-	dt_partition = np.arange(-win, win + trv_out.max() + dt + tbuffer, dt)
+	dt_partition = np.arange(-win, win + trv_out.max() + dt, dt) # + tbuffer
 
 	edges_p = []
 	edges_s = []
@@ -1176,4 +1176,5 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
