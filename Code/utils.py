@@ -915,7 +915,7 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 
 	k_sta_edges, k_spc_edges, k_time_edges = graph_params
 
-	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
+	# t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
 
 	x_grids_trv = []
 	x_grids_trv_pointers_p = []
@@ -1196,6 +1196,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
