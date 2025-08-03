@@ -297,10 +297,14 @@ if device.type == 'cuda' or device.type == 'cpu':
 		raise SystemError('Issue with knn on cuda for some versions of pytorch geometric and cuda')
 
 use_only_one_grid = process_config['use_only_one_grid']
+x_grids_trv = compute_travel_times(trv, locs, x_grids, device = device)
+max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
+
 # if (use_only_one_grid == True)*(1 == 0): ## Speeds up the initilization of the code by only loading one grid
 if use_only_one_grid == True: ## Speeds up the initilization of the code by only loading one grid
 	x_grids = np.expand_dims(x_grids[np.random.choice(len(x_grids))], axis = 0)
-x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, dt_embed = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device) ## Note: setting time embedding vectors with respect to kernel_sig_t
+x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t_ = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = max_t, dt_embed = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device) ## Note: setting time embedding vectors with respect to kernel_sig_t
+assert(max_t_ == max_t)
 x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])).to(device) for i in range(len(x_grids))]
 
 # mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff)
@@ -552,7 +556,7 @@ for cnt, strs in enumerate([0]):
 
 			# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
 			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(locs_use, x_grids[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, device = device)
-			A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, locs_use, x_grids[i], A_src_in_sta, max_t, t_win = t_win, device = device)
+			A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, locs_use, x_grids[i], A_src_in_sta, max_t, dt_res = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device)
 			spatial_vals = torch.Tensor((x_grids[i][A_src_in_prod[1].cpu().detach().numpy()] - locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()])/scale_x_extend).to(device)
 			A_src_in_prod = Data(x = spatial_vals, edge_index = A_src_in_prod)
 			
