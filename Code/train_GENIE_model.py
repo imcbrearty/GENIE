@@ -1255,8 +1255,8 @@ for i in range(len(x_grids)):
 	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(x_grids_trv[i], k = k_time_edges, max_t = max_t, dt = kernel_sig_t/5.0, win = kernel_sig_t*2.0)
 
 	if config['train_travel_time_neural_network'] == False:
-		assert(x_grids_trv[i],.min() > 0.0)
-		assert(x_grids_trv[i],.max() < (ts_max_val + 3.0))
+		assert(x_grids_trv[i].min() > 0.0)
+		assert(x_grids_trv[i].max() < (ts_max_val + 3.0))
 
 	x_grids_trv_pointers_p.append(A_edges_time_p)
 	x_grids_trv_pointers_s.append(A_edges_time_s)
@@ -2292,6 +2292,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
