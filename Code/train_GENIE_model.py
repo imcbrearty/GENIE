@@ -1232,7 +1232,7 @@ x_grids_trv_refs = []
 if config['train_travel_time_neural_network'] == False:
 	ts_max_val = Ts.max()
 
-x_grids_trv = compute_travel_times(trv, locs, x_grids)
+x_grids_trv = compute_travel_times(trv, locs, x_grids, device = device)
 
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
 
@@ -2292,6 +2292,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
