@@ -1455,7 +1455,7 @@ for i in range(len(x_grids)):
 	
 	# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
 	x_grids_trv.append(trv_out.cpu().detach().numpy())
-	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(trv_out.cpu().detach().numpy(), k = k_time_edges)
+	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(trv_out.cpu().detach().numpy(), k = k_time_edges, dt = kernel_sig_t/5.0, win = kernel_sig_t*2.0) ## Note: using updated dt and win
 
 	if config['train_travel_time_neural_network'] == False:
 		assert(trv_out.min() > 0.0)
@@ -1626,7 +1626,7 @@ if build_training_data == True:
 
 			if use_subgraph == True:
 				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, device = device)
-				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[i], X_fixed[i], A_src_in_sta, max_t, device = device)
+				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[i], X_fixed[i], A_src_in_sta, max_t, dt_res = kernel_sig_t/5.0, t_win = kernel_sig_t*2.0, device = device) ## Note: updated dt_res and t_win
 				A_sta_sta_l[i] = A_sta_sta ## These should be equal
 				A_src_src_l[i] = A_src_src ## These should be equal
 				A_prod_sta_sta_l[i] = A_prod_sta_sta
@@ -2524,6 +2524,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
