@@ -891,7 +891,7 @@ def load_station_corrections(trv, locs, path_to_file, name_of_project, n_ver_cor
 	## Can we overwrite the function?
 	return TrvTimesCorrection(trv, x_grid_corr, locs_use, coefs, ftrns1_diff, coefs_ker = coefs_ker, interp_type = interp_type, k = k_spc_interp, trv_direct = trv_direct, sig = sig_ker)
 
-def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, dt_embed = 1.0, t_win = 10.0, device = 'cpu'):
+def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = None, dt_embed = 1.0, t_win = 10.0, device = 'cpu'):
 
 	k_sta_edges, k_spc_edges, k_time_edges = graph_params
 
@@ -922,7 +922,7 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 		edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
 		x_grids_edges.append(edge_index)
 
-	max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # *1.1 # + 10.0
+	if max_t is None: max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # *1.1 # + 10.0
 
 	for i in range(len(x_grids)):
 
@@ -1176,6 +1176,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
