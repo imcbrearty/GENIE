@@ -1232,20 +1232,27 @@ x_grids_trv_refs = []
 if config['train_travel_time_neural_network'] == False:
 	ts_max_val = Ts.max()
 
-for i in range(len(x_grids)):
+x_grids_trv = compute_travel_times(trv, locs, x_grids)
 
-	if locs.shape[0]*x_grids[i].shape[0] > 150e3:
-		trv_out_l = []
-		for j in range(locs.shape[0]):
-			trv_out = trv(torch.Tensor(locs[j,:].reshape(1,-1)).to(device), torch.Tensor(x_grids[i]).to(device))
-			trv_out_l.append(trv_out.cpu().detach().numpy())
-		trv_out = torch.Tensor(np.concatenate(trv_out_l, axis = 1)).to(device)
-	else:
-		trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
+
+# for i in range(len(x_grids)):
+
+# 	if locs.shape[0]*x_grids[i].shape[0] > 150e3:
+# 		trv_out_l = []
+# 		for j in range(locs.shape[0]):
+# 			trv_out = trv(torch.Tensor(locs[j,:].reshape(1,-1)).to(device), torch.Tensor(x_grids[i]).to(device))
+# 			trv_out_l.append(trv_out.cpu().detach().numpy())
+# 		trv_out = torch.Tensor(np.concatenate(trv_out_l, axis = 1)).to(device)
+# 	else:
+# 		trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
 	
-	# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
-	x_grids_trv.append(trv_out.cpu().detach().numpy())
-	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(trv_out.cpu().detach().numpy(), k = k_time_edges, dt = kernel_sig_t/5.0, win = kernel_sig_t*2.0)
+# 	# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+# 	x_grids_trv.append(trv_out.cpu().detach().numpy())
+
+for i in range(len(x_grids)):
+	
+	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(trv_out.cpu().detach().numpy(), k = k_time_edges, max_t = max_t, dt = kernel_sig_t/5.0, win = kernel_sig_t*2.0)
 
 	if config['train_travel_time_neural_network'] == False:
 		assert(trv_out.min() > 0.0)
@@ -2285,6 +2292,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
