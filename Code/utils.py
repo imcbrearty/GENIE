@@ -683,7 +683,7 @@ def compute_travel_times(trv, locs, x_grids, device = 'cpu'):
 		# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
 		x_grids_trv.append(trv_out.cpu().detach().numpy())
 
-	return np.vstack(x_grids_trv)
+	return x_grids_trv
 
 ## ACTUAL UTILS
 def remove_mean(x, axis):
@@ -1196,6 +1196,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
