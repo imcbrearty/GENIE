@@ -1,12 +1,12 @@
-name_of_project: 'Mayotte'
+name_of_project: 'Ferndale'
 num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost). Note: now this is done with n_jobs below
 vel_model_ver: 1 ## Which travel time version to save when running calculate travel times
 
 ## Note, when running continuous days processing a number of parameters are also set in process_config
 
-latitude_range: [18.8, 20.3] # Latitude range of the region that will be processed
-longitude_range: [-156.1, -154.7] # Longitude range of the region that will be processed
-depth_range: [-40000, 5000] # Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
+latitude_range: [39.3, 41.2] # Latitude range of the region that will be processed
+longitude_range: [-125.0, -123.0] # Longitude range of the region that will be processed
+depth_range: [-40000, 2000] # Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
 time_range: # This sets up the Catalog and Pick files to have these years initialized
   start: '2018-01-01'
   end: '2023-01-01'
@@ -35,8 +35,8 @@ vel_model_type: 1 ## 1: 1d_velocity_model file is used; 2: 3d_velocity_model is 
 
 velocity_model: ## This is the model that's used when using "vel_model_type = 1"
   Depths: [-40000, -35000, -30000, -25000, -20000, -15000, -10000, -5000, 0, 5000] ## Must be in meters with increasing values, and positive above sea level, and neative below sea level
-  Vp: [8200, 8200, 8150, 8100, 8050, 7400, 6800, 6100, 2900, 2900] ## m/s
-  Vs: [4700, 4700, 4650, 4600, 4600, 4200, 3800, 3400, 1800, 1800] ## m/s
+  Vp: [8200, 8200, 8150, 8100, 8050, 7400, 6800, 6100, 3400, 2900] ## m/s
+  Vs: [4700, 4700, 4650, 4600, 4600, 4200, 3800, 3400, 2200, 1800] ## m/s
 
 ### ASSEMBLE NETWORK DATA ###
 with_density: False
@@ -86,6 +86,7 @@ k_nearest_pairs: 30
 ## Other model parameters
 use_phase_types: True ## If False, then assume no phase type information is known on picks (e.g., fifth column of picks, P[:.4] is not used)
 use_absolute_pos: False ## If True, append the absolute station and source coordinates in the input feature (e.g., allows some extra `specilization' during training to specific areas; approach should be used tentatitevly)
+## Note: absolute pos only implemented with use_updated_model_definition set as True currently
 
 ## Additional training params
 device: 'cuda' # or 'cpu'
@@ -93,5 +94,6 @@ max_number_pick_association_labels_per_sample: 1500 # Max number of picks to com
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
 
 
