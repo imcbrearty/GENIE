@@ -15,7 +15,9 @@ client : 'IRIS'
 network: 'HV'
 
 
-## Note: it is helpful to set this as True, and then to specify the initial station file yourself in stations.txt or stations.npz
+## Note: it is helpful to set pre_load_stations as True, and then to specify the initial station file yourself in stations.txt or stations.npz
+## You can also set convert_initial_pick_files as True, to convert the initial picks.txt into the expected format (when calling make_initial_files.py)
+
 pre_load_stations: True # If True, then skip download stations during make_initial_files.py; instead, stations.txt (or stations.npz) is assumed to already exist with locs and stas as the two fields.
 convert_initial_pick_files: True ## If True, will convert the initial pick files saved in "picks.txt" into the expected format in the Picks folders (when calling make_initial_files.py)
 
@@ -95,6 +97,7 @@ max_number_pick_association_labels_per_sample: 1500 # Max number of picks to com
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
 
 
 
