@@ -125,9 +125,9 @@ if __name__ == '__main__':
         iskipped = []
         filt = lambda x: len(x) > 0
         for p in lines:
-            p = list(filter(filt, p.split(',')))
+            p = [s.strip() for s in list(filter(filt, p.split(',')))]
             t = UTCDateTime(p[0])
-            imatch = np.where(stas == p[1])[0]
+            imatch = np.where(stas == p[1].strip())[0]
             assert(len(imatch) == 1) ## Requires a match of pick names in picks.txt to station names in stations.txt
             assert(((p[4] == 'P') + (p[4] == 'S')) > 0) ## Requires a phase type of either P or S
             Dates.append(np.array([t.year, t.month, t.day]).reshape(1,-1))
