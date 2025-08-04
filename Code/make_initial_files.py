@@ -125,7 +125,7 @@ if __name__ == '__main__':
         iskipped = []
         filt = lambda x: len(x) > 0
         for p in lines:
-            p = [s.strip() for s in list(filter(filt, p.split(',')))] if ',' in p else [s.strip() for s in list(filter(filt, p.split(' ')))]
+            p = [s.strip() for s in list(filter(filt, p.split(',')))] if ',' in p else [s.strip() for s in list(filter(filt, p.split(' ')))[0:5]]
             t = UTCDateTime(p[0])
             imatch = np.where(stas == p[1].strip())[0]
             assert(len(imatch) == 1) ## Requires a match of pick names in picks.txt to station names in stations.txt
