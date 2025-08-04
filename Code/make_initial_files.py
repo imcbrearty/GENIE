@@ -143,7 +143,6 @@ if __name__ == '__main__':
             np.savez_compressed(base_path + 'Picks' + seperator + '%d_%d_%d_ver_%d.npz'%(dates_unique[i,0], dates_unique[i,1], dates_unique[i,2], n_ver_write), P = P[ip[i]])
             print('Saved %d/%d/%d (%d picks; %d P and %d S)'%(dates_unique[i,0], dates_unique[i,1], dates_uniqu[i,2], len(ip[i]), len(np.where(P[ip[i],4] == 0)[0]), len(np.where(P[ip[i],4] == 1)[0])))
 
-    
     ##### End convert initial pick files #####
     
     print("Saving files...")
