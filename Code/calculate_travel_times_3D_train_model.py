@@ -702,7 +702,7 @@ if train_travel_time_neural_network == True:
 	loss_vald = 0.0
 	n_burn_in = 1000
 
-	dz_offset = np.diff(depth_steps)[0]
+	# dz_offset = np.diff(depth_steps)[0]
 	add_random_vertical_shift = False
 
   
