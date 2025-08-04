@@ -38,8 +38,8 @@ vel_model_type: 1 ## 1: 1d_velocity_model file is used; 2: 3d_velocity_model is 
 
 velocity_model: ## This is the model that's used when using "vel_model_type = 1"
   Depths: [-40000, -35000, -30000, -25000, -20000, -15000, -10000, -5000, 0, 5000] ## Must be in meters with increasing values, and positive above sea level, and neative below sea level
-  Vp: [8200, 8200, 8150, 8100, 8050, 7400, 6800, 6100, 3400, 2900] ## m/s
-  Vs: [4700, 4700, 4650, 4600, 4600, 4200, 3800, 3400, 2200, 1800] ## m/s
+  Vp: [7884, 7808, 7623, 7305, 6739, 6186, 5752, 5225, 4610, 4528] ## m/s
+  Vs: [4430, 4388, 4286, 4108, 3788, 3477, 3233, 2935, 2590, 2544] ## m/s
 
 ### ASSEMBLE NETWORK DATA ###
 with_density: False
@@ -97,6 +97,7 @@ max_number_pick_association_labels_per_sample: 1500 # Max number of picks to com
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
 
 
 
