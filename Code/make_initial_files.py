@@ -2,6 +2,7 @@ import yaml
 import numpy as np
 from obspy.clients.fdsn import Client
 from obspy.core import UTCDateTime
+from scipy.spatial import cKDTree
 import pathlib
 import os
 from utils import load_config
@@ -69,7 +70,9 @@ if __name__ == '__main__':
     years = list(range(t0.year, tf.year + 1))
 
     print("Determining base path for saving files...")
-    base_path = str(pathlib.Path().absolute()) + ('\\' if '\\' in str(pathlib.Path().absolute()) else '/')
+    path_abs = pathlib.Path().absolute()
+    seperator = '\\' if '\\' in str(path_abs) else '/'
+    base_path = str(path_abs) + seperator
     
     print(f"Connecting to {config['client']} client...")
     client = Client(config['client'])
@@ -109,6 +112,39 @@ if __name__ == '__main__':
             z.close()
         else:
              raise Exception('No station file loaded; create the "stations.txt" or "stations.npz" file; see GitHub "Setup Details" section for more information')
+
+    ##### Run convert initial pick files #####
+    convert_picks = config.get('convert_initial_pick_files', True)
+    if (convert_picks == True)*(os.path.isfile(base_path + 'picks.txt') == 1):
+        print('Converting pick files')
+        n_ver_write = 1
+        f = open(base_path + 'picks.txt', 'r')
+        lines = f.readlines()
+        f.close()
+        P, Dates = [], []
+        iskipped = []
+        filt = lambda x: len(x) > 0
+        for p in lines:
+            p = list(filter(filt, p.split(',')))
+            t = UTCDateTime(p[0])
+            imatch = np.where(stas == p[1])[0]
+            assert(len(imatch) == 1) ## Requires a match of pick names in picks.txt to station names in stations.txt
+            assert(((p[4] == 'P') + (p[4] == 'S')) > 0) ## Requires a phase type of either P or S
+            Dates.append(np.array([t.year, t.month, t.day]).reshape(1,-1))
+            P.append(np.array([t - UTCDateTime(t.year, t.month, t.day), imatch[0], float(p[2]), float(p[3]), 0.0 if p[4] == 'P' else 1.0]).reshape(1,-1))
+        Dates = np.vstack(Dates)
+        P = np.vstack(P)
+        dates_unique = np.unique(Dates, axis = 0)
+        os.makedirs(base_path + 'Picks', exist_ok = True)
+        for yr in np.unique(dates_unique[:,0]): os.makedirs(base_path + 'Picks' + seperator + '%d'%yr, exist_ok = True)
+        ip = cKDTree(Dates).query_ball_point(dates_unique, r = 0)
+        for i in range(len(dates_unique)):
+            if len(ip[i]) == 0: continue
+            np.savez_compressed(base_path + 'Picks' + seperator + '%d_%d_%d_ver_%d.npz'%(dates_unique[i,0], dates_unique[i,1], dates_unique[i,2], n_ver_write), P = P[ip[i]])
+            print('Saved %d/%d/%d (%d picks; %d P and %d S)'%(dates_unique[i,0], dates_unique[i,1], dates_uniqu[i,2], len(ip[i]), len(np.where(P[ip[i],4] == 0)[0]), len(np.where(P[ip[i],4] == 1)[0])))
+
+    
+    ##### End convert initial pick files #####
     
     print("Saving files...")
     save_files(base_path, locs, stas, config, years)
