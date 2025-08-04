@@ -146,11 +146,13 @@ if __name__ == '__main__':
             if len(ip[i]) == 0: continue
             np.savez_compressed(base_path + 'Picks' + seperator + '%d'%dates_unique[i,0] + seperator + '%d_%d_%d_ver_%d.npz'%(dates_unique[i,0], dates_unique[i,1], dates_unique[i,2], n_ver_write), P = P[ip[i]])
             print('Saved %d/%d/%d (%d picks; %d P and %d S)'%(dates_unique[i,0], dates_unique[i,1], dates_unique[i,2], len(ip[i]), len(np.where(P[ip[i],4] == 0)[0]), len(np.where(P[ip[i],4] == 1)[0])))
+
         ## Make pick list file
         f = open(base_path + '%s_process_days_list_ver_%d.txt'%(config['name_of_project'], n_ver_write), 'w')
         for i in range(len(dates_unique)):
             f.write('%d/%d/%d \n'%(dates_unique[i,0], dates_unique[i,1], dates_unique[i,2]))
         f.close()
+        ## Make pick list file
     ##### End convert initial pick files #####
     
     print("Saving files...")
