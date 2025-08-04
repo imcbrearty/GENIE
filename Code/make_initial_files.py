@@ -136,7 +136,11 @@ if __name__ == '__main__':
         P = np.vstack(P)
         dates_unique = np.unique(Dates, axis = 0)
         os.makedirs(base_path + 'Picks', exist_ok = True)
+        os.makedirs(base_path + 'Catalog', exist_ok = True)
+        os.makedirs(base_path + 'Calibration', exist_ok = True)
         for yr in np.unique(dates_unique[:,0]): os.makedirs(base_path + 'Picks' + seperator + '%d'%yr, exist_ok = True)
+        for yr in np.unique(dates_unique[:,0]): os.makedirs(base_path + 'Catalog' + seperator + '%d'%yr, exist_ok = True)
+        for yr in np.unique(dates_unique[:,0]): os.makedirs(base_path + 'Calibration' + seperator + '%d'%yr, exist_ok = True)
         ip = cKDTree(Dates).query_ball_point(dates_unique, r = 0)
         for i in range(len(dates_unique)):
             if len(ip[i]) == 0: continue
