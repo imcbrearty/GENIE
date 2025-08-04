@@ -1799,7 +1799,8 @@ for cnt, strs in enumerate([0]):
 			file_name_ext = 'continuous_days'
 		
 		ext_save = path_to_file + 'Catalog' + seperator + '%d'%yr + seperator + '%s_results_%s_%d_%d_%d_ver_%d.hdf5'%(name_of_project, file_name_ext, date[0], date[1], date[2], n_save_ver)
-
+		if (os.path.isdir(path_to_file + 'Catalog' + seperator + '%d'%yr) == 0): os.makedirs(base_path + 'Catalog' + seperator + '%d'%yr, exist_ok = True)
+		
 		file_save = h5py.File(ext_save, 'w')
 
 		julday = int((UTCDateTime(date[0], date[1], date[2]) - UTCDateTime(date[0], 1, 1))/(day_len)) + 1
