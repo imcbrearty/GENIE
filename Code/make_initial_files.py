@@ -160,6 +160,7 @@ if __name__ == '__main__':
     ####### Convert initial catalog file #########
     convert_catalog = config.get('convert_initial_catalog', True)
     if (convert_catalog == True)*(os.path.isfile(base_path + 'catalog.txt') == 1):
+        print('\nConvert catalog')
         f = open(base_path + 'catalog.txt', 'r')
         lines = f.readlines()
         f.close()
