@@ -70,5 +70,5 @@ use_expanded_competitive_assignment: True ## This is advised, but the code is co
 use_differential_evolution_location: True # otherwise use particle swarm to locate, which tends to converge less well (especially in depth)
 
 ## Minimum requirements for keeping event after associations
-min_required_picks: 5 ## Minimum required picks per event (set this or min_required_sta to False to not enforce minimum pick requirements)
-min_required_sta: 5 ## Minimum required stations per event (set this or min_required_picks to False to not enforce minimum pick requirements)
+min_required_sta: 4 ## Minimum required stations per event (set this or min_required_picks to False to not enforce minimum pick requirements)
+min_required_picks: 7 ## Minimum required picks per event (set this or min_required_sta to False to not enforce minimum pick requirements)
