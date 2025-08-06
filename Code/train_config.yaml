@@ -17,9 +17,9 @@ n_src_query: 300 # Number of src-arrival queries per sample
 kernel_sig_t: 3.0 # Kernel to embed arrival time - theoretical time misfit (s)
 src_t_kernel: 3.0 # Kernel of origin time label (s)
 src_t_arv_kernel: 3.0 # Kernel for arrival association time label (s)
-src_x_kernel: 25000. # Kernel for source label, horizontal distance (m)
-src_x_arv_kernel: 25000. # Kernel for arrival-source association label, horizontal distance (m)
-src_depth_kernel: 25000. # Kernel of source label in Cartesian projection, vertical distance (m)
+src_x_kernel: 15000. # Kernel for source label, horizontal distance (m)
+src_x_arv_kernel: 15000. # Kernel for arrival-source association label, horizontal distance (m)
+src_depth_kernel: 15000. # Kernel of source label in Cartesian projection, vertical distance (m)
 
 ## Training params list 2
 spc_random : 7500 # Spatial scale to randomly remove true picks from stations ontop of threshold distance per event
@@ -29,7 +29,7 @@ min_sta_arrival : 4 # Min number of unique stations required for a positive labe
 min_pick_arrival : 7 # Min number of picks total required for a positive label source event
 coda_rate : 0.035 # Percent of picks with false coda picks (e.g., 3.5%)
 coda_win : [0, 20.0] # Window that code picks can occur over (e.g., 25 s)
-max_num_spikes : 20 # Number of possible network wide spikes per window T of synthetic data
+max_num_spikes : 10 # Number of possible network wide spikes per window T of synthetic data
 spike_time_spread : 0.15 # The temporal spread of the network wide spikes
 s_extra : 0.0 # If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
 use_stable_association_labels : True # This flag only allows positive association labels that occur within thresh_noise_max ratio of true travel time
