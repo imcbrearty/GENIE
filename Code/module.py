@@ -27,10 +27,17 @@ import yaml
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
+with open('train_config.yaml', 'r') as file:
+    train_config = yaml.safe_load(file)
+
 use_updated_model_definition = config['use_updated_model_definition']
 scale_rel = config['scale_rel'] # 30e3
-scale_t = config['scale_t'] # 10.0
-eps = config['eps'] # 15.0
+
+## Removing scale_t and eps as free variables. Instead set proportionally to kernel_sig_t
+# scale_t = config['scale_t'] # 10.0
+# eps = config['eps'] # 15.0
+scale_t = train_config['kernel_sig_t']*2.0
+eps = train_config['eps']*3.0
 
 # use_updated_model_definition = True
 use_phase_types = config['use_phase_types']
@@ -1562,3 +1569,4 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
