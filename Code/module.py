@@ -349,9 +349,13 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 if use_updated_model_definition == False:
 
 	class DataAggregationAssociationPhase(MessagePassing): # make equivelent version with sum operations.
-		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_latent = 30, n_dim_mask = 5):
+		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_latent = 30, n_dim_mask = 5, use_absolute_pos = use_absolute_pos):
 			super(DataAggregationAssociationPhase, self).__init__('mean') # node dim
 			## Use two layers of SageConv. Explictly or implicitly?
+
+			if use_absolute_pos == True:
+				in_channels = in_channels + 2*3
+			
 			self.in_channels = in_channels
 			self.out_channels = out_channels
 			self.n_hidden = n_hidden
@@ -579,7 +583,7 @@ class LocalSliceLgCollapse(MessagePassing):
 		t_rel = tpick[sliced_edges[1]] - tlatent[sliced_edges[0],0] # Breaks here?
 
 		if len(t_rel) > 0:
-			ikeep = torch.where(abs(t_rel) < self.eps)[0]
+			ikeep = torch.where(abs(t_rel) < 2.0*self.eps)[0] ## Add a larger window for this time embedding
 		else:
 			ikeep = torch.Tensor([]).long().to(device)
 
@@ -1573,6 +1577,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
