@@ -669,6 +669,7 @@ def optimize_station_selection(cnt_per_station, n_total):
 def compute_travel_times(trv, locs, x_grids, n_max_chunks = int(50e3), device = 'cpu'):
 
 	x_grids_trv = []
+	locs_cuda = torch.Tensor(locs).to(device)
 	for i in range(len(x_grids)):
 		
 		n_sta, n_temp = len(locs), len(x_grids[i])
@@ -678,12 +679,12 @@ def compute_travel_times(trv, locs, x_grids, n_max_chunks = int(50e3), device = 
 		if len(inds) == 0: inds = np.arange(len(locs))
 		if (inds[-1][-1] > len(locs))*(len(inds) > 1): inds[-1] = np.arange(inds[-2] + 1, len(locs))
 		if (inds[-1][-1] > len(locs))*(len(inds) == 1): inds[-1] = np.arange(0, len(locs))
-		assert(np.abs(np.hstack(inds) - np.arange(locs)).max() == 0)
+		assert(np.abs(np.hstack(inds) - np.arange(len(locs))).max() == 0)
 	
 		trv_out_l = []
 		x_grid_cuda = torch.Tensor(x_grids[i]).to(device)
 		for j in range(len(inds)):
-			trv_out_l.append(trv(torch.Tensor(locs[inds[j],:].reshape(1,-1)).to(device), x_grid_cuda).cpu().detach().numpy())
+			trv_out_l.append(trv(locs_cuda[inds[j]], x_grid_cuda).cpu().detach().numpy())
 		# trv_out = np.concatenate(trv_out_l, axis = 1)
 		x_grids_trv.append(np.concatenate(trv_out_l, axis = 1))
 
@@ -1220,6 +1221,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
