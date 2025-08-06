@@ -394,6 +394,7 @@ if compute_reference_times == True:
 			
 			results = compute_travel_times_parallel(xx, reciever_proj[j][None,:], Vp, Vs, dx_v, x11, x12, x13, num_cores = num_cores)
 
+			## Note: most likely, the interpolation step isn't necessary, since we fit the model later
 			mp = RegularGridInterpolator((x1, x2, x3), results[0].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
 			ms = RegularGridInterpolator((x1, x2, x3), results[1].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
 			tp = mp(ftrns1(X))
