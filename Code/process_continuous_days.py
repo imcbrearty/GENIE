@@ -367,8 +367,8 @@ elif step_size == 'half':
 # pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
 tc_win = pred_params[2]*1.35 # 1.25 # process_config['tc_win'] # Temporal window (s) to link events in Local Marching
 sp_win = pred_params[3]*1.35 # 1.25 #  process_config['sp_win'] # Distance (m) to link events in Local Marching
-d_win = pred_params[3]*1.25/110e3 ## Converting km to degrees, roughly
-d_win_depth = pred_params[4]*1.25  ## proportional to depth kernel
+d_win = pred_params[3]*1.35/110e3 # 1.25 ## Converting km to degrees, roughly
+d_win_depth = pred_params[4]*1.35 # 1.25 ## proportional to depth kernel
 src_t_kernel = pred_params[2] ## temporal source kernel size
 
 ## Make topography surface
