@@ -28,7 +28,7 @@ vel_model_ver : 1 # velocity model version
 n_ver : 1 # model save version
 
 ## Training params
-n_batch: 30 # 75 # batch size
+n_batch: 15 # 30 # 75 # batch size
 n_epochs: 15001 # Number of update steps (not technically epochs)
 n_spc_query: 4500 # Number of src queries per sample
 n_src_query: 300 # Number of src-arrival queries per sample
