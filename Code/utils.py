@@ -665,25 +665,45 @@ def optimize_station_selection(cnt_per_station, n_total):
         sta_grab = iperm[np.where(soln > 0)[0]]
 
         return sta_grab
-
-def compute_travel_times(trv, locs, x_grids, device = 'cpu'):
+	
+def compute_travel_times(trv, locs, x_grids, n_max_chunks = int(50e3), device = 'cpu'):
 
 	x_grids_trv = []
 	for i in range(len(x_grids)):
 		
-		if locs.shape[0]*x_grids[i].shape[0] > 150e3:
-			trv_out_l = []
-			for j in range(locs.shape[0]):
-				trv_out = trv(torch.Tensor(locs[j,:].reshape(1,-1)).to(device), torch.Tensor(x_grids[i]).to(device))
-				trv_out_l.append(trv_out.cpu().detach().numpy())
-			trv_out = torch.Tensor(np.concatenate(trv_out_l, axis = 1)).to(device)
-		else:
-			trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
-		
-		# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
-		x_grids_trv.append(trv_out.cpu().detach().numpy())
+		n_sta, n_temp = len(locs), len(x_grids[i].shape[0])
+		n_chunks = int(n_sta*n_temp/n_max_chunk)
+		n_int = int(len(locs)/n_chunks)
+		inds = [np.arange(n_int) + n_int*j for j in n_chunks]
+		if len(inds) == 0: inds = np.arange(len(locs))
+		if (inds[-1][-1] > len(locs))*(len(inds) > 1): inds[-1] = np.arange(inds[-2] + 1, len(locs))
+		if (inds[-1][-1] > len(locs))*(len(inds) == 1): inds[-1] = np.arange(0, len(locs))
+		assert(np.abs(np.hstack(inds) - np.arange(locs)).max() == 0)
+	
+		trv_out_l = []
+		x_grid_cuda = torch.Tensor(x_grids[i]).to(device)
+		for j in range(len(inds)):
+			trv_out_l.append(trv(torch.Tensor(locs[inds[j],:].reshape(1,-1)).to(device), x_grid_cuda).cpu().detach().numpy())
+		# trv_out = np.concatenate(trv_out_l, axis = 1)
+		x_grids_trv.append(np.concatenate(trv_out_l, axis = 1))
 
 	return x_grids_trv
+
+	# x_grids_trv = []
+	# for i in range(len(x_grids)):
+		
+	# 	if locs.shape[0]*x_grids[i].shape[0] > 150e3:
+	# 		trv_out_l = []
+	# 		for j in range(locs.shape[0]):
+	# 			trv_out = trv(torch.Tensor(locs[j,:].reshape(1,-1)).to(device), torch.Tensor(x_grids[i]).to(device))
+	# 			trv_out_l.append(trv_out.cpu().detach().numpy())
+	# 		trv_out = torch.Tensor(np.concatenate(trv_out_l, axis = 1)).to(device)
+	# 	else:
+	# 		trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+		
+	# 	# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+	# 	x_grids_trv.append(trv_out.cpu().detach().numpy())
+
 
 ## ACTUAL UTILS
 def remove_mean(x, axis):
