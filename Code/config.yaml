@@ -72,8 +72,9 @@ use_relative_1d_profile: False # If False, the 1D profile is treated as absolute
 ## Set model hyper-parameters (these can scale with the application domain size)
 use_updated_model_definition: False ## Note: switching this back
 scale_rel: 30000.0 # The normalization scale between source-source edges
-scale_t: 10.0 # The normalization scale during temporal attention
-eps: 15.0 # The normalization and clipping window during arrival embedding and source-station-arrival attention
+## Removing scale_t and eps from being definable for now; are set as proportional to kernel_sig_t
+# scale_t: 10.0 # The normalization scale during temporal attention
+# eps: 15.0 # The normalization and clipping window during arrival embedding and source-station-arrival attention
 
 ## Graph params
 k_sta_edges: 8 # or 10 are reasonable choices
@@ -98,6 +99,7 @@ max_number_pick_association_labels_per_sample: 1500 # Max number of picks to com
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
 
 
 
