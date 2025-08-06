@@ -674,7 +674,7 @@ def compute_travel_times(trv, locs, x_grids, n_max_chunks = int(50e3), device = 
 		n_sta, n_temp = len(locs), len(x_grids[i])
 		n_chunks = int(n_sta*n_temp/n_max_chunks)
 		n_int = int(len(locs)/n_chunks)
-		inds = [np.arange(n_int) + n_int*j for j in n_chunks]
+		inds = [np.arange(n_int) + n_int*j for j in range(n_chunks)]
 		if len(inds) == 0: inds = np.arange(len(locs))
 		if (inds[-1][-1] > len(locs))*(len(inds) > 1): inds[-1] = np.arange(inds[-2] + 1, len(locs))
 		if (inds[-1][-1] > len(locs))*(len(inds) == 1): inds[-1] = np.arange(0, len(locs))
@@ -1220,6 +1220,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
