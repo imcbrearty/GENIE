@@ -32,10 +32,10 @@ import yaml
 from utils import remove_mean
 
 # Load configuration from YAML
-with open('config.yaml', 'r') as file:
-    config = yaml.safe_load(file)
+with open('train_config.yaml', 'r') as file:
+    train_config = yaml.safe_load(file)
 	
-eps = config['eps'] # Use this value to set resolution for the temporal embedding grid
+eps = train_config['kernel_sig_t']*3.0 # Use this value to set resolution for the temporal embedding grid
 
 class LocalMarching(MessagePassing): # make equivelent version with sum operations.
 	def __init__(self, device = 'cpu'):
@@ -1541,5 +1541,6 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
