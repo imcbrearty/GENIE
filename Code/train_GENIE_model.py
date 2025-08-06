@@ -1369,7 +1369,8 @@ if optimize_training_data == True:
 
 	print('Finished optimized training data')
 
-	error('Data set optimized; call the training script again to build training data')
+	print('Data set optimized; call the training script again to build training data')
+	sys.exit()
 
 if build_training_data == True:
 
@@ -1463,7 +1464,8 @@ if build_training_data == True:
 
 	print('Finished building training data for job %d'%job_number)
 
-	error('Data set built; call the training script again once all data has been built')
+	print('Data set built; call the training script again once all data has been built')
+	sys.exit()
 
 for i in range(n_restart_step, n_epochs):
 
@@ -2292,6 +2294,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
