@@ -1742,7 +1742,7 @@ for i in range(n_restart_step, n_epochs):
 
 		n_visualize_step = 1000
 		n_visualize_fraction = 0.2
-		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0)*(i0 == 0): # (i0 < n_visualize_fraction*n_batch)
+		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0)*(inc == 0): # (i0 < n_visualize_fraction*n_batch)
 			save_plots_path = path_to_file + seperator + 'Plots' + seperator
 			visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
 
@@ -2295,6 +2295,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
