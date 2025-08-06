@@ -443,7 +443,9 @@ if test == True:
 		'radial_factor_p': 0.9087,
 		'radial_factor_s': 0.758,
 		'lambda_noise': 0.534,
-		'perturb_factor': 0.13
+		'radial_perturb_factor': 0.13,
+		'angle_perturb': 0.13,
+		'axis_perturb_factor': 0.13
 	}
 	srcs_sample, mags_sample, Features, ind_sample, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(None, None, None, locs, [], chol_params, ftrns1, pdist_p, pdist_s, srcs = src_positions, mags = src_magnitude, locs_use_list = locs_use_list, inds = inds, Picks_P_lists = None, Picks_S_lists = None, n_samples = n_batch, return_features = False)
 	assert(np.abs(src_positions - srcs_sample).max() == 0)
@@ -1889,7 +1891,9 @@ chol_params['radial_factor_s'] = 8.5608 # S-wave detection radius factor
 chol_params['miss_pick_rate'] = 0.35 # Miss pick rate (single value)
 chol_params['sigma_noise'] = 150000.0 # Sigma noise for cluster spreading (in meters)
 chol_params['lambda_noise'] = 0.001 # Noise mixing parameter
-chol_params['perturb_factor'] = 0.0069 # Perturbation factor for radius scaling
+chol_params['radial_perturb_factor'] = 0.0069 # Perturbation factor for radius scaling
+chol_params['axis_perturb_factor'] = 0.0069 # Perturbation factor for axis scaling
+chol_params['angle_perturb'] = 0.0069 # Perturbation factor for angle scaling
 
 
 

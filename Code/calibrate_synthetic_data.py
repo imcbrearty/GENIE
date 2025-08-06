@@ -789,14 +789,16 @@ chol_params['sigma_noise'] = 100000               # Sigma noise for cluster spre
 chol_params['lambda_noise'] = 0.01                # Correlation between radial function and noise
 chol_params['radial_factor_p'] = 1.04     # P-wave detection radius factor (before division)
 chol_params['radial_factor_s'] = 0.8      # S-wave detection radius factor (before division)
-chol_params['perturb_factor'] = 0.0    # Perturbation factor for ellipse parameters
+chol_params['radial_perturb_factor'] = 0.0    # Perturbation factor for ellipse parameters
+chol_params['angle_perturb'] = 0.0    # Perturbation factor for ellipse parameters
+chol_params['axis_perturb_factor'] = 0.0    # Perturbation factor for ellipse parameters
 
 ## Choose batch size
 n_batch = 750
 
 ######################## Test Zone #######################
-test = True
-if test == True:
+debug = False
+if debug == True:
 	n_batch = 100
 	srcs_sample, mags_sample, features, ind_sample, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(Srcs, Mags, Inds, locs, prob_vec, chol_params, ftrns1, pdist_p, pdist_s, n_samples = n_batch, return_features = True, Picks_P_lists = Picks_P_lists, Picks_S_lists = Picks_S_lists, debug=True)
 	median_loss, [res_vals_p, res_vals_s], [median_res_vals_p, median_res_vals_s] = compute_data_misfit_loss(srcs_sample, mags_sample, features, n_mag_bins = 5, return_diagnostics = True)
@@ -895,7 +897,9 @@ def evaluate_bayesian_objective_evaluate(x, n_batch = n_batch, n_mag_bins = 5, r
 	chol_params['lambda_noise'] = x[3] # 0.005                 # Correlation between radial function and noise
 	chol_params['radial_factor_p'] = x[4] # 1.6      # P-wave detection radius factor (before division)
 	chol_params['radial_factor_s'] = x[5] # 1.4172001463561372      # S-wave detection radius factor (before division)
-	chol_params['perturb_factor'] = x[6] # 0.4      # Perturbation factor for ellipse parameters
+	chol_params['radial_perturb_factor'] = x[6] # 0.4      # Perturbation factor for ellipse parameters
+	chol_params['angle_perturb'] = x[7] # 0.4      # Perturbation factor for ellipse parameters
+	chol_params['axis_perturb_factor'] = x[8] # 0.4      # Perturbation factor for ellipse parameters
 
 	## Sample a generation
 	# st_time = time.time()
@@ -920,11 +924,13 @@ def evaluate_bayesian_objective_evaluate(x, n_batch = n_batch, n_mag_bins = 5, r
 
 bounds = [(1.5, 5.0), # p_exp
 		(0.0, 0.5), # miss_pick_rate
-		(1e3, 100e3), # sigma_noise
-		(0.01, 0.5), # lambda_noise
-		(0.1, 5.0), # radial_factor_p
-		(0.1, 5.0), # radial_factor_s
-		(0.0, 0.4)] # perturb_factor
+		(0.5e3, 100e3), # sigma_noise
+		(0.01, 0.8), # lambda_noise
+		(0.1, 10.0), # radial_factor_p
+		(0.1, 10.0), # radial_factor_s
+		(0.0, 0.5), # radial_perturb_factor
+		(0.0, 0.8), # angle_perturb
+		(0.0, 0.5)] # axis_perturb_factor
 
 # strings = ['p_exponent', 'scale_factor']
 
