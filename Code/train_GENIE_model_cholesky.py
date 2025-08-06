@@ -23,17 +23,11 @@ from numpy.matlib import repmat
 import pathlib
 import glob
 import sys
-import re
-import pdb
-import datetime
 
 from utils import *
 from module import *
 from process_utils import *
-# Import your radial cholesky utilities
-import sys
-from training_data_scripts.data_generation_utils import *
-
+from generator_utils import sample_synthetic_moveout_pattern_generator
 # from generate_synthetic_data import generate_synthetic_data 
 ## For now not using the seperate files definition of generate_synthetic_data
 
@@ -70,8 +64,6 @@ use_physics_informed = config['use_physics_informed']
 use_phase_types = config['use_phase_types']
 use_subgraph = config['use_subgraph']
 use_topography = config['use_topography']
-# Add configuration for radial cholesky method
-use_radial_cholesky = train_config.get('use_radial_cholesky', False)  # Default to False for backward compatibility
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
     k_nearest_pairs = config['k_nearest_pairs']	
@@ -121,7 +113,7 @@ else:
 load_training_data = train_config['load_training_data']
 build_training_data = train_config['build_training_data'] ## If try, will use system argument to build a set of data
 optimize_training_data = train_config['optimize_training_data']
-optimize_hyperparameters = train_config['optimize_hyperparameters']
+
 
 max_number_pick_association_labels_per_sample = config['max_number_pick_association_labels_per_sample']
 make_visualize_predictions = config['make_visualize_predictions']
@@ -289,8 +281,10 @@ if use_reference_spatial_density == True:
 		if load_reference_density == True:
 			np.savez_compressed(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver, srcs_ref = srcs_ref)
 
-use_amplitudes = True
-if use_amplitudes == True:
+
+
+use_distance_model = True
+if use_distance_model == True:
 	n_mag_ver = 1
 	mags_supp = np.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d_supplemental.npz'%n_mag_ver)
 	mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
@@ -357,7 +351,8 @@ if use_amplitudes == True:
 	log_amp_sta_distb = np.vstack(log_amp_sta_distb)
 	log_amp_sta_distb_diff = np.diff(log_amp_sta_distb, axis = 1)
 
-					      
+
+				      
 ## Training synthic data parameters
 
 ## Training params list 2
@@ -365,6 +360,7 @@ spc_random = train_config['spc_random']
 sig_t = train_config['sig_t'] # 3 percent of travel time error on pick times
 spc_thresh_rand = train_config['spc_thresh_rand']
 min_sta_arrival = train_config['min_sta_arrival']
+min_pick_arrival = train_config.get('min_pick_arrival', min_sta_arrival)
 coda_rate = train_config['coda_rate'] # 5 percent arrival have code. Probably more than this? Increased from 0.035.
 coda_win = np.array(train_config['coda_win']) # coda occurs within 0 to 25 s after arrival (should be less?) # Increased to 25, from 20.0
 max_num_spikes = train_config['max_num_spikes']
@@ -398,254 +394,391 @@ use_shallow_sources = train_config['use_shallow_sources']
 use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
 
-# Add global variables for Cholesky parameters
-# These will be used when use_radial_cholesky == True
-radial_cholesky_params = {
-    'p_exponent': train_config['p_exponent'],                    # Radial function exponent (fixed integer)
-    'scale_factor': train_config['scale_factor'],               # Scaling factor for radial function
-    'sigma_noise': train_config['sigma_noise'],               # Sigma noise for cluster spreading (in meters)
-    'sigma_radial_divider': train_config['sigma_radial_divider'],          # Divisor for detection radius calculation
-    'threshold_logistic': train_config['threshold_logistic'],            # Logistic function threshold
-    'lambda_corr': train_config['lambda_corr'],                 # Correlation between radial function and noise
-    'k_neighbours': train_config['k_neighbours'],                  # Number of neighbors for analysis
-    'sigma_radial_p_factor': train_config['sigma_radial_p_factor'],      # P-wave detection radius factor (before division)
-    'sigma_radial_s_factor': train_config['sigma_radial_s_factor'],      # S-wave detection radius factor (before division)
-    'angle_perturbation': train_config['angle_perturbation'],      # S-wave angle perturbation range
-    'length_perturbation': train_config['length_perturbation'], # S-wave ellipse length perturbation range
-    'miss_pick_rate': train_config['miss_pick_rate'],
-    'random_scale_factor_phase': train_config['random_scale_factor_phase']
-}
+test = False
+if test == True:
+	## Load stations
+	# Load the station data
+	data = np.load('CentralCalifornia_stations.npz')
+	locs = data['locs']  # This contains the station coordinates
+
+	plt.figure(figsize=(12, 8))
+	plt.scatter(locs[:, 1], locs[:, 0], c='blue', marker='^', label='Stations', s=100)
+	plt.xlabel('Longitude')
+	plt.ylabel('Latitude')
+	plt.title('Checkpoint 1: Initial Station Distribution')
+	plt.legend()
+	plt.grid(True)
+	checkpoint_dir = 'test_newsample'
+	plt.savefig(f'{checkpoint_dir}/1_initial_stations.png')
+	plt.close()
+
+	## sources and mags
+	x_min, x_max = locs[:, 0].min(), locs[:, 0].max()
+	y_min, y_max = locs[:, 1].min(), locs[:, 1].max()
+	n_sample = 10
+	# srcs = np.array([(np.random.uniform(x_min, x_max), np.random.uniform(y_min, y_max), 0.0) for _ in range(n_sample)])
+	# mags = np.random.uniform(-1.0, 7.0, n_sample)  # Random magnitudes between 4.0 and 7.0
+	srcs = np.array([((x_min+x_max)/2.0, (y_min+y_max)/2.0, 0.0) for _ in range(n_sample)])
+	mags = [3.0] * n_sample
+
+	plt.figure(figsize=(12, 8))
+	plt.scatter(locs[:, 1], locs[:, 0], c='blue', marker='^', label='Stations', s=100)
+	plt.scatter(srcs[:, 1], srcs[:, 0], c='red', marker='*', label='Sources', s=150)
+	plt.xlabel('Longitude')
+	plt.ylabel('Latitude')
+	plt.title('Checkpoint 2: Station and Source Distribution')
+	plt.legend()
+	plt.grid(True)
+	plt.savefig(f'{checkpoint_dir}/2_stations_and_sources.png')
+	plt.close()
+
+	src_positions = srcs
+	src_magnitude = mags
+	locs_use_list = [locs for i in range(len(src_positions))]
+	inds = [np.arange(len(locs)) for i in range(len(src_positions))]
+	chol_params = {
+		'p_exp': 3.4278,
+		'miss_pick_rate': 0.286,
+		'sigma_noise': 45752,
+		'radial_factor_p': 0.9087,
+		'radial_factor_s': 0.758,
+		'lambda_noise': 0.534,
+		'perturb_factor': 0.13
+	}
+	srcs_sample, mags_sample, Features, ind_sample, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(None, None, None, locs, [], chol_params, ftrns1, pdist_p, pdist_s, srcs = src_positions, mags = src_magnitude, locs_use_list = locs_use_list, inds = inds, Picks_P_lists = None, Picks_S_lists = None, n_samples = n_batch, return_features = False)
+	assert(np.abs(src_positions - srcs_sample).max() == 0)
+	assert(np.abs(src_magnitude - mags_sample).max() == 0)
+	assert(np.abs(ind_sample - np.arange(len(src_positions))).max() == 0)
+	Mags = mags
+	for i in range(len(srcs_sample)):
+		fig, ax = plt.subplots(2,2, sharex = True, sharey = True)
+		ax[0,0].set_title('%0.3f'%Mags[ind_sample[i]])
+		ax[0,1].set_title('%0.3f'%Mags[ind_sample[i]])
+		locs_use = locs
+		for j in [[0,0], [0,1], [1,0], [1,1]]:
+			ax[j[0], j[1]].scatter(locs_use[:,1], locs_use[:,0], c = 'grey', marker = '^')
+			ax[j[0], j[1]].set_aspect(1.0/np.cos(np.pi*locs_use[:,0].mean()/180.0))
+			ax[j[0], j[1]].scatter(srcs_sample[i,1], srcs_sample[i,0], c = 'm', marker = 's')
+		## Synthetic event (P and S)
+		ind_found_p = ikeep_p2[np.where(ikeep_p1 == i)[0]]
+		ind_found_s = ikeep_s2[np.where(ikeep_s1 == i)[0]]
+		ax[0,1].scatter(locs_use[ind_found_p,1], locs_use[ind_found_p,0], c = 'red', marker = '^')
+		ax[1,1].scatter(locs_use[ind_found_s,1], locs_use[ind_found_s,0], c = 'red', marker = '^')
+		#ax[1,0].scatter(locs_use[Picks_P_lists[ind_sample[i]][:,1].astype('int'),1], locs[Picks_P_lists[ind_sample[i]][:,1].astype('int'),0], c = 'red', marker = '^')
+		fig.set_size_inches([12,8])
+		fig.savefig(checkpoint_dir + '/' + 'example_synthetic_data_optimized_%d.png'%i)
+		plt.close('all')
+
+	print("Sampled sources:", srcs_sample)
+	print("Sampled magnitudes:", mags_sample)
+	raise NotImplementedError("Test completed, but further implementation needed for full functionality.")
+
+# ## Note: this assumes "Srcs", "Mags", "Inds" are global variables that wont be changed
+# ## Also that Picks_P_lists and Picks_S_lists are available (perm indices), and can index into the observed associated picks
+# def sample_synthetic_moveout_pattern_generator_old(prob_vec, chol_params, ftrns1, n_samples = 100, srcs = None, mags = None, locs_use_list = None, inds = None, use_l1 = False, mask_noise = False, return_features = True, distance_abs = None): # n_repeat : can repeatedly draw either from the covariance matrices, or the binomial distribution
+
+# 	## Sample sources
+# 	if srcs is None: ## If srcs is None, assume global dataset Srcs is available and sample from this. 
+# 		## Otherwise, sample the given input lists of sources and magnitudes
+# 		ichoose = np.random.choice(len(Srcs), p = prob_vec, size = n_samples)
+# 		locs_use_list = [locs[Inds[j]] for j in ichoose]
+# 		locs_use_cart_list = [ftrns1(l) for l in locs_use_list]
+# 		srcs_sample = Srcs[ichoose]
+# 		mags_sample = Mags[ichoose]
+# 		srcs_samples_cart = ftrns1(srcs_sample)
+
+# 	else:
+
+# 		## In this case, assume all of srcs, mags, locs_use_list, and inds, are all supplied
+# 		n_samples = len(srcs)
+# 		ichoose = np.arange(len(srcs))
+# 		locs_use_cart_list = [ftrns1(l) for l in locs_use_list]
+# 		Srcs = np.copy(srcs)
+# 		srcs_sample = np.copy(srcs)
+# 		Mags = np.copy(mags)
+# 		mags_sample = Mags[ichoose]
+# 		Inds = [ind_use for ind_use in inds]
+# 		srcs_samples_cart = ftrns1(srcs_sample)
 
 
+# 	## Extract parameters
+# 	p_exp = chol_params['p_exp']  # Use optimized value
+# 	sigma_radial_p_factor = chol_params['sigma_radial_p_factor']
+# 	sigma_radial_s_factor = chol_params['sigma_radial_s_factor']
+# 	sigma_radial_divider = chol_params['sigma_radial_divider']
+# 	scale_factor = chol_params['scale_factor'] # scaling factor for the radial function - use optimized value
+# 	sigma_noise = chol_params['sigma_noise'] # Covariance matrix/kernel distances sigma_radial, controls the spreading of the cluster - use optimized value directly
+# 	threshold_logistic = chol_params['threshold_logistic'] 	# Logistic function sigma_radial, controls the roughness of cluster border - use optimized value
+# 	max_value_logistic = 0.99 # < 1, the maximum value of the logistic function for the threshold, don't tune this.
+# 	sigma_logistic = - threshold_logistic / np.log(1/max_value_logistic - 1) 
+# 	lambda_corr = chol_params['lambda_corr'] 	# Mixing function lambda, controls the correlation between radial function and correlated noise - use optimized value
+# 	# k_neighbours = chol_params['k_neighbours']  # Use from params (though this one isn't optimized)
+# 	angle_perturbation = chol_params['angle_perturbation']
+# 	length_perturbation = chol_params['length_perturbation']
+# 	miss_pick_rate = chol_params['miss_pick_rate']
+# 	random_scale_factor_phase = chol_params['random_scale_factor_phase'] # random_scale_factor_phase = 0.35
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, 
-lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, 
-training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, 
-plot_on = False, verbose = False, skip_graphs = False, return_only_data = False, 
-use_amplitudes=False, use_softplus=False, n_mag_ver=1, n_rand_choose=100, 
-st_load=None, log_amp_emperical=None, log_amp_ind_emperical=None, q_range_emperical=None, n_range_emperical=None, 
-log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
-	"""
-	Generate synthetic seismic data for training the GENIE neural network.
-	
-	This function creates realistic synthetic earthquake data including:
-	- Earthquake source locations and times
-	- Seismic wave arrivals (P and S phases) at stations
-	- False picks and noise to simulate real-world conditions
-	- Training batches with different station subnetworks
-	
-	Parameters:
-	-----------
-	trv : function
-		Travel time function that computes P and S wave travel times
-	locs : np.ndarray
-		Station locations [lat, lon, depth] in degrees and meters
-	x_grids : list
-		List of spatial grids for source locations
-	x_grids_trv : list
-		Precomputed travel times for each grid
-	lat_range, lon_range : list
-		Interior region bounds [min, max] in degrees
-	lat_range_extend, lon_range_extend : list
-		Extended region bounds [min, max] in degrees
-	depth_range : list
-		Depth range [min, max] in meters
-	training_params : list
-		[n_spc_query, n_src_query] - number of spatial and source queries
-	training_params_2 : list
-		Noise and detection parameters
-	training_params_3 : list
-		Batch and sampling parameters
-	graph_params : list
-		[k_sta_edges, k_spc_edges, k_time_edges] - graph connectivity parameters
-	pred_params : list
-		[t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel] - prediction kernels
-	ftrns1, ftrns2 : functions
-		Coordinate transformation functions (geographic <-> Cartesian)
-	plot_on : bool
-		Whether to generate visualization checkpoints
-	verbose : bool
-		Whether to print timing information
-	skip_graphs : bool
-		Whether to skip graph construction (for data-only generation)
-	return_only_data : bool
-		Whether to return only raw data without processing for training
-	radial_cholesky_params : dict
-		Parameters for radial Cholesky decomposition
-	use_amplitudes : bool
-		Whether to use amplitude information
-	use_softplus : bool
-		Whether to use softplus activation function
-	
-	Returns:
-	--------
-	tuple : Training data structures for neural network
-	"""
+# 	## Note: could likely remove scale_factor, and only use these per phase type and event scale factors
+# 	random_scale_factor_range = [1.0 - random_scale_factor_phase, 1.0 + random_scale_factor_phase]
+# 	random_scale_factor_phase_range = [1.0 - random_scale_factor_phase, 1.0 + random_scale_factor_phase]
+# 	scale_factor_sample = np.random.rand(n_samples)*(random_scale_factor_range[1] - random_scale_factor_range[0]) + random_scale_factor_range[0]
+# 	scale_factor_p, scale_factor_s = np.random.rand(2,n_samples)*(random_scale_factor_phase_range[1] - random_scale_factor_phase_range[0]) + random_scale_factor_phase_range[0]
 
-	# ============================================================================
-	# INITIALIZATION AND PARAMETER SETUP
-	# ============================================================================
-	
+# 	## Noise correlation range
+# 	phase_noise_corr_range = [0.1, 0.4] ## Range to "weight" the independent S wave noise probabilities compared to P waves
+# 	phase_noise_corr_sample = np.random.rand(n_samples)*(phase_noise_corr_range[1] - phase_noise_corr_range[0]) + phase_noise_corr_range[0]
+
+# 	## Radius values per sources (need to add per-source random perturbation, not fixed scaling)
+# 	sigma_radial_p = np.array([sigma_radial_p_factor * pdist_p(magnitude) / sigma_radial_divider for magnitude in mags_sample])  # P-wave detection radius
+# 	sigma_radial_s = np.array([sigma_radial_s_factor * pdist_s(magnitude) / sigma_radial_divider for magnitude in mags_sample])  # S-wave detection radius
+
+# 	## Setup absolute network parameters
+# 	tol = 1e-8
+# 	distance_abs = pd(ftrns1(locs), ftrns1(locs)) ## Absolute stations O(n^2)
+# 	if use_l1 == False:
+# 		covariance_abs = np.exp(-0.5*(distance_abs**2) / (sigma_noise**2)) + tol*np.eye(distance_abs.shape[0])
+# 	else:
+# 		covariance_abs = np.exp(-1.0*np.abs(distance_abs) / (sigma_noise**1)) + tol*np.eye(distance_abs.shape[0])
+
+# 	length_scale = sigma_noise ## Is this reasonable? ## Instead, can base it on a multiple of nearest neighbors
+# 	W_abs = np.exp(-(distance_abs**2) / (2 * (length_scale**2))) # Compute weights using a Gaussian kernel: W_ij = exp(-d^2 / (2*length_scale^2))
+# 	np.fill_diagonal(W_abs, 0.0)  # Remove self-loops
+
+# 	## Could cach the repeated set indices, and save cholesky factors for each
+# 	# # pdb.set_trace()
+# 	# pre_check_unique_sets = True
+# 	# if pre_check_unique_sets == True:
+# 	# 	set_equal = np.vstack([np.array([set(Inds[ichoose[i]]) == set(Inds[ichoose[j]]) for j in range(len(ichoose))]).reshape(1,-1) for i in range(len(ichoose))])
+# 	# 	iset1, iset2 = np.where(set_equal > 0)
+# 	# 	graph_components = nx.connected_components(to_networkx(Data(edge_index = torch.Tensor(np.concatenate((iset1.reshape(1,-1), iset2.reshape(1,-1)), axis = 0)).long())).to_undirected()) # .connected_components()
+
+# 	ikeep_p1, ikeep_p2 = [], []
+# 	ikeep_s1, ikeep_s2 = [], []
+
+# 	for i in range(n_samples):
+
+# 		# angle_p, length1_p, length2_p = experiment_result_p['parameters']['angle'], experiment_result_p['parameters']['length1'], experiment_result_p['parameters']['length2']
+# 		angle_p, length1_p, length2_p, _, inv_cov_p = generate_ellipse_parameters(angle = None, length1 = None, length2 = None)
+# 		angle_s = (angle_p + np.random.uniform(-angle_perturbation, angle_perturbation)) % (2.0*np.pi)
+# 		length1_s = length1_p * np.random.uniform(length_perturbation[0], length_perturbation[1])
+# 		length2_s = length2_p * np.random.uniform(length_perturbation[0], length_perturbation[1])
+# 		angle_s, length1_s, length2_s, _, inv_cov_s = generate_ellipse_parameters(angle = angle_s, length1 = length1_s, length2 = length2_s)
+
+# 		# points, center, inv_cov, sigma_radial
+# 		## Radial component (rather than fixed scale_factor, need to be a perturbation per event within tolerance)
+# 		radial_pdf_p = radial_function(locs_use_cart_list[i], srcs_samples_cart[i], inv_cov_p, sigma_radial_p[i], p_exp, scale_factor_p[i]*scale_factor_sample[i]) ## Note: p_exp is the exponent term
+# 		radial_pdf_s = radial_function(locs_use_cart_list[i], srcs_samples_cart[i], inv_cov_s, sigma_radial_s[i], p_exp, scale_factor_s[i]*scale_factor_sample[i])
+
+# 		## Sample P and S wave noise (do not use pre-built Cholesky matrix for S wave sampling)
+# 		## Could "cache" the cholesky factor for each unique (repeated) set of Inds[ichoose[i]]. 
+# 		## In cases where Inds[ichoose[i]] is repeated, then the cholesky factor is fixed. (should occur in practice during sampling)
+# 		if np.random.rand() < 0.5: ## Note: can make sigma_noise a random sample over a range
+# 			noise_p = sample_correlated_noise(covariance_abs, Inds[ichoose[i]], sigma_noise, n_repeat = 1)
+# 			noise_s = noise_p + phase_noise_corr_sample[i]*sample_correlated_noise(covariance_abs, Inds[ichoose[i]], sigma_noise, n_repeat = 1)
+# 		else:
+# 			noise_s = sample_correlated_noise(covariance_abs, Inds[ichoose[i]], sigma_noise, n_repeat = 1)
+# 			noise_p = noise_s + phase_noise_corr_sample[i]*sample_correlated_noise(covariance_abs, Inds[ichoose[i]], sigma_noise, n_repeat = 1)			
+    
+# 		# else:
+
+# 		# Updated selection
+# 		if mask_noise == True:
+# 			updated_pdf_p = np.copy(radial_pdf_p)
+# 			updated_pdf_s = np.copy(radial_pdf_s)
+# 		else:
+# 			updated_pdf_p = invert_probabilities(radial_pdf_p, noise_p, lambda_corr, sigma_logistic) # radial_pdf, noise, lambda_corr, sigma_logistic   
+# 			updated_pdf_s = invert_probabilities(radial_pdf_s, noise_s, lambda_corr, sigma_logistic) # radial_pdf, noise, lambda_corr, sigma_logistic   
+
+# 		rand_miss_mask_p = np.ones(len(updated_pdf_p))
+# 		rand_miss_mask_s = np.ones(len(updated_pdf_s))
+# 		if miss_pick_rate[1] > 0:
+# 			miss_pick_rate_phase_val = [0.0, 0.2] ## The proportion that different phase types mix their noise level
+# 			miss_pick_rate_phase_corr = np.random.rand()*(miss_pick_rate_phase_val[1] - miss_pick_rate_phase_val[0]) + miss_pick_rate_phase_val[0]
+# 			if np.random.rand() > 0.5:
+# 				miss_pick_rate_sample_p = np.random.rand()*(miss_pick_rate[1] - miss_pick_rate[0]) + miss_pick_rate[0]
+# 				miss_pick_rate_sample_s = miss_pick_rate_sample_p + miss_pick_rate_phase_corr*np.random.rand()*(miss_pick_rate[1] - miss_pick_rate[0]) + miss_pick_rate[0]
+# 			else:
+# 				miss_pick_rate_sample_s = np.random.rand()*(miss_pick_rate[1] - miss_pick_rate[0]) + miss_pick_rate[0]
+# 				miss_pick_rate_sample_p = miss_pick_rate_sample_s + miss_pick_rate_phase_corr*np.random.rand()*(miss_pick_rate[1] - miss_pick_rate[0]) + miss_pick_rate[0]
+
+# 			rand_miss_mask_p = 1.0*(np.random.rand(len(radial_pdf_p)) > miss_pick_rate_sample_p) ## If less than miss rate, then definitely miss pick
+# 			rand_miss_mask_s = 1.0*(np.random.rand(len(radial_pdf_s)) > miss_pick_rate_sample_s)
+
+# 		updated_mask_p = np.random.binomial(1, updated_pdf_p*rand_miss_mask_p)
+# 		updated_idx_p = np.where(updated_mask_p)[0]
+# 		updated_mask_s = np.random.binomial(1, updated_pdf_s*rand_miss_mask_s)
+# 		updated_idx_s = np.where(updated_mask_s)[0]
+
+# 		ikeep_p1.append(i*np.ones(len(updated_idx_p)))
+# 		ikeep_p2.append(updated_idx_p)
+# 		ikeep_s1.append(i*np.ones(len(updated_idx_s)))
+# 		ikeep_s2.append(updated_idx_s)
+
+# 	## Merge results
+# 	ikeep_p1 = np.hstack(ikeep_p1).astype('int')
+# 	ikeep_p2 = np.hstack(ikeep_p2).astype('int')
+# 	ikeep_s1 = np.hstack(ikeep_s1).astype('int')
+# 	ikeep_s2 = np.hstack(ikeep_s2).astype('int')
+
+# 	## Add computation of features
+# 	Features = []
+# 	if return_features == True:
+
+# 		Morans_pred_p = []
+# 		Morans_pred_s = []
+# 		Inertia_pred_p = []
+# 		Inertia_pred_s = []
+# 		Cnt_pred_p, Cnt_pred_s = [], []
+
+# 		Morans_trgt_p = []
+# 		Morans_trgt_s = []
+# 		Inertia_trgt_p = []
+# 		Inertia_trgt_s = []
+# 		Cnt_trgt_p, Cnt_trgt_s = [], []
+
+# 		Intersection_p_ratio = []
+# 		Intersection_s_ratio = []
+
+# 		for i in range(n_samples):
+# 			ind_pred_p = ikeep_p2[np.where(ikeep_p1 == i)[0]]
+# 			ind_pred_s = ikeep_s2[np.where(ikeep_s1 == i)[0]]		
+# 			ind_trgt_p = Picks_P_lists[ichoose[i]][:,1].astype('int')
+# 			ind_trgt_s = Picks_S_lists[ichoose[i]][:,1].astype('int')	
+
+# 			## [1]. Morans metric
+# 			morans_metric_p = compute_morans_I_metric(W_abs, Inds[ichoose[i]], locs_use_cart_list[i], srcs_samples_cart[i], [ind_trgt_p, ind_pred_p]) ## Should pass in trgt first, as filtering scale is set by target data
+# 			morans_metric_s = compute_morans_I_metric(W_abs, Inds[ichoose[i]], locs_use_cart_list[i], srcs_samples_cart[i], [ind_trgt_s, ind_pred_s])
+# 			Morans_trgt_p.append(morans_metric_p[0])
+# 			Morans_trgt_s.append(morans_metric_s[0])
+# 			Morans_pred_p.append(morans_metric_p[1])
+# 			Morans_pred_s.append(morans_metric_s[1])
+
+# 			# morans_metric_p_trgt, morans_metric_p_pred = morans_metric_p
+# 			# morans_metric_s_trgt, morans_metric_s_pred = morans_metric_s
+
+# 			## [2]. Inertia
+# 			Inertia_trgt_p.append(calculate_inertia(locs_use_cart_list[i], ind_trgt_p))
+# 			Inertia_trgt_s.append(calculate_inertia(locs_use_cart_list[i], ind_trgt_s))
+# 			Inertia_pred_p.append(calculate_inertia(locs_use_cart_list[i], ind_pred_p))
+# 			Inertia_pred_s.append(calculate_inertia(locs_use_cart_list[i], ind_pred_s))
+
+# 			## [3]. Counts
+# 			Cnt_trgt_p.append(len(ind_trgt_p))
+# 			Cnt_trgt_s.append(len(ind_trgt_s))
+# 			Cnt_pred_p.append(len(ind_pred_p))
+# 			Cnt_pred_s.append(len(ind_pred_s))
+
+# 			## [4]. Intersection
+# 			Intersection_p_ratio.append((1.0 if (len(ind_trgt_p) > 0) else np.nan)*len(set(ind_trgt_p).intersection(ind_pred_p))/np.maximum(len(ind_trgt_p), 1.0))
+# 			Intersection_s_ratio.append((1.0 if (len(ind_trgt_s) > 0) else np.nan)*len(set(ind_trgt_s).intersection(ind_pred_s))/np.maximum(len(ind_trgt_s), 1.0))
+
+# 		## Merge outputs
+# 		Morans_pred_p = np.hstack(Morans_pred_p)
+# 		Morans_pred_s = np.hstack(Morans_pred_s)
+# 		Morans_trgt_p = np.hstack(Morans_trgt_p)
+# 		Morans_trgt_s = np.hstack(Morans_trgt_s)
+
+# 		Inertia_pred_p = np.hstack(Inertia_pred_p)
+# 		Inertia_pred_s = np.hstack(Inertia_pred_s)
+# 		Inertia_trgt_p = np.hstack(Inertia_trgt_p)
+# 		Inertia_trgt_s = np.hstack(Inertia_trgt_s)
+
+# 		Cnt_pred_p = np.hstack(Cnt_pred_p)
+# 		Cnt_pred_s = np.hstack(Cnt_pred_s)
+# 		Cnt_trgt_p = np.hstack(Cnt_trgt_p)
+# 		Cnt_trgt_s = np.hstack(Cnt_trgt_s)
+
+# 		Intersection_p_ratio = np.hstack(Intersection_p_ratio)
+# 		Intersection_s_ratio = np.hstack(Intersection_s_ratio)
+
+# 		Features.append([Morans_pred_p, Morans_pred_s, Morans_trgt_p, Morans_trgt_s])
+# 		Features.append([Inertia_pred_p, Inertia_pred_s, Inertia_trgt_p, Inertia_trgt_s])
+# 		Features.append([Cnt_pred_p, Cnt_pred_s, Cnt_trgt_p, Cnt_trgt_s])
+# 		Features.append([Intersection_p_ratio, Intersection_s_ratio])
+# 		# Features = [[Morans_trgt_p, Morans_trgt_s, Morans_pred_p, Morans_pred_p], [Inertia_trgt_p, Inertia_trgt_s, Inertia_pred_p, Inertia_pred_p], ]
+
+# 		# error('Not yet implemented')
+# 		# pass
+
+# 	return srcs_sample, mags_sample, Features, ichoose, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2]
+
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, return_only_data = False):
+
 	if verbose == True:
-		st = time.time()  # Start timing for performance monitoring
-	
-	# Create visualization directory if plot_on is True
-	if plot_on:
-		print("Generating visualizations")
-		os.makedirs('visualizations', exist_ok=True)
-		checkpoint_dir = 'visualizations/checkpoints'
-		os.makedirs(checkpoint_dir, exist_ok=True)
+		st = time.time()
 
-	# Unpack graph parameters (connectivity for neural network)
 	k_sta_edges, k_spc_edges, k_time_edges = graph_params
-	
-	# Unpack prediction parameters (kernel widths for probability functions)
 	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
-	
-	# Unpack training parameters
-	n_spc_query, n_src_query = training_params  # Number of spatial and source queries per batch
-	
-	# Unpack noise and detection parameters
+
+	n_spc_query, n_src_query = training_params
 	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias = training_params_2
-	
-	# Unpack batch and sampling parameters
 	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts = training_params_3
 
-	# Ensure we have enough stations for the required graph connectivity
 	assert(np.floor(n_sta_range[0]*locs.shape[0]) > k_sta_edges)
 
-	# ============================================================================
-	# COORDINATE SYSTEM SETUP AND VISUALIZATION
-	# ============================================================================
-	
-	# Checkpoint 1: Initial station distribution
-	print("Checkpoint 1: Initial station distribution")
-	if plot_on:
-		plt.figure(figsize=(12, 8))
-		plt.scatter(locs[:, 1], locs[:, 0], c='blue', marker='^', label='Stations', s=100)
-		plt.xlabel('Longitude')
-		plt.ylabel('Latitude')
-		plt.title('Checkpoint 1: Initial Station Distribution')
-		plt.legend()
-		plt.grid(True)
-		plt.savefig(f'{checkpoint_dir}/1_initial_stations.png')
-		plt.close()
-		
-    ## Note: this uses a different definition of scale_x and offset_x than the rest of the script (the should really be called scale_x_extend and offset_x_extend to be consistent)
-    ## Should update these names and use the correct name throught the rest of this function
-	# Set up coordinate scaling and offset for the extended region
-	# Note: this uses extended ranges (larger than interior region) to allow sources outside the main area
-	# TODO: rename to scale_x_extend and offset_x_extend for consistency
+	## Note: this uses a different definition of scale_x and offset_x than the rest of the script (the should really be called scale_x_extend and offset_x_extend to be consistent)
+	## Should update these names and use the correct name throught the rest of this function
 	scale_x = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 	offset_x = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
-	n_sta = locs.shape[0]  # Total number of stations
+	n_sta = locs.shape[0]
 
-	# Time slice for prediction window (centered around origin time)
 	t_slice = np.arange(-t_win/2.0, t_win/2.0 + dt_win, dt_win)
 
-	# ============================================================================
-	# TEMPORAL EVENT RATE GENERATION
-	# ============================================================================
-	
-	# Create time steps for the entire simulation period
-	tsteps = np.arange(0, T + dt, dt)  # T is total time duration
-	
-	# Create smoothing kernel for temporal correlation
-	tvec = np.arange(-tscale*4, tscale*4 + dt, dt)  # Kernel support (4 standard deviations)
-	tvec_kernel = np.exp(-(tvec**2)/(2.0*(tscale**2)))  # Gaussian kernel for temporal smoothing
-	
-	# Generate correlated random processes for event rates
-	# Creates 2*n_stations + 3 independent random processes, then smooths them
-	# First 3 are global rates (events, misses, false picks)
-	# Next n_stations are station-specific miss rates
-	# Last n_stations are station-specific false pick rates
-	p_rate_events = fftconvolve(np.random.randn(2*locs.shape[0] + 3, len(tsteps)), 
-	                           tvec_kernel.reshape(1,-1).repeat(2*locs.shape[0] + 3,0), 
-	                           'same', axes = 1)
-	
-	# Extract global rates (same for all stations)
+	tsteps = np.arange(0, T + dt, dt)
+	tvec = np.arange(-tscale*4, tscale*4 + dt, dt)
+	tvec_kernel = np.exp(-(tvec**2)/(2.0*(tscale**2)))
+
+	p_rate_events = fftconvolve(np.random.randn(2*locs.shape[0] + 3, len(tsteps)), tvec_kernel.reshape(1,-1).repeat(2*locs.shape[0] + 3,0), 'same', axes = 1)
 	global_event_rate, global_miss_rate, global_false_rate = p_rate_events[0:3,:]
 
-	# ============================================================================
-	# RATE PROCESSING AND NORMALIZATION
-	# ============================================================================
-	
-	# Process global event rate to physical units
-	# Normalize to [0,1] range, then scale to desired event rate range
-	global_event_rate = (global_event_rate - global_event_rate.min())/(global_event_rate.max() - global_event_rate.min())
-	min_add = np.random.rand()*0.25*max_rate_events  # Random minimum rate (0-25% of max)
-	scale = np.random.rand()*(0.5*max_rate_events - min_add) + 0.5*max_rate_events  # Random scale (50-100% of max)
+	# Process global event rate, to physical units.
+	global_event_rate = (global_event_rate - global_event_rate.min())/(global_event_rate.max() - global_event_rate.min()) # [0,1] scale
+	min_add = np.random.rand()*0.25*max_rate_events ## minimum between 0 and 0.25 of max rate
+	scale = np.random.rand()*(0.5*max_rate_events - min_add) + 0.5*max_rate_events
 	global_event_rate = global_event_rate*scale + min_add
 
-	# Process global miss rate (probability of missing a real pick)
-	global_miss_rate = (global_miss_rate - global_miss_rate.min())/(global_miss_rate.max() - global_miss_rate.min())
-	min_add = np.random.rand()*0.25*max_miss_events
+	global_miss_rate = (global_miss_rate - global_miss_rate.min())/(global_miss_rate.max() - global_miss_rate.min()) # [0,1] scale
+	min_add = np.random.rand()*0.25*max_miss_events ## minimum between 0 and 0.25 of max rate
 	scale = np.random.rand()*(0.5*max_miss_events - min_add) + 0.5*max_miss_events
 	global_miss_rate = global_miss_rate*scale + min_add
 
-	# Process global false pick rate (probability of generating false picks)
-	global_false_rate = (global_false_rate - global_false_rate.min())/(global_false_rate.max() - global_false_rate.min())
-	min_add = np.random.rand()*0.25*max_false_events
+	global_false_rate = (global_false_rate - global_false_rate.min())/(global_false_rate.max() - global_false_rate.min()) # [0,1] scale
+	min_add = np.random.rand()*0.25*max_false_events ## minimum between 0 and 0.25 of max rate
 	scale = np.random.rand()*(0.5*max_false_events - min_add) + 0.5*max_false_events
 	global_false_rate = global_false_rate*scale + min_add
 
-	# Process station-specific miss rates (each station has different sensitivity)
-	station_miss_rate = p_rate_events[3 + np.arange(n_sta),:]  # Extract station-specific rates
-	station_miss_rate = (station_miss_rate - station_miss_rate.min(1, keepdims = True))/(station_miss_rate.max(1, keepdims = True) - station_miss_rate.min(1, keepdims = True))
-	min_add = np.random.rand(n_sta,1)*0.25*max_miss_events
+	station_miss_rate = p_rate_events[3 + np.arange(n_sta),:]
+	station_miss_rate = (station_miss_rate - station_miss_rate.min(1, keepdims = True))/(station_miss_rate.max(1, keepdims = True) - station_miss_rate.min(1, keepdims = True)) # [0,1] scale
+	min_add = np.random.rand(n_sta,1)*0.25*max_miss_events ## minimum between 0 and 0.25 of max rate
 	scale = np.random.rand(n_sta,1)*(0.5*max_miss_events - min_add) + 0.5*max_miss_events
 	station_miss_rate = station_miss_rate*scale + min_add
 
-	# Process station-specific false pick rates
 	station_false_rate = p_rate_events[3 + n_sta + np.arange(n_sta),:]
 	station_false_rate = (station_false_rate - station_false_rate.min(1, keepdims = True))/(station_false_rate.max(1, keepdims = True) - station_false_rate.min(1, keepdims = True))
 	min_add = np.random.rand(n_sta,1)*0.25*max_false_events ## minimum between 0 and 0.25 of max rate
 	scale = np.random.rand(n_sta,1)*(0.5*max_false_events - min_add) + 0.5*max_false_events
 	station_false_rate = station_false_rate*scale + min_add
 
-	# ============================================================================
-	# EARTHQUAKE SOURCE GENERATION
-	# ============================================================================
-	
-	# Sample earthquake occurrence times using Poisson process
-	# For each time bin, sample number of events from Poisson distribution
-	vals = np.random.poisson(dt*global_event_rate/T)  # Scale rate to get expected count per bin
-	
-	# Generate actual event times by adding random offsets within each bin
+	## Sample events.
+	vals = np.random.poisson(dt*global_event_rate/T) # This scaling, assigns to each bin the number of events to achieve correct, on averge, average
 	src_times = np.sort(np.hstack([np.random.rand(vals[j])*dt + tsteps[j] for j in range(len(vals))]))
 
-	# Ensure we have at least one event (fallback)
 	if len(src_times) == 0:
 		src_times = np.array([np.random.rand()*T])
 	
-	n_src = len(src_times)  # Total number of synthetic earthquakes
-	
-	# Generate random source locations uniformly within extended region
-	src_positions = np.random.rand(n_src, 3)*scale_x + offset_x  # [lat, lon, depth]
-	
-	# Generate random magnitudes uniformly between -1.0 and 7.0
-	src_magnitude = np.random.rand(n_src)*8.0 - 1.0
+	n_src = len(src_times)
+	src_positions = np.random.rand(n_src, 3)*scale_x + offset_x
+	src_magnitude = np.random.rand(n_src)*7.0 - 1.0 # magnitudes, between -1.0 and 7 (uniformly)
 
-	# ============================================================================
-	# SOURCE POSITION MODIFICATIONS
-	# ============================================================================
-	
-	# Option 1: Use reference catalog spatial density (if available)
 	if use_reference_spatial_density == True:
-		# Replace some sources with locations based on historical earthquake catalog
 		n_rand_sample = int(len(src_positions)*n_frac_reference_catalog)
 		if n_rand_sample > 0:
-			# Sample from reference catalog and add spatial noise
 			rand_sample = ftrns2(ftrns1(srcs_ref[np.random.choice(len(srcs_ref), size = n_rand_sample),0:3]) + spatial_sigma*np.random.randn(n_rand_sample,3))
-			# Ensure depths are within valid range
 			ioutside = np.where(((rand_sample[:,2] < depth_range[0]) + (rand_sample[:,2] > depth_range[1])) > 0)[0]
 			rand_sample[ioutside,2] = np.random.rand(len(ioutside))*(depth_range[1] - depth_range[0]) + depth_range[0]		
-			# Replace random subset of generated sources with catalog-based locations
 			src_positions[np.random.choice(len(src_positions), size = n_rand_sample, replace = False)] = rand_sample
 	
-	# Option 2: Use shallow source depth distribution (more realistic than uniform)
 	if use_shallow_sources == True:
-		# Generate depths using gamma distribution (more shallow earthquakes)
 		sample_random_depths = gamma(1.75, 0.0).rvs(n_src)
 		sample_random_grab = np.where(sample_random_depths > 5)[0] # Clip the long tails, and place in uniform, [0,5].
 		sample_random_depths[sample_random_grab] = 5.0*np.random.rand(len(sample_random_grab))
@@ -653,42 +786,21 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 		sample_random_depths = -sample_random_depths*(scale_x[0,2] - 2e3) + (offset_x[0,2] + scale_x[0,2] - 2e3) # Project along axis, going negative direction. Removing 2e3 on edges.
 		src_positions[:,2] = sample_random_depths
 
-	# Option 3: Respect topography (don't place sources above ground)
-	if use_topography == True:
-		# Find nearest surface elevation for each source
+	if use_topography == True: ## Don't simulate any sources in the air
 		imatch = tree_surface.query(src_positions[:,0:2])[1]
-		# Find sources that would be above ground
 		ifind_match = np.where(src_positions[:,2] > surface_profile[imatch,2])[0]
-		# Move these sources to valid depths below surface
 		src_positions[ifind_match,2] = np.random.rand(len(ifind_match))*(surface_profile[imatch[ifind_match],2] - depth_range[0]) + depth_range[0]
 	
-	# Checkpoint 2: Station and source distribution*
-	print("Checkpoint 2: Station and source distribution")
-	if plot_on:
-		plt.figure(figsize=(12, 8))
-		plt.scatter(locs[:, 1], locs[:, 0], c='blue', marker='^', label='Stations', s=100)
-		plt.scatter(src_positions[:, 1], src_positions[:, 0], c='red', marker='*', label='Sources', s=150)
-		plt.xlabel('Longitude')
-		plt.ylabel('Latitude')
-		plt.title('Checkpoint 2: Station and Source Distribution')
-		plt.legend()
-		plt.grid(True)
-		plt.savefig(f'{checkpoint_dir}/2_stations_and_sources.png')
-		plt.close()
+	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
-
-	# Generate distance thresholds for detection (simulates magnitude-distance relationship)
 	use_uniform_distance_threshold = False
 	## This previously sampled a uniform distribution by default, now it samples a skewed
 	## distribution of the maximum source-reciever distances allowed for each event.
 	if use_uniform_distance_threshold == True:
-		# Simple uniform distribution of detection distances
 		dist_thresh = np.random.rand(n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
 	else:
 		## Use beta distribution to generate more samples with smaller moveouts
-		# Use beta distribution to favor smaller distances (more realistic)
-		# This creates more training examples with nearby sources
-		
+	
 		if use_extra_nearby_moveouts == True:
 		
 			## For half of samples, use only half of range supplied
@@ -699,32 +811,28 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 			n3 = n_src - n1 - n2
 
 			dist_thresh1 = beta(2,5).rvs(size = n1).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-			# Replace 15% with even more nearby sources using beta(1,5)
 			ireplace = np.random.choice(len(dist_thresh1), size = int(0.15*len(dist_thresh1)), replace = False)
 			dist_thresh1[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
 
-			# Group 2: Half distance range (more local sources)
 			dist_thresh2 = beta(2,5).rvs(size = n2).reshape(-1,1)*(dist_range[1] - dist_range[0])/2.0 + dist_range[0]
 			ireplace = np.random.choice(len(dist_thresh2), size = int(0.15*len(dist_thresh2)), replace = False)
 			dist_thresh2[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0])/2.0 + dist_range[0]
 
-			# Group 3: Third distance range (very local sources)
 			dist_thresh3 = beta(2,5).rvs(size = n3).reshape(-1,1)*(dist_range[1] - dist_range[0])/3.0 + dist_range[0]
 			ireplace = np.random.choice(len(dist_thresh3), size = int(0.15*len(dist_thresh3)), replace = False)
 			dist_thresh3[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0])/3.0 + dist_range[0]
 
-			# Combine all groups
 			dist_thresh = np.concatenate((dist_thresh1, dist_thresh2, dist_thresh3), axis = 0)
 		
 		else:
-			# Standard beta distribution favoring smaller distances
+	
 			dist_thresh = beta(2,5).rvs(size = n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-			# Replace 15% with very nearby sources
 			ireplace = np.random.choice(len(dist_thresh), size = int(0.15*len(dist_thresh)), replace = False)
 			dist_thresh[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
+	
 
-
-	if use_amplitudes == True:
+	fix_magnitudes = True
+	if fix_magnitudes == True:
 		mag_ratio = [0.85, 1.15]
 		## Need to "match" these distances to the magnitude scale
 		## One option: overwrite the distance sampling to sample realistic distances
@@ -738,474 +846,261 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 		mag_scale = np.random.rand(len(dist_thresh))*(mag_ratio[1] - mag_ratio[0]) + mag_ratio[0]
 		src_magnitude = mag_scale*(0.5*mag_vals[imag1] + 0.5*mag_vals[imag2])
 
-	if (srcs is not None) and (mags is not None):
-		pdist_p, pdist_s = load_distance_magnitude_model(n_mag_ver=1, use_softplus=True)
 
-		src_magnitude = mags
-		src_positions = srcs
-		n_src = len(src_magnitude)
+	## Sample from the genertor the moveout patters, using "all" stations as the inds, and the previously created sources and magnitudes
+	## Use assert to make sure the sources are correctly assigned
 
-		# For each time bin, sample number of events from Poisson distribution
-		vals = pdist_p(src_magnitude)
+	## Note, can potentially do the subsetting here, but need to make consistent with "Station_indices" sampling that comes later
+	locs_use_list = [locs for i in range(len(src_positions))]
+	inds = [np.arange(len(locs)) for i in range(len(src_positions))]
+	srcs_sample_, mags_sample_, Features_, ichoose_, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(None, None, None, locs, [], chol_params, ftrns1, pdist_p, pdist_s, srcs = src_positions, mags = src_magnitude, locs_use_list = locs_use_list, inds = inds, n_samples = n_batch, return_features = False)
+	assert(np.abs(src_positions - srcs_sample_).max() == 0)
+	assert(np.abs(src_magnitude - mags_sample_).max() == 0)
+	assert(np.abs(ichoose_ - np.arange(len(src_positions))).max() == 0)
+	# print('Finished asserts')
+
+	# Plot ikeep_p1/p2/s1/s2 variables for debugging when plot_debug is True
+	plot_debug = False  # Set to True for debugging plots
+	if plot_debug == True:
+		import os
+		# Create debug plots directory
+		debug_plots_dir = f'debug_plots'
+		os.makedirs(debug_plots_dir, exist_ok=True)
 		
-		# Generate actual event times by adding random offsets within each bin
-		src_times = np.sort(np.hstack([np.random.rand(vals[j])*dt + tsteps[j] for j in range(len(vals))]))
-
-	## ====================================================================================
-	## BLOCK TO CHANGE IN THE ORIGINAL CODE
-	## ====================================================================================
-	use_radial_cholesky_vectorized = True
-	if use_radial_cholesky_vectorized == True:
-		from calibrate_synthetic_data import sample_synthetic_moveout_pattern_generator
-		Srcs = src_positions
-		Mags = src_magnitude
-		Inds = [np.arange(len(Srcs)) for _ in range(len(Srcs))]
-		pdist_p, pdist_s = load_distance_magnitude_model(n_mag_ver=1, use_softplus=True)
-		srcs_sample, mags_sample, _, ichoose, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2] = sample_synthetic_moveout_pattern_generator(locs, Srcs, Mags, Inds, None, radial_cholesky_params, ftrns1, pdist_p, pdist_s, n_samples = n_src, use_l1 = False, mask_noise = False, return_features = False, use_ichoose=False)	
-		ikeep_p1 = np.array(ikeep_p1).astype(int)
-		ikeep_p2 = np.array(ikeep_p2).astype(int)
-		ikeep_s1 = np.array(ikeep_s1).astype(int)
-		ikeep_s2 = np.array(ikeep_s2).astype(int)
-	elif use_radial_cholesky == True:
-		# ===========================================
-		# RADIAL CHOLESKY INTEGRATION (Instead of DISTANCE CALCULATIONS AND DETECTION THRESHOLDS)
-		# ===========================================
-		# # Calculate distances between all source-station pairs (in Cartesian coordinates)
-		# sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
-
-		# Convert locs to format expected by your functions
-		locs_geographic = ftrns1(locs)[:,0:2]  # Convert from local coords to lat/lon/depth + projection to 2D
+		print(f"Creating debug plots for ikeep variables")
+		print(f"P-wave detections: {len(ikeep_p1)} stations with arrivals")
+		print(f"S-wave detections: {len(ikeep_s1)} stations with arrivals")
 		
-		pdist_p, pdist_s = load_distance_magnitude_model(n_mag_ver=1, use_softplus=True)
-
-		# Calculate space size for sigma_cov
-		# space_size = max(locs_geographic[:, 0].max() - locs_geographic[:, 0].min(), 
-		# 	locs_geographic[:, 1].max() - locs_geographic[:, 1].min())
-
-		# # Sizes
-		# max_noise_spread = space_size / 6 
-
-		# ============================================================================
-		# PARAMETERS & RUN
-		# ============================================================================
-		ikeep_p1, ikeep_p2 = [], []
-		ikeep_s1, ikeep_s2 = [], []
-
-		for i in range(n_src):
-			# Magnitude of the cluster
-			magnitude = src_magnitude[i]
-			print(f"Generating data with Magnitude: {magnitude} and Source position: {src_positions[i,0:2]}")
-			center = ftrns1(src_positions)[i,0:2]
-
-			# Radial function parameters based on magnitude - use optimized parameters
-			p = radial_cholesky_params['p_exponent']  # Use optimized value
-
-			sigma_radial_p = radial_cholesky_params['sigma_radial_p_factor'] * pdist_p(magnitude) / radial_cholesky_params['sigma_radial_divider']  # P-wave detection radius
-			sigma_radial_s = radial_cholesky_params['sigma_radial_s_factor'] * pdist_s(magnitude) / radial_cholesky_params['sigma_radial_divider']  # S-wave detection radius
-			
-			# scaling factor for the radial function - use optimized value
-			scale_factor = radial_cholesky_params['scale_factor']
-
-			# Covariance matrix/kernel distances sigma_radial, controls the spreading of the cluster - use optimized value directly
-			sigma_noise = radial_cholesky_params['sigma_noise']
-
-			# Logistic function sigma_radial, controls the roughness of cluster border - use optimized value
-			threshold_logistic = radial_cholesky_params['threshold_logistic']
-			max_value_logistic = 0.99 # < 1, the maximum value of the logistic function for the threshold, don't tune this.
-			sigma_logistic = - threshold_logistic / np.log(1/max_value_logistic - 1) 
-
-			# Mixing function lambda, controls the correlation between radial function and correlated noise - use optimized value
-			lambda_corr = radial_cholesky_params['lambda_corr']
-
-			k_neighbours = radial_cholesky_params['k_neighbours']  # Use from params (though this one isn't optimized)
-
-			# Generate P-wave detections
-			experiment_result_p = run_single_experiment(
-				points=locs_geographic,  # Use 2D station locations as the spatial grid
-				sigma_radial=sigma_radial_p,
-				sigma_noise=sigma_noise,
-				sigma_logistic=sigma_logistic,
-				lambda_corr=lambda_corr,
-				p=p,
-				scale_factor=scale_factor,
-				center=center
-			)
-			# Save the noise
-			noise_p = experiment_result_p['noise']
-
-			angle_p, length1_p, length2_p = experiment_result_p['parameters']['angle'], experiment_result_p['parameters']['length1'], experiment_result_p['parameters']['length2']
-			angle_s = (angle_p + np.random.uniform(-radial_cholesky_params['angle_perturbation'], radial_cholesky_params['angle_perturbation'])) % (2*np.pi)
-			length1_s = length1_p * np.random.uniform(radial_cholesky_params['length_perturbation'][0], radial_cholesky_params['length_perturbation'][1])
-			length2_s = length2_p * np.random.uniform(radial_cholesky_params['length_perturbation'][0], radial_cholesky_params['length_perturbation'][1])
-
-			# Generate S-wave detections (with different parameters)
-			experiment_result_s = run_single_experiment(
-				points=locs_geographic,  # Use 2D station locations as the spatial grid
-				sigma_radial=sigma_radial_s,
-				sigma_noise=sigma_noise,
-				sigma_logistic=sigma_logistic,
-				lambda_corr=lambda_corr,
-				p=p,
-				scale_factor=scale_factor,
-				center=center,
-				angle=angle_s,
-				length1=length1_s,
-				length2=length2_s,
-				noise=noise_p
-			)
-
-			if plot_on:
-				plot_experiment_results_extended(locs_geographic, [experiment_result_p, experiment_result_s], k_neighbours=8, p=p)
-				
-			# Get the selected station indices for P-waves
-			selected_stations_p = experiment_result_p['final_idx']
-			if len(selected_stations_p) > 0:
-				ikeep_p1.extend([i] * len(selected_stations_p))
-				ikeep_p2.extend(selected_stations_p)
-			
-			# Get the selected station indices for S-waves
-			selected_stations_s = experiment_result_s['final_idx']
-			if len(selected_stations_s) > 0:
-				ikeep_s1.extend([i] * len(selected_stations_s))
-				ikeep_s2.extend(selected_stations_s)
-
-		ikeep_p1 = np.array(ikeep_p1).astype(int)
-		ikeep_p2 = np.array(ikeep_p2).astype(int)
-		ikeep_s1 = np.array(ikeep_s1).astype(int)
-		ikeep_s2 = np.array(ikeep_s2).astype(int)
-		print(ikeep_p1, ikeep_p2)
-	else:
-		# ============================================================================
-		# DISTANCE CALCULATIONS AND DETECTION THRESHOLDS
-		# ============================================================================
+		# Define colors for each source
+		colors = plt.cm.Set1(np.linspace(0, 1, len(src_positions)))  # Use Set1 colormap
+		if len(src_positions) > 9:  # If more than 9 sources, use tab20 for more colors
+			colors = plt.cm.tab20(np.linspace(0, 1, len(src_positions)))
 		
-		# Calculate distances between all source-station pairs (in Cartesian coordinates)
-		sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
-
-		# Generate distance thresholds for detection (simulates magnitude-distance relationship)
-		use_uniform_distance_threshold = False
-		## This previously sampled a uniform distribution by default, now it samples a skewed
-		## distribution of the maximum source-reciever distances allowed for each event.
-		if use_uniform_distance_threshold == True:
-			# Simple uniform distribution of detection distances
-			dist_thresh = np.random.rand(n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-		else:
-			## Use beta distribution to generate more samples with smaller moveouts
-			# Use beta distribution to favor smaller distances (more realistic)
-			# This creates more training examples with nearby sources
-			
-			if use_extra_nearby_moveouts == True:
-			
-				## For half of samples, use only half of range supplied
-				## (this is to increase training for sources that span only small range of network)
-
-				n1 = int(n_src*0.3)
-				n2 = int(n_src*0.3)
-				n3 = n_src - n1 - n2
-
-				dist_thresh1 = beta(2,5).rvs(size = n1).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-				# Replace 15% with even more nearby sources using beta(1,5)
-				ireplace = np.random.choice(len(dist_thresh1), size = int(0.15*len(dist_thresh1)), replace = False)
-				dist_thresh1[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-
-				# Group 2: Half distance range (more local sources)
-				dist_thresh2 = beta(2,5).rvs(size = n2).reshape(-1,1)*(dist_range[1] - dist_range[0])/2.0 + dist_range[0]
-				ireplace = np.random.choice(len(dist_thresh2), size = int(0.15*len(dist_thresh2)), replace = False)
-				dist_thresh2[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0])/2.0 + dist_range[0]
-
-				# Group 3: Third distance range (very local sources)
-				dist_thresh3 = beta(2,5).rvs(size = n3).reshape(-1,1)*(dist_range[1] - dist_range[0])/3.0 + dist_range[0]
-				ireplace = np.random.choice(len(dist_thresh3), size = int(0.15*len(dist_thresh3)), replace = False)
-				dist_thresh3[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0])/3.0 + dist_range[0]
-
-				# Combine all groups
-				dist_thresh = np.concatenate((dist_thresh1, dist_thresh2, dist_thresh3), axis = 0)
-			
-			else:
-				# Standard beta distribution favoring smaller distances
-				dist_thresh = beta(2,5).rvs(size = n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-				# Replace 15% with very nearby sources
-				ireplace = np.random.choice(len(dist_thresh), size = int(0.15*len(dist_thresh)), replace = False)
-				dist_thresh[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
+		# Create figure for P and S wave detection patterns
+		fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 		
-		# create different distance dependent thresholds.
-		dist_thresh_p = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None] # Increased sig from 20e3 to 25e3 # Decreased to 10 km
-		dist_thresh_s = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None]
-		# Determine which source-station pairs will generate detections
-		# Add random noise to distances to simulate detection uncertainty
-		ikeep_p1, ikeep_p2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_p))
-		ikeep_s1, ikeep_s2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_s))
+		# Plot P-wave detections
+		if len(ikeep_p1) > 0:
+			# Plot all stations in gray
+			ax1.scatter(locs[:, 1], locs[:, 0], c='lightgray', marker='^', 
+					   s=30, label='All stations', alpha=0.6)
+			
+			# Plot stations with P-wave detections
+			p_stations = np.unique(ikeep_p2)
+			ax1.scatter(locs[p_stations, 1], locs[p_stations, 0], 
+					   c='red', marker='^', s=60, 
+					   label=f'P-wave detections ({len(p_stations)} stations)', 
+					   alpha=0.8)
+			
+			# Plot sources with different colors
+			for i in range(len(src_positions)):
+				ax1.scatter(src_positions[i, 1], src_positions[i, 0], 
+						   c=[colors[i]], marker='*', s=150,
+						   label=f'Source {i} (M{src_magnitude[i]:.2f})' if i < 5 else None, 
+						   alpha=1.0, edgecolors='black', linewidth=1)
+			
+			# Plot P-wave detection connections with source-specific colors
+			for i in range(len(ikeep_p1)):
+				src_idx = ikeep_p1[i]
+				sta_idx = ikeep_p2[i]
+				if src_idx < len(src_positions) and sta_idx < len(locs):
+					ax1.plot([src_positions[src_idx, 1], locs[sta_idx, 1]], 
+							[src_positions[src_idx, 0], locs[sta_idx, 0]], 
+							color=colors[src_idx], alpha=0.4, linewidth=1.0)
+		
+		ax1.set_xlabel('Longitude')
+		ax1.set_ylabel('Latitude')
+		ax1.set_title(f'P-wave Detection Pattern\n{len(ikeep_p1)} detections from {len(np.unique(ikeep_p2))} stations')
+		ax1.legend()
+		ax1.grid(True, alpha=0.3)
+		
+		# Plot S-wave detections
+		if len(ikeep_s1) > 0:
+			# Plot all stations in gray
+			ax2.scatter(locs[:, 1], locs[:, 0], c='lightgray', marker='^', 
+					   s=30, label='All stations', alpha=0.6)
+			
+			# Plot stations with S-wave detections
+			s_stations = np.unique(ikeep_s2)
+			ax2.scatter(locs[s_stations, 1], locs[s_stations, 0], 
+					   c='blue', marker='^', s=60, 
+					   label=f'S-wave detections ({len(s_stations)} stations)', 
+					   alpha=0.8)
+			
+			# Plot sources with different colors
+			for i in range(len(src_positions)):
+				ax2.scatter(src_positions[i, 1], src_positions[i, 0], 
+						   c=[colors[i]], marker='*', s=150,
+						   label=f'Source {i} (M{src_magnitude[i]:.2f})' if i < 5 else None, 
+						   alpha=1.0, edgecolors='black', linewidth=1)
+			
+			# Plot S-wave detection connections with source-specific colors
+			for i in range(len(ikeep_s1)):
+				src_idx = ikeep_s1[i]
+				sta_idx = ikeep_s2[i]
+				if src_idx < len(src_positions) and sta_idx < len(locs):
+					ax2.plot([src_positions[src_idx, 1], locs[sta_idx, 1]], 
+							[src_positions[src_idx, 0], locs[sta_idx, 0]], 
+							color=colors[src_idx], alpha=0.4, linewidth=1.0)
+		
+		ax2.set_xlabel('Longitude')
+		ax2.set_ylabel('Latitude')
+		ax2.set_title(f'S-wave Detection Pattern\n{len(ikeep_s1)} detections from {len(np.unique(ikeep_s2))} stations')
+		ax2.legend()
+		ax2.grid(True, alpha=0.3)
+		
+		plt.tight_layout()
+		plt.savefig(f'{debug_plots_dir}/ikeep_detection_patterns.png', 
+				   bbox_inches='tight', dpi=150)
+		plt.close()
+		
+		# Create combined P and S detection plot
+		plt.figure(figsize=(12, 8))
+		
+		# Plot all stations in gray
+		plt.scatter(locs[:, 1], locs[:, 0], c='lightgray', marker='^', 
+				   s=30, label='All stations', alpha=0.6)
+		
+		# Find stations with both P and S detections
+		if len(ikeep_p1) > 0 and len(ikeep_s1) > 0:
+			p_stations = set(ikeep_p2)
+			s_stations = set(ikeep_s2)
+			both_stations = list(p_stations & s_stations)
+			p_only_stations = list(p_stations - s_stations)
+			s_only_stations = list(s_stations - p_stations)
+			
+			if p_only_stations:
+				plt.scatter(locs[p_only_stations, 1], locs[p_only_stations, 0], 
+						   c='red', marker='^', s=60, 
+						   label=f'P-wave only ({len(p_only_stations)})', alpha=0.8)
+			
+			if s_only_stations:
+				plt.scatter(locs[s_only_stations, 1], locs[s_only_stations, 0], 
+						   c='blue', marker='^', s=60, 
+						   label=f'S-wave only ({len(s_only_stations)})', alpha=0.8)
+			
+			if both_stations:
+				plt.scatter(locs[both_stations, 1], locs[both_stations, 0], 
+						   c='purple', marker='^', s=60, 
+						   label=f'Both P & S ({len(both_stations)})', alpha=0.8)
+		
+		# Plot sources with different colors
+		for i in range(len(src_positions)):
+			plt.scatter(src_positions[i, 1], src_positions[i, 0], 
+					   c=[colors[i]], marker='*', s=150,
+					   label=f'Source {i} (M{src_magnitude[i]:.2f})' if i < 8 else None, 
+					   alpha=1.0, edgecolors='black', linewidth=1)
+		
+		# Plot all detection connections with source-specific colors
+		# P-wave connections
+		for i in range(len(ikeep_p1)):
+			src_idx = ikeep_p1[i]
+			sta_idx = ikeep_p2[i]
+			if src_idx < len(src_positions) and sta_idx < len(locs):
+				plt.plot([src_positions[src_idx, 1], locs[sta_idx, 1]], 
+						[src_positions[src_idx, 0], locs[sta_idx, 0]], 
+						color=colors[src_idx], alpha=0.3, linewidth=0.8, linestyle='-')
+		
+		# S-wave connections (dashed lines to distinguish from P-waves)
+		for i in range(len(ikeep_s1)):
+			src_idx = ikeep_s1[i]
+			sta_idx = ikeep_s2[i]
+			if src_idx < len(src_positions) and sta_idx < len(locs):
+				plt.plot([src_positions[src_idx, 1], locs[sta_idx, 1]], 
+						[src_positions[src_idx, 0], locs[sta_idx, 0]], 
+						color=colors[src_idx], alpha=0.3, linewidth=0.8, linestyle='--')
+		
+		plt.xlabel('Longitude')
+		plt.ylabel('Latitude')
+		plt.title(f'Combined P & S Detection Patterns\n'
+				 f'P: {len(ikeep_p1)} detections (solid lines), S: {len(ikeep_s1)} detections (dashed lines)')
+		plt.legend()
+		plt.grid(True, alpha=0.3)
+		plt.savefig(f'{debug_plots_dir}/ikeep_combined_patterns.png', 
+				   bbox_inches='tight', dpi=150)
+		plt.close()
+		
+		print(f"Debug plots saved to {debug_plots_dir}/")
 
-	# ============================================================================
-	# TRAVEL TIME CALCULATION AND ARRIVAL GENERATION
-	# ============================================================================
-	
-	# Calculate theoretical travel times for all source-station pairs
-	# Returns [n_sources, n_stations, 2] array where last dimension is [P_time, S_time]
+	# # create different distance dependent thresholds.
+	# dist_thresh_p = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None] # Increased sig from 20e3 to 25e3 # Decreased to 10 km
+	# dist_thresh_s = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None]
+
+	# ikeep_p1, ikeep_p2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_p))
+	# ikeep_s1, ikeep_s2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_s))
+
 	arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
 
 	add_bias_scaled_travel_time_noise = True ## This way, some "true moveouts" will have travel time 
 	## errors that are from a velocity model different than used for sampling, training, and application, etc.
 	## Uses a different bias for both p and s waves, but constant for all stations, for each event
 	if add_bias_scaled_travel_time_noise == True:
-			# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
-			# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
-			# avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
-			# avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
-			# mean_ps_ratio = avg_p_vel/avg_s_vel
-			## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
-			frac_bias_s_ratio = 0.3
-			scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
-			scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
-			scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
-			# scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
-			# scale_bias_s = 
-			scale_bias = scale_bias + 1.0
-			arrivals_theoretical = arrivals_theoretical*scale_bias
+		# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
+		# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
+		# avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
+		# avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
+		# mean_ps_ratio = avg_p_vel/avg_s_vel
+		## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
+		frac_bias_s_ratio = 0.3
+		scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+		scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
+		scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
+		# scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+		# scale_bias_s = 
+		scale_bias = scale_bias + 1.0
+		arrivals_theoretical = arrivals_theoretical*scale_bias
 	
-	# Create index arrays for organizing arrival data
-	arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)  # Origin time for each source-station pair
-	arrivals_indices = np.arange(n_sta).reshape(1,-1).repeat(n_src, 0)  # Station indices
-	src_indices = np.arange(n_src).reshape(-1,1).repeat(n_sta, 1)  # Source indices
+	arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)
+	arrivals_indices = np.arange(n_sta).reshape(1,-1).repeat(n_src, 0)
+	src_indices = np.arange(n_src).reshape(-1,1).repeat(n_sta, 1)
 
-	# Create P-wave arrivals array: [travel_time, station_idx, source_idx, origin_time, phase_type]
-	# Only include source-station pairs that passed the distance threshold
-	arrivals_p = np.concatenate((
-		arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1),  # P travel times
-		arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1),         # Station indices
-		src_indices[ikeep_p1, ikeep_p2].reshape(-1,1),             # Source indices
-		arrival_origin_times[ikeep_p1, ikeep_p2].reshape(-1,1),    # Origin times
-		np.zeros(len(ikeep_p1)).reshape(-1,1)                      # Phase type (0 = P)
-	), axis = 1)
-	
-	# Create S-wave arrivals array (same structure as P-waves)
-	arrivals_s = np.concatenate((
-		arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1),  # S travel times
-		arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1),         # Station indices
-		src_indices[ikeep_s1, ikeep_s2].reshape(-1,1),             # Source indices
-		arrival_origin_times[ikeep_s1, ikeep_s2].reshape(-1,1),    # Origin times
-		np.ones(len(ikeep_s1)).reshape(-1,1)                       # Phase type (1 = S)
-	), axis = 1)
-	
-	# Combine P and S arrivals
+	arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), arrival_origin_times[ikeep_p1, ikeep_p2].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
+	arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), arrival_origin_times[ikeep_s1, ikeep_s2].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
 	arrivals = np.concatenate((arrivals_p, arrivals_s), axis = 0)
 
-	# Fallback: ensure we have at least one arrival (should rarely happen)
 	if len(arrivals) == 0:
-		arrivals = -1*np.zeros((1,5))  # Create dummy arrival
-		arrivals[0,0] = np.random.rand()*T  # Random time
-		arrivals[0,1] = int(np.floor(np.random.rand()*(locs.shape[0] - 1)))  # Random station
+		arrivals = -1*np.zeros((1,5))
+		arrivals[0,0] = np.random.rand()*T
+		arrivals[0,1] = int(np.floor(np.random.rand()*(locs.shape[0] - 1)))
 	
-	# Checkpoint 3: Station and source distribution with arrivals
-	print("Checkpoint 3: Station and source distribution with arrivals")
-	if plot_on:
-		# Import functions from data_generation_utils for Moran's I calculation
-		
-		# Create separate folder for per-source figures
-		per_source_dir = f'{checkpoint_dir}/per_source_arrivals'
-		os.makedirs(per_source_dir, exist_ok=True)
-		
-		# Find unique sources with arrivals (excluding false picks with source_idx = -1)
-		unique_sources = np.unique(arrivals[arrivals[:, 2] >= 0, 2]).astype(int)
-		print(f"Creating individual plots for {len(unique_sources)} sources")
-		
-		for src_idx in unique_sources:
-			if src_idx < len(src_positions):  # Valid source index
-				# Find all arrivals for this source
-				source_arrivals = arrivals[arrivals[:, 2] == src_idx]
-				station_indices_with_arrivals = np.unique(source_arrivals[:, 1]).astype(int)
-				
-				# Count P and S arrivals for this source
-				p_arrivals_count = np.sum(source_arrivals[:, 4] == 0)
-				s_arrivals_count = np.sum(source_arrivals[:, 4] == 1)
-				
-				# Identify stations with P-only, S-only, or both wave types
-				p_stations = set(source_arrivals[source_arrivals[:, 4] == 0, 1].astype(int))
-				s_stations = set(source_arrivals[source_arrivals[:, 4] == 1, 1].astype(int))
-				
-				p_only_stations = list(p_stations - s_stations)
-				s_only_stations = list(s_stations - p_stations)
-				both_stations = list(p_stations & s_stations)
-				
-				# Compute Moran's I for spatial clustering of detecting stations
-				if len(station_indices_with_arrivals) > 1:  # Need at least 2 stations for meaningful calculation
-					# Get coordinates of all stations in x,y format
-					all_station_coords = ftrns1(locs)[:, :2]  # x,y coordinates
-					
-					# Create binary selection vector (1 for detecting stations, 0 for others)
-					detecting_mask = np.zeros(len(locs), dtype=bool)
-					detecting_mask[station_indices_with_arrivals] = True
-					
-					# Build knn weights matrix for all stations
-					k_neighbors = min(8, len(locs) - 1)  # Ensure k doesn't exceed available stations
-					W = knn_weights(all_station_coords, k=k_neighbors)
-					# tensor_knn = torch.Tensor(ftrns1(locs)).to(device)/1000.0
-					# edges_stations = remove_self_loops(knn(tensor_knn, tensor_knn, k=k_neighbors))[0].flip(0).contiguous().long()
-					# dist_vals = torch.norm(tensor_knn[edges_stations[0]] - tensor_knn[edges_stations[1]], dim=1)
-					# # val_min = scatter(dist_vals.reshape(-1, 1))
-					# kernel_sta = scatter(dist_vals.reshape(-1, 1), edges_stations[1], dim=0, reduce='min').mean()
-					# edges_W = torch.exp(-0.5 * ((dist_vals)**2)/(kernel_sta**2))
-					# W = np.zeros(len(locs), len(locs))
-			
-					# Calculate Moran's I using the binary selection vector
-					morans_i = morans_I_binary(detecting_mask, W)
-				else:
-					morans_i = 0.0  # No spatial clustering with 0 or 1 detecting stations
-				
-				print(f'Source {src_idx} - Moran\'s I: {morans_i:.3f}')
-
-				# Create figure similar to visualize_point_selection
-				plt.figure(figsize=(8, 6))
-				
-				# Plot all stations in gray (background)
-				plt.scatter(locs[:, 1], locs[:, 0], c='gray', marker='^', 
-						   s=10, label='All stations', alpha=0.5)
-				
-				# Plot stations with different colors based on wave type
-				if p_only_stations:
-					plt.scatter(locs[p_only_stations, 1], locs[p_only_stations, 0], 
-							   c='red', marker='^', s=20, 
-							   label=f'P-wave only ({len(p_only_stations)})', 
-							   alpha=0.8)
-				
-				if s_only_stations:
-					plt.scatter(locs[s_only_stations, 1], locs[s_only_stations, 0], 
-							   c='blue', marker='^', s=20, 
-							   label=f'S-wave only ({len(s_only_stations)})', 
-							   alpha=0.8)
-				
-				if both_stations:
-					plt.scatter(locs[both_stations, 1], locs[both_stations, 0], 
-							   c='purple', marker='^', s=20, 
-							   label=f'Both waves ({len(both_stations)})', 
-							   alpha=0.8)
-				
-				# Plot the source location
-				plt.scatter(src_positions[src_idx, 1], src_positions[src_idx, 0], 
-						   c='orange', marker='*', s=150, 
-						   label=f'Source {src_idx} (M{src_magnitude[src_idx]:.2f})', alpha=1.0, 
-						   edgecolors='black', linewidth=1)
-				
-				# Plot arrival connections with low alpha
-				for arrival in source_arrivals:
-					sta_idx = int(arrival[1])
-					if sta_idx < len(locs):
-						plt.plot([src_positions[src_idx, 1], locs[sta_idx, 1]], 
-								[src_positions[src_idx, 0], locs[sta_idx, 0]], 
-								'k-', alpha=0.2, linewidth=0.5)
-				
-				plt.xlabel('Longitude')
-				plt.ylabel('Latitude')
-				plt.title(f'Source {src_idx} (M{src_magnitude[src_idx]:.2f}): {p_arrivals_count} P-arrivals, {s_arrivals_count} S-arrivals\nMoran\'s I = {morans_i:.3f}')
-				plt.legend()
-				plt.gca().set_aspect('equal', 'box')
-				plt.ticklabel_format(style='sci', axis='both', scilimits=(0,0))
-				plt.tight_layout()
-				
-				# Save individual source figure
-				save_path = f'{per_source_dir}/source_{src_idx:03d}_arrivals.png'
-				plt.savefig(save_path, bbox_inches='tight', dpi=150)
-				plt.close()
-		
-		# Also create the original combined overview figure
-		plt.figure(figsize=(12, 8))
-		plt.scatter(locs[:, 1], locs[:, 0], c='blue', marker='^', label='Stations', s=100)
-		
-		# Plot sources with magnitude information
-		for i in range(len(src_positions)):
-			plt.scatter(src_positions[i, 1], src_positions[i, 0], 
-					   c='red', marker='*', s=150,
-					   label=f'Source {i} (M{src_magnitude[i]:.2f})' if i < 5 else None)  # Only label first 5 sources to avoid overcrowding
-		
-		# Plot arrival connections
-		print(f"Plotting {len(arrivals)} arrivals")
-		print(f"Arrivals shape: {arrivals.shape}")
-		for arrival in arrivals:
-			if arrival[2] >= 0:  # Only plot real arrivals
-				src_idx = int(arrival[2])
-				sta_idx = int(arrival[1])
-				if src_idx < len(src_positions) and sta_idx < len(locs):
-					plt.plot([src_positions[src_idx, 1], locs[sta_idx, 1]], 
-							[src_positions[src_idx, 0], locs[sta_idx, 0]], 
-							'k-', alpha=0.2)
-		
-		plt.xlabel('Longitude')
-		plt.ylabel('Latitude')
-		plt.title('Checkpoint 3: Station and Source Distribution with Arrivals (Overview)\nMagnitudes shown for first 5 sources')
-		plt.legend()
-		plt.grid(True)
-		plt.savefig(f'{checkpoint_dir}/3_stations_sources_arrivals_overview.png')
-		plt.close()
-
-		# Plot arrival time distribution
-		plt.figure(figsize=(12, 6))
-		p_arrivals = arrivals[arrivals[:, 4] == 0]
-		s_arrivals = arrivals[arrivals[:, 4] == 1]
-		if len(p_arrivals) > 0:
-			plt.hist(p_arrivals[:, 0], bins=50, alpha=0.5, label='P arrivals')
-		if len(s_arrivals) > 0:
-			plt.hist(s_arrivals[:, 0], bins=50, alpha=0.5, label='S arrivals')
-		plt.xlabel('Time')
-		plt.ylabel('Count')
-		plt.title('Checkpoint 4: Arrival Time Distribution')
-		plt.legend()
-		plt.grid(True)
-		plt.savefig(f'{checkpoint_dir}/4_arrival_times.png')
-		plt.close()
-	
-	# ============================================================================
-	# MISSED PICKS SIMULATION (DETECTION FAILURES)
-	# ============================================================================
 	# s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
-
-	# Calculate time-dependent miss rates for each arrival
-	# Combine station-specific and global miss rates
-	t_inc = np.floor(arrivals[:,3]/dt).astype('int')  # Time bin for each arrival
+	t_inc = np.floor(arrivals[:,3]/dt).astype('int')
 	p_miss_rate = 0.5*station_miss_rate[arrivals[:,1].astype('int'), t_inc] + 0.5*global_miss_rate[t_inc]
 
-	# Apply miss pick fraction scaling (if specified)
-	if miss_pick_fraction is not False: ## Scale random delete rates to min and max values (times inflate)
-		# Scale miss rates to specified fraction range with some inflation
-		inflate = 1.5
-		p_miss_rate1 = np.copy(p_miss_rate)
-		low_val, high_val = np.quantile(p_miss_rate, 0.1), np.quantile(p_miss_rate, 0.9)
-		p_miss_rate1 = (p_miss_rate - low_val)/(high_val - low_val) # approximate min-max normalization with quantiles
-		p_miss_rate1 = inflate*p_miss_rate1*(miss_pick_fraction[1] - miss_pick_fraction[0]) + miss_pick_fraction[0]
-		p_miss_rate1 = p_miss_rate1 + 0.5*(np.random.rand() - 0.5)*(miss_pick_fraction[1] - miss_pick_fraction[0]) ## Random shift of 25% of range
-		# Apply differential S-wave missing (s_extra parameter)
-		idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < p_miss_rate1)[0]
-		print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
-	else:
-		## Previous delete random pick version
-		idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < dt*p_miss_rate/T)[0]
-		print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
+	skip_default_miss_pick = True ## Note: skipping default miss pick behavior, since this is moved to generator.
+	## Note: a downside of this is it does not use the correlated global/station specific time dependent miss pick
+	## values saved in p_miss_rate1. 
+	## It might be good to sample the per-event miss pick rates partially with respect to the gobal p_miss_rate1 values
+	if skip_default_miss_pick == False:
+		if miss_pick_fraction is not False: ## Scale random delete rates to min and max values (times inflate)
+			inflate = 1.5
+			p_miss_rate1 = np.copy(p_miss_rate)
+			low_val, high_val = np.quantile(p_miss_rate, 0.1), np.quantile(p_miss_rate, 0.9)
+			p_miss_rate1 = (p_miss_rate - low_val)/(high_val - low_val) # approximate min-max normalization with quantiles
+			p_miss_rate1 = inflate*p_miss_rate1*(miss_pick_fraction[1] - miss_pick_fraction[0]) + miss_pick_fraction[0]
+			p_miss_rate1 = p_miss_rate1 + 0.5*(np.random.rand() - 0.5)*(miss_pick_fraction[1] - miss_pick_fraction[0]) ## Random shift of 25% of range
+			idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < p_miss_rate1)[0]
+			print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
+		else:
+			## Previous delete random pick version
+			idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < dt*p_miss_rate/T)[0]
+			print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
 
-	# Remove missed picks from arrivals
-	# arrivals = np.delete(arrivals, idel, axis = 0) # NO MISS PICK BE CAREFUL
+		arrivals = np.delete(arrivals, idel, axis = 0)
+
 	n_events = len(src_times)
-
-	# ============================================================================
-	# FALSE PICK GENERATION (NOISE AND ARTIFACTS)
-	# ============================================================================
 	
-	# Type 1: Coda wave false picks (secondary phases from real earthquakes)
 	icoda = np.where(np.random.rand(arrivals.shape[0]) < coda_rate)[0]
 	if len(icoda) > 0:
-		# Generate false picks in coda window after real arrivals
 		false_coda_arrivals = np.random.rand(len(icoda))*(coda_win[1] - coda_win[0]) + coda_win[0] + arrivals[icoda,0] + arrivals[icoda,3]
-		false_coda_arrivals = np.concatenate((
-			false_coda_arrivals.reshape(-1,1),           # Arrival time
-			arrivals[icoda,1].reshape(-1,1),             # Same station as real pick
-			-1.0*np.ones((len(icoda),1)),                # Source index = -1 (false)
-			np.zeros((len(icoda),1)),                    # Origin time = 0
-			-1.0*np.ones((len(icoda),1))                 # Phase type = -1 (false)
-		), axis = 1)
+		false_coda_arrivals = np.concatenate((false_coda_arrivals.reshape(-1,1), arrivals[icoda,1].reshape(-1,1), -1.0*np.ones((len(icoda),1)), np.zeros((len(icoda),1)), -1.0*np.ones((len(icoda),1))), axis = 1)
 		arrivals = np.concatenate((arrivals, false_coda_arrivals), axis = 0)
-		
+
 	## Base false events
-	# Type 2: Random false picks (noise, cultural signals, etc.)
-	# Combine station-specific and global false pick rates
 	station_false_rate_eval = 0.5*station_false_rate + 0.5*global_false_rate
+
+	# if use_false_ratio_value == True: ## If true, use the ratio of real events to guide false picks
+	# 	station_false_rate_eval = max_false_events*np.mean(miss_pick_fraction)*station_false_rate_eval*(global_event_rate.mean()/station_false_rate_eval.mean()) # station_false_rate_eval
 
 	use_clean_data_interval = True
 	if use_clean_data_interval == True:
@@ -1215,32 +1110,20 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 		interval_length = int(np.floor(station_false_rate_eval.shape[1]*frac_length_sample))
 		ichoose_start = np.random.choice(station_false_rate_eval.shape[1] - interval_length)
 		station_false_rate_eval[:,ichoose_start:(ichoose_start + interval_length)] = 0.0 ## Set false pick rate to zero during this interval, for all stations
-
-	# if use_false_ratio_value == True: ## If true, use the ratio of real events to guide false picks
-	# 	station_false_rate_eval = max_false_events*np.mean(miss_pick_fraction)*station_false_rate_eval*(global_event_rate.mean()/station_false_rate_eval.mean()) # station_false_rate_eval
-	# Generate false picks using Poisson process
+	
+	
 	vals = np.random.poisson(dt*station_false_rate_eval/T) # This scaling, assigns to each bin the number of events to achieve correct, on averge, average
-	
+
 	# How to speed up this part?
-	# Extract times and stations for false picks
-	i1, i2 = np.where(vals > 0)  # Station and time indices with false picks
-	v_val, t_val = vals[i1,i2], tsteps[i2]  # Number of picks and time bins
-	false_times = np.repeat(t_val, v_val) + np.random.rand(vals.sum())*dt  # Random times within bins
-	false_indices = np.hstack([k*np.ones(vals[k,:].sum()) for k in range(n_sta)])  # Station indices
+	i1, i2 = np.where(vals > 0)
+	v_val, t_val = vals[i1,i2], tsteps[i2]
+	false_times = np.repeat(t_val, v_val) + np.random.rand(vals.sum())*dt
+	false_indices = np.hstack([k*np.ones(vals[k,:].sum()) for k in range(n_sta)])
 	n_false = len(false_times)
-	
-	# Create false arrival array
-	false_arrivals = np.concatenate((
-		false_times.reshape(-1,1),                       # Arrival times
-		false_indices.reshape(-1,1),                     # Station indices
-		-1.0*np.ones((n_false,1)),                       # Source index = -1 (false)
-		np.zeros((n_false,1)),                           # Origin time = 0
-		-1.0*np.ones((n_false,1))                        # Phase type = -1 (false)
-	), axis = 1) 
+	false_arrivals = np.concatenate((false_times.reshape(-1,1), false_indices.reshape(-1,1), -1.0*np.ones((n_false,1)), np.zeros((n_false,1)), -1.0*np.ones((n_false,1))), axis = 1)
 	arrivals = np.concatenate((arrivals, false_arrivals), axis = 0)
-	
-    # n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
-	# Type 3: Coherent noise spikes (simultaneous false picks across multiple stations)
+
+	# n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
 	if int(max_num_spikes*T/(3600*24)) > 0:
 		n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
 		n_spikes_extent = np.random.randint(int(np.floor(n_sta*0.5)), high = n_sta, size = n_spikes) ## This many stations per spike
@@ -1253,13 +1136,8 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 			arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) ## Concatenate on spikes
 
 
-	# ============================================================================
-	# NOISE ADDITION AND PICK TIME PERTURBATION
-	# ============================================================================
-	
-    # use_stable_association_labels = True
- ## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
-	# Add realistic noise to arrival times and handle excessive noise
+	# use_stable_association_labels = True
+	## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
 	iexcess_noise = []
 	if use_stable_association_labels == True: ## It turns out association results are fairly sensitive to this choice
 		# thresh_noise_max = 2.5 # ratio of sig_t*travel time considered excess noise
@@ -1279,43 +1157,31 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 
 	
-	# ============================================================================
-	# ACTIVE SOURCE DETERMINATION
-	# ============================================================================
-	
-	# Determine which sources generated enough picks to be considered "active"
-	# This simulates the fact that small/distant earthquakes may not be detectable
-	source_tree_indices = cKDTree(arrivals[:,2].reshape(-1,1))  # Tree for source indices
-	lp = source_tree_indices.query_ball_point(np.arange(n_events).reshape(-1,1), r = 0)  # Find picks for each source
-	lp_backup = [lp[j] for j in range(len(lp))]  # Backup for later use
-	
-	# Count unique stations that detected each source
+	## Check which sources are active
+	source_tree_indices = cKDTree(arrivals[:,2].reshape(-1,1))
+	lp = source_tree_indices.query_ball_point(np.arange(n_events).reshape(-1,1), r = 0)
+	lp_backup = [lp[j] for j in range(len(lp))]
 	n_unique_station_counts = np.array([len(np.unique(arrivals[lp[j],1])) for j in range(n_events)])
+	cnt_p_srcs = np.array([len(np.where(arrivals[lp[j],4] == 0)[0]) for j in range(n_events)])
+	cnt_s_srcs = np.array([len(np.where(arrivals[lp[j],4] == 1)[0]) for j in range(n_events)])
+	# active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] # subset of sources
+	active_sources = np.where(((n_unique_station_counts >= min_sta_arrival)*((cnt_p_srcs + cnt_s_srcs) >= min_pick_arrival)))[0] # subset of sources
+
 	
-	# Sources are "active" if detected by minimum number of stations
-	active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] #subset of source
 	src_times_active = src_times[active_sources]
 
 	## If true, return only the synthetic arrivals
-	# Early return option: just return raw synthetic data without training processing
 	if return_only_data == True:
 		srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitude.reshape(-1,1)), axis = 1)
 		data = [arrivals, srcs, active_sources]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
 		return data
 	
-	# ============================================================================
-	# PHASE TYPE PROCESSING AND PERTURBATION
-	# ============================================================================
-	
-	# Determine which sources are in the interior region (for training labels)
 	inside_interior = ((src_positions[:,0] < lat_range[1])*(src_positions[:,0] > lat_range[0])*(src_positions[:,1] < lon_range[1])*(src_positions[:,1] > lon_range[0]))
 
-	# Separate real and false picks for phase type assignment
-	iwhere_real = np.where(arrivals[:,-1] > -1)[0]  # Real picks (phase type >= 0)
-	iwhere_false = np.delete(np.arange(arrivals.shape[0]), iwhere_real)  # False picks
+	iwhere_real = np.where(arrivals[:,-1] > -1)[0]
+	iwhere_false = np.delete(np.arange(arrivals.shape[0]), iwhere_real)
 	phase_observed = np.copy(arrivals[:,-1]).astype('int')
 
-	# Assign random phase types to false picks (since they don't have real phases)
 	if len(iwhere_false) > 0: # For false picks, assign a random phase type
 		phase_observed[iwhere_false] = np.random.randint(0, high = 2, size = len(iwhere_false))
 	if len(iexcess_noise) > 0:
@@ -1323,26 +1189,22 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 
 	perturb_phases = True # For true picks, randomly flip a fraction of phases
 	if (len(phase_observed) > 0)*(perturb_phases == True):
-		n_switch = int(np.random.rand()*(0.2*len(iwhere_real))) # switch up to 20% phases
+		frac_perturb_interval = [0.1, 0.3]
+		frac_perturb_sample = np.random.rand()*(frac_perturb_interval[1] - frac_perturb_interval[0]) + frac_perturb_interval[0]
+		if len(iexcess_noise) > 0:
+			iwhere_real = np.sort(np.array(list(set(iwhere_real).union(iz[iexcess_noise])))).astype('int')
+		n_switch = int(np.random.rand()*(frac_perturb_sample*len(iwhere_real))) # switch up to 20% phases
 		iflip = np.random.choice(iwhere_real, size = n_switch, replace = False)
-		phase_observed[iflip] = np.mod(phase_observed[iflip] + 1, 2)  # Flip P<->S
-	
-	# Set up spatial kernel for source probability calculations
+		phase_observed[iflip] = np.mod(phase_observed[iflip] + 1, 2)
 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
-
-	# ============================================================================
-	# TRAINING BATCH TIME SAMPLING
-	# ============================================================================
 	
-	# Generate time samples for training batches
+
 	if use_sources == False:
-		# Random uniform sampling across entire time period
-		time_samples = np.sort(np.random.rand(n_batch)*T)
+		time_samples = np.sort(np.random.rand(n_batch)*T) ## Uniform
+
 	elif use_sources == True:
-		# Sample times near active earthquake sources (more realistic training)
 		time_samples = src_times_active[np.sort(np.random.choice(len(src_times_active), size = n_batch))]
 
-	# Apply preferential sampling (focus on earthquake times with some noise)
 	l_src_times_active = len(src_times_active)
 	if (use_preferential_sampling == True)*(len(src_times_active) > 1): # Should the second condition just be (len(src_times_active) > 0) ?
 		for j in range(n_batch):
@@ -1406,23 +1268,13 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 		Grid_indices.append(i0)
 		Sample_indices.append(np.arange(len(ind_sta_select)*n_spc) + sc)
 		sc += len(Sample_indices[-1])
-		
-		# Checkpoint 5: Selected stations for this batch
-		print(f"Checkpoint 5: Selected stations for batch {i}")
-		if plot_on and i == 0:  # Only plot for first batch to avoid too many plots
-			plt.figure(figsize=(12, 8))
-			plt.scatter(locs[:, 1], locs[:, 0], c='lightblue', marker='^', label='All Stations', s=50, alpha=0.5)
-			plt.scatter(locs[ind_sta_select, 1], locs[ind_sta_select, 0], c='blue', marker='^', label='Selected Stations', s=100)
-			plt.xlabel('Longitude')
-			plt.ylabel('Latitude')
-			plt.title(f'Checkpoint 5: Selected Stations for Batch {i} ({len(ind_sta_select)}/{n_sta} stations)')
-			plt.legend()
-			plt.grid(True)
-			plt.savefig(f'{checkpoint_dir}/5_selected_stations_batch_{i}.png')
-			plt.close()
 
+		tree_subset = cKDTree(ind_sta_select.reshape(-1,1))
 		active_sources_per_slice = np.where(np.array([len( np.array(list(set(ind_sta_select).intersection(np.unique(arrivals[lp_backup[j],1])))) ) >= min_sta_arrival for j in lp_src_times_all[i]]))[0]
-
+		cnt_per_slice_p = np.array([len(np.where((arrivals[lp_backup[j],4] == 0)*(tree_subset.query(arrivals[lp_backup[j],1].reshape(-1,1))[0] == 0))[0]) for j in lp_src_times_all[i]])
+		cnt_per_slice_s = np.array([len(np.where((arrivals[lp_backup[j],4] == 1)*(tree_subset.query(arrivals[lp_backup[j],1].reshape(-1,1))[0] == 0))[0]) for j in lp_src_times_all[i]])
+		active_sources_per_slice = np.array(list(set(active_sources_per_slice).intersection(np.where((cnt_per_slice_p + cnt_per_slice_s) >= min_pick_arrival)[0]))).astype('int')
+		
 		active_sources_per_slice_l.append(active_sources_per_slice)
 
 	Trv_subset_p = np.vstack(Trv_subset_p)
@@ -1484,7 +1336,6 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 	else:
 		# rel_t_s1 = np.zeros(rel_t_s.shape)
 		rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
-		
 		
 
 	Inpts = []
@@ -1663,25 +1514,13 @@ log_amp_sta_distb=None, log_amp_sta_distb_diff=None, srcs=None, mags=None):
 		Lbls.append(lbls_grid)
 		Lbls_query.append(lbls_query)
 
-	# ============================================================================
-	# FINAL DATA ASSEMBLY AND RETURN
-	# ============================================================================
-	
-	# Assemble source catalog with positions, times, and magnitudes
 	srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitude.reshape(-1,1)), axis = 1)
 	data = [arrivals, srcs, active_sources]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
 
-	# Print timing information if requested
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
 
-	# Return comprehensive training data structure:
-	# - Input features: [Inpts, Masks, X_fixed, X_query, Locs, Trv_out]
-	# - Labels: [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs]  
-	# - Graph structures: [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l]
-	# - Raw data: arrivals, sources, active source indices
 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
-
 
 def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
 
@@ -1697,68 +1536,6 @@ def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_
 		lbl_trgt[:,iz,1] = d*torch.Tensor((source_pick[iz,0] == 1)).to(device).float()
 
 	return lbl_trgt
-
-def sample_picks_mags(event, W=None):
-	Trgt = []
-	source = ftrns1(np.array(event['srcs_trv']).reshape(1,-1))[0,0:2]
-
-	# Extract picks
-	picks_p = event['Picks_P_perm'] 
-	picks_s = event['Picks_S_perm'] 
-	
-	# Get station indices
-	if len(picks_p) > 0:
-		p_stations = np.unique(picks_p[:, 1]).astype(int)
-	else:
-		p_stations = np.array([])
-		
-	if len(picks_s) > 0:
-		s_stations = np.unique(picks_s[:, 1]).astype(int)
-	else:
-		s_stations = np.array([])
-	
-	p_only_stations = list(set(p_stations) - set(s_stations))
-	s_only_stations = list(set(s_stations) - set(p_stations))
-	both_stations = list(set(p_stations) & set(s_stations))
-	all_detecting_stations = list(set(p_stations) | set(s_stations))
-
-	## Inertia + Moran's I using the calculate_inertia function of the data_generation_utils
-	# After iunique, lunique, locs_use, etc.
-
-	# Find all picks for this source
-	locs_use = event['locs_use']
-	locs_geographic = ftrns1(locs_use)[:,0:2]  # Convert from local coords to lat/lon/depth + projection to 2D
-	inertia = calculate_inertia(locs_geographic, all_detecting_stations)
-
-	if len(all_detecting_stations) > 1:
-		# Create binary selection vector (1 for detecting stations, 0 for others)
-		detecting_mask = np.zeros(len(locs_geographic), dtype=bool)
-		detecting_mask[all_detecting_stations] = True
-		# Build knn weights matrix for all stations
-		# Build knn weights matrix for all stations
-		# k_neighbors = min(8, len(locs_geographic) - 1)  # Ensure k doesn't exceed available stations
-		# tensor_knn = torch.Tensor(ftrns1(locs_use)).to(device)/1000.0
-		# edges_stations = remove_self_loops(knn(tensor_knn, tensor_knn, k=k_neighbors))[0].flip(0).contiguous().long()
-		# dist_vals = torch.norm(tensor_knn[edges_stations[0]] - tensor_knn[edges_stations[1]], dim=1)
-		# # val_min = scatter(dist_vals.reshape(-1, 1))
-		# kernel_sta = 3.0*scatter(dist_vals.reshape(-1, 1), edges_stations[1], dim=0, reduce='min').mean()
-		# edges_W = torch.exp(-0.5 * ((dist_vals)**2)/(kernel_sta**2))
-		# edges_W = torch.ones(dist_vals.shape[0]).to(device)
-		# W = np.zeros((len(locs_use), len(locs_use)))
-		# W[edges_stations[1].cpu().detach().numpy(), edges_stations[0].cpu().detach().numpy()] = edges_W.cpu().detach().numpy()
-		# morans_i = morans_I_binary(detecting_mask, W)
-		# print("Edges_W: ", edges_W)
-		# print("W: ", W)
-		# print("Morans_I: ", morans_i)
-		if W is None:
-			morans_i, W = morans_I_filtered(locs_geographic, detecting_mask, source=source)
-		else:
-			W_use = W[event['ind_use']][:, event['ind_use']]  # Subset W to only include detecting stations
-			morans_i, _ = morans_I_filtered(locs_geographic, detecting_mask, W_use, source=source)
-	else:	
-		morans_i = 0.0
-
-	return inertia, morans_i, len(p_stations), len(s_stations), W
 
 def sample_picks(P, locs_abs, t_sample_win = 120.0, windows = [40e3, 150e3, 300e3], t_win_ball = [10.0, 15.0, 25.0]): # windows = [40e3, 150e3, 300e3]
 
@@ -1848,7 +1625,7 @@ def sample_picks(P, locs_abs, t_sample_win = 120.0, windows = [40e3, 150e3, 300e
 
 			ipick = np.random.choice(upper_fifth_percentile_stas) ## Pick random station
 			ifind = np.where(pw_dist[ipick,:] < windows[k])[0] ## Find other stations within window distance
-			# ifind_outside = np.delete(np.arange(locs_use.shape[0]), ifind, axis = 0) P, locs, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_winide window distance
+			# ifind_outside = np.delete(np.arange(locs_use.shape[0]), ifind, axis = 0) ## Stations outside window distance
 
 			## Choose origin time focused on the high pick count time intervals
 			t0 = bins_in_time[np.random.choice(upper_fifth_percentile)] + np.random.rand()*t_sample_win
@@ -1903,202 +1680,59 @@ def sample_picks(P, locs_abs, t_sample_win = 120.0, windows = [40e3, 150e3, 300e
 			ifind_ball = np.array(tree_times.query_ball_point(np.array([P[ichoose,0]]).reshape(-1,1) + t_win_ball[k]/2.0 + 0.1, r = t_win_ball[k]/2.0)[0]).astype('int')
 			min_sta_dist = (sta_ind == P[ifind_ball,1]).sum()
 			Num_adjacent_picks[k].append(min_sta_dist)
-	
+
 	Num_adjacent_picks = np.vstack([np.quantile(Num_adjacent_picks[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Num_adjacent_picks))])
-	Trgts.append(Num_adjacent_picks) # Real pick data (once for each file, results stored in Trgts_list) # Real pick data (once for each file, results stored in Trgts_list)
-	
+	Trgts.append(Num_adjacent_picks)
+
+	## [6] Possibly correlation of pick traces between nearby stations
+
 	return Trgts
 
-def evaluate_bayesian_objective_catalog(x, Trgts_list, events, prob_vector, n_random = 300, return_vals = False, W=None):
+def evaluate_bayesian_objective(x, n_random = 30, t_sample_win = 120.0, windows = [40e3, 150e3, 300e3], t_win_ball = [10.0, 15.0, 25.0], return_vals = False): # 	windows = [40e3, 150e3, 300e3], 	
 
-	# Update global radial Cholesky parameters
-	radial_cholesky_params['scale_factor'] = x[0]
-	radial_cholesky_params['sigma_noise'] = x[1]
-	radial_cholesky_params['sigma_radial_divider'] = x[2]
-	radial_cholesky_params['threshold_logistic'] = x[3]
-	radial_cholesky_params['lambda_corr'] = x[4]
-	radial_cholesky_params['sigma_radial_p_factor'] = x[5]
-	radial_cholesky_params['sigma_radial_s_factor'] = x[6]
-	radial_cholesky_params['angle_perturbation'] = x[7]
-	radial_cholesky_params['length_perturbation'] = x[8], x[9]
-			
-	pdist_p, pdist_s = load_distance_magnitude_model(n_mag_ver=1, use_softplus=True)
 
-	Trgts = []
+	training_params_2[0] = x[0] # spc_random
+	training_params_2[2] = x[1] # spc_thresh_rand
+	training_params_2[4] = x[2] # coda_rate
+	training_params_2[5][1] = x[3] # coda_win
 
-	indices_selected = np.sort(np.random.choice(np.arange(len(Trgts_list)), p=prob_vector, size=n_random))
-	print(f"Indices selected: {indices_selected}")
-	print(f"Size of indices_selected: {len(indices_selected)}")
-	res = []
-	mag_bins = {}
-	global_time = time.time()
-	for i in indices_selected:
-		generate_time = time.time()
-		event = events[i]
-		magnitude = event['mag_trv']
-		locs_use = event['locs_use']
-		locs_geographic = ftrns1(locs_use)[:,0:2]  # Convert from local coords to lat/lon/depth + projection to 2D
-		center = ftrns1(np.array(event['srcs_trv']).reshape(1,-1))[0,0:2]
-		# print(f"Generating data with Magnitude: {magnitude} and Source position: {event['srcs_trv'][0:2]}")
-		# print(f"Center: {center}")
-
-		p = radial_cholesky_params['p_exponent']  # Use optimized value
-
-		sigma_radial_p = radial_cholesky_params['sigma_radial_p_factor'] * pdist_p(magnitude) / radial_cholesky_params['sigma_radial_divider']  # P-wave detection radius
-		sigma_radial_s = radial_cholesky_params['sigma_radial_s_factor'] * pdist_s(magnitude) / radial_cholesky_params['sigma_radial_divider']  # S-wave detection radius
-		
-		# scaling factor for the radial function - use optimized value
-		scale_factor = radial_cholesky_params['scale_factor']
-
-		# Covariance matrix/kernel distances sigma_radial, controls the spreading of the cluster - use optimized value directly
-		sigma_noise = radial_cholesky_params['sigma_noise']
-
-		# Logistic function sigma_radial, controls the roughness of cluster border - use optimized value
-		threshold_logistic = radial_cholesky_params['threshold_logistic']
-		max_value_logistic = 0.99 # < 1, the maximum value of the logistic function for the threshold, don't tune this.
-		sigma_logistic = - threshold_logistic / np.log(1/max_value_logistic - 1) 
-
-		# Mixing function lambda, controls the correlation between radial function and correlated noise - use optimized value
-		lambda_corr = radial_cholesky_params['lambda_corr']
-
-		k_neighbours = radial_cholesky_params['k_neighbours']  # Use from params (though this one isn't optimized)
-
-		# Generate P-wave detections
-		experiment_result_p = run_single_experiment(
-			points=locs_geographic,  # Use 2D station locations as the spatial grid
-			sigma_radial=sigma_radial_p,
-			sigma_noise=sigma_noise,
-			sigma_logistic=sigma_logistic,
-			lambda_corr=lambda_corr,
-			p=p,
-			scale_factor=scale_factor,
-			center=center
-		)
-		# Save the noise
-		noise_p = experiment_result_p['noise']
-
-		angle_p, length1_p, length2_p = experiment_result_p['parameters']['angle'], experiment_result_p['parameters']['length1'], experiment_result_p['parameters']['length2']
-		angle_s = (angle_p + np.random.uniform(-radial_cholesky_params['angle_perturbation'], radial_cholesky_params['angle_perturbation'])) % (2*np.pi)
-		length1_s = length1_p * np.random.uniform(radial_cholesky_params['length_perturbation'][0], radial_cholesky_params['length_perturbation'][1])
-		length2_s = length2_p * np.random.uniform(radial_cholesky_params['length_perturbation'][0], radial_cholesky_params['length_perturbation'][1])
-
-		# Generate S-wave detections (with different parameters)
-		experiment_result_s = run_single_experiment(
-			points=locs_geographic,  # Use 2D station locations as the spatial grid
-			sigma_radial=sigma_radial_s,
-			sigma_noise=sigma_noise,
-			sigma_logistic=sigma_logistic,
-			lambda_corr=lambda_corr,
-			p=p,
-			scale_factor=scale_factor,
-			center=center,
-			angle=angle_s,
-			length1=length1_s,
-			length2=length2_s,
-			noise=noise_p
-		)
-		exp_event = {
-				'srcs_trv': event['srcs_trv'],
-				'ind_use': event['ind_use'],
-				'locs_use': locs_use,
-				'Picks_P_perm': np.hstack([np.zeros((len(experiment_result_p['final_idx']), 1)), np.array(experiment_result_p['final_idx']).reshape(-1,1)]), # Arrival time 0 !!
-				'Picks_S_perm': np.hstack([np.zeros((len(experiment_result_s['final_idx']), 1)), np.array(experiment_result_s['final_idx']).reshape(-1,1)]) # Arrival time 0 !!
-		}
-		print(f"Time taken for generating event {i}: {time.time() - generate_time}")
-		sample_time = time.time()
-		Trgt = sample_picks_mags(exp_event, W)[:4]
-		print(f"Time taken for sampling event {i}: {time.time() - sample_time}")
-		Trgts.append(Trgt) # [inertia, morans_i, p_number, s_number]
-
-		w1, w2, w3, w4 = 1.0, 0.8, 1.0, 1.0
-		res_inertia = w1 * np.clip(np.linalg.norm(Trgts_list[i][0] - Trgt[0])/np.maximum(np.linalg.norm(Trgts_list[i][0]), 1e-5), 0, 3.0)
-		res_morans_i = w2 * np.clip(np.linalg.norm(Trgts_list[i][1] - Trgt[1])/np.maximum(np.linalg.norm(Trgts_list[i][1]), 1e-5), 0, 3.0)
-		res_p_number = w3 * np.clip(np.linalg.norm(Trgts_list[i][2] - Trgt[2])/np.maximum(np.linalg.norm(Trgts_list[i][2]), 1), 0, 3.0)
-		res_s_number = w4 * np.clip(np.linalg.norm(Trgts_list[i][3] - Trgt[3])/np.maximum(np.linalg.norm(Trgts_list[i][3]), 1), 0, 3.0)
-		# print(f"Trgt[{i}]: {Trgt}")
-		# print(f"Trgts_list[{i}]: {Trgts_list[i]}")
-		# print(f"res_event_0: {res_event_0}")
-		# print(f"res_event_1: {res_event_1}")
-		# print(f"Magnitude: {magnitude}")
-		# print(f"Day: {event['Path']}, Id: {event['Id']}")
-		res.append([res_inertia, res_morans_i, res_p_number, res_s_number])
-		if not np.floor(magnitude) in mag_bins:
-			mag_bins[np.floor(magnitude)] = []
-		mag_bins[np.floor(magnitude)].append([res_inertia, res_morans_i, res_p_number, res_s_number])
-	bins_indices = [slice((i)*n_random//10, (i+1)*n_random//10) for i in range(10)]
-	res_bins = [np.median(res[indices], axis = 0) for indices in bins_indices]
-
-	res = np.sum(res_bins)
-	print("res_bins:", res_bins)
-	print("Global residual:", res)
-	print(f"Time taken for evaluating total: {time.time() - global_time}")
-	if return_vals == False:
-		return res
-	else:
-		return res, Trgts, res_bins
-
-def evaluate_bayesian_objective(x, n_random = 100, t_sample_win = 120.0, windows = [40e3, 150e3, 300e3], t_win_ball = [10.0, 15.0, 25.0], return_vals = False): # 	windows = [40e3, 150e3, 300e3], 	
-
-	# if use_radial_cholesky == True:
-	# 	# Radial Cholesky parameter assignment
-	# 	training_params_2[4] = x[0] # coda_rate
-	# 	training_params_2[5][1] = x[1] # coda_win[1]
-
-	# 	training_params_3[2] = x[2] # max_rate_events
-	# 	training_params_3[4] = x[2]*x[3] # max_false_events (absolute value)
-	# 	training_params_3[5][0] = x[5] # miss_pick_fraction[0]
-	# 	training_params_3[5][1] = x[6] # miss_pick_fraction[1]
-
-	# 	# Update global radial Cholesky parameters
-	# 	radial_cholesky_params['scale_factor'] = x[7]
-	# 	radial_cholesky_params['sigma_noise'] = x[8]
-	# 	radial_cholesky_params['sigma_radial_divider'] = x[9]
-	# 	radial_cholesky_params['threshold_logistic'] = x[10]
-	# 	radial_cholesky_params['lambda_corr'] = x[11]
-	# 	radial_cholesky_params['sigma_radial_p_factor'] = x[12]
-	# 	radial_cholesky_params['sigma_radial_s_factor'] = x[13]
-
-	# else:
-	# Traditional distance-based parameter assignment
-	training_params_2[4] = x[0] # coda_rate
-	training_params_2[5][1] = x[1] # coda_win[1]
-
-	training_params_3[1][0] = x[2] # dist_range[0]
-	training_params_3[1][1] = x[3] # dist_range[1]
-	training_params_3[2] = x[4] # max_rate_events
-	training_params_3[4] = x[4]*x[5] # max_false_events (absolute value)
+	training_params_3[1][0] = x[4] # dist_range[0]
+	training_params_3[1][1] = x[5] # dist_range[1]
+	training_params_3[2] = x[6] # max_rate_events
+	training_params_3[3] = x[7] # max_miss_events
+	training_params_3[4] = x[6]*x[8] # max_false_events (input of false rate to generate is an absolute number, not the ratio, which is x[8])
+	training_params_3[5][0] = x[9] # miss_pick_fraction[0]
+	training_params_3[5][1] = x[10] # miss_pick_fraction[0]
 
 	arrivals = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, return_only_data = True)[0]
 
 	P = np.copy(arrivals)
 
 	Trgts = sample_picks(P, locs, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win)
-	res1, res2, res3, res4, res5, res6, res7 = 0, 0, 0, 0, 0, 0, 0
+
+	res1, res2, res3, res4, res5 = 0, 0, 0, 0, 0
 
 	for n in range(n_random):
+
 		ichoose = np.random.choice(len(Trgts_list))
-		Trgts_choose = Trgts_list[ichoose]
 
-		res1 += np.linalg.norm(Trgts[0] - Trgts_choose[0])/np.maximum(np.linalg.norm(Trgts_choose[0]), 1e-5)/n_random
-		res2 += np.linalg.norm(Trgts[1] - Trgts_choose[1])/np.maximum(np.linalg.norm(Trgts_choose[1]), 1e-5)/n_random
-		res3 += np.linalg.norm(Trgts[2] - Trgts_choose[2])/np.maximum(np.linalg.norm(Trgts_choose[2]), 1e-5)/n_random
-		res4 += np.linalg.norm(Trgts[3] - Trgts_choose[3])/np.maximum(np.linalg.norm(Trgts_choose[3]), 1e-5)/n_random
-		res5 += np.linalg.norm(Trgts[4] - Trgts_choose[4])/np.maximum(np.linalg.norm(Trgts_choose[4]), 1e-5)/n_random
+		res1 += np.linalg.norm(Trgts[0] - Trgts_list[ichoose][0])/np.maximum(np.linalg.norm(Trgts_list[ichoose][0]), 1e-5)/n_random
+		res2 += np.linalg.norm(Trgts[1] - Trgts_list[ichoose][1])/np.maximum(np.linalg.norm(Trgts_list[ichoose][1]), 1e-5)/n_random
+		res3 += np.linalg.norm(Trgts[2] - Trgts_list[ichoose][2])/np.maximum(np.linalg.norm(Trgts_list[ichoose][2]), 1e-5)/n_random
+		res4 += np.linalg.norm(Trgts[3] - Trgts_list[ichoose][3])/np.maximum(np.linalg.norm(Trgts_list[ichoose][3]), 1e-5)/n_random
+		res5 += np.linalg.norm(Trgts[4] - Trgts_list[ichoose][4])/np.maximum(np.linalg.norm(Trgts_list[ichoose][4]), 1e-5)/n_random
 
-	res = res1 + res2 + res3 + res4 + res5  ## Residual is average relative residual over all five objectives
-	res_list = [res1, res2, res3, res4, res5]
+	res = res1 + res2 + res3 + res4 + res5 ## Residual is average relative residual over all five objectives
 
-	print(f"Calculated loss: {res}")
-	print(f"Residuals:")
-	print(f"Pick rate residual: {res1}")
-	print(f"Spatial ratio (random) residual: {res2}")
-	print(f"Spatial ratio (optimal) residual: {res3}")
-	print(f"Coda rate residual: {res4}")
-	print(f"Number of adjacent picks residual: {res5}")
+	print(res)
+
 	if return_vals == False:
+
 		return res
+
 	else:
-		return res, Trgts, arrivals, res_list
+
+		return res, Trgts, arrivals
 	
 if config['train_travel_time_neural_network'] == False:
 
@@ -2213,6 +1847,7 @@ loss_func = torch.nn.MSELoss()
 np.random.seed() ## randomize seed
 
 losses = np.zeros(n_epochs)
+val_losses = np.zeros(n_epochs)
 mx_trgt_1, mx_trgt_2, mx_trgt_3, mx_trgt_4 = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
 mx_pred_1, mx_pred_2, mx_pred_3, mx_pred_4 = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
 
@@ -2230,8 +1865,33 @@ if load_training_data == True:
 
 	files_load = glob.glob(path_to_data + '*ver_%d.hdf5'%n_ver_training_data)
 	print('Number of found training files %d'%len(files_load))
+
+	# Add validation split here
+	training_split = 0.9
+	np.random.shuffle(files_load)  # Shuffle HDF5 files
+	split_idx = int(training_split * len(files_load))  # training_split % training, (1-training_split) % validation
+	files_train = files_load[:split_idx]
+	files_val = files_load[split_idx:]
+	files_load = files_train
+	print(f'Training files: {len(files_load)}, Validation files: {len(files_val)}')
+
 	if build_training_data == False:
 		assert(len(files_load) > 0)
+
+## Set Chol parameters
+
+
+## Set Cholesky parameters - adapted to match generator_utils structure
+chol_params = {}
+chol_params['p_exp'] = 4.23546 # Radial function exponent
+chol_params['radial_factor_p'] = 10.0 # P-wave detection radius factor
+chol_params['radial_factor_s'] = 8.5608 # S-wave detection radius factor
+chol_params['miss_pick_rate'] = 0.35 # Miss pick rate (single value)
+chol_params['sigma_noise'] = 150000.0 # Sigma noise for cluster spreading (in meters)
+chol_params['lambda_noise'] = 0.001 # Noise mixing parameter
+chol_params['perturb_factor'] = 0.0069 # Perturbation factor for radius scaling
+
+
 
 if optimize_training_data == True:
 
@@ -2256,23 +1916,10 @@ if optimize_training_data == True:
 			st_load_l.extend(st)
 	print('Loading %d detected files for comparisons'%len(st_load_l))
 
-	# Time window (in seconds) for binning picks when computing pick rate statistics.
-	# Larger values smooth out temporal variations; smaller values may be noisy.
 	t_sample_win = 120.0 ## Bins to count picks in, and focus sampling around
-
-	# Spatial distance thresholds (in meters) for evaluating the ratio of picks within certain distances of a reference station.
-	# These control the spatial clustering metrics; too large or too small can reduce metric sensitivity.
 	windows = [40e3, 150e3, 300e3]
-
-	# Time windows (in seconds) for evaluating the number of picks that occur close together in time (temporal clustering).
-	# These control the temporal clustering metrics; too large or too small can reduce metric sensitivity.
 	t_win_ball = [10.0, 15.0, 25.0]
-
-	# Version number for saving the optimized parameters/results (for file naming/versioning only).
 	n_ver_optimize = 1
-
-	# Maximum number of real data files to use for computing the target statistics.
-	# Too small: statistics may not be representative; too large: computation may be slow.
 	n_max_files = 500
 
 	if len(st_load_l) > n_max_files:
@@ -2289,316 +1936,44 @@ if optimize_training_data == True:
 
 	## Now apply Bayesian optimization to training parameters
 
-	# if use_radial_cholesky != True:
-	# 	# Bounds for radial Cholesky method parameters
-	# 	bounds = [
-	# 		(0.001, 0.3),    # x[0] coda_rate
-	# 		(1.0, 180.0),    # x[1] coda_win[1]
-	# 		(5, 250),        # x[2] max_rate_events
-	# 		(5, 250),        # x[3] max_miss_events
-	# 		(0.2, 5.0),      # x[4] max_false_events ratio
-	# 		(0, 0.25),       # x[5] miss_pick_fraction[0]
-	# 		(0.25, 0.6),     # x[6] miss_pick_fraction[1]
-	# 		(0.8, 1.0),      # x[7] scale_factor
-	# 		(5000, 50000),   # x[8] sigma_noise (in meters)
-	# 		(1, 10),         # x[9] sigma_radial_divider
-	# 		(1, 8),          # x[10] threshold_logistic
-	# 		(0.05, 0.8),     # x[11] lambda_corr
-	# 		(0.5, 2.0),      # x[12] sigma_radial_p_factor
-	# 		(0.5, 2.0)       # x[13] sigma_radial_s_factor
-	# 	]
-		
-	# 	strings = [
-	# 		'coda_rate', 'coda_win[1]', 'max_rate_events', 'max_miss_events', 'max_false_events_ratio',
-	# 		'miss_pick_fraction[0]', 'miss_pick_fraction[1]', 'scale_factor', 
-	# 		'sigma_noise', 'sigma_radial_divider', 'threshold_logistic', 'lambda_corr', 
-	# 		'sigma_radial_p_factor', 'sigma_radial_s_factor'
-	# 	]
-		
-	# Bounds for traditional distance-based method parameters, tight bounds of Ferndale
-	bounds = [(0.01, 0.3),    # x[0] coda_rate
-			(1.0, 20.0),     # x[1] coda_win[1]
-			(5000.0, 20e3),  # x[2] dist_range[0]
-			(20e3, 700e3),   # x[3] dist_range[1]
-			(5, 400),        # x[4] max_rate_events
-			(0.1, 2.0)]      # x[5] max_false_events_ratio
-	
-	strings = [
-		'coda_rate', 'coda_win[1]', 'dist_range[0]', 
-		'dist_range[1]', 'max_rate_events', 'max_false_events_ratio'
-	]
-	test_parameters = False
-	if test_parameters == True:
-		print("Testing parameters.")
-		n_tests = 2
-		pdb.set_trace()
-		x = [training_params_2[4], training_params_2[5][1], training_params_3[1][0], training_params_3[1][1], training_params_3[2], training_params_3[4]/training_params_3[2]]
-		results = [evaluate_bayesian_objective(x, windows=windows, t_win_ball=t_win_ball, t_sample_win=t_sample_win, return_vals=True) for _ in range(n_tests)]
-		results = np.array([np.array(r, dtype=object) for r in results], dtype=object)
-		print(results[:,0])
-		print(f"Res mean: {np.mean(results[:, 0])}")
-		print(f"Res std: {np.std(results[:, 0])}")
+	bounds = [(100.0, 300e3), # spc_random
+	          (100.0, 300e3), # spc_thresh_rand
+	          (0.001, 0.3), # coda_rate
+	          (1.0, 180.0), # coda_win
+	          (5000.0, 149e3), # dist_range[0]
+	          (300e3, 800e3), # dist_range[1]
+	          (5, 250), # max_rate_events
+	          (5, 250), # max_miss_events
+	          (0.2, 5.0), # max_false_events # (5, 350)
+	          (0, 0.25), # miss_pick_fraction[0]
+	          (0.25, 0.6)] # ] # miss_pick_fraction[0]
 
-		raise ValueError("Test done.")
-
-	else:
-		# RANDOM SET = NONE !!!
-		optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
-						bounds,      # the bounds on each dimension of x
-						acq_func="EI",      # the acquisition function
-						n_calls=200,         # the number of evaluations of f
-						n_random_starts=50,  # the number of random initialization points
-						noise='gaussian',       # the noise level (optional)
-						random_state=None, # the random seed
-						initial_point_generator = 'lhs',
-						model_queue_size = 150)
-
-		res, Trgts, arrivals, res_list = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
-		
-		print(f"Final residual: {res}")
-		print(f"Strings: {strings}")
-		print(f"Params: {optimize.x}")
-		print(f"Res bins: {res_list}")
-
-		# Find the latest version number for the output file and increment it ==========
-		import glob
-		latest_ver = 0
-		if use_radial_cholesky == True:
-			pattern = path_to_file + f'Grids/{name_of_project}_optimized_training_data_parameters_ver_*_cholesky.npz'
-		else:
-			pattern = path_to_file + f'Grids/{name_of_project}_optimized_training_data_parameters_ver_*.npz'
-		files = glob.glob(pattern)
-		for f in files:
-			m = re.search(r'_ver_(\d+)', f)
-			if m:
-				v = int(m.group(1))
-				if v > latest_ver:
-					latest_ver = v
-		n_ver_optimize_out = latest_ver + 1
-		# ==========
-
-		if use_radial_cholesky == True:
-			np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d_cholesky_res%.2f.npz' % (name_of_project, n_ver_optimize_out, res), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings, use_radial_cholesky = use_radial_cholesky, res_list = res_list)
-		else:
-			np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d_res%.2f.npz' % (name_of_project, n_ver_optimize_out, res), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings, use_radial_cholesky = use_radial_cholesky, res_list = res_list)
-
-		print('Finished optimized training data')
-
-		# error('Data set optimized; call the training script again to build training data')
-		raise ValueError('Data set optimized; call the training script again to build training data')
-
-elif optimize_hyperparameters == True:
-	# https://scikit-optimize.github.io/stable/auto_examples/bayesian-optimization.html
-	from skopt import gp_minimize
-
-	# Load configuration from YAML
-	with open('process_config.yaml', 'r') as file:
-		process_config = yaml.safe_load(file)
-		n_ver_picks = process_config['n_ver_picks']
-
-	# Find all relevant HDF5 catalog files in the Catalog directory (recursively)
-	catalog_dir = os.path.join(path_to_file, '../CentralCalifornia1/Catalog')
-	pattern1 = os.path.join(catalog_dir, "*/*ver_1.hdf5")
-	pattern2 = os.path.join(catalog_dir, "**/*ver_1.hdf5")
-	catalog_files = glob.glob(pattern1) + glob.glob(pattern2, recursive=True)
-
-	print('Loading %d catalog files for comparisons' % len(catalog_files))
-
-	# Maximum number of real data files to use for computing the target statistics.
-	n_max_days = 500
-	pool_size = float('inf')
-	mag_threshold = 6.0
-	batch_size = 400
-	if len(catalog_files) > n_max_days:
-		ichoose = np.sort(np.random.choice(len(catalog_files), size=n_max_days, replace=False))
-		catalog_files = [catalog_files[j] for j in ichoose]
-
-	log_path = path_to_file + 'Grids/datalog.txt'
-	with open(log_path, "w") as log_file:
-		log_file.write(f"Execution time: {datetime.datetime.now()}\n")
-		log_file.write(f"n_max_days: {n_max_days}\n")
-		log_file.write(f"pool_size: {pool_size}\n")
-		log_file.write(f"mag_threshold: {mag_threshold}\n")
-
-	events = []
-	events_mags = {}
-	W = None
-	for catalog_file in catalog_files:
-		try:
-			with h5py.File(catalog_file, 'r') as z:
-				ind_use = z['ind_use'][:]
-				locs = z['locs'][:]
-				locs_use = z['locs_use'][:]
-				srcs_trv = z['srcs_trv'][:]
-				mag_trv = z['mag_trv'][:]
-				P_perm = z['P_perm'][:]
-				Picks_P = [z['Picks/%d_Picks_P' % j][:] for j in range(len(z['srcs_trv'][:]))]
-				Picks_S = [z['Picks/%d_Picks_S' % j][:] for j in range(len(z['srcs_trv'][:]))]
-				Picks_P_perm = [z['Picks/%d_Picks_P_perm' % j][:] for j in range(len(z['srcs_trv'][:]))]
-				Picks_S_perm = [z['Picks/%d_Picks_S_perm' % j][:] for j in range(len(z['srcs_trv'][:]))]
-				
-				for i in range(len(z['srcs_trv'])):
-					event = {
-						'ind_use': ind_use[:],
-						'locs': locs[:],
-						'locs_use': locs_use[:],
-						'srcs_trv': srcs_trv[i],  # [lat, lon, depth, time]
-						'mag_trv': mag_trv[i],
-						'P_perm': P_perm[i],
-						'Picks_P': Picks_P[i],
-						'Picks_S': Picks_S[i],
-						'Picks_P_perm': Picks_P_perm[i],
-						'Picks_S_perm': Picks_S_perm[i],
-						'Path': catalog_file,
-						'Id': i
-						}
-					if W is None:
-						locs_geographic = ftrns1(locs)[:,0:2]  # Convert from local coords to lat/lon/depth + projection to 2D
-						W = compute_W(locs_geographic)
-			
-					inertia, morans_i, p_number, s_number, _ = sample_picks_mags(event, W)
-
-					event['inertia'] = inertia
-					event['morans_i'] = morans_i
-					event['p_number'] = p_number
-					event['s_number'] = s_number
-					if np.floor(mag_trv[i]) not in events_mags or len(events_mags[np.floor(mag_trv[i])]) < pool_size:
-						if np.floor(mag_trv[i]) not in events_mags:
-							events_mags[np.floor(mag_trv[i])] = []
-							events_mags[np.floor(mag_trv[i])].append(event)
-							events.append(event)
-						
-						else:
-							mag_bin = events_mags[np.floor(mag_trv[i])]
-							mean_inertia = np.mean([mag_bin[k]['inertia'] for k in range(len(mag_bin))])
-							rel_diff = np.linalg.norm(inertia - mean_inertia)/np.linalg.norm(mean_inertia)
-							if len(mag_bin) < 10 or not (rel_diff > mag_threshold) :
-								events_mags[np.floor(mag_trv[i])].append(event)
-								events.append(event)
-							else:
-								print("BAD DATA")
-								print(f"Path: {event['Path']} Id: {event['Id']}")
-								with open(log_path, "a") as log_file:
-									log_file.write(f"Path: {event['Path']} Id: {event['Id']}\n")
-											
-		except Exception as e:
-			print(f"Error loading catalog file {catalog_file}: {e}")
-			with open(log_path, "a") as log_file:
-				log_file.write(f"Error loading catalog file {catalog_file}: {e}\n")
-			
-		print(f'Loaded {len(events)} events from {catalog_file}')
-	
-	# import matplotlib.pyplot as plt
-	# keys = sorted(events_mags.keys())
-	# counts = [len(events_mags[k]) for k in keys]
-	# plt.figure(figsize=(8, 4))
-	# plt.bar(keys, counts, align='center', alpha=0.7)
-	# plt.xlabel('Magnitude (bin)')
-	# plt.ylabel('Nombre d\'événements')
-	# plt.title('Répartition des événements par bin de magnitude')
-	# plt.xticks(keys)
-	# plt.tight_layout()
-	# plt.savefig('visualizations/magnitude_distribution.png')
-	# plt.close()
-
-	events.sort(key=lambda x: x['mag_trv']) # Sort events by magnitude
-
-	Trgts_list = np.array([[event['inertia'], event['morans_i'], event['p_number'], event['s_number']] for event in events])
-	mags = np.array([event['mag_trv'] for event in events])
-	# max_mag, min_mag = np.max(mags), np.min(mags)
-	# b = 1.0
-	# prob_vect = np.array([(mags[i]-min_mag)/(max_mag - min_mag) for i in range(len(mags))]) + b
-	# prob_vect = prob_vect/np.sum(prob_vect)
-	mag_bin = 0.5 ## Set magnitude bin
-	mag_vals = np.copy(mags) ## Magnitudes of catalog (Copy the magnitudes here)
-
-	mag_range = np.minimum((mag_vals.max() - mag_vals.min())/4.0, mag_bin)
-	mag_bins = np.arange(mag_vals.min(), mag_vals.max() + mag_bin, mag_bin)
-	ip = cKDTree(mag_vals.reshape(-1,1)).query_ball_point(mag_bins.reshape(-1,1) + mag_bin/2.0, r = mag_bin/2.0)
-	prob_vec = (-1.0*np.ones(len(mag_vals)))
-	for j in ip: prob_vec[j] = (len(j) > 0)*(1.0/np.maximum(1.0, len(j)))
-	prob_vec = prob_vec/prob_vec.sum()
-	assert(prob_vec.min() > 0)
-	
-	nums = [1000, 10000, int(1e5)] ## Make plots of sampled magnitudes over different amount of samples
-	fig, ax = plt.subplots(1,len(nums), sharex = True)
-	for inc, n in enumerate(nums):
-		sample_inds = np.random.choice(len(mags), p = prob_vec, size = n)
-		sample_mags = mags[sample_inds]
-		ax[inc].hist(sample_mags, 20)
-		if inc == 0: ax[inc].set_ylabel('Counts')
-		ax[inc].set_xlabel('Magnitude')
-		fig.set_size_inches([11.53,  5.52])
-	plt.savefig(f'Grids/mag_distribution_ian.png')
-	
-	# Now catalog_files contains the list of HDF5 files to use
-	# prob_vect = (2/(N*(N+1))) * np.arange(1,N+1) # Linear increasing probability vector
-	evaluate_bayesian_objective_evaluate = lambda x: evaluate_bayesian_objective_catalog(x, Trgts_list, events, prob_vec, n_random=batch_size, W=W)
-
-	## Now apply Bayesian optimization to training parameters
-	# Bounds for radial Cholesky method parameters
-	bounds = [
-		(0.5, 1.0),      # x[0] scale_factor
-		(1000, 100000),   # x[1] sigma_noise (in meters)
-		(0.1, 10),         # x[2] sigma_radial_divider
-		(0.1, 10),          # x[3] threshold_logistic
-		(0.005, 0.3),     # x[4] lambda_corr
-		(0.4, 1.6),      # x[5] sigma_radial_p_factor
-		(0.4, 1.6),       # x[6] sigma_radial_s_factor
-		(0.0, (np.pi)/4),    # x[7] angle_perturbation
-		(0.8, 1.0),    # x[8] length_perturbation[0]
-		(1.0, 1.3)     # x[9] length_perturbation[1]
-	]	
-	strings = ['scale_factor', 'sigma_noise', 'sigma_radial_divider', 'threshold_logistic', 'lambda_corr', 
-		'sigma_radial_p_factor', 'sigma_radial_s_factor', 'angle_perturbation', 'length_perturbation[0]', 'length_perturbation[1]']
-
-	# RANDOM SET = NONE !!!
 	optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
 	                  bounds,      # the bounds on each dimension of x
 	                  acq_func="EI",      # the acquisition function
 	                  n_calls=200,         # the number of evaluations of f
-	                  n_random_starts=50,  # the number of random initialization points
+	                  n_random_starts=100,  # the number of random initialization points
 	                  noise='gaussian',       # the noise level (optional)
-	                  random_state=None, # the random seed
+	                  random_state=1234, # the random seed
 	                  initial_point_generator = 'lhs',
 	                  model_queue_size = 150)
-	res, Trgts, res_list = evaluate_bayesian_objective_catalog(optimize.x, Trgts_list, events, prob_vect, n_random=batch_size, return_vals=True, W=W)
-	print(f"Final residual: {res}")
-	print(f"Strings: {strings}")
-	print(f"Params: {optimize.x}")
-	print(f"Res bins: {res_list}")
-	# Find the latest version number for the output file and increment it ==========
-	latest_ver = 0
-	if use_radial_cholesky == True:
-		pattern = path_to_file + f'Grids/{name_of_project}_optimized_training_data_parameters_ver_*_cholesky_catalog.npz'
-	else:
-		pattern = path_to_file + f'Grids/{name_of_project}_optimized_training_data_parameters_ver_*_catalog.npz'
-	files = glob.glob(pattern)
-	for f in files:
-		m = re.search(r'_ver_(\d+)', f)
-		if m:
-			v = int(m.group(1))
-			if v > latest_ver:
-				latest_ver = v
-	n_ver_optimize_out = latest_ver + 1
-	# ==========
 
-	if use_radial_cholesky == True:
-		np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d_cholesky_catalog_res%.2f.npz' % (name_of_project, n_ver_optimize_out, res), res = res, x = np.array(optimize.x), strings = strings, use_radial_cholesky = use_radial_cholesky, res_list = res_list)
-	else:
-		np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d_catalog_res%.2f.npz' % (name_of_project, n_ver_optimize_out, res), res = res, x = np.array(optimize.x), strings = strings, use_radial_cholesky = use_radial_cholesky, res_list = res_list)
+	res, Trgts, arrivals = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
+
+	strings = ['spc_random', 'spc_thresh_rand', 'coda_rate', 'coda_win', 'dist_range[0]', 'dist_range[1]', 'max_rate_events', 'max_miss_events', 'max_false_events', 'miss_pick_fraction[0]', 'miss_pick_fraction[0]']
+	
+	np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d.npz'%(name_of_project, n_ver_optimize), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings)
 
 	print('Finished optimized training data')
 
-	# error('Data set optimized; call the training script again to build training data')
-	raise ValueError('Data set optimized; call the training script again to build training data')
-
+	error('Data set optimized; call the training script again to build training data')
 
 if build_training_data == True:
 
 	## If true, use this script to build the training data.
 	## For efficiency, each instance of this script (e.g., python train_GENIE_model.py $i$ for different integer $i$ calls)
-	## will build train_config['n_batches_per_job_training_data'] batches of training data and save them to train_config['patge training dataset. Then set flag "build_training_data : False" in train_config.yaml
+	## will build train_config['n_batches_per_job_training_data'] batches of training data and save them to train_config['path_to_data'].
+	## Call this script ~100's of times to build a large training dataset. Then set flag "build_training_data : False" in train_config.yaml
 	## and call this script with "load_training_data : True" to train with the available pre-built training data.
 
 	## If false, this script begins training the model, and builds a batch of data on the fly between each update step.
@@ -2611,7 +1986,7 @@ if build_training_data == True:
 
 	job_number = int(argvs[1]) ## Choose job index
 
-	print('Build and save training data on job index %d'%job_number)
+	print('Build and save training data on job indexgenera %d'%job_number)
 
 	for n in range(n_repeat):
 
@@ -2688,6 +2063,411 @@ if build_training_data == True:
 	error('Data set built; call the training script again once all data has been built')
 
 for i in range(n_restart_step, n_epochs):
+	for j in range(2):
+		is_validation = (j % 2 == 0) ## Validation is every batch
+	
+		if (i == n_restart_step)*(n_restart == True):
+			## Load model and optimizer.
+			mz.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
+			optimizer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(n_restart_step, n_ver), map_location = device))
+			zlosses = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_restart_step, n_ver))
+			losses[0:n_restart_step] = zlosses['losses'][0:n_restart_step]
+			mx_trgt_1[0:n_restart_step] = zlosses['mx_trgt_1'][0:n_restart_step]; mx_trgt_2[0:n_restart_step] = zlosses['mx_trgt_2'][0:n_restart_step]
+			mx_trgt_3[0:n_restart_step] = zlosses['mx_trgt_3'][0:n_restart_step]; mx_trgt_4[0:n_restart_step] = zlosses['mx_trgt_4'][0:n_restart_step]
+			mx_pred_1[0:n_restart_step] = zlosses['mx_pred_1'][0:n_restart_step]; mx_pred_2[0:n_restart_step] = zlosses['mx_pred_2'][0:n_restart_step]
+			mx_pred_3[0:n_restart_step] = zlosses['mx_pred_3'][0:n_restart_step]; mx_pred_4[0:n_restart_step] = zlosses['mx_pred_4'][0:n_restart_step]
+			print('loaded model for restart on step %d ver %d \n'%(n_restart_step, n_ver))
+			zlosses.close()
+		
+		optimizer.zero_grad()
+
+		## Generate batch of synthetic inputs. Note, if this is too slow to interleave with model updates, 
+		## you can  build these synthetic training data offline and then just load during training. The 
+		## dataset would likely have a large memory footprint if doing so (e.g. > 1 Tb)
+
+		if load_training_data == True:
+
+			if is_validation == False:	
+				file_choice = np.random.choice(files_load)
+			else:
+				file_choice = files_load[0] ## Validation is the first file (for now)
+
+			h = h5py.File(file_choice, 'r')
+			
+			data = [h['data'][:], h['srcs'][:], h['srcs_active'][:]]
+
+			# h.close()
+
+		else:
+
+			## Build a training batch on the fly
+			if use_subgraph == False:
+				[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
+				Inpts = [Inpts[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Inpts))]
+				Masks = [Masks[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Masks))]
+				A_sta_sta_l = [torch.Tensor(A_sta_sta_l[j]).long().to(device) for j in range(len(A_sta_sta_l))]
+				A_src_src_l = [torch.Tensor(A_src_src_l[j]).long().to(device) for j in range(len(A_src_src_l))]
+				A_prod_sta_sta_l = [torch.Tensor(A_prod_sta_sta_l[j]).long().to(device) for j in range(len(A_prod_sta_sta_l))]
+				A_prod_src_src_l = [torch.Tensor(A_prod_src_src_l[j]).long().to(device) for j in range(len(A_prod_src_src_l))]
+				A_src_in_prod_l = [torch.Tensor(A_src_in_prod_l[j]).long().to(device) for j in range(len(A_src_in_prod_l))]
+				A_src_in_sta_l = [torch.Tensor(np.concatenate((np.tile(np.arange(Locs[j].shape[0]), len(X_fixed[j])).reshape(1,-1), np.arange(len(X_fixed[j])).repeat(len(Locs[j]), axis = 0).reshape(1,-1)), axis = 0)).long().to(device) for j in range(len(Inpts))]
+
+			if use_subgraph == True:
+				[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
+				A_src_in_sta_l = [[] for j in range(len(Inpts))]
+				
+				for n in range(len(Inpts)):
+					A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[n], X_fixed[n], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, device = device)
+					A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[n], X_fixed[n], A_src_in_sta, max_t, device = device)
+					A_sta_sta_l[n] = A_sta_sta ## These should be equal
+					A_src_src_l[n] = A_src_src ## These should be equal
+					A_prod_sta_sta_l[n] = A_prod_sta_sta
+					A_prod_src_src_l[n] = A_prod_src_src
+					A_src_in_prod_l[n] = A_src_in_prod
+					A_src_in_sta_l[n] = A_src_in_sta
+					A_edges_time_p_l[n] = A_edges_time_p
+					A_edges_time_s_l[n] = A_edges_time_s
+					A_edges_ref_l[n] = dt_partition
+					Inpts[n] = np.copy(np.ascontiguousarray(Inpts[n][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
+					Masks[n] = np.copy(np.ascontiguousarray(Masks[n][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
+		
+		if is_validation == True:
+			val_loss = 0
+		else:
+			train_loss = 0
+		
+		mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
+		mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4 = 0.0, 0.0, 0.0, 0.0
+
+		if (np.mod(i, 1000) == 0) or (i == (n_epochs - 1)):
+			torch.save(mz.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(i, n_ver))
+			torch.save(optimizer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(i, n_ver))
+			np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
+			print('saved model %s %d'%(n_ver, i))
+			print('saved model at step %d'%i)
+		
+		for inc, i0 in enumerate(range(n_batch)):
+			if load_training_data == True:
+
+				## Overwrite i0 and create length-1 lists for the training samples loaded from .hdf5 file
+				Inpts = []
+				Masks = []
+				X_fixed = []
+				X_query = []
+				Locs = []
+				Trv_out = []
+				Lbls = []
+				Lbls_query = []
+				lp_times = []
+				lp_stations = []
+				lp_phases = []
+				lp_meta = []
+				lp_srcs = []
+				A_sta_sta_l = []
+				A_src_src_l = []
+				A_prod_sta_sta_l = []
+				A_prod_src_src_l = []
+				A_src_in_prod_l = []
+				# A_src_in_prod_x_l = []
+				# A_src_in_prod_edges_l = []
+				A_edges_time_p_l = []
+				A_edges_time_s_l = []
+				A_edges_ref_l = []
+				A_src_in_sta_l = []
+
+				## Note: it would be more efficient (speed and memory) to pass 
+				## in each sample one at time, rather than appending batch to a list
+				
+				Inpts.append(h['Inpts_%d'%i0][:])
+				Masks.append(h['Masks_%d'%i0][:])
+				X_fixed.append(h['X_fixed_%d'%i0][:])
+				X_query.append(h['X_query_%d'%i0][:])
+				Locs.append(h['Locs_%d'%i0][:])
+				Trv_out.append(h['Trv_out_%d'%i0][:])
+				Lbls.append(h['Lbls_%d'%i0][:])
+				Lbls_query.append(h['Lbls_query_%d'%i0][:])
+				lp_times.append(h['lp_times_%d'%i0][:])
+				lp_stations.append(h['lp_stations_%d'%i0][:])
+				lp_phases.append(h['lp_phases_%d'%i0][:])
+				lp_meta.append(h['lp_meta_%d'%i0][:])
+				lp_srcs.append(h['lp_srcs_%d'%i0][:])
+				A_sta_sta_l.append(torch.Tensor(h['A_sta_sta_%d'%i0][:]).long().to(device))
+				A_src_src_l.append(torch.Tensor(h['A_src_src_%d'%i0][:]).long().to(device))
+				A_prod_sta_sta_l.append(torch.Tensor(h['A_prod_sta_sta_%d'%i0][:]).long().to(device))
+				A_prod_src_src_l.append(torch.Tensor(h['A_prod_src_src_%d'%i0][:]).long().to(device))
+				A_src_in_prod_l.append(torch.Tensor(h['A_src_in_prod_%d'%i0][:]).long().to(device))
+
+				# A_src_in_prod_l.append(h['A_src_in_prod_%d'%i0][:])
+				# A_src_in_prod_x_l.append(h['A_src_in_prod_x_%d'%i0][:])
+				# A_src_in_prod_edges_l.append(h['A_src_in_prod_edges_%d'%i0][:])
+				# if use_subgraph == True:
+				A_src_in_sta_l.append(torch.Tensor(h['A_src_in_sta_%d'%i0][:]).long().to(device))
+				
+				A_edges_time_p_l.append(h['A_edges_time_p_%d'%i0][:])
+				A_edges_time_s_l.append(h['A_edges_time_s_%d'%i0][:])
+				A_edges_ref_l.append(h['A_edges_ref_%d'%i0][:])
+
+				i0 = 0 ## Over-write, so below indexing 
+
+			## Adding skip... to skip samples with zero input picks
+			if len(lp_times[i0]) == 0:
+				print('skip a sample!') ## If this skips, and yet i0 == (n_batch - 1), is it a problem?
+				continue ## Skip this!
+
+			## Should add increased samples in x_src_query around places of coherency
+			## and true labels
+			x_src_query = np.random.rand(n_src_query,3)*scale_x_extend + offset_x_extend
+
+
+			n_frac_focused_association_queries = 0.2 # concentrate 10% of association queries around true sources
+			n_concentration_focused_association_queries = 0.03 # 3% of scale of domain
+			if (len(lp_srcs[i0]) > 0)*(n_frac_focused_association_queries > 0):
+
+				n_focused_queries = int(n_frac_focused_association_queries*n_src_query)
+				ind_overwrite_focused_queries = np.sort(np.random.choice(n_src_query, size = n_focused_queries, replace = False))
+				ind_source_focused = np.random.choice(len(lp_srcs[i0]), size = n_focused_queries)
+
+				# x_query_focused = np.random.randn(n_focused_queries, 3)*scale_x_extend*n_concentration_focused_association_queries
+				x_query_focused = 2.0*np.random.randn(n_focused_queries, 3)*np.mean([src_x_kernel, src_depth_kernel])
+				x_query_focused = ftrns2(x_query_focused + ftrns1(lp_srcs[i0][ind_source_focused,0:3]))
+				ioutside = np.where(((x_query_focused[:,2] < depth_range[0]) + (x_query_focused[:,2] > depth_range[1])) > 0)[0]
+				x_query_focused[ioutside,2] = np.random.rand(len(ioutside))*(depth_range[1] - depth_range[0]) + depth_range[0]
+				
+				x_query_focused = np.maximum(np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), x_query_focused)
+				x_query_focused = np.minimum(np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1), x_query_focused)
+				x_src_query[ind_overwrite_focused_queries] = x_query_focused
+
+			if len(lp_srcs[i0]) > 0:
+				x_src_query[0:len(lp_srcs[i0]),0:3] = lp_srcs[i0][:,0:3]
+			
+			x_src_query_cart = ftrns1(x_src_query)
+			
+			trv_out_src = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(x_src_query).to(device)).detach()
+
+			
+			if use_subgraph == True:
+				# A_src_in_prod_l[i0] = Data(torch.Tensor(A_src_in_prod_x_l[i0]).to(device), edge_index = torch.Tensor(A_src_in_prod_edges_l[i0]).long().to(device))
+				trv_out = trv_pairwise(torch.Tensor(Locs[i0][A_src_in_sta_l[i0][0].cpu().detach().numpy()]).to(device), torch.Tensor(X_fixed[i0][A_src_in_sta_l[i0][1].cpu().detach().numpy()]).to(device))
+				spatial_vals = torch.Tensor((X_fixed[i0][A_src_in_prod_l[i0][1].cpu().detach().numpy()] - Locs[i0][A_src_in_sta_l[i0][0][A_src_in_prod_l[i0][0]].cpu().detach().numpy()])/scale_x_extend).to(device)
+
+			else:
+				trv_out = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(X_fixed[i0]).to(device)).detach().reshape(-1,2) ## Note: could also just take this from x_grids_trv
+				spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(X_fixed[i0], axis = 1), Locs[i0].shape[0], axis = 1) - np.repeat(np.expand_dims(Locs[i0], axis = 0), X_fixed[i0].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
+		
+			
+			tq_sample = torch.rand(n_src_query).to(device)*t_win - t_win/2.0
+			tq = torch.arange(-t_win/2.0, t_win/2.0 + dt_win, dt_win).reshape(-1,1).float().to(device)
+
+			if len(lp_srcs[i0]) > 0:
+				ifind_src = np.where(np.abs(lp_srcs[i0][:,3]) <= t_win/2.0)[0]
+				tq_sample[ifind_src] = torch.Tensor(lp_srcs[i0][ifind_src,3]).to(device)
+
+			if use_phase_types == False:
+				Inpts[i0][:,2::] = 0.0 ## Phase type informed features zeroed out
+				Masks[i0][:,2::] = 0.0
+
+			# Pre-process tensors for Inpts and Masks
+			input_tensor_1 = torch.Tensor(Inpts[i0]).to(device) # .reshape(-1, 4)
+			input_tensor_2 = torch.Tensor(Masks[i0]).to(device) # .reshape(-1, 4)
+
+			# Process tensors for A_prod and A_src arrays
+			A_prod_sta_tensor = A_prod_sta_sta_l[i0]
+			A_prod_src_tensor = A_prod_src_src_l[i0]
+
+			# Process edge index data
+			edge_index_1 = A_src_in_prod_l[i0]
+			flipped_edge = np.ascontiguousarray(np.flip(A_src_in_prod_l[i0].cpu().detach().numpy(), axis = 0))
+			edge_index_2 = torch.Tensor(flipped_edge).long().to(device)
+
+			data_1 = Data(x=spatial_vals, edge_index=edge_index_1)
+			data_2 = Data(x=spatial_vals, edge_index=edge_index_2)
+
+			use_updated_pick_max_associations = True # Changing to True
+			if (len(lp_times[i0]) > max_number_pick_association_labels_per_sample)*(use_updated_pick_max_associations == True):
+
+				## Cnt number of picks per station
+				## Optimally choose n stations to compute association labels for
+				## so that sum cnt_i < max_mumber of picks used. 
+				## Permute station indices to not bias ordering.
+				## Keep all picks for this set of stations.
+				## (note: this does not effect output values, only the ones we compute losses on)
+
+				tree_sta_slice = cKDTree(lp_stations[i0].reshape(-1,1))
+				lp_cnt_sta = tree_sta_slice.query_ball_point(np.arange(Locs[i0].shape[0]).reshape(-1,1), r = 0)
+				cnt_lp_sta = np.array([len(lp_cnt_sta[j]) for j in range(len(lp_cnt_sta))])
+
+				# Maximize the number of associations. Permute
+				sta_grab = optimize_station_selection(cnt_lp_sta, max_number_pick_association_labels_per_sample)
+				isample_picks = np.hstack([lp_cnt_sta[j] for j in sta_grab])
+
+				lp_times[i0] = lp_times[i0][isample_picks]
+				lp_stations[i0] = lp_stations[i0][isample_picks]
+				lp_phases[i0] = lp_phases[i0][isample_picks]
+				lp_meta[i0] = lp_meta[i0][isample_picks]
+
+				assert(len(lp_times[i0]) <= max_number_pick_association_labels_per_sample)
+			
+			elif len(lp_times[i0]) > max_number_pick_association_labels_per_sample:
+
+				## Randomly choose max number of picks to compute association labels for.
+				isample_picks = np.sort(np.random.choice(len(lp_times[i0]), size = max_number_pick_association_labels_per_sample, replace = False))
+				lp_times[i0] = lp_times[i0][isample_picks]
+				lp_stations[i0] = lp_stations[i0][isample_picks]
+				lp_phases[i0] = lp_phases[i0][isample_picks]
+				lp_meta[i0] = lp_meta[i0][isample_picks]
+			
+			# Continue processing the rest of the inputs
+			input_tensors = [
+				input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor,
+				data_1, data_2,
+				A_src_in_sta_l[i0],
+				A_src_src_l[i0],
+				torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
+				torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
+				torch.Tensor(A_edges_ref_l[i0]).to(device),
+				trv_out,
+				torch.Tensor(lp_times[i0]).to(device),
+				torch.Tensor(lp_stations[i0]).long().to(device),
+				torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
+				torch.Tensor(ftrns1(Locs[i0])).to(device),
+				torch.Tensor(ftrns1(X_fixed[i0])).to(device),
+				torch.Tensor(ftrns1(X_query[i0])).to(device),
+				torch.Tensor(x_src_query_cart).to(device),
+				tq, tq_sample, trv_out_src
+			]
+
+			# Call the model with pre-processed tensors
+			out = mz(*input_tensors)
+			
+			pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
+			loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+
+			n_visualize_step = 1000
+			n_visualize_fraction = 0.2
+			if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0)*(i0 < n_visualize_fraction*n_batch):
+				save_plots_path = path_to_file + seperator + 'Plots' + seperator
+
+				if Lbls_query[i0][:,5].max() > 0.2: # Plot all true sources
+					visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
+				elif np.random.rand() > 0.8: # Plot a fraction of false sources
+					visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
+
+			## TRAINING BACKWARD PASS
+			if is_validation == False:	
+				if inc != (n_batch - 1):
+					loss.backward(retain_graph = True)
+				else:
+					loss.backward(retain_graph = False)
+
+				train_loss += loss.item()
+				mx_trgt_val_1 += Lbls[i0].max()
+				mx_trgt_val_2 += Lbls_query[i0].max()
+				mx_trgt_val_3 += pick_lbls[:,:,0].max().item()
+				mx_trgt_val_4 += pick_lbls[:,:,1].max().item()
+				mx_pred_val_1 += out[0].max().item()
+				mx_pred_val_2 += out[1].max().item()
+				mx_pred_val_3 += out[2].max().item()
+				mx_pred_val_4 += out[3].max().item()
+			else:
+				val_loss += loss.item()
+
+
+		if load_training_data == True:
+			h.close() ## Close training file
+
+		## TRAINING STEP PASS
+		if is_validation == False:
+			optimizer.step()
+
+	losses[i] = train_loss
+	val_losses[i] = val_loss
+	mx_trgt_1[i] = mx_trgt_val_1/n_batch
+	mx_trgt_2[i] = mx_trgt_val_2/n_batch
+	mx_trgt_3[i] = mx_trgt_val_3/n_batch
+	mx_trgt_4[i] = mx_trgt_val_4/n_batch
+
+	mx_pred_1[i] = mx_pred_val_1/n_batch
+	mx_pred_2[i] = mx_pred_val_2/n_batch
+	mx_pred_3[i] = mx_pred_val_3/n_batch
+	mx_pred_4[i] = mx_pred_val_4/n_batch
+
+	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, train_loss, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
+	print("val loss %0.9f"%(val_loss))
+	
+	# Log losses
+	if use_wandb_logging == True:
+		if is_validation == False:
+			wandb.log({"loss": train_loss})
+		else:
+			wandb.log({"val_loss": val_loss})
+
+	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
+		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, train_loss, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
+		text_file.write("val loss %0.9f \n"%(val_loss))
+		
+	# Plot and save loss curve periodically
+	if (i % 100 == 0 and i > 0) or (i == (n_epochs - 1)):
+		plots_dir = path_to_file + seperator + 'Plots'
+		os.makedirs(plots_dir, exist_ok=True)
+		
+		# Get valid loss data up to current step
+		steps = np.arange(n_restart_step, i + 1)
+		valid_losses = losses[n_restart_step:i + 1]
+		valid_mask = valid_losses > 0
+		
+		if np.sum(valid_mask) > 10:  # Need sufficient data points
+			steps = steps[valid_mask]
+			valid_losses = valid_losses[valid_mask]
+			
+			# Create compact 2-panel plot
+			fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+			
+			# Main loss curve
+			ax1.plot(steps, valid_losses, 'b-', linewidth=2, alpha=0.8, label='Training')
+			# Add validation curve
+			valid_val_losses = val_losses[n_restart_step:i + 1][valid_mask]
+			ax1.plot(steps, valid_val_losses, 'r-', linewidth=2, alpha=0.8, label='Validation')
+			ax1.set_xlabel('Training Step')
+			ax1.set_ylabel('Loss')
+			ax1.set_title(f'Training & Validation Loss (Step {i})')
+			ax1.set_yscale('log')
+			ax1.grid(True, alpha=0.3)
+			ax1.legend()
+			
+			# Loss components
+			components = ['Src Det', 'Src Query', 'Pick P', 'Pick S']
+			colors = ['r', 'g', 'b', 'm']
+			targets = [mx_trgt_1[n_restart_step:i + 1][valid_mask],
+					  mx_trgt_2[n_restart_step:i + 1][valid_mask],
+					  mx_trgt_3[n_restart_step:i + 1][valid_mask],
+					  mx_trgt_4[n_restart_step:i + 1][valid_mask]]
+			
+			for j, (comp, color, target) in enumerate(zip(components, colors, targets)):
+				ax2.plot(steps, target, color=color, linewidth=1.5, alpha=0.7, label=comp)
+			
+			ax2.set_xlabel('Training Step')
+			ax2.set_ylabel('Max Target Value')
+			ax2.set_title('Loss Components')
+			ax2.grid(True, alpha=0.3)
+			ax2.legend()
+			
+			plt.tight_layout()
+			
+			# Save both timestamped and latest versions
+			plt.savefig(f'{plots_dir}{seperator}loss_curve_step_{i:06d}_ver_{n_ver}.png', 
+					   dpi=150, bbox_inches='tight')
+			plt.savefig(f'{plots_dir}{seperator}loss_curve_latest_ver_{n_ver}.png', 
+					   dpi=150, bbox_inches='tight')
+			plt.close()
+			
+			print(f'Loss curve saved at step {i}')
+
+
+
+if validate_model == True:
+	i = 0
+	is_validation = True
+
 	if (i == n_restart_step)*(n_restart == True):
 		## Load model and optimizer.
 		mz.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
@@ -2709,7 +2489,10 @@ for i in range(n_restart_step, n_epochs):
 
 	if load_training_data == True:
 
-		file_choice = np.random.choice(files_load)
+		if is_validation == False:	
+			file_choice = np.random.choice(files_load)
+		else:
+			file_choice = files_load[0] ## Validation is the first file (for now)
 
 		h = h5py.File(file_choice, 'r')
 		
@@ -2721,7 +2504,6 @@ for i in range(n_restart_step, n_epochs):
 
 		## Build a training batch on the fly
 		if use_subgraph == False:
-			# Choose which synthetic data generation method to use
 			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
 			Inpts = [Inpts[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Inpts))]
 			Masks = [Masks[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Masks))]
@@ -2732,8 +2514,7 @@ for i in range(n_restart_step, n_epochs):
 			A_src_in_prod_l = [torch.Tensor(A_src_in_prod_l[j]).long().to(device) for j in range(len(A_src_in_prod_l))]
 			A_src_in_sta_l = [torch.Tensor(np.concatenate((np.tile(np.arange(Locs[j].shape[0]), len(X_fixed[j])).reshape(1,-1), np.arange(len(X_fixed[j])).repeat(len(Locs[j]), axis = 0).reshape(1,-1)), axis = 0)).long().to(device) for j in range(len(Inpts))]
 
-		else:  # use_subgraph == True
-			# Choose which synthetic data generation method to use
+		if use_subgraph == True:
 			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
 			A_src_in_sta_l = [[] for j in range(len(Inpts))]
 			
@@ -2751,9 +2532,12 @@ for i in range(n_restart_step, n_epochs):
 				A_edges_ref_l[n] = dt_partition
 				Inpts[n] = np.copy(np.ascontiguousarray(Inpts[n][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
 				Masks[n] = np.copy(np.ascontiguousarray(Masks[n][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
-		
 	
-	loss_val = 0
+	if is_validation == True:
+		val_loss = 0
+	else:
+		train_loss = 0
+	
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
 	mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4 = 0.0, 0.0, 0.0, 0.0
 
@@ -2765,7 +2549,6 @@ for i in range(n_restart_step, n_epochs):
 		print('saved model at step %d'%i)
 	
 	for inc, i0 in enumerate(range(n_batch)):
-
 		if load_training_data == True:
 
 			## Overwrite i0 and create length-1 lists for the training samples loaded from .hdf5 file
@@ -2971,26 +2754,35 @@ for i in range(n_restart_step, n_epochs):
 			elif np.random.rand() > 0.8: # Plot a fraction of false sources
 				visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
 
-		if inc != (n_batch - 1):
-			loss.backward(retain_graph = True)
-		else:
-			loss.backward(retain_graph = False)
+		## TRAINING BACKWARD PASS
+		if is_validation == False:	
+			if inc != (n_batch - 1):
+				loss.backward(retain_graph = True)
+			else:
+				loss.backward(retain_graph = False)
 
-		loss_val += loss.item()
-		mx_trgt_val_1 += Lbls[i0].max()
-		mx_trgt_val_2 += Lbls_query[i0].max()
-		mx_trgt_val_3 += pick_lbls[:,:,0].max().item()
-		mx_trgt_val_4 += pick_lbls[:,:,1].max().item()
-		mx_pred_val_1 += out[0].max().item()
-		mx_pred_val_2 += out[1].max().item()
-		mx_pred_val_3 += out[2].max().item()
-		mx_pred_val_4 += out[3].max().item()
+			train_loss += loss.item()
+			mx_trgt_val_1 += Lbls[i0].max()
+			mx_trgt_val_2 += Lbls_query[i0].max()
+			mx_trgt_val_3 += pick_lbls[:,:,0].max().item()
+			mx_trgt_val_4 += pick_lbls[:,:,1].max().item()
+			mx_pred_val_1 += out[0].max().item()
+			mx_pred_val_2 += out[1].max().item()
+			mx_pred_val_3 += out[2].max().item()
+			mx_pred_val_4 += out[3].max().item()
+		else:
+			val_loss += loss.item()
+
 
 	if load_training_data == True:
 		h.close() ## Close training file
 
-	optimizer.step()
-	losses[i] = loss_val
+	## TRAINING STEP PASS
+	if is_validation == False:
+		optimizer.step()
+
+	losses[i] = train_loss
+	val_losses[i] = val_loss
 	mx_trgt_1[i] = mx_trgt_val_1/n_batch
 	mx_trgt_2[i] = mx_trgt_val_2/n_batch
 	mx_trgt_3[i] = mx_trgt_val_3/n_batch
@@ -3001,54 +2793,76 @@ for i in range(n_restart_step, n_epochs):
 	mx_pred_3[i] = mx_pred_val_3/n_batch
 	mx_pred_4[i] = mx_pred_val_4/n_batch
 
-	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
-
+	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, train_loss, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
+	print("val loss %0.9f"%(val_loss))
+	
 	# Log losses
 	if use_wandb_logging == True:
-		wandb.log({"loss": loss_val})
+		if is_validation == False:
+			wandb.log({"loss": train_loss})
+		else:
+			wandb.log({"val_loss": val_loss})
 
 	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
-		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
-
-# def visualize_source_distributions(original_sources, radial_sources, save_path='source_comparison.png'):
-#     """Compare source distributions between original and radial Cholesky methods."""
-#     plt.figure(figsize=(12, 5))
-    
-#     # Plot original sources
-#     plt.subplot(121)
-#     plt.scatter(original_sources[:, 0], original_sources[:, 1], 
-#                c='blue', alpha=0.6, label='Original Sources')
-#     plt.title('Original Source Distribution')
-#     plt.xlabel('Longitude')
-#     plt.ylabel('Latitude')
-#     plt.legend()
-    
-#     # Plot radial Cholesky sources
-#     plt.subplot(122)
-#     plt.scatter(radial_sources[:, 0], radial_sources[:, 1], 
-#                c='red', alpha=0.6, label='Radial Cholesky Sources')
-#     plt.title('Radial Cholesky Source Distribution')
-#     plt.xlabel('Longitude')
-#     plt.ylabel('Latitude')
-#     plt.legend()
-    
-#     plt.tight_layout()
-#     plt.savefig(save_path)
-#     plt.close()
-
-# Add this to your training loop after generating sources
-# if use_radial_cholesky:
-#     # After generating sources with both methods
-#     visualize_source_distributions(
-#         original_sources=src_positions,  # From original method
-#         radial_sources=src_positions_radial,  # From radial method
-#         save_path=f'figures/source_comparison_epoch_{epoch}.png'
-#     )
-
-
-
-
-
+		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, train_loss, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
+		text_file.write("val loss %0.9f \n"%(val_loss))
+		
+	# Plot and save loss curve periodically
+	if (i % 100 == 0 and i > 0) or (i == (n_epochs - 1)):
+		plots_dir = path_to_file + seperator + 'Plots'
+		os.makedirs(plots_dir, exist_ok=True)
+		
+		# Get valid loss data up to current step
+		steps = np.arange(n_restart_step, i + 1)
+		valid_losses = losses[n_restart_step:i + 1]
+		valid_mask = valid_losses > 0
+		
+		if np.sum(valid_mask) > 10:  # Need sufficient data points
+			steps = steps[valid_mask]
+			valid_losses = valid_losses[valid_mask]
+			
+			# Create compact 2-panel plot
+			fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+			
+			# Main loss curve
+			ax1.plot(steps, valid_losses, 'b-', linewidth=2, alpha=0.8, label='Training')
+			# Add validation curve
+			valid_val_losses = val_losses[n_restart_step:i + 1][valid_mask]
+			ax1.plot(steps, valid_val_losses, 'r-', linewidth=2, alpha=0.8, label='Validation')
+			ax1.set_xlabel('Training Step')
+			ax1.set_ylabel('Loss')
+			ax1.set_title(f'Training & Validation Loss (Step {i})')
+			ax1.set_yscale('log')
+			ax1.grid(True, alpha=0.3)
+			ax1.legend()
+			
+			# Loss components
+			components = ['Src Det', 'Src Query', 'Pick P', 'Pick S']
+			colors = ['r', 'g', 'b', 'm']
+			targets = [mx_trgt_1[n_restart_step:i + 1][valid_mask],
+					  mx_trgt_2[n_restart_step:i + 1][valid_mask],
+					  mx_trgt_3[n_restart_step:i + 1][valid_mask],
+					  mx_trgt_4[n_restart_step:i + 1][valid_mask]]
+			
+			for j, (comp, color, target) in enumerate(zip(components, colors, targets)):
+				ax2.plot(steps, target, color=color, linewidth=1.5, alpha=0.7, label=comp)
+			
+			ax2.set_xlabel('Training Step')
+			ax2.set_ylabel('Max Target Value')
+			ax2.set_title('Loss Components')
+			ax2.grid(True, alpha=0.3)
+			ax2.legend()
+			
+			plt.tight_layout()
+			
+			# Save both timestamped and latest versions
+			plt.savefig(f'{plots_dir}{seperator}loss_curve_step_{i:06d}_ver_{n_ver}.png', 
+					   dpi=150, bbox_inches='tight')
+			plt.savefig(f'{plots_dir}{seperator}loss_curve_latest_ver_{n_ver}.png', 
+					   dpi=150, bbox_inches='tight')
+			plt.close()
+			
+			print(f'Loss curve saved at step {i}')
 
 
 
@@ -3550,3 +3364,9 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
+
+
+
+
+
