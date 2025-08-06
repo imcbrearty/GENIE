@@ -923,24 +923,28 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 	x_grids_trv_refs = []
 	x_grids_edges = []
 
-	for i in range(len(x_grids)):
+	## Replacing the loop with this seperate function
+	x_grids_trv = compute_travel_times(trv, locs, x_grids, device = device)
+	
+	# for i in range(len(x_grids)):
 
-		# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+	# 	# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
 
-		if locs.shape[0]*x_grids[i].shape[0] > 150e3:
-			trv_out_l = []
-			for j in range(locs.shape[0]):
-				trv_out = trv(torch.Tensor(locs[j,:].reshape(1,-1)).to(device), torch.Tensor(x_grids[i]).to(device))
-				trv_out_l.append(trv_out.cpu().detach().numpy())
-			trv_out = torch.Tensor(np.concatenate(trv_out_l, axis = 1)).to(device)
-		else:
-			trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+	# 	if locs.shape[0]*x_grids[i].shape[0] > 150e3:
+	# 		trv_out_l = []
+	# 		for j in range(locs.shape[0]):
+	# 			trv_out = trv(torch.Tensor(locs[j,:].reshape(1,-1)).to(device), torch.Tensor(x_grids[i]).to(device))
+	# 			trv_out_l.append(trv_out.cpu().detach().numpy())
+	# 		trv_out = torch.Tensor(np.concatenate(trv_out_l, axis = 1)).to(device)
+	# 	else:
+	# 		trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
 		
-		x_grids_trv.append(trv_out.cpu().detach().numpy())
+	# 	x_grids_trv.append(trv_out.cpu().detach().numpy())
 
-		edge_index = knn(torch.Tensor(ftrns1(x_grids[i])).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device), k = k_spc_edges).flip(0).contiguous()
-		edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
-		x_grids_edges.append(edge_index)
+		## Removing creation of edges here
+		# edge_index = knn(torch.Tensor(ftrns1(x_grids[i])).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device), k = k_spc_edges).flip(0).contiguous()
+		# edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
+		# x_grids_edges.append(edge_index)
 
 	if max_t is None: max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # *1.1 # + 10.0
 
@@ -1196,6 +1200,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
