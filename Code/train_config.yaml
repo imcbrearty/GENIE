@@ -15,8 +15,8 @@ n_src_query: 300 # Number of src-arrival queries per sample
 ## Prediction params
 ## These parameters should somewhat scale with the size of the application
 kernel_sig_t: 3.0 # Kernel to embed arrival time - theoretical time misfit (s)
-src_t_kernel: 3.5 # Kernel of origin time label (s)
-src_t_arv_kernel: 3.5 # Kernel for arrival association time label (s)
+src_t_kernel: 3.0 # Kernel of origin time label (s)
+src_t_arv_kernel: 3.0 # Kernel for arrival association time label (s)
 src_x_kernel: 25000. # Kernel for source label, horizontal distance (m)
 src_x_arv_kernel: 25000. # Kernel for arrival-source association label, horizontal distance (m)
 src_depth_kernel: 25000. # Kernel of source label in Cartesian projection, vertical distance (m)
