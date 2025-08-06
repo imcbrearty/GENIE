@@ -48,8 +48,12 @@ device = torch.device('cuda') ## or use cpu
 if use_updated_model_definition == False:
 
 	class DataAggregation(MessagePassing): # make equivelent version with sum operations.
-		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4):
+		def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, use_absolute_pos = use_absolute_pos):
 			super(DataAggregation, self).__init__('mean') # node dim
+
+			if use_absolute_pos == True:
+				in_channels = in_channels + 3*2
+			
 			## Use two layers of SageConv.
 			self.in_channels = in_channels
 			self.out_channels = out_channels
@@ -1569,5 +1573,6 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
