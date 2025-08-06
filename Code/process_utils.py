@@ -472,7 +472,8 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 	# if len(t0) == 1:
 	# 	t0 = float(t0)
 
-	ineed = np.where((P[:,0] > (t0 - 3.0*kernel_sig_t))*(P[:,0] < (t0 + max_t + 3.0*kernel_sig_t)))[0]
+	# ineed = np.where((P[:,0] > (t0 - 3.0*kernel_sig_t))*(P[:,0] < (t0 + max_t + 3.0*kernel_sig_t)))[0]
+	ineed = np.where((P[:,0] > (t0 - 2.0*kernel_sig_t))*(P[:,0] < (t0 + max_t + 2.0*kernel_sig_t)))[0] #
 	P_slice = np.copy(P[ineed])
 
 	## Find pick indices with stations in desired subset (note could do this after the next query instead)
@@ -1540,4 +1541,5 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
