@@ -801,7 +801,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 if use_updated_model_definition == False:
 
 	class GCN_Detection_Network_extended(nn.Module):
-		def __init__(self, ftrns1, ftrns2, device = 'cuda'):
+		def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, use_absolute_pos = use_absolute_pos, device = 'cuda'):
 			super(GCN_Detection_Network_extended, self).__init__()
 			# Define modules and other relavent fixed objects (scaling coefficients.)
 			# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
@@ -820,7 +820,9 @@ if use_updated_model_definition == False:
 			self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3, device = device).to(device)
 			# self.ArrivalS = StationSourceAttention(30, 15, 1, 15, n_heads = 3).to(device)
-	
+			self.use_absolute_pos = use_absolute_pos
+			self.scale_rel = scale_rel
+			
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
 	
@@ -829,7 +831,9 @@ if use_updated_model_definition == False:
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
 			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
-	
+			if self.use_absolute_pos == True:
+				Slice = torch.cat((Slice, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
+
 			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
@@ -844,6 +848,8 @@ if use_updated_model_definition == False:
 			## Note below: why detach x_latent?
 			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
+			if self.use_absolute_pos == True:
+				s = torch.cat((s, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
 			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size
 			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, s, tlatent[:,1].reshape(-1,1), n_temp, n_sta)
@@ -880,7 +886,9 @@ if use_updated_model_definition == False:
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
 			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
-	
+			if self.use_absolute_pos == True:
+				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)		
+			
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
 			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
@@ -897,6 +905,9 @@ if use_updated_model_definition == False:
 			## Note below: why detach x_latent?
 			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
+			if self.use_absolute_pos == True:
+				s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
+				
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
 			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta)
 			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,1].reshape(-1,1), n_temp, n_sta)
@@ -911,7 +922,10 @@ if use_updated_model_definition == False:
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
 			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
-	
+			if self.use_absolute_pos == True:
+				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
+
+			
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
 			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
@@ -929,7 +943,7 @@ if use_updated_model_definition == False:
 elif use_updated_model_definition == True:
 
 	class GCN_Detection_Network_extended(nn.Module):
-		def __init__(self, ftrns1, ftrns2, use_absolute_pos = use_absolute_pos, device = 'cuda'):
+		def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, use_absolute_pos = use_absolute_pos, device = 'cuda'):
 			super(GCN_Detection_Network_extended, self).__init__()
 			# Define modules and other relavent fixed objects (scaling coefficients.)
 			# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
@@ -948,7 +962,7 @@ elif use_updated_model_definition == True:
 			self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3, device = device).to(device)
 			self.use_absolute_pos = use_absolute_pos
-			self.scale_rel = self.DataAggregation.scale_rel
+			self.scale_rel = scale_rel # self.DataAggregation.scale_rel
 			# self.ArrivalS = StationSourceAttention(30, 15, 1, 15, n_heads = 3).to(device)
 	
 			self.ftrns1 = ftrns1
@@ -1577,6 +1591,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
