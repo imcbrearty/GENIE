@@ -89,7 +89,14 @@ if __name__ == '__main__':
     elif pre_load_stations == True:
         print('Loading pre-built station file')
 
-        if os.path.isfile(base_path + 'stations.txt') == True:
+        ## Default load is npz file
+        if os.path.isfile(base_path + 'stations.npz') == True:
+            z = np.load(base_path + 'stations.npz', allow_pickle = True)
+            locs, stas = z['locs'], z['stas'].astype('U9')
+            print('Saving station .npz file')
+            z.close()
+        
+        elif os.path.isfile(base_path + 'stations.txt') == True:
             f = open(base_path + 'stations.txt', 'r')
             lines = f.readlines()
             stas, locs = [], []
@@ -106,11 +113,7 @@ if __name__ == '__main__':
             locs = np.vstack(locs)
             print('Saving station .npz file')
             np.savez_compressed(base_path + 'stations.npz', locs = locs, stas = stas) 
-        elif os.path.isfile(base_path + 'stations.npz') == True:
-            z = np.load(base_path + 'stations.npz', allow_pickle = True)
-            locs, stas = z['locs'], z['stas'].astype('U9')
-            print('Saving station .npz file')
-            z.close()
+
         else:
              raise Exception('No station file loaded; create the "stations.txt" or "stations.npz" file; see GitHub "Setup Details" section for more information')
 
