@@ -1116,7 +1116,7 @@ for cnt, strs in enumerate([0]):
 			matched_arv_indices = matched_arv_indices_val[1]
 
 			ifind_p = np.where(Out_p_save[i] > thresh_assoc)[0]
-			ifind_s = np.where(Out_s_save[i] > thresh_assoc)[0
+			ifind_s = np.where(Out_s_save[i] > thresh_assoc)[0]
 			assert(len(Out_p_save[i]) == len(Out_s_save[i]))
 
 			# Check for minimum number of picks, otherwise, skip source
