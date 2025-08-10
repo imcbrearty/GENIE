@@ -469,12 +469,22 @@ else:
 # Window over which to "relocate" each 
 # event with denser sampling from GNN output
 d_deg = 0.018 ## Is this discretization being preserved?
-x1 = np.linspace(-d_win, d_win, 15)
-x2 = np.linspace(-d_win, d_win, 15)
-x3 = np.linspace(-d_win_depth, d_win_depth, 15)
+# x1 = np.linspace(-d_win, d_win, 15)
+# x2 = np.linspace(-d_win, d_win, 15)
+# x3 = np.linspace(-d_win_depth, d_win_depth, 15)
+
+## Changing range of the Srcs_refined window (also using Cartesian domain)
+depth_scale_factor = 1.0
+x1 = np.linspace(-1.5*dist_offset, 1.5*dist_offset, 15)
+x2 = np.linspace(-1.5*dist_offset, 1.5*dist_offset, 15)
+# x3 = np.linspace(-d_win_depth, d_win_depth, 15) # 2*dist_offset
+x3 = np.linspace(-1.5*dist_offset*depth_scale_factor, 1.5*dist_offset*depth_scale_factor, 15) # 2*dist_offset
 x11, x12, x13 = np.meshgrid(x1, x2, x3)
 xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 X_offset = np.copy(xx)
+X_offset = ftrns2(X_offset + ftrns1(x_grids[0].mean(0, keepdims = True)))
+X_offset = X_offset - X_offset.mean(0, keepdims = True)
+X_offset_range, X_offset_min = X_offset.max(0, keepdims = True) - X_offset.min(0, keepdim = True), X_offset.min(0, keepdims = True)
 
 check_if_finished = False
 
@@ -859,7 +869,8 @@ for cnt, strs in enumerate([0]):
 
 		for i in range(srcs_slice.shape[0]):
 			# X_query = srcs[i,0:3] + X_offset
-			X_query_1 = srcs_slice[i,0:3] + (np.random.rand(n_rand_query,3)*(X_offset.max(0, keepdims = True) - X_offset.min(0, keepdims = True)) + X_offset.min(0, keepdims = True))
+			# X_query_1 = srcs_slice[i,0:3] + (np.random.rand(n_rand_query,3)*(X_offset.max(0, keepdims = True) - X_offset.min(0, keepdims = True)) + X_offset.min(0, keepdims = True))
+			X_query_1 = srcs_slice[i,0:3] + (np.random.rand(n_rand_query,3)*X_offset_range + X_offset_min)
 			inside = np.where((X_query_1[:,0] > lat_range[0])*(X_query_1[:,0] < lat_range[1])*(X_query_1[:,1] > lon_range[0])*(X_query_1[:,1] < lon_range[1])*(X_query_1[:,2] > depth_range[0])*(X_query_1[:,2] < depth_range[1]))[0]
 			X_query_1 = X_query_1[inside]
 			X_query_1_cart = torch.Tensor(ftrns1(np.copy(X_query_1))).to(device) # 
