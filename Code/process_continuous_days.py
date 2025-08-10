@@ -441,6 +441,12 @@ else:
 	if load_prebuilt_sampling_grid == True:
 		np.savez_compressed(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid, X_query = X_query)
 
+## Estimate average grid spacing
+tree_grid = cKDTree(X_query_cart.cpu().detach().numpy())
+irand_check = np.sort(np.random.choice(len(X_query_cart), size = int(0.05*len(X_query_cart)), replace = False))
+dist_offset = np.median(tree_grid.query(X_query_cart[irand_check].cpu().detach().numpy(), k = 5)[0][:,1::].mean(1))
+
+
 loaded_mag_model = False
 if compute_magnitudes == True:
 
@@ -796,7 +802,8 @@ for cnt, strs in enumerate([0]):
 			srcs_l.append(srcs_groups_l[i])
 		else:
 			mp = LocalMarching(device = device)
-			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
+			# srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
+			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False
 			if len(srcs_out) > 0:
 				srcs_l.append(srcs_out)
 	srcs = np.vstack(srcs_l)
@@ -989,8 +996,9 @@ for cnt, strs in enumerate([0]):
 	srcs_refined = np.vstack(srcs_refined_l)
 
 	mp = LocalMarching(device = device)
-	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
-
+	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
+	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False)
+	
 	tree_refined = cKDTree(ftrns1(srcs_refined))
 	ip_retained = tree_refined.query(ftrns1(srcs_refined_1))[1]
 
