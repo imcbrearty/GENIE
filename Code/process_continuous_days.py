@@ -488,7 +488,7 @@ xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), a
 X_offset = np.copy(xx)
 X_offset = ftrns2(X_offset + ftrns1(x_grids[0].mean(0, keepdims = True)))
 X_offset = X_offset - X_offset.mean(0, keepdims = True)
-X_offset_range, X_offset_min = X_offset.max(0, keepdims = True) - X_offset.min(0, keepdim = True), X_offset.min(0, keepdims = True)
+X_offset_range, X_offset_min = X_offset.max(0, keepdims = True) - X_offset.min(0, keepdims = True), X_offset.min(0, keepdims = True)
 
 check_if_finished = False
 
