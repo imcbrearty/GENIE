@@ -1099,7 +1099,7 @@ for cnt, strs in enumerate([0]):
 		matched_src_arrival_indices_p = []
 		matched_src_arrival_indices_s = []
 
-		min_picks = 4
+		# min_picks = 4
 
 		for i in range(len(lp_meta)):
 
@@ -1111,10 +1111,11 @@ for cnt, strs in enumerate([0]):
 			matched_arv_indices = matched_arv_indices_val[1]
 
 			ifind_p = np.where(Out_p_save[i] > thresh_assoc)[0]
-			ifind_s = np.where(Out_s_save[i] > thresh_assoc)[0]
+			ifind_s = np.where(Out_s_save[i] > thresh_assoc)[0
+			assert(len(Out_p_save[i]) == len(Out_s_save[i]))
 
 			# Check for minimum number of picks, otherwise, skip source
-			if (len(ifind_p) + len(ifind_s)) >= min_picks:
+			if ((len(ifind_p) + len(ifind_s)) >= min_required_picks)*(len(set(lp_meta[i][ifind_p,1].astype('int')).union(lp_meta[i][ifind_s,1].astype('int'))) >= min_required_sta):
 
 				ifind = np.unique(np.concatenate((ifind_p, ifind_s), axis = 0)) # Create combined set of indices
 
