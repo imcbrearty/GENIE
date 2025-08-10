@@ -809,7 +809,9 @@ for cnt, strs in enumerate([0]):
 
 	srcs = srcs[np.argsort(srcs[:,3])]
 	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs[:,0:3]).to(device)).cpu().detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)
-
+	trv_out_srcs_init1 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs[:,0:3]).to(device)).cpu().detach() + srcs[:,3].reshape(-1,1,1) # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)
+	print('Number sources (after first local marching): %d'%len(srcs))
+	
 	## Run post processing detections.
 	print('check the thresh assoc %f'%thresh_assoc)
 
@@ -999,7 +1001,10 @@ for cnt, strs in enumerate([0]):
 	srcs_refined = srcs_refined[ip_retained]
 	
 	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach()
-
+	trv_out_srcs_init2 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach() + srcs_refined[:,3].reshape(-1,1,1)
+	print('Number sources (after sources refined and second local marching): %d'%len(srcs_refined))
+	
+	
 	print('Begin competetive assignment')
 	iargsort = np.argsort(srcs_refined[:,3])
 	srcs_refined = srcs_refined[iargsort]
@@ -1430,6 +1435,7 @@ for cnt, strs in enumerate([0]):
 		
 		srcs_refined = np.vstack(srcs_retained)
 
+	print('Number sources (after competitive assignment): %d'%len(srcs_refined))
 
 	## Locate events using travel times and associated picks
 	srcs_trv, srcs_sigma = [], []
@@ -1623,7 +1629,6 @@ for cnt, strs in enumerate([0]):
 		srcs_trv.append(np.concatenate((xmle, np.array([origin]).reshape(1,-1)), axis = 1))
 		srcs_sigma.append(sigma_cart)
 	
-	
 	srcs_trv = np.vstack(srcs_trv)
 	srcs_sigma = np.hstack(srcs_sigma)
 	del_arv_p = np.hstack(del_arv_p)
@@ -1636,6 +1641,8 @@ for cnt, strs in enumerate([0]):
 	assert(len(srcs_trv) == len(srcs_refined))
 	###### Only keep events with minimum number of picks and observing stations #########
 
+	print('Number sources (after travel time locations and quality control): %d'%len(srcs_trv))
+	
 	# Count number of P and S picks
 	cnt_p, cnt_s = np.zeros(srcs_refined.shape[0]), np.zeros(srcs_refined.shape[0])
 	for i in range(srcs_refined.shape[0]):
@@ -1668,6 +1675,8 @@ for cnt, strs in enumerate([0]):
 	
 		Picks_P_perm = [Picks_P_perm[j] for j in ikeep]
 		Picks_S_perm = [Picks_S_perm[j] for j in ikeep]
+
+	print('Number sources (after minimum number of picks and stations): %d'%len(srcs_trv))
 	
 	####################################################################################
 	
@@ -1838,6 +1847,9 @@ for cnt, strs in enumerate([0]):
 		file_save['trv_out2'] = trv_out2
 		file_save['trv_out1_all'] = trv_out1_all
 		file_save['trv_out2_all'] = trv_out2_all
+		file_save['trv_srcs_init1'] = trv_out_srcs_init1
+		file_save['trv_srcs_init2'] = trv_out_srcs_init2
+		
 		
 		if (process_known_events == True):
 			if len(srcs_known) > 0:
