@@ -444,7 +444,7 @@ else:
 ## Estimate average grid spacing
 tree_grid = cKDTree(X_query_cart.cpu().detach().numpy())
 irand_check = np.sort(np.random.choice(len(X_query_cart), size = int(0.05*len(X_query_cart)), replace = False))
-dist_offset = np.median(tree_grid.query(X_query_cart[irand_check].cpu().detach().numpy(), k = 5)[0][:,1::].mean(1))
+dist_grid = np.median(tree_grid.query(X_query_cart[irand_check].cpu().detach().numpy(), k = 5)[0][:,1::].mean(1))
 
 
 loaded_mag_model = False
@@ -475,10 +475,10 @@ d_deg = 0.018 ## Is this discretization being preserved?
 
 ## Changing range of the Srcs_refined window (also using Cartesian domain)
 depth_scale_factor = 1.0
-x1 = np.linspace(-1.5*dist_offset, 1.5*dist_offset, 15)
-x2 = np.linspace(-1.5*dist_offset, 1.5*dist_offset, 15)
+x1 = np.linspace(-1.5*dist_grid, 1.5*dist_grid, 15)
+x2 = np.linspace(-1.5*dist_grid, 1.5*dist_grid, 15)
 # x3 = np.linspace(-d_win_depth, d_win_depth, 15) # 2*dist_offset
-x3 = np.linspace(-1.5*dist_offset*depth_scale_factor, 1.5*dist_offset*depth_scale_factor, 15) # 2*dist_offset
+x3 = np.linspace(-1.5*dist_grid*depth_scale_factor, 1.5*dist_grid*depth_scale_factor, 15) # 2*dist_offset
 x11, x12, x13 = np.meshgrid(x1, x2, x3)
 xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 X_offset = np.copy(xx)
@@ -813,7 +813,7 @@ for cnt, strs in enumerate([0]):
 		else:
 			mp = LocalMarching(device = device)
 			# srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
-			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False
+			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = 2*dt_win, sp_win = 2*dist_grid, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False
 			if len(srcs_out) > 0:
 				srcs_l.append(srcs_out)
 	srcs = np.vstack(srcs_l)
@@ -1008,7 +1008,7 @@ for cnt, strs in enumerate([0]):
 
 	mp = LocalMarching(device = device)
 	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
-	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False)
+	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = 2*dt_win, sp_win = 2*dist_grid, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False)
 	
 	tree_refined = cKDTree(ftrns1(srcs_refined))
 	ip_retained = tree_refined.query(ftrns1(srcs_refined_1))[1]
