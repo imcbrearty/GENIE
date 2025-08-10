@@ -486,8 +486,8 @@ x3 = np.linspace(-2.0*dist_grid*depth_scale_factor, 2.0*dist_grid*depth_scale_fa
 x11, x12, x13 = np.meshgrid(x1, x2, x3)
 xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 X_offset = np.copy(xx)
-X_offset = ftrns2(X_offset + ftrns1(x_grids[0].mean(0, keepdims = True)))
-X_offset = X_offset - X_offset.mean(0, keepdims = True)
+# X_offset = ftrns2(X_offset + ftrns1(x_grids[0].mean(0, keepdims = True)))
+# X_offset = X_offset - X_offset.mean(0, keepdims = True)
 X_offset_range, X_offset_min = X_offset.max(0, keepdims = True) - X_offset.min(0, keepdims = True), X_offset.min(0, keepdims = True)
 
 check_if_finished = False
@@ -874,10 +874,11 @@ for cnt, strs in enumerate([0]):
 		for i in range(srcs_slice.shape[0]):
 			# X_query = srcs[i,0:3] + X_offset
 			# X_query_1 = srcs_slice[i,0:3] + (np.random.rand(n_rand_query,3)*(X_offset.max(0, keepdims = True) - X_offset.min(0, keepdims = True)) + X_offset.min(0, keepdims = True))
-			X_query_1 = srcs_slice[i,0:3] + (np.random.rand(n_rand_query,3)*X_offset_range + X_offset_min)
+			X_query_1_cart = ftrns1(srcs_slice[i,0:3].reshape(1,-1)) + (np.random.rand(n_rand_query,3)*X_offset_range + X_offset_min)
+			X_query_1 = ftrns2(X_query_1_cart) # 
 			inside = np.where((X_query_1[:,0] > lat_range[0])*(X_query_1[:,0] < lat_range[1])*(X_query_1[:,1] > lon_range[0])*(X_query_1[:,1] < lon_range[1])*(X_query_1[:,2] > depth_range[0])*(X_query_1[:,2] < depth_range[1]))[0]
 			X_query_1 = X_query_1[inside]
-			X_query_1_cart = torch.Tensor(ftrns1(np.copy(X_query_1))).to(device) # 
+			X_query_1_cart = torch.Tensor(X_query_1_cart[inside]).to(device)
 			X_query_1_list.append(X_query_1)
 			X_query_1_cart_list.append(X_query_1_cart)
 
