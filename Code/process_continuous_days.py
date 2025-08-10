@@ -410,11 +410,11 @@ else:
 plot_on = False
 save_on = True
 
-d_deg = 0.1 ## leads to 42 k grid?
+# d_deg = 0.1 ## leads to 42 k grid?
 print('Going to compute sources only in interior region')
 
-x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
-x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
+# x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
+# x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
 
 # load_prebuilt_sampling_grid = True
 n_ver_sampling_grid = 1
@@ -428,15 +428,19 @@ if (load_prebuilt_sampling_grid == True)*(os.path.isfile(path_to_file + 'Grids' 
 else:	
 
 	use_irregular_reference_grid = True ## Could add a different function to create the initial grid sampling points
+	assert(use_irregular_reference_grid == True)
 	if use_irregular_reference_grid == True:
 		X_query = kmeans_packing_sampling_points(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 3000, n_sim = 1)[0]
 		X_query_cart = torch.Tensor(ftrns1(np.copy(X_query))).to(device)
-	else:
-		x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
-		x11, x12, x13 = np.meshgrid(x1, x2, x3)
-		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-		X_query = np.copy(xx)
-		X_query_cart = torch.Tensor(ftrns1(np.copy(xx))).to(device)
+		
+	## Remove option for non uniform grid
+	
+# 	else:
+# 		x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
+# 		x11, x12, x13 = np.meshgrid(x1, x2, x3)
+# 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+# 		X_query = np.copy(xx)
+# 		X_query_cart = torch.Tensor(ftrns1(np.copy(xx))).to(device)
 
 	if load_prebuilt_sampling_grid == True:
 		np.savez_compressed(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid, X_query = X_query)
@@ -468,7 +472,7 @@ else:
 
 # Window over which to "relocate" each 
 # event with denser sampling from GNN output
-d_deg = 0.018 ## Is this discretization being preserved?
+# d_deg = 0.018 ## Is this discretization being preserved?
 # x1 = np.linspace(-d_win, d_win, 15)
 # x2 = np.linspace(-d_win, d_win, 15)
 # x3 = np.linspace(-d_win_depth, d_win_depth, 15)
@@ -939,7 +943,7 @@ for cnt, strs in enumerate([0]):
 		trv_out_srcs_l.append(trv_out_srcs_slice)
 
 		## Dense, spatial view.
-		d_deg = 0.1
+		# d_deg = 0.1
 		x1 = np.linspace(lat_range[0], lat_range[1], 15)
 		x2 = np.linspace(lon_range[0], lon_range[1], 15)
 		x3 = np.array([0.0]) # This value is overwritten in the next step
