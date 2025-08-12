@@ -830,7 +830,7 @@ for cnt, strs in enumerate([0]):
 
 	srcs = srcs[np.argsort(srcs[:,3])]
 	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs[:,0:3]).to(device)).cpu().detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)
-	trv_out_srcs_init1 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs[:,0:3]).to(device)).cpu().detach() + srcs[:,3].reshape(-1,1,1) # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)
+	trv_out_srcs_init1 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs[:,0:3]).to(device)).cpu().detach().numpy() + srcs[:,3].reshape(-1,1,1) # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)
 	print('Number sources (after first local marching): %d'%len(srcs))
 	
 	## Run post processing detections.
@@ -1025,7 +1025,7 @@ for cnt, strs in enumerate([0]):
 	srcs_refined = srcs_refined[ip_retained]
 	
 	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach()
-	trv_out_srcs_init2 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach() + srcs_refined[:,3].reshape(-1,1,1)
+	trv_out_srcs_init2 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
 	print('Number sources (after sources refined and second local marching): %d'%len(srcs_refined))
 	
 	
