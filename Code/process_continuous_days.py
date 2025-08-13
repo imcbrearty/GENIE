@@ -770,7 +770,7 @@ for cnt, strs in enumerate([0]):
 				trace[iz2[ifind_x]] = Out_2_sparse[ifind_x,2]
 				
 				# ip = np.where(Out[:,i] > thresh)[0]
-				ip = find_peaks(trace, height = thresh, distance = int(1.25*src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
+				ip = find_peaks(trace, height = thresh, distance = int(1.5*src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
 				if len(ip[0]) > 0: # why use xq here?
 					val = np.concatenate((xq[i,:].reshape(1,-1)*np.ones((len(ip[0]),3)), ts[ip[0]].reshape(-1,1), ip[1]['peak_heights'].reshape(-1,1)), axis = 1)
 					srcs_init.append(val)		
@@ -783,7 +783,7 @@ for cnt, strs in enumerate([0]):
 		srcs_init = []
 		for i in range(Out.shape[0]):
 			# ip = np.where(Out[:,i] > thresh)[0]
-			ip = find_peaks(Out[i,:], height = thresh, distance = int(1.25*src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
+			ip = find_peaks(Out[i,:], height = thresh, distance = int(1.5*src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
 			if len(ip[0]) > 0: # why use xq here?
 				val = np.concatenate((xq[i,:].reshape(1,-1)*np.ones((len(ip[0]),3)), ts[ip[0]].reshape(-1,1), ip[1]['peak_heights'].reshape(-1,1)), axis = 1)
 				srcs_init.append(val)
