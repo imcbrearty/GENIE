@@ -19,8 +19,8 @@ network: 'HV'
 ## You can also set convert_initial_pick_files as True, to convert the initial picks.txt into the expected format (when calling make_initial_files.py)
 
 pre_load_stations: True # If True, then skip download stations during make_initial_files.py; instead, stations.txt (or stations.npz) is assumed to already exist with locs and stas as the two fields.
-convert_initial_pick_files: True ## If True, will convert the initial pick files saved in "picks.txt" into the expected format in the Picks folders (when calling make_initial_files.py)
-convert_initial_catalog: True ## If True, will convert an initial catalog file ("catalog.txt" saved in HypoDD format) into the catalog format
+convert_initial_pick_files: False ## If True, will convert the initial pick files saved in "picks.txt" into the expected format in the Picks folders (when calling make_initial_files.py)
+convert_initial_catalog: False ## If True, will convert an initial catalog file ("catalog.txt" saved in HypoDD format) into the catalog format
 
 use_physics_informed: True ## If true, must run the "build" and "train" scripts seperately for the travel times and load a 3D (or 1D) velocity model
 use_topography: False ## If True, create the "surface_elevation.npz" file in the main project folder, saved with numpy array with "Points" (with columns of lat, lon, and elevation (m)). Can be arbitrary structured set of points (areas outside convex hull of Points will be trated as zero elevation.
@@ -99,6 +99,7 @@ max_number_pick_association_labels_per_sample: 1500 # Max number of picks to com
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
 
 
 
