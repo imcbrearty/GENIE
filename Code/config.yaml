@@ -8,7 +8,7 @@ latitude_range: [39.3, 41.2] # Latitude range of the region that will be process
 longitude_range: [-125.0, -123.0] # Longitude range of the region that will be processed
 depth_range: [-40000, 2000] # Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
 time_range: # This sets up the Catalog and Pick files to have these years initialized
-  start: '2018-01-01'
+  start: '2000-01-01'
   end: '2025-01-01'
 
 client : 'IRIS'
@@ -99,6 +99,7 @@ max_number_pick_association_labels_per_sample: 1500 # Max number of picks to com
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
 
 
 
