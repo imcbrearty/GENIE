@@ -816,7 +816,8 @@ for cnt, strs in enumerate([0]):
 			srcs_l.append(srcs_groups_l[i])
 		else:
 			mp = LocalMarching(device = device)
-			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
+			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False)
+			# srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
 			# srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = 2.5*dt_win, sp_win = 2.5*dist_grid, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False
 			if len(srcs_out) > 0:
 				srcs_l.append(srcs_out)
@@ -1012,7 +1013,8 @@ for cnt, strs in enumerate([0]):
 	srcs_refined = np.vstack(srcs_refined_l)
 
 	mp = LocalMarching(device = device)
-	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
+	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
+	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
 	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = 2.5*dt_win, sp_win = 2.5*dist_grid, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False)
 	
 	tree_refined = cKDTree(ftrns1(srcs_refined))
