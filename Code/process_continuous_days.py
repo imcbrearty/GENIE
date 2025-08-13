@@ -410,11 +410,11 @@ else:
 plot_on = False
 save_on = True
 
-d_deg = 0.1 ## leads to 42 k grid?
+# d_deg = 0.1 ## leads to 42 k grid?
 print('Going to compute sources only in interior region')
 
-x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
-x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
+# x1 = np.arange(lat_range[0], lat_range[1] + d_deg, d_deg)
+# x2 = np.arange(lon_range[0], lon_range[1] + d_deg, d_deg)
 
 # load_prebuilt_sampling_grid = True
 n_ver_sampling_grid = 1
@@ -428,18 +428,28 @@ if (load_prebuilt_sampling_grid == True)*(os.path.isfile(path_to_file + 'Grids' 
 else:	
 
 	use_irregular_reference_grid = True ## Could add a different function to create the initial grid sampling points
+	assert(use_irregular_reference_grid == True)
 	if use_irregular_reference_grid == True:
 		X_query = kmeans_packing_sampling_points(scale_x, offset_x, 3, n_query_grid, ftrns1, n_batch = 3000, n_steps = 3000, n_sim = 1)[0]
 		X_query_cart = torch.Tensor(ftrns1(np.copy(X_query))).to(device)
-	else:
-		x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
-		x11, x12, x13 = np.meshgrid(x1, x2, x3)
-		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-		X_query = np.copy(xx)
-		X_query_cart = torch.Tensor(ftrns1(np.copy(xx))).to(device)
+		
+	## Remove option for non uniform grid
+	
+# 	else:
+# 		x3 = np.arange(-45e3, 5e3 + 10e3, 20e3)
+# 		x11, x12, x13 = np.meshgrid(x1, x2, x3)
+# 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+# 		X_query = np.copy(xx)
+# 		X_query_cart = torch.Tensor(ftrns1(np.copy(xx))).to(device)
 
 	if load_prebuilt_sampling_grid == True:
 		np.savez_compressed(path_to_file + 'Grids' + seperator + 'prebuilt_sampling_grid_ver_%d.npz'%n_ver_sampling_grid, X_query = X_query)
+
+## Estimate average grid spacing
+tree_grid = cKDTree(X_query_cart.cpu().detach().numpy())
+irand_check = np.sort(np.random.choice(len(X_query_cart), size = int(0.05*len(X_query_cart)), replace = False))
+dist_grid = np.median(tree_grid.query(X_query_cart[irand_check].cpu().detach().numpy(), k = 5)[0][:,1::].mean(1))
+
 
 loaded_mag_model = False
 if compute_magnitudes == True:
@@ -462,13 +472,23 @@ else:
 
 # Window over which to "relocate" each 
 # event with denser sampling from GNN output
-d_deg = 0.018 ## Is this discretization being preserved?
-x1 = np.linspace(-d_win, d_win, 15)
-x2 = np.linspace(-d_win, d_win, 15)
-x3 = np.linspace(-d_win_depth, d_win_depth, 15)
+# d_deg = 0.018 ## Is this discretization being preserved?
+# x1 = np.linspace(-d_win, d_win, 15)
+# x2 = np.linspace(-d_win, d_win, 15)
+# x3 = np.linspace(-d_win_depth, d_win_depth, 15)
+
+## Changing range of the Srcs_refined window (also using Cartesian domain)
+depth_scale_factor = 1.5
+x1 = np.linspace(-2.0*dist_grid, 2.0*dist_grid, 15)
+x2 = np.linspace(-2.0*dist_grid, 2.0*dist_grid, 15)
+# x3 = np.linspace(-d_win_depth, d_win_depth, 15) # 2*dist_offset
+x3 = np.linspace(-2.0*dist_grid*depth_scale_factor, 2.0*dist_grid*depth_scale_factor, 15) # 2*dist_offset
 x11, x12, x13 = np.meshgrid(x1, x2, x3)
 xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 X_offset = np.copy(xx)
+# X_offset = ftrns2(X_offset + ftrns1(x_grids[0].mean(0, keepdims = True)))
+# X_offset = X_offset - X_offset.mean(0, keepdims = True)
+X_offset_range, X_offset_min = X_offset.max(0, keepdims = True) - X_offset.min(0, keepdims = True), X_offset.min(0, keepdims = True)
 
 check_if_finished = False
 
@@ -750,7 +770,7 @@ for cnt, strs in enumerate([0]):
 				trace[iz2[ifind_x]] = Out_2_sparse[ifind_x,2]
 				
 				# ip = np.where(Out[:,i] > thresh)[0]
-				ip = find_peaks(trace, height = thresh, distance = int(src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
+				ip = find_peaks(trace, height = thresh, distance = int(1.25*src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
 				if len(ip[0]) > 0: # why use xq here?
 					val = np.concatenate((xq[i,:].reshape(1,-1)*np.ones((len(ip[0]),3)), ts[ip[0]].reshape(-1,1), ip[1]['peak_heights'].reshape(-1,1)), axis = 1)
 					srcs_init.append(val)		
@@ -763,7 +783,7 @@ for cnt, strs in enumerate([0]):
 		srcs_init = []
 		for i in range(Out.shape[0]):
 			# ip = np.where(Out[:,i] > thresh)[0]
-			ip = find_peaks(Out[i,:], height = thresh, distance = int(src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
+			ip = find_peaks(Out[i,:], height = thresh, distance = int(1.25*src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
 			if len(ip[0]) > 0: # why use xq here?
 				val = np.concatenate((xq[i,:].reshape(1,-1)*np.ones((len(ip[0]),3)), ts[ip[0]].reshape(-1,1), ip[1]['peak_heights'].reshape(-1,1)), axis = 1)
 				srcs_init.append(val)
@@ -796,7 +816,9 @@ for cnt, strs in enumerate([0]):
 			srcs_l.append(srcs_groups_l[i])
 		else:
 			mp = LocalMarching(device = device)
-			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
+			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False)
+			# srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
+			# srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = 2.5*dt_win, sp_win = 2.5*dist_grid, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False
 			if len(srcs_out) > 0:
 				srcs_l.append(srcs_out)
 	srcs = np.vstack(srcs_l)
@@ -809,7 +831,9 @@ for cnt, strs in enumerate([0]):
 
 	srcs = srcs[np.argsort(srcs[:,3])]
 	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs[:,0:3]).to(device)).cpu().detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)
-
+	trv_out_srcs_init1 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs[:,0:3]).to(device)).cpu().detach().numpy() + srcs[:,3].reshape(-1,1,1) # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)
+	print('Number sources (after first local marching): %d'%len(srcs))
+	
 	## Run post processing detections.
 	print('check the thresh assoc %f'%thresh_assoc)
 
@@ -850,10 +874,12 @@ for cnt, strs in enumerate([0]):
 
 		for i in range(srcs_slice.shape[0]):
 			# X_query = srcs[i,0:3] + X_offset
-			X_query_1 = srcs_slice[i,0:3] + (np.random.rand(n_rand_query,3)*(X_offset.max(0, keepdims = True) - X_offset.min(0, keepdims = True)) + X_offset.min(0, keepdims = True))
+			# X_query_1 = srcs_slice[i,0:3] + (np.random.rand(n_rand_query,3)*(X_offset.max(0, keepdims = True) - X_offset.min(0, keepdims = True)) + X_offset.min(0, keepdims = True))
+			X_query_1_cart = ftrns1(srcs_slice[i,0:3].reshape(1,-1)) + (np.random.rand(n_rand_query,3)*X_offset_range + X_offset_min)
+			X_query_1 = ftrns2(X_query_1_cart) # 
 			inside = np.where((X_query_1[:,0] > lat_range[0])*(X_query_1[:,0] < lat_range[1])*(X_query_1[:,1] > lon_range[0])*(X_query_1[:,1] < lon_range[1])*(X_query_1[:,2] > depth_range[0])*(X_query_1[:,2] < depth_range[1]))[0]
 			X_query_1 = X_query_1[inside]
-			X_query_1_cart = torch.Tensor(ftrns1(np.copy(X_query_1))).to(device) # 
+			X_query_1_cart = torch.Tensor(X_query_1_cart[inside]).to(device)
 			X_query_1_list.append(X_query_1)
 			X_query_1_cart_list.append(X_query_1_cart)
 
@@ -919,7 +945,7 @@ for cnt, strs in enumerate([0]):
 		trv_out_srcs_l.append(trv_out_srcs_slice)
 
 		## Dense, spatial view.
-		d_deg = 0.1
+		# d_deg = 0.1
 		x1 = np.linspace(lat_range[0], lat_range[1], 15)
 		x2 = np.linspace(lon_range[0], lon_range[1], 15)
 		x3 = np.array([0.0]) # This value is overwritten in the next step
@@ -987,8 +1013,10 @@ for cnt, strs in enumerate([0]):
 	srcs_refined = np.vstack(srcs_refined_l)
 
 	mp = LocalMarching(device = device)
-	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
-
+	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
+	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
+	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = 2.5*dt_win, sp_win = 2.5*dist_grid, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False)
+	
 	tree_refined = cKDTree(ftrns1(srcs_refined))
 	ip_retained = tree_refined.query(ftrns1(srcs_refined_1))[1]
 
@@ -999,7 +1027,10 @@ for cnt, strs in enumerate([0]):
 	srcs_refined = srcs_refined[ip_retained]
 	
 	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach()
-
+	trv_out_srcs_init2 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
+	print('Number sources (after sources refined and second local marching): %d'%len(srcs_refined))
+	
+	
 	print('Begin competetive assignment')
 	iargsort = np.argsort(srcs_refined[:,3])
 	srcs_refined = srcs_refined[iargsort]
@@ -1099,7 +1130,7 @@ for cnt, strs in enumerate([0]):
 		matched_src_arrival_indices_p = []
 		matched_src_arrival_indices_s = []
 
-		min_picks = 4
+		# min_picks = 4
 
 		for i in range(len(lp_meta)):
 
@@ -1112,9 +1143,10 @@ for cnt, strs in enumerate([0]):
 
 			ifind_p = np.where(Out_p_save[i] > thresh_assoc)[0]
 			ifind_s = np.where(Out_s_save[i] > thresh_assoc)[0]
+			assert(len(Out_p_save[i]) == len(Out_s_save[i]))
 
 			# Check for minimum number of picks, otherwise, skip source
-			if (len(ifind_p) + len(ifind_s)) >= min_picks:
+			if ((len(ifind_p) + len(ifind_s)) >= min_required_picks)*(len(set(lp_meta[i][ifind_p,1].astype('int')).union(lp_meta[i][ifind_s,1].astype('int'))) >= min_required_sta):
 
 				ifind = np.unique(np.concatenate((ifind_p, ifind_s), axis = 0)) # Create combined set of indices
 
@@ -1135,6 +1167,7 @@ for cnt, strs in enumerate([0]):
 		## From this, we may not have memory issues with competitive assignment. If so,
 		## can still reduce the size of disjoint groups.
 
+		if len(matched_src_arrival_indices) == 0: print('No sources detected')
 		matched_src_arrival_indices = np.hstack(matched_src_arrival_indices)
 		matched_src_arrival_indices_p = np.hstack(matched_src_arrival_indices_p)
 		matched_src_arrival_indices_s = np.hstack(matched_src_arrival_indices_s)
@@ -1429,6 +1462,7 @@ for cnt, strs in enumerate([0]):
 		
 		srcs_refined = np.vstack(srcs_retained)
 
+	print('Number sources (after competitive assignment): %d'%len(srcs_refined))
 
 	## Locate events using travel times and associated picks
 	srcs_trv, srcs_sigma = [], []
@@ -1622,7 +1656,6 @@ for cnt, strs in enumerate([0]):
 		srcs_trv.append(np.concatenate((xmle, np.array([origin]).reshape(1,-1)), axis = 1))
 		srcs_sigma.append(sigma_cart)
 	
-	
 	srcs_trv = np.vstack(srcs_trv)
 	srcs_sigma = np.hstack(srcs_sigma)
 	del_arv_p = np.hstack(del_arv_p)
@@ -1635,6 +1668,8 @@ for cnt, strs in enumerate([0]):
 	assert(len(srcs_trv) == len(srcs_refined))
 	###### Only keep events with minimum number of picks and observing stations #########
 
+	print('Number sources (after travel time locations and quality control): %d'%len(srcs_trv))
+	
 	# Count number of P and S picks
 	cnt_p, cnt_s = np.zeros(srcs_refined.shape[0]), np.zeros(srcs_refined.shape[0])
 	for i in range(srcs_refined.shape[0]):
@@ -1667,6 +1702,8 @@ for cnt, strs in enumerate([0]):
 	
 		Picks_P_perm = [Picks_P_perm[j] for j in ikeep]
 		Picks_S_perm = [Picks_S_perm[j] for j in ikeep]
+
+	print('Number sources (after minimum number of picks and stations): %d'%len(srcs_trv))
 	
 	####################################################################################
 	
@@ -1837,6 +1874,9 @@ for cnt, strs in enumerate([0]):
 		file_save['trv_out2'] = trv_out2
 		file_save['trv_out1_all'] = trv_out1_all
 		file_save['trv_out2_all'] = trv_out2_all
+		file_save['trv_srcs_init1'] = trv_out_srcs_init1
+		file_save['trv_srcs_init2'] = trv_out_srcs_init2
+		
 		
 		if (process_known_events == True):
 			if len(srcs_known) > 0:
