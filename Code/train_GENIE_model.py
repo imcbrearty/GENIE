@@ -21,6 +21,7 @@ from torch_geometric.utils import softmax
 from torch_geometric.utils import degree
 from torch_scatter import scatter
 from numpy.matlib import repmat
+import pdb
 import pathlib
 import glob
 import sys
@@ -322,6 +323,152 @@ use_shallow_sources = train_config['use_shallow_sources']
 use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
 
+def simulate_travel_times(prob_vec, chol_params, ftrns1, n_samples = 100, use_l1 = False, srcs = None, mags = None, ichoose = None, locs_use_list = None, ind_use_slice = None, return_features = True): # n_repeat : can repeatedly draw either from the covariance matrices, or the binomial distribution
+
+	if srcs is None:
+		## Sample sources
+		if ichoose is None: ichoose = np.random.choice(len(Srcs), p = prob_vec, size = n_samples)
+		locs_use_list = [locs[Inds[j]] for j in ichoose]
+		locs_use_cart_list = [ftrns1(l) for l in locs_use_list]
+		srcs_sample = Srcs[ichoose]
+		# mags_sample = Mags[ichoose]
+		srcs_samples_cart = ftrns1(srcs_sample)
+		ind_use_slice = [Inds[ichoose[i]] for i in range(len(ichoose))]
+		sample_fixed = False
+
+	else:
+		ichoose = np.arange(len(srcs))
+		n_samples = len(srcs)
+		locs_use_cart_list = [ftrns1(l) for l in locs_use_list]
+		srcs_sample = np.copy(srcs)
+		# mags_sample = np.copy(mags_sample)
+		srcs_samples_cart = ftrns1(srcs_sample)
+		# ind_use_slice = [np.arange(len(locs)) for i in range(len(ichoose))]
+		sample_fixed = True
+
+	## Removing the use of mags from the function
+
+	rel_trv_factor1 = chol_params['relative_travel_time_factor1'] # random_scale_factor_phase = 0.35
+	rel_trv_factor2 = chol_params['relative_travel_time_factor2'] # random_scale_factor_phase = 0.35
+	travel_time_bias_scale_factor1 = chol_params['travel_time_bias_scale_factor1']
+	travel_time_bias_scale_factor2 = chol_params['travel_time_bias_scale_factor2']
+	correlation_scale_distance = chol_params['correlation_scale_distance']
+
+	## Setup absolute network parameters
+	tol = 1e-8
+	distance_abs = pd(ftrns1(locs), ftrns1(locs)) ## Absolute stations
+	if use_l1 == False:
+		# covariance_abs = np.exp(-0.5*(distance_abs**2) / (sigma_noise**2)) + tol*np.eye(distance_abs.shape[0])
+		covariance_trv = np.exp(-0.5*(distance_abs**2) / (correlation_scale_distance**2)) + tol*np.eye(distance_abs.shape[0])
+	else:
+		# covariance_abs = np.exp(-1.0*np.abs(distance_abs) / (sigma_noise**1)) + tol*np.eye(distance_abs.shape[0])
+		covariance_trv = np.exp(-1.0*np.abs(distance_abs) / (correlation_scale_distance**1)) + tol*np.eye(distance_abs.shape[0])
+
+
+	chol_trv_matrix = np.linalg.cholesky(covariance_trv)
+
+
+	Log_prob_p = []
+	Log_prob_s = []
+	Simulated_p = []
+	Simulated_s = []
+	Mean_trv_p = []
+	Mean_trv_s = []
+	Std_val_p = []
+	Std_val_s = []
+	scale_log_prob = 100.0
+
+	locs_cuda = torch.Tensor(locs).to(device)
+	srcs_cuda = torch.Tensor(srcs_sample).to(device)
+	for i in range(n_samples):
+		## Sample correlated travel time noise
+		trv_out_vals = trv(locs_cuda, srcs_cuda[i].reshape(1,-1)).cpu().detach().numpy()
+		if sample_fixed == False:
+			time_trgt_p, time_trgt_s = Picks_P_lists[ichoose[i]][:,0].astype('int') - srcs_sample[i,3], Picks_S_lists[ichoose[i]][:,0].astype('int') - srcs_sample[i,3]
+			ind_trgt_p, ind_trgt_s = Picks_P_lists[ichoose[i]][:,1].astype('int'), Picks_S_lists[ichoose[i]][:,1].astype('int')
+			simulated_trv_p, scaled_mean_vec_p, std_val_p, log_likelihood_obs_p, log_likelihood_sim_p = sample_correlated_travel_time_noise_pre_computed(chol_trv_matrix, trv_out_vals[0,:,0], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], ind_use_slice[i], observed_times = time_trgt_p, observed_indices = ind_trgt_p, compute_log_likelihood = True)
+			simulated_trv_s, scaled_mean_vec_s, std_val_s, log_likelihood_obs_s, log_likelihood_sim_s = sample_correlated_travel_time_noise_pre_computed(chol_trv_matrix, trv_out_vals[0,:,1], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], ind_use_slice[i], observed_times = time_trgt_s, observed_indices = ind_trgt_s, compute_log_likelihood = True)
+			Log_prob_p.append(log_likelihood_sim_p/np.maximum(1.0, len(time_trgt_p))) ## Check normalization
+			Log_prob_s.append(log_likelihood_sim_s/np.maximum(1.0, len(time_trgt_s))) ## Check normalization
+
+		else:
+			simulated_trv_p, scaled_mean_vec_p, std_val_p = sample_correlated_travel_time_noise_pre_computed(chol_trv_matrix, trv_out_vals[0,:,0], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], ind_use_slice[i])
+			simulated_trv_s, scaled_mean_vec_s, std_val_s = sample_correlated_travel_time_noise_pre_computed(chol_trv_matrix, trv_out_vals[0,:,1], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], ind_use_slice[i])
+
+
+		Simulated_p.append(simulated_trv_p)
+		Simulated_s.append(simulated_trv_s)
+		Mean_trv_p.append(scaled_mean_vec_p)
+		Mean_trv_s.append(scaled_mean_vec_s)
+		Std_val_p.append(std_val_p)
+		Std_val_s.append(std_val_s)
+
+
+	return srcs_sample, [], ichoose, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, np.array(Std_val_p), np.array(Std_val_s), np.array(Log_prob_p)/scale_log_prob, np.array(Log_prob_s)/scale_log_prob
+	# _, _, _, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, _, _
+
+def sample_correlated_travel_time_noise_pre_computed(cholesky_matrix_trv, mean_vec, bias_factors, std_factor, ind_use, compute_log_likelihood = False, observed_indices = None, observed_times = None, min_tol = 0.005, n_repeat = 1):
+	"""Generate spatially correlated noise using Cholesky decomposition.
+	TO DO: use pre-computed coefficients.
+	Args:
+		points (np.ndarray): Array of points
+		sigma_noise (float): Covariance scale parameter
+		cholesky_matrix (np.ndarray): Pre-computed Cholesky matrix
+	Returns:
+	np.ndarray: Spatially correlated noise
+	"""
+	# covariance = compute_covariance(distance, sigma_noise=sigma_noise)
+	# if cholesky_matrix == None:
+	# 	L = np.linalg.cholesky(covariance[ind_use.reshape(-1,1), ind_use.reshape(1,-1)])
+	# else:
+	# 	L = np.copy(cholesky_matrix)
+
+	## Scale absolute "mean" travel times by bias factor
+	if len(bias_factors) > 1:
+		bias_val = np.random.uniform(1.0 - bias_factors[0], 1.0 + bias_factors[1])
+	else:
+		bias_val = np.random.uniform(1.0 - bias_factors[0], 1.0 + bias_factors[0])		
+
+	## Set the standard deviation as proportional to travel time
+	if len(std_factor) > 1:
+		std_val = np.random.uniform(std_factor[0], std_factor[0] + std_factor[1])
+	else:
+		std_val = std_factor[0]
+
+	standard_deviation = np.diag(mean_vec*std_val)
+
+	# std_val = np.random.uniform(min_tol, std_factor)
+	# standard_deviation = np.diag(mean_vec*std_factor)
+
+	z = np.random.randn(len(cholesky_matrix_trv), n_repeat)
+
+	# z = np.random.multivariate_normal(np.zeros(len(points)), np.identity(len(points)))
+	scaled_chol_matrix = (standard_deviation @ cholesky_matrix_trv)
+	scaled_mean_vec = mean_vec*bias_val
+
+	# Compute simulated times
+	simulated_times = ((scaled_chol_matrix @ z) + (scaled_mean_vec).reshape(-1,1))[ind_use].squeeze() # [ind_use]
+
+	if compute_log_likelihood == False:
+
+		return simulated_times, scaled_mean_vec, std_val
+
+	else: ## In this case, compute the log likelihood of the observations (and simulations) given the model
+
+		# pdb.set_trace()
+		# inv_cov_subset = np.linalg.pinv((cholesky_matrix_trv @ cholesky_matrix_trv.T)[ind_use[observed_indices].reshape(-1,1), ind_use[observed_indices].reshape(1,-1)])
+		cov_subset = (scaled_chol_matrix @ scaled_chol_matrix.T)[ind_use[observed_indices].reshape(-1,1), ind_use[observed_indices].reshape(1,-1)]
+		res_vec_obs = observed_times - scaled_mean_vec[ind_use[observed_indices]]
+		res_vec_sim = simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]]
+		inv_cov_prod_res = np.linalg.solve(cov_subset, res_vec_obs.reshape(-1,1))
+		inv_cov_prod_sim = np.linalg.solve(cov_subset, res_vec_sim.reshape(-1,1))
+		# log_likelihood_obs = -(len(observed_indices)/2.0)*np.log(2.0*np.pi) - 1.0*(np.log(np.diag(scaled_chol_matrix)).sum()) - 0.5*((observed_times - scaled_mean_vec[ind_use[observed_indices]])*(inv_cov_subset @ (observed_times - scaled_mean_vec[ind_use[observed_indices]]).reshape(-1,1))).sum()
+		# log_likelihood_sim = -(len(observed_indices)/2.0)*np.log(2.0*np.pi) - 1.0*(np.log(np.diag(scaled_chol_matrix)).sum()) - 0.5*((simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]])*(inv_cov_subset @ (simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]]).reshape(-1,1))).sum()
+		log_likelihood_obs = -(len(observed_indices)/2.0)*np.log(2.0*np.pi) - 1.0*(np.log(np.diag(scaled_chol_matrix)).sum()) - 0.5*(res_vec_obs*inv_cov_prod_res).sum() # ((observed_times - scaled_mean_vec[ind_use[observed_indices]])*(inv_cov_subset @ (observed_times - scaled_mean_vec[ind_use[observed_indices]]).reshape(-1,1))).sum()
+		log_likelihood_sim = -(len(observed_indices)/2.0)*np.log(2.0*np.pi) - 1.0*(np.log(np.diag(scaled_chol_matrix)).sum()) - 0.5*(res_vec_sim*inv_cov_prod_sim).sum() # ((simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]])*(inv_cov_subset @ (simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]]).reshape(-1,1))).sum()
+
+		return simulated_times, scaled_mean_vec, std_val, log_likelihood_obs, log_likelihood_sim
+
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, return_only_data = False):
 
 	if verbose == True:
@@ -457,26 +604,58 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ikeep_p1, ikeep_p2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_p))
 	ikeep_s1, ikeep_s2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_s))
 
-	arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
+	# arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
 
-	add_bias_scaled_travel_time_noise = True ## This way, some "true moveouts" will have travel time 
-	## errors that are from a velocity model different than used for sampling, training, and application, etc.
-	## Uses a different bias for both p and s waves, but constant for all stations, for each event
-	if add_bias_scaled_travel_time_noise == True:
-		# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
-		# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
-		# avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
-		# avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
-		# mean_ps_ratio = avg_p_vel/avg_s_vel
-		## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
-		frac_bias_s_ratio = 0.3
-		scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
-		scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
-		scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
-		# scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
-		# scale_bias_s = 
-		scale_bias = scale_bias + 1.0
-		arrivals_theoretical = arrivals_theoretical*scale_bias
+
+	use_correlated_travel_time_noise = True
+	if use_correlated_travel_time_noise == True:
+		trv_time_noise_params = np.array([0.0417, 0.0309, 0.0319, 0.0585, 126677.6764])
+		chol_params_trv = {}
+		chol_params_trv['relative_travel_time_factor1'] = trv_time_noise_params[0] 
+		chol_params_trv['relative_travel_time_factor2'] = trv_time_noise_params[1]
+		chol_params_trv['travel_time_bias_scale_factor1'] = trv_time_noise_params[2]
+		chol_params_trv['travel_time_bias_scale_factor2'] = trv_time_noise_params[3]
+		chol_params_trv['correlation_scale_distance'] = trv_time_noise_params[4]
+		ind_use_slice = [np.arange(len(locs)) for j in range(len(src_positions))] ## Note the dependency on which ind_use_slice and locs_use_list depend on eachother
+		locs_use_list = [locs[ind_use_slice[j]] for j in range(len(src_positions))]
+		_, _, _, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, Std_val_p, Std_val_s, _, _ = simulate_travel_times([], chol_params_trv, ftrns1, srcs = src_positions, locs_use_list = locs_use_list, ind_use_slice = ind_use_slice, return_features = False)
+		## Can use difference between Simulated_p, Simulatred_s, and Mean_trv_P, Mean_trv_s, to define the "remove outliers" re-labelling approach
+		## Can assume there's always at least one source, and all moveout vectors are the same size
+		Simulated_p = np.vstack(Simulated_p)
+		Simulated_s = np.vstack(Simulated_s)
+		Mean_trv_p = np.vstack(Mean_trv_p)
+		Mean_trv_s = np.vstack(Mean_trv_s)
+		Res_p = Simulated_p - Mean_trv_p ## Res with respect to the biased travel time vector
+		Res_s = Simulated_s - Mean_trv_s
+		iexcess_noise_p1, iexcess_noise_p2 = np.where(np.abs(Res_p) > np.maximum(min_misfit_allowed, thresh_noise_max*Std_val_p.reshape(-1,1)*Simulated_p))
+		iexcess_noise_s1, iexcess_noise_s2 = np.where(np.abs(Res_s) > np.maximum(min_misfit_allowed, thresh_noise_max*Std_val_s.reshape(-1,1)*Simulated_s))
+		arrivals_theoretical = np.concatenate((np.expand_dims(Simulated_p, axis = 2), np.expand_dims(Simulated_s, axis = 2)), axis = 2)
+
+		pdb.set_trace()
+
+	else:
+
+		arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
+
+
+	# add_bias_scaled_travel_time_noise = True ## This way, some "true moveouts" will have travel time 
+	# ## errors that are from a velocity model different than used for sampling, training, and application, etc.
+	# ## Uses a different bias for both p and s waves, but constant for all stations, for each event
+	# if add_bias_scaled_travel_time_noise == True:
+	# 	# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
+	# 	# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
+	# 	# avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
+	# 	# avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
+	# 	# mean_ps_ratio = avg_p_vel/avg_s_vel
+	# 	## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
+	# 	frac_bias_s_ratio = 0.3
+	# 	scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+	# 	scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
+	# 	scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
+	# 	# scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+	# 	# scale_bias_s = 
+	# 	scale_bias = scale_bias + 1.0
+	# 	arrivals_theoretical = arrivals_theoretical*scale_bias
 	
 	arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)
 	arrivals_indices = np.arange(n_sta).reshape(1,-1).repeat(n_src, 0)
@@ -2295,7 +2474,6 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
-
 
 
 
