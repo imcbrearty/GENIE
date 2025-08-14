@@ -618,6 +618,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		chol_params_trv['correlation_scale_distance'] = trv_time_noise_params[4]
 		ind_use_slice = [np.arange(len(locs)) for j in range(len(src_positions))] ## Note the dependency on which ind_use_slice and locs_use_list depend on eachother
 		locs_use_list = [locs[ind_use_slice[j]] for j in range(len(src_positions))]
+		## Need to add correlation between P and S waves
 		_, _, _, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, Std_val_p, Std_val_s, _, _ = simulate_travel_times([], chol_params_trv, ftrns1, srcs = src_positions, locs_use_list = locs_use_list, ind_use_slice = ind_use_slice, return_features = False)
 		## Can use difference between Simulated_p, Simulatred_s, and Mean_trv_P, Mean_trv_s, to define the "remove outliers" re-labelling approach
 		## Can assume there's always at least one source, and all moveout vectors are the same size
@@ -630,7 +631,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		iexcess_noise_p1, iexcess_noise_p2 = np.where(np.abs(Res_p) > np.maximum(min_misfit_allowed, thresh_noise_max*Std_val_p.reshape(-1,1)*Simulated_p))
 		iexcess_noise_s1, iexcess_noise_s2 = np.where(np.abs(Res_s) > np.maximum(min_misfit_allowed, thresh_noise_max*Std_val_s.reshape(-1,1)*Simulated_s))
 		arrivals_theoretical = np.concatenate((np.expand_dims(Simulated_p, axis = 2), np.expand_dims(Simulated_s, axis = 2)), axis = 2)
-
+		mask_excess_noise = np.zeros(arrivals_theoretical.shape)
+		mask_excess_noise[iexcess_noise_p1, iexcess_noise_p2, 0] = 1
+		mask_excess_noise[iexcess_noise_s1, iexcess_noise_s2, 1] = 1
 		pdb.set_trace()
 
 	else:
@@ -661,8 +664,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	arrivals_indices = np.arange(n_sta).reshape(1,-1).repeat(n_src, 0)
 	src_indices = np.arange(n_src).reshape(-1,1).repeat(n_sta, 1)
 
-	arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), arrival_origin_times[ikeep_p1, ikeep_p2].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
-	arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), arrival_origin_times[ikeep_s1, ikeep_s2].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
+	## Save the excess noise mask in the fourth column instead of the origin time; after using this mask, can overwrite back to the origin time
+	# arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), arrival_origin_times[ikeep_p1, ikeep_p2].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
+	# arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), arrival_origin_times[ikeep_s1, ikeep_s2].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
+	arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), mask_excess_noise[ikeep_p1, ikeep_p2, 0].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
+	arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), mask_excess_noise[ikeep_s1, ikeep_s2, 1].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
 	arrivals = np.concatenate((arrivals_p, arrivals_s), axis = 0)
 
 	if len(arrivals) == 0:
@@ -740,22 +746,27 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	# use_stable_association_labels = True
 	## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
 	iexcess_noise = []
+	assert(use_stable_association_labels == True)
 	if use_stable_association_labels == True: ## It turns out association results are fairly sensitive to this choice
 		# thresh_noise_max = 2.5 # ratio of sig_t*travel time considered excess noise
 		# min_misfit_allowed = 1.0 # min misfit time for establishing excess noise (now set in train_config.yaml)
 		iz = np.where(arrivals[:,4] >= 0)[0]
-		noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+		iexcess_noise = np.where(arrivals[iz,3] > 0)[0]
+		# noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 		iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
-		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+		arrivals[iz,0] = arrivals[iz,0] + src_times[arrivals[iz,2].astype('int')] # + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+		arrivals[iz,3] = src_times[arrivals[iz,2].astype('int')] ## Write real picks fourth column back to origin times, for consistency with previous approach
 		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
 			init_phase_type = arrivals[iz[iexcess_noise],4]
 			arrivals[iz[iexcess_noise],2] = -1
 			arrivals[iz[iexcess_noise],3] = 0
 			arrivals[iz[iexcess_noise],4] = -1
-	
-	else: ## This was the original version
-		iz = np.where(arrivals[:,4] >= 0)[0]
-		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+		# else:
+		# 	init_phase_type = np.zeros((0,1)) ## Empty array
+
+	# else: ## This was the original version
+	# 	iz = np.where(arrivals[:,4] >= 0)[0]
+	# 	arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 
 	
 	## Check which sources are active
