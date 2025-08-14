@@ -457,7 +457,7 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 
 # 	return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta]
 
-def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta, trv_times = None, max_t = 300.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, return_embedding = False, device = 'cpu'): ## pred_params[1]
+def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta, trv_times = None, max_t = 300.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, use_sign_input = False, return_embedding = False, device = 'cpu'): ## pred_params[1]
 
 	## Travel time calculator
 	## Picks
@@ -606,6 +606,12 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 		val_embed_s = embed[trv_read_ind_s] ## S waves accessing all picks
 		val_embed_p1 = embed_p[trv_read_ind_p] ## P waves accessing P labeled picks
 		val_embed_s1 = embed_s[trv_read_ind_s] ## S waves accessing S labeled picks
+
+		if use_sign_input == True:
+			val_embed_p = val_embed_p*torch.sign(torch.diff(embed, append = embed[-1], dim = 0))[trv_read_ind_p] ## Pointwise multiply by slope of embedding
+			val_embed_s = val_embed_s*torch.sign(torch.diff(embed, append = embed[-1], dim = 0))[trv_read_ind_s] ## Pointwise multiply by slope of embedding
+			val_embed_p1 = val_embed_p1*torch.sign(torch.diff(embed_p, append = embed_p[-1], dim = 0))[trv_read_ind_p] ## Pointwise multiply by slope of embedding
+			val_embed_s1 = val_embed_s1*torch.sign(torch.diff(embed_s, append = embed_s[-1], dim = 0))[trv_read_ind_s] ## Pointwise multiply by slope of embedding
 
 		# write_indices = torch.Tensor((src_ind_vec*len(ind_use) + sta_ind_vec_abs).reshape(-1)).long().to(device)
 		# write_indices = torch.Tensor((A_src_in_sta[1][ifind]*len(ind_use) + A_src_in_sta[0][ifind]).reshape(-1)).long().to(device)
@@ -1541,6 +1547,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
