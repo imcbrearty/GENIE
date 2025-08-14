@@ -601,7 +601,7 @@ class LocalSliceLgCollapse(MessagePassing):
 		
 
 class StationSourceAttentionMergedPhases(MessagePassing):
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, scale_rel = scale_rel, eps = eps, use_neighbor_assoc_edges = use_neighbor_assoc_edges, use_phase_types = use_phase_types, device = device):
+	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, scale_rel = scale_rel, k_sta_edges = k_sta_edges, eps = eps, use_neighbor_assoc_edges = use_neighbor_assoc_edges, use_phase_types = use_phase_types, device = device):
 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
 		if use_neighbor_assoc_edges == True: ndim_extra = ndim_extra + 1 + 3 ## Add one bimary feature to indicate if edge is for a common station, and the relative offset positions
@@ -624,6 +624,9 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		self.ndim_feat = ndim_arv_in + ndim_extra
 		self.use_phase_types = use_phase_types
 		self.use_neighbor_assoc_edges = use_neighbor_assoc_edges
+
+		frac_sta_edges = 1.0
+		self.k_sta_edges = int(np.ceil(frac_sta_edges*k_sta_edges))
 
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
@@ -670,7 +673,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		## Add neighbor edges
 		if self.use_neighbor_assoc_edges == True:
 			## Can only run k nearest neighbors for one 
-			k_edges = knn(locs_cart/1000.0, locs_cart/1000.0, k = k_sta_edges + 1).flip(0)
+			k_edges = knn(locs_cart/1000.0, locs_cart/1000.0, k = self.k_sta_edges + 1).flip(0)
 			iactive_sta = (-1*torch.ones(len(locs_cart)).to(device)).long()
 			iactive_sta[ipick[edges[1]]] = 1 ## At least one pick for a station
 			
@@ -1608,6 +1611,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
