@@ -634,7 +634,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		mask_excess_noise = np.zeros(arrivals_theoretical.shape)
 		mask_excess_noise[iexcess_noise_p1, iexcess_noise_p2, 0] = 1
 		mask_excess_noise[iexcess_noise_s1, iexcess_noise_s2, 1] = 1
-		pdb.set_trace()
+		# pdb.set_trace()
 
 	else:
 
@@ -753,7 +753,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		iz = np.where(arrivals[:,4] >= 0)[0]
 		iexcess_noise = np.where(arrivals[iz,3] > 0)[0]
 		# noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-		iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+		# iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
 		arrivals[iz,0] = arrivals[iz,0] + src_times[arrivals[iz,2].astype('int')] # + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
 		arrivals[iz,3] = src_times[arrivals[iz,2].astype('int')] ## Write real picks fourth column back to origin times, for consistency with previous approach
 		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
