@@ -32,6 +32,7 @@ with open('train_config.yaml', 'r') as file:
 
 use_updated_model_definition = config['use_updated_model_definition']
 scale_rel = config['scale_rel'] # 30e3
+k_sta_edges = config['k_sta_edges']
 
 ## Removing scale_t and eps as free variables. Instead set proportionally to kernel_sig_t
 # scale_t = config['scale_t'] # 10.0
@@ -42,7 +43,7 @@ eps = train_config['kernel_sig_t']*5.0
 # use_updated_model_definition = True
 use_phase_types = config['use_phase_types']
 use_absolute_pos = config['use_absolute_pos']
-use_neighbor_assoc_edges = config['use_neighbor_assoc_edges']
+use_neighbor_assoc_edges = config.get('use_neighbor_assoc_edges', False)
 
 device = torch.device('cuda') ## or use cpu
 
@@ -597,11 +598,13 @@ class LocalSliceLgCollapse(MessagePassing):
 	def message(self, x_j, pos_i, pos_j, phase_i):
 
 		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
+		
 
 class StationSourceAttentionMergedPhases(MessagePassing):
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_neighbor_assoc_edges = use_neighbor_assoc_edges, use_phase_types = use_phase_types, device = device):
+	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, scale_rel = scale_rel, eps = eps, use_neighbor_assoc_edges = use_neighbor_assoc_edges, use_phase_types = use_phase_types, device = device):
 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
+		if use_neighbor_assoc_edges == True: ndim_extra = ndim_extra + 1 + 3 ## Add one bimary feature to indicate if edge is for a common station, and the relative offset positions
 		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6, n_hidden) # add edge data (observed arrival - theoretical arrival)
 		self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
 		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + 2, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
@@ -620,15 +623,17 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
 		self.ndim_feat = ndim_arv_in + ndim_extra
 		self.use_phase_types = use_phase_types
+		self.use_neighbor_assoc_edges = use_neighbor_assoc_edges
 
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
 		self.activate3 = nn.PReLU()
 		self.activate4 = nn.PReLU()
+		self.scale_rel = scale_rel
 		# self.activate5 = nn.PReLU()
 		self.device = device
 
-	def forward(self, src, stime, src_embed, trv_src, arrival_p, arrival_s, tpick, ipick, phase_label): # reference k nearest spatial points
+	def forward(self, src, stime, locs_cart, src_embed, trv_src, arrival_p, arrival_s, tpick, ipick, phase_label): # reference k nearest spatial points
 
 		# src isn't used. Only trv_src is needed.
 		n_src, n_sta, n_arv = src.shape[0], trv_src.shape[1], len(tpick) # + 1 ## Note: adding 1 to size of arrivals!
@@ -660,6 +665,17 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 			# edges = edges[:,ikeep]
 			edges = torch.cat((edges[0][ikeep].reshape(1,-1), edges[1][ikeep].reshape(1,-1)), dim = 0).contiguous()
 			src_index = src_index[ikeep]
+
+		
+		## Add neighbor edges
+		if self.use_neighbor_assoc_edges == True:
+			## Can only run k nearest neighbors for one 
+			k_edges = knn(locs_cart/1000.0, locs_cart/1000.0, k = k_sta_edges + 1).flip(0)
+			iactive_sta = (-1*torch.ones(len(locs_cart)).to(device)).long()
+			iactive_sta[ipick[edges[1]]] = 1 ## At least one pick for a station
+			
+			
+			
 		
 		N = n_arv + 1 # still correct?
 		M = n_arv*n_src
@@ -1592,6 +1608,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
