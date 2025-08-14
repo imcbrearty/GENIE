@@ -626,7 +626,7 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 		thresh_mask = 0.01
 		val_embed = torch.cat((val_embed_p.reshape(-1,1), val_embed_s.reshape(-1,1), val_embed_p1.reshape(-1,1), val_embed_s1.reshape(-1,1)), dim = 1)
 		Inpts = [scatter(val_embed, write_indices, dim = 0, dim_size = len(A_src_in_sta[0]), reduce = 'sum')] ## Sum should not exceed original values. This should be onto
-		Masks = [1.0*(Inpts[-1] > thresh_mask)] ## Putting into lists for consistency with batching
+		Masks = [1.0*(torch.abs(Inpts[-1]) > thresh_mask)] ## Putting into lists for consistency with batching
 		# Inpts = [Inpt]
 		# Masks = [Mask]
 
@@ -1547,6 +1547,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
