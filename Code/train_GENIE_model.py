@@ -64,7 +64,7 @@ k_time_edges = config['k_time_edges']
 use_physics_informed = config['use_physics_informed']
 use_phase_types = config['use_phase_types']
 use_subgraph = config['use_subgraph']
-use_sign_input = config['use_sign_input']
+use_sign_input = config.get('use_sign_input', False)
 use_topography = config['use_topography']
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
@@ -2529,6 +2529,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
