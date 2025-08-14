@@ -171,6 +171,7 @@ name_of_project = config['name_of_project']
 use_physics_informed = config['use_physics_informed']
 use_phase_types = config['use_phase_types']
 use_subgraph = config['use_subgraph']
+use_sign_input = config.get('use_sign_input', False)
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
     k_nearest_pairs = config['k_nearest_pairs']
