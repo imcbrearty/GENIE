@@ -1275,7 +1275,7 @@ def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, l
 
 	return optim.x.reshape(1,-1), likelihood_estimate(optim.x.reshape(-1,1))
 
-def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, time_range, sig_t = 1.5, weight = [1.0, 0.75], popsize = 75, maxiter = 1000, trim = 0.2, min_picks = 5, device = 'cpu', surface_profile = None, disp = True, vectorized = True):
+def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, time_range, sig_t = 1.5, weight = [1.0, 0.85], popsize = 75, maxiter = 1000, trim = 0.2, min_picks = 5, device = 'cpu', surface_profile = None, disp = True, vectorized = True):
 
 	if (len(arv_p) + len(arv_s)) == 0:
 		return np.nan*np.ones((1,3)), np.nan
@@ -1627,6 +1627,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
