@@ -1290,7 +1290,7 @@ def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind
 	
 			# pdb.set_trace()
 			n_picks = len(ind_p) + len(ind_s)
-			num_trim = int(np.floor(0.2*n_picks))
+			num_trim = int(np.floor(trim*n_picks))
 			if n_picks - num_trim < min_picks: num_trim = n_picks - min_picks
 			pred = trv(torch.Tensor(locs_use).to(device), torch.Tensor(x.T[:,0:3]).to(device)).cpu().detach().numpy() + x[3,:].reshape(-1,1,1)
 			pred_vals = np.concatenate((pred[:,ind_p,0], pred[:,ind_s,1]), axis = 1) # , 1)
@@ -1627,6 +1627,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
