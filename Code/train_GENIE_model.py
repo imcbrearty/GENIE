@@ -653,26 +653,27 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	else:
 
 		arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
-
-
-	# add_bias_scaled_travel_time_noise = True ## This way, some "true moveouts" will have travel time 
-	# ## errors that are from a velocity model different than used for sampling, training, and application, etc.
-	# ## Uses a different bias for both p and s waves, but constant for all stations, for each event
-	# if add_bias_scaled_travel_time_noise == True:
-	# 	# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
-	# 	# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
-	# 	# avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
-	# 	# avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
-	# 	# mean_ps_ratio = avg_p_vel/avg_s_vel
-	# 	## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
-	# 	frac_bias_s_ratio = 0.3
-	# 	scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
-	# 	scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
-	# 	scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
-	# 	# scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
-	# 	# scale_bias_s = 
-	# 	scale_bias = scale_bias + 1.0
-	# 	arrivals_theoretical = arrivals_theoretical*scale_bias
+		mask_excess_noise = np.expand_dims(src_times.reshape(-1,1).repeat(len(locs), axis = 1)).repeat(2, axis = 2)
+	
+	if use_correlated_travel_time_noise == False:
+		add_bias_scaled_travel_time_noise = True ## This way, some "true moveouts" will have travel time 
+		## errors that are from a velocity model different than used for sampling, training, and application, etc.
+		## Uses a different bias for both p and s waves, but constant for all stations, for each event
+		if add_bias_scaled_travel_time_noise == True:
+			# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
+			# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
+			# avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
+			# avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
+			# mean_ps_ratio = avg_p_vel/avg_s_vel
+			## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
+			frac_bias_s_ratio = 0.3
+			scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+			scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
+			scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
+			# scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+			# scale_bias_s = 
+			scale_bias = scale_bias + 1.0
+			arrivals_theoretical = arrivals_theoretical*scale_bias
 	
 	arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)
 	arrivals_indices = np.arange(n_sta).reshape(1,-1).repeat(n_src, 0)
@@ -765,11 +766,21 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		# thresh_noise_max = 2.5 # ratio of sig_t*travel time considered excess noise
 		# min_misfit_allowed = 1.0 # min misfit time for establishing excess noise (now set in train_config.yaml)
 		iz = np.where(arrivals[:,4] >= 0)[0]
-		iexcess_noise = np.where(arrivals[iz,3] > 0)[0]
-		# noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-		# iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
-		arrivals[iz,0] = arrivals[iz,0] + src_times[arrivals[iz,2].astype('int')] # + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
-		arrivals[iz,3] = src_times[arrivals[iz,2].astype('int')] ## Write real picks fourth column back to origin times, for consistency with previous approach
+
+
+		if use_correlated_travel_time_noise == True:
+		
+			iexcess_noise = np.where(arrivals[iz,3] > 0)[0]
+			# noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+			# iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+			arrivals[iz,0] = arrivals[iz,0] + src_times[arrivals[iz,2].astype('int')] # + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+			arrivals[iz,3] = src_times[arrivals[iz,2].astype('int')] ## Write real picks fourth column back to origin times, for consistency with previous approach
+		
+		else:
+			noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+			iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+			arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+		
 		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
 			init_phase_type = arrivals[iz[iexcess_noise],4]
 			arrivals[iz[iexcess_noise],2] = -1
@@ -777,6 +788,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			arrivals[iz[iexcess_noise],4] = -1
 		# else:
 		# 	init_phase_type = np.zeros((0,1)) ## Empty array
+
 
 	# else: ## This was the original version
 	# 	iz = np.where(arrivals[:,4] >= 0)[0]
@@ -2542,6 +2554,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
