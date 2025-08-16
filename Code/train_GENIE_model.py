@@ -788,10 +788,13 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			arrivals[iz[iexcess_noise],2] = -1
 			arrivals[iz[iexcess_noise],3] = 0 ## Could choose to leave this equal to the original source time, as it was originally connected to those sources (must check if this column is ever used later based on noise class)
 			arrivals[iz[iexcess_noise],4] = -1
-		# else:
-		# 	init_phase_type = np.zeros((0,1)) ## Empty array
+
+	else: ## This was the original version
+		iz = np.where(arrivals[:,4] >= 0)[0]
+		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 
 
+	
 	# else: ## This was the original version
 	# 	iz = np.where(arrivals[:,4] >= 0)[0]
 	# 	arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
@@ -2556,6 +2559,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
