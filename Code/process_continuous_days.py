@@ -1465,103 +1465,23 @@ for cnt, strs in enumerate([0]):
 
 	print('Number sources (after competitive assignment): %d'%len(srcs_refined))
 
-	## Locate events using travel times and associated picks
-	srcs_trv, srcs_sigma = [], []
-	del_arv_p, del_arv_s = [], []
-	torch.set_grad_enabled(True)
-	for i in range(srcs_refined.shape[0]):
+	use_location_trim = True
+	if use_location_trim == True:
 
-		arv_p, ind_p, arv_s, ind_s = Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int')
-
-		ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
-
-		if len(ind_unique_arrivals) == 0:
-			srcs_trv.append(np.nan*np.ones((1, 4)))
-			srcs_sigma.append(np.nan)
-			del_arv_p.append(0)
-			del_arv_s.append(0)
-			continue			
-		
-		perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
-		perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
-		locs_use_slice = locs_use[ind_unique_arrivals]
-		ind_p_perm_slice = perm_vec_arrivals[ind_p]
-		ind_s_perm_slice = perm_vec_arrivals[ind_s]
-		if len(ind_p_perm_slice) > 0:
-			assert(ind_p_perm_slice.min() > -1)
-		if len(ind_s_perm_slice) > 0:
-			assert(ind_s_perm_slice.min() > -1)
-
-		if use_differential_evolution_location == True:
-			xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, surface_profile = surface_profile, device = device)
-		else:
-			xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
-		
-		if np.isnan(xmle).sum() > 0:
-			srcs_trv.append(np.nan*np.ones((1, 4)))
-			srcs_sigma.append(np.nan)
-			del_arv_p.append(0)
-			del_arv_s.append(0)
-			continue
-
-		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + srcs_refined[i,3]
-
-		res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
-		res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
-
-		mean_shift = 0.0
-		cnt_phases = 0
-		if len(res_p) > 0:
-			mean_shift += np.median(res_p)*(len(res_p)/(len(res_p) + len(res_s)))
-			cnt_phases += 1
-
-		if len(res_s) > 0:
-			mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
-			cnt_phases += 1
-
-		## This moved later, after the quality check
-		# srcs_trv.append(np.concatenate((xmle, np.array([srcs_refined[i,3] - mean_shift]).reshape(1,-1)), axis = 1))
-
-		## Estimate uncertainties
-		origin = srcs_refined[i,3] - mean_shift
-		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + origin # srcs_trv[-1][0,3]
-		res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
-		res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
-		
-		# use_quality_check = process_config['use_quality_check'] ## If True, check all associated picks and set a maximum allowed relative error after obtaining initial location
-		# max_relative_error = process_config['max_relative_error'] ## 0.15 corresponds to 15% maximum relative error allowed
-		# min_time_buffer = process_config['min_time_buffer'] ## Uses this time (seconds) as a minimum residual time, beneath which, the relative error criterion is ignored (i.e., an associated pick is removed if both the relative error > max_relative_error and the residual > min_time_buffer)
-		if use_quality_check == True:
-			tval_p = pred_out[0,ind_p_perm_slice,0] - origin
-			tval_s = pred_out[0,ind_s_perm_slice,1] - origin
-			tval_p[tval_p <= 0] = 0.01
-			tval_s[tval_s <= 0] = 0.01
-			rel_error_p = np.abs(res_p/tval_p)
-			rel_error_s = np.abs(res_s/tval_s)
-			# idel_p = np.where((rel_error_p > max_relative_error)*((pred_out[0,ind_p_perm_slice,0] - origin) > min_time_buffer))[0]
-			# idel_s = np.where((rel_error_s > max_relative_error)*((pred_out[0,ind_s_perm_slice,1] - origin) > min_time_buffer))[0]
-			idel_p = np.where((rel_error_p > max_relative_error)*(np.abs(res_p) > min_time_buffer))[0]
-			idel_s = np.where((rel_error_s > max_relative_error)*(np.abs(res_s) > min_time_buffer))[0]
-			del_arv_p.append(len(idel_p))
-			del_arv_s.append(len(idel_s))
-					  
-			if len(idel_p) > 0:
-				arv_p = np.delete(arv_p, idel_p, axis = 0)
-				ind_p = np.delete(ind_p, idel_p, axis = 0)
-				Picks_P[i] = np.delete(Picks_P[i], idel_p, axis = 0)
-				Picks_P_perm[i] = np.delete(Picks_P_perm[i], idel_p, axis = 0)
-
-			if len(idel_s) > 0:
-				arv_s = np.delete(arv_s, idel_s, axis = 0)
-				ind_s = np.delete(ind_s, idel_s, axis = 0)
-				Picks_S[i] = np.delete(Picks_S[i], idel_s, axis = 0)
-				Picks_S_perm[i] = np.delete(Picks_S_perm[i], idel_s, axis = 0)
-			
+		srcs_trv, srcs_sigma = [], []
+		del_arv_p, del_arv_s = [], []
+		torch.set_grad_enabled(True)
+		for i in range(srcs_refined.shape[0]):
+	
+			arv_p, ind_p, arv_s, ind_s = Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int')
+	
 			ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
 	
 			if len(ind_unique_arrivals) == 0:
 				srcs_trv.append(np.nan*np.ones((1, 4)))
 				srcs_sigma.append(np.nan)
+				del_arv_p.append(0)
+				del_arv_s.append(0)
 				continue			
 			
 			perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
@@ -1569,46 +1489,209 @@ for cnt, strs in enumerate([0]):
 			locs_use_slice = locs_use[ind_unique_arrivals]
 			ind_p_perm_slice = perm_vec_arrivals[ind_p]
 			ind_s_perm_slice = perm_vec_arrivals[ind_s]
-			
 			if len(ind_p_perm_slice) > 0:
 				assert(ind_p_perm_slice.min() > -1)
 			if len(ind_s_perm_slice) > 0:
 				assert(ind_s_perm_slice.min() > -1)
-				
-			# if len(ind_unique_arrivals) == 0:
-			# 	srcs_trv.append(np.nan*np.ones((1, 4)))
-			# 	continue				
-								
-			if ((len(idel_p) > 0) + (len(idel_s) > 0)) > 0: ## If arrivals have been removed, re-locate
-
-				if (min_required_picks is not False)*(min_required_sta is not False):
-					
-					if ((len(ind_unique_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
-						srcs_trv.append(np.nan*np.ones((1, 4)))
-						srcs_sigma.append(np.nan)
-						continue
 	
-				else:
-	
-					if len(ind_unique_arrivals) == 0:
-						srcs_trv.append(np.nan*np.ones((1, 4)))
-						srcs_sigma.append(np.nan)
-						continue
-				
-				if use_differential_evolution_location == True:
-					xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, surface_profile = surface_profile, device = device)
-				else:
-					xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
-				
+			if use_differential_evolution_location == True:
+				xmle, origin, logprob = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
+			else:
+				xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
+			
 			if np.isnan(xmle).sum() > 0:
 				srcs_trv.append(np.nan*np.ones((1, 4)))
 				srcs_sigma.append(np.nan)
+				del_arv_p.append(0)
+				del_arv_s.append(0)
 				continue
+	
+			origin = srcs_refined[i,3] + origin
+			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + origin
+	
+			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+	
+			
+			# use_quality_check = process_config['use_quality_check'] ## If True, check all associated picks and set a maximum allowed relative error after obtaining initial location
+			# max_relative_error = process_config['max_relative_error'] ## 0.15 corresponds to 15% maximum relative error allowed
+			# min_time_buffer = process_config['min_time_buffer'] ## Uses this time (seconds) as a minimum residual time, beneath which, the relative error criterion is ignored (i.e., an associated pick is removed if both the relative error > max_relative_error and the residual > min_time_buffer)
+			if use_quality_check == True:
+				tval_p = pred_out[0,ind_p_perm_slice,0] - origin
+				tval_s = pred_out[0,ind_s_perm_slice,1] - origin
+				tval_p[tval_p <= 0] = 0.01
+				tval_s[tval_s <= 0] = 0.01
+				rel_error_p = np.abs(res_p/tval_p)
+				rel_error_s = np.abs(res_s/tval_s)
+				# idel_p = np.where((rel_error_p > max_relative_error)*((pred_out[0,ind_p_perm_slice,0] - origin) > min_time_buffer))[0]
+				# idel_s = np.where((rel_error_s > max_relative_error)*((pred_out[0,ind_s_perm_slice,1] - origin) > min_time_buffer))[0]
+				idel_p = np.where((rel_error_p > max_relative_error)*(np.abs(res_p) > min_time_buffer))[0]
+				idel_s = np.where((rel_error_s > max_relative_error)*(np.abs(res_s) > min_time_buffer))[0]
+				del_arv_p.append(len(idel_p))
+				del_arv_s.append(len(idel_s))
+						  
+				if len(idel_p) > 0:
+					arv_p = np.delete(arv_p, idel_p, axis = 0)
+					ind_p = np.delete(ind_p, idel_p, axis = 0)
+					Picks_P[i] = np.delete(Picks_P[i], idel_p, axis = 0)
+					Picks_P_perm[i] = np.delete(Picks_P_perm[i], idel_p, axis = 0)
+	
+				if len(idel_s) > 0:
+					arv_s = np.delete(arv_s, idel_s, axis = 0)
+					ind_s = np.delete(ind_s, idel_s, axis = 0)
+					Picks_S[i] = np.delete(Picks_S[i], idel_s, axis = 0)
+					Picks_S_perm[i] = np.delete(Picks_S_perm[i], idel_s, axis = 0)
 				
-			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + srcs_refined[i,3] # srcs_trv[-1][0,3]
+				ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
+		
+				if len(ind_unique_arrivals) == 0:
+					srcs_trv.append(np.nan*np.ones((1, 4)))
+					srcs_sigma.append(np.nan)
+					continue			
+				
+				perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
+				perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
+				locs_use_slice = locs_use[ind_unique_arrivals]
+				ind_p_perm_slice = perm_vec_arrivals[ind_p]
+				ind_s_perm_slice = perm_vec_arrivals[ind_s]
+				
+				if len(ind_p_perm_slice) > 0:
+					assert(ind_p_perm_slice.min() > -1)
+				if len(ind_s_perm_slice) > 0:
+					assert(ind_s_perm_slice.min() > -1)
+					
+				# if len(ind_unique_arrivals) == 0:
+				# 	srcs_trv.append(np.nan*np.ones((1, 4)))
+				# 	continue				
+									
+				if ((len(idel_p) > 0) + (len(idel_s) > 0)) > 0: ## If arrivals have been removed, re-locate
+	
+					if (min_required_picks is not False)*(min_required_sta is not False):
+						
+						if ((len(ind_unique_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
+							srcs_trv.append(np.nan*np.ones((1, 4)))
+							srcs_sigma.append(np.nan)
+							continue
+		
+					else:
+		
+						if len(ind_unique_arrivals) == 0:
+							srcs_trv.append(np.nan*np.ones((1, 4)))
+							srcs_sigma.append(np.nan)
+							continue
+					
+					if use_differential_evolution_location == True:
+						xmle, origin, logprob = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
+					else:
+						xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
+					
+				if np.isnan(xmle).sum() > 0:
+					srcs_trv.append(np.nan*np.ones((1, 4)))
+					srcs_sigma.append(np.nan)
+					continue
+					
+				origin = srcs_refined[i,3] + origin
+	
+				# origin = srcs_refined[i,3] + origin
+				# pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + origin # + srcs_refined[i,3] # srcs_trv[-1][0,3]
+				# res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+				# res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+				
+				# mean_shift = 0.0
+				# cnt_phases = 0
+				# if len(res_p) > 0:
+				# 	mean_shift += np.median(res_p)*(len(res_p)/(len(res_p) + len(res_s)))
+				# 	cnt_phases += 1
+		
+				# if len(res_s) > 0:
+				# 	mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
+				# 	cnt_phases += 1		
+	
+			else:
+				del_arv_p.append(0)
+				del_arv_s.append(0)
+	
+			# origin = srcs_refined[i,3] - mean_shift
+			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + origin # srcs_trv[-1][0,3]
 			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
 			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
 			
+			scale_val1 = 100.0*np.linalg.norm(ftrns1(xmle[0,0:3].reshape(1,-1)) - ftrns1(xmle[0,0:3].reshape(1,-1) + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
+			scale_val2 = 100.0*np.linalg.norm(ftrns1(xmle[0,0:3].reshape(1,-1)) - ftrns1(xmle[0,0:3].reshape(1,-1) + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
+			scale_val = 0.5*(scale_val1 + scale_val2)
+	
+			scale_partials = (1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)
+			src_input_p = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_p_perm_slice),1).to(device), requires_grad = True)
+			src_input_s = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_s_perm_slice),1).to(device), requires_grad = True)
+			trv_out_p = trv_pairwise1(torch.Tensor(locs_use_slice[ind_p_perm_slice]).to(device), src_input_p, method = 'direct')[:,0]
+			trv_out_s = trv_pairwise1(torch.Tensor(locs_use_slice[ind_s_perm_slice]).to(device), src_input_s, method = 'direct')[:,1]
+			# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
+			d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0].cpu().detach().numpy()
+			d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0].cpu().detach().numpy()
+			
+			d_grad = np.concatenate((d_p, d_s), axis = 0)
+			sig_d = 0.15 ## Assumed pick uncertainty (seconds)
+			chi_pdf = chi2(df = 3).pdf(0.99)
+			
+			var = (d_grad/scale_partials)
+			var = np.linalg.pinv(var.T@var)*(sig_d**2)
+			var = var*chi_pdf
+			#Variances.append(np.expand_dims(var, axis = 0))
+			var_cart = (d_grad/scale_partials)/np.array([scale_val1, scale_val2, 1.0]).reshape(1,-1)
+			var_cart = np.linalg.pinv(var_cart.T@var_cart)*(sig_d**2)
+			var_cart = var_cart*chi_pdf
+			sigma_cart = np.linalg.norm(np.diag(var_cart)**(0.5))
+	
+			## Append the final location and origin time
+			srcs_trv.append(np.concatenate((xmle, np.array([origin]).reshape(1,-1)), axis = 1))
+			srcs_sigma.append(sigma_cart)
+
+	else:
+	
+		## Locate events using travel times and associated picks
+		srcs_trv, srcs_sigma = [], []
+		del_arv_p, del_arv_s = [], []
+		torch.set_grad_enabled(True)
+		for i in range(srcs_refined.shape[0]):
+	
+			arv_p, ind_p, arv_s, ind_s = Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int')
+	
+			ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
+	
+			if len(ind_unique_arrivals) == 0:
+				srcs_trv.append(np.nan*np.ones((1, 4)))
+				srcs_sigma.append(np.nan)
+				del_arv_p.append(0)
+				del_arv_s.append(0)
+				continue			
+			
+			perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
+			perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
+			locs_use_slice = locs_use[ind_unique_arrivals]
+			ind_p_perm_slice = perm_vec_arrivals[ind_p]
+			ind_s_perm_slice = perm_vec_arrivals[ind_s]
+			if len(ind_p_perm_slice) > 0:
+				assert(ind_p_perm_slice.min() > -1)
+			if len(ind_s_perm_slice) > 0:
+				assert(ind_s_perm_slice.min() > -1)
+	
+			if use_differential_evolution_location == True:
+				xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, surface_profile = surface_profile, device = device)
+			else:
+				xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
+			
+			if np.isnan(xmle).sum() > 0:
+				srcs_trv.append(np.nan*np.ones((1, 4)))
+				srcs_sigma.append(np.nan)
+				del_arv_p.append(0)
+				del_arv_s.append(0)
+				continue
+	
+			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + srcs_refined[i,3]
+	
+			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+	
 			mean_shift = 0.0
 			cnt_phases = 0
 			if len(res_p) > 0:
@@ -1617,45 +1700,145 @@ for cnt, strs in enumerate([0]):
 	
 			if len(res_s) > 0:
 				mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
-				cnt_phases += 1		
-		else:
-			del_arv_p.append(0)
-			del_arv_s.append(0)
-
-		origin = srcs_refined[i,3] - mean_shift
-		pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + origin # srcs_trv[-1][0,3]
-		res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
-		res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+				cnt_phases += 1
+	
+			## This moved later, after the quality check
+			# srcs_trv.append(np.concatenate((xmle, np.array([srcs_refined[i,3] - mean_shift]).reshape(1,-1)), axis = 1))
+	
+			## Estimate uncertainties
+			origin = srcs_refined[i,3] - mean_shift
+			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + origin # srcs_trv[-1][0,3]
+			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+			
+			# use_quality_check = process_config['use_quality_check'] ## If True, check all associated picks and set a maximum allowed relative error after obtaining initial location
+			# max_relative_error = process_config['max_relative_error'] ## 0.15 corresponds to 15% maximum relative error allowed
+			# min_time_buffer = process_config['min_time_buffer'] ## Uses this time (seconds) as a minimum residual time, beneath which, the relative error criterion is ignored (i.e., an associated pick is removed if both the relative error > max_relative_error and the residual > min_time_buffer)
+			if use_quality_check == True:
+				tval_p = pred_out[0,ind_p_perm_slice,0] - origin
+				tval_s = pred_out[0,ind_s_perm_slice,1] - origin
+				tval_p[tval_p <= 0] = 0.01
+				tval_s[tval_s <= 0] = 0.01
+				rel_error_p = np.abs(res_p/tval_p)
+				rel_error_s = np.abs(res_s/tval_s)
+				# idel_p = np.where((rel_error_p > max_relative_error)*((pred_out[0,ind_p_perm_slice,0] - origin) > min_time_buffer))[0]
+				# idel_s = np.where((rel_error_s > max_relative_error)*((pred_out[0,ind_s_perm_slice,1] - origin) > min_time_buffer))[0]
+				idel_p = np.where((rel_error_p > max_relative_error)*(np.abs(res_p) > min_time_buffer))[0]
+				idel_s = np.where((rel_error_s > max_relative_error)*(np.abs(res_s) > min_time_buffer))[0]
+				del_arv_p.append(len(idel_p))
+				del_arv_s.append(len(idel_s))
+						  
+				if len(idel_p) > 0:
+					arv_p = np.delete(arv_p, idel_p, axis = 0)
+					ind_p = np.delete(ind_p, idel_p, axis = 0)
+					Picks_P[i] = np.delete(Picks_P[i], idel_p, axis = 0)
+					Picks_P_perm[i] = np.delete(Picks_P_perm[i], idel_p, axis = 0)
+	
+				if len(idel_s) > 0:
+					arv_s = np.delete(arv_s, idel_s, axis = 0)
+					ind_s = np.delete(ind_s, idel_s, axis = 0)
+					Picks_S[i] = np.delete(Picks_S[i], idel_s, axis = 0)
+					Picks_S_perm[i] = np.delete(Picks_S_perm[i], idel_s, axis = 0)
+				
+				ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
 		
-		scale_val1 = 100.0*np.linalg.norm(ftrns1(xmle[0,0:3].reshape(1,-1)) - ftrns1(xmle[0,0:3].reshape(1,-1) + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
-		scale_val2 = 100.0*np.linalg.norm(ftrns1(xmle[0,0:3].reshape(1,-1)) - ftrns1(xmle[0,0:3].reshape(1,-1) + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
-		scale_val = 0.5*(scale_val1 + scale_val2)
-
-		scale_partials = (1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)
-		src_input_p = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_p_perm_slice),1).to(device), requires_grad = True)
-		src_input_s = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_s_perm_slice),1).to(device), requires_grad = True)
-		trv_out_p = trv_pairwise1(torch.Tensor(locs_use_slice[ind_p_perm_slice]).to(device), src_input_p, method = 'direct')[:,0]
-		trv_out_s = trv_pairwise1(torch.Tensor(locs_use_slice[ind_s_perm_slice]).to(device), src_input_s, method = 'direct')[:,1]
-		# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
-		d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0].cpu().detach().numpy()
-		d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0].cpu().detach().numpy()
+				if len(ind_unique_arrivals) == 0:
+					srcs_trv.append(np.nan*np.ones((1, 4)))
+					srcs_sigma.append(np.nan)
+					continue			
+				
+				perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
+				perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
+				locs_use_slice = locs_use[ind_unique_arrivals]
+				ind_p_perm_slice = perm_vec_arrivals[ind_p]
+				ind_s_perm_slice = perm_vec_arrivals[ind_s]
+				
+				if len(ind_p_perm_slice) > 0:
+					assert(ind_p_perm_slice.min() > -1)
+				if len(ind_s_perm_slice) > 0:
+					assert(ind_s_perm_slice.min() > -1)
+					
+				# if len(ind_unique_arrivals) == 0:
+				# 	srcs_trv.append(np.nan*np.ones((1, 4)))
+				# 	continue				
+									
+				if ((len(idel_p) > 0) + (len(idel_s) > 0)) > 0: ## If arrivals have been removed, re-locate
+	
+					if (min_required_picks is not False)*(min_required_sta is not False):
+						
+						if ((len(ind_unique_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
+							srcs_trv.append(np.nan*np.ones((1, 4)))
+							srcs_sigma.append(np.nan)
+							continue
 		
-		d_grad = np.concatenate((d_p, d_s), axis = 0)
-		sig_d = 0.15 ## Assumed pick uncertainty (seconds)
-		chi_pdf = chi2(df = 3).pdf(0.99)
+					else:
 		
-		var = (d_grad/scale_partials)
-		var = np.linalg.pinv(var.T@var)*(sig_d**2)
-		var = var*chi_pdf
-		#Variances.append(np.expand_dims(var, axis = 0))
-		var_cart = (d_grad/scale_partials)/np.array([scale_val1, scale_val2, 1.0]).reshape(1,-1)
-		var_cart = np.linalg.pinv(var_cart.T@var_cart)*(sig_d**2)
-		var_cart = var_cart*chi_pdf
-		sigma_cart = np.linalg.norm(np.diag(var_cart)**(0.5))
-
-		## Append the final location and origin time
-		srcs_trv.append(np.concatenate((xmle, np.array([origin]).reshape(1,-1)), axis = 1))
-		srcs_sigma.append(sigma_cart)
+						if len(ind_unique_arrivals) == 0:
+							srcs_trv.append(np.nan*np.ones((1, 4)))
+							srcs_sigma.append(np.nan)
+							continue
+					
+					if use_differential_evolution_location == True:
+						xmle, logprob = differential_evolution_location(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, surface_profile = surface_profile, device = device)
+					else:
+						xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
+					
+				if np.isnan(xmle).sum() > 0:
+					srcs_trv.append(np.nan*np.ones((1, 4)))
+					srcs_sigma.append(np.nan)
+					continue
+					
+				pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + srcs_refined[i,3] # srcs_trv[-1][0,3]
+				res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+				res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+				
+				mean_shift = 0.0
+				cnt_phases = 0
+				if len(res_p) > 0:
+					mean_shift += np.median(res_p)*(len(res_p)/(len(res_p) + len(res_s)))
+					cnt_phases += 1
+		
+				if len(res_s) > 0:
+					mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
+					cnt_phases += 1		
+			else:
+				del_arv_p.append(0)
+				del_arv_s.append(0)
+	
+			origin = srcs_refined[i,3] - mean_shift
+			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + origin # srcs_trv[-1][0,3]
+			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+			
+			scale_val1 = 100.0*np.linalg.norm(ftrns1(xmle[0,0:3].reshape(1,-1)) - ftrns1(xmle[0,0:3].reshape(1,-1) + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
+			scale_val2 = 100.0*np.linalg.norm(ftrns1(xmle[0,0:3].reshape(1,-1)) - ftrns1(xmle[0,0:3].reshape(1,-1) + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
+			scale_val = 0.5*(scale_val1 + scale_val2)
+	
+			scale_partials = (1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)
+			src_input_p = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_p_perm_slice),1).to(device), requires_grad = True)
+			src_input_s = Variable(torch.Tensor(xmle[0,0:3].reshape(1,-1)).repeat(len(ind_s_perm_slice),1).to(device), requires_grad = True)
+			trv_out_p = trv_pairwise1(torch.Tensor(locs_use_slice[ind_p_perm_slice]).to(device), src_input_p, method = 'direct')[:,0]
+			trv_out_s = trv_pairwise1(torch.Tensor(locs_use_slice[ind_s_perm_slice]).to(device), src_input_s, method = 'direct')[:,1]
+			# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
+			d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0].cpu().detach().numpy()
+			d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0].cpu().detach().numpy()
+			
+			d_grad = np.concatenate((d_p, d_s), axis = 0)
+			sig_d = 0.15 ## Assumed pick uncertainty (seconds)
+			chi_pdf = chi2(df = 3).pdf(0.99)
+			
+			var = (d_grad/scale_partials)
+			var = np.linalg.pinv(var.T@var)*(sig_d**2)
+			var = var*chi_pdf
+			#Variances.append(np.expand_dims(var, axis = 0))
+			var_cart = (d_grad/scale_partials)/np.array([scale_val1, scale_val2, 1.0]).reshape(1,-1)
+			var_cart = np.linalg.pinv(var_cart.T@var_cart)*(sig_d**2)
+			var_cart = var_cart*chi_pdf
+			sigma_cart = np.linalg.norm(np.diag(var_cart)**(0.5))
+	
+			## Append the final location and origin time
+			srcs_trv.append(np.concatenate((xmle, np.array([origin]).reshape(1,-1)), axis = 1))
+			srcs_sigma.append(sigma_cart)
 	
 	srcs_trv = np.vstack(srcs_trv)
 	srcs_sigma = np.hstack(srcs_sigma)
