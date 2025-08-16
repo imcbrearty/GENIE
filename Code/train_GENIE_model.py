@@ -21,6 +21,7 @@ from torch_geometric.utils import softmax
 from torch_geometric.utils import degree
 from torch_scatter import scatter
 from numpy.matlib import repmat
+from scipy.stats import gamma
 import pdb
 import pathlib
 import glob
@@ -554,11 +555,22 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		sample_random_depths = -sample_random_depths*(scale_x[0,2] - 2e3) + (offset_x[0,2] + scale_x[0,2] - 2e3) # Project along axis, going negative direction. Removing 2e3 on edges.
 		src_positions[:,2] = sample_random_depths
 
+	use_aftershocks = True
+	if (use_aftershocks == True)*(len(src_positions) > 0):
+			ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(0.3*len(src_positions))), replace = False)
+			rand_vec = np.random.randn(len(ichoose),3)
+			rand_vec = rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True)
+			samp_spc = gamma.rvs(0.5, 1.0, size = len(rand_vec))*2000.0
+			rand_vec = rand_vec*samp_spc.reshape(-1,1)
+			src_positions[ichoose] = ftrns2(ftrns1(src_positions[ichoose - 1]) + rand_vec)
+			src_positions = np.clip(src_positions, np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1))
+			src_times[ichoose] = src_times[ichoose - 1] + 3.0*gamma.rvs(0.5, 1.0, size = len(rand_vec))
+	
 	if use_topography == True: ## Don't simulate any sources in the air
 		imatch = tree_surface.query(src_positions[:,0:2])[1]
 		ifind_match = np.where(src_positions[:,2] > surface_profile[imatch,2])[0]
 		src_positions[ifind_match,2] = np.random.rand(len(ifind_match))*(surface_profile[imatch[ifind_match],2] - depth_range[0]) + depth_range[0]
-	
+		
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
 	use_uniform_distance_threshold = False
@@ -2529,6 +2541,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
