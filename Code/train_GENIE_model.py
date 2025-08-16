@@ -557,15 +557,17 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	use_aftershocks = True
 	if (use_aftershocks == True)*(len(src_positions) > 0):
-			aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.2, float(src_x_kernel/1.0), float(src_t_kernel/1.0)
-			ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(aftershock_rate*len(src_positions))), replace = False)
-			rand_vec = np.random.randn(len(ichoose),3)
-			rand_vec = rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True)
-			samp_spc = gamma.rvs(0.5, 1.0, size = len(rand_vec))*aftershock_scale_x
-			rand_vec = rand_vec*samp_spc.reshape(-1,1)
-			src_positions[ichoose] = ftrns2(ftrns1(src_positions[ichoose - 1]) + rand_vec)
-			src_positions = np.clip(src_positions, np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1))
-			src_times[ichoose] = src_times[ichoose - 1] + aftershock_scale_t*gamma.rvs(0.5, 1.0, size = len(rand_vec))
+			n_iterations = 2
+			for i in range(n_iterations):
+				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.1, float(src_x_kernel/1.0), float(src_t_kernel/1.0)
+				ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(aftershock_rate*len(src_positions))), replace = False)
+				rand_vec = np.random.randn(len(ichoose),3)
+				rand_vec = rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True)
+				samp_spc = gamma.rvs(0.5, 1.0, size = len(rand_vec))*aftershock_scale_x
+				rand_vec = rand_vec*samp_spc.reshape(-1,1)
+				src_positions[ichoose] = ftrns2(ftrns1(src_positions[ichoose - 1]) + rand_vec)
+				src_positions = np.clip(src_positions, np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1))
+				src_times[ichoose] = src_times[ichoose - 1] + aftershock_scale_t*gamma.rvs(0.5, 1.0, size = len(rand_vec))
 	
 	if use_topography == True: ## Don't simulate any sources in the air
 		imatch = tree_surface.query(src_positions[:,0:2])[1]
@@ -2554,6 +2556,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
