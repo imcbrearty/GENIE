@@ -1584,14 +1584,14 @@ for cnt, strs in enumerate([0]):
 						xmle, origin, logprob = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
 					else:
 						xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
-					
+
+					origin = srcs_refined[i,3] + origin
+				
 				if np.isnan(xmle).sum() > 0:
 					srcs_trv.append(np.nan*np.ones((1, 4)))
 					srcs_sigma.append(np.nan)
 					continue
-					
-				origin = srcs_refined[i,3] + origin
-	
+						
 				# origin = srcs_refined[i,3] + origin
 				# pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle[0,0:3].reshape(1,-1)).to(device)).cpu().detach().numpy() + origin # + srcs_refined[i,3] # srcs_trv[-1][0,3]
 				# res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
