@@ -1356,7 +1356,7 @@ class VModel(nn.Module):
 
 class TravelTimesPN(nn.Module):
 
-	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, device = 'cuda'):
+	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, corrs = None, locs_corr = None, device = 'cuda'):
 		super(TravelTimesPN, self).__init__()
 
 		## Relative offset prediction [2]
@@ -1406,7 +1406,13 @@ class TravelTimesPN(nn.Module):
 		self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
 		self.scale_angles = torch.Tensor([180.0, 180.0]).reshape(1,-1).to(device) ## Make these adaptive
 		self.scale_depths = torch.Tensor([300e3]).reshape(1,-1).to(device)
-
+		if locs_corr is not None:
+			self.tree_corr = cKDTree(ftrns1(torch.Tensor(locs_corr).to(device)).cpu().detach().numpy())
+			self.corrs = torch.Tensor(corrs).to(device)
+			self.use_corr = True
+		else:
+			self.use_corr = False
+		
 		if n_srcs > 0:
 			self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))).to(device)
 			self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))).to(device)
@@ -1479,7 +1485,15 @@ class TravelTimesPN(nn.Module):
 
 			else:
 
-				return torch.relu(self.inorm_time(base_val + pred))
+				if self.use_corr == True:
+					imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
+					return torch.relu(self.inorm_time(base_val + pred) + self.corrs[imatch,:])
+
+				else:
+
+					return torch.relu(self.inorm_time(base_val + pred))
+				
+				# return torch.relu(self.inorm_time(base_val + pred))
 
 		elif method == 'pairs':
 
@@ -1504,7 +1518,13 @@ class TravelTimesPN(nn.Module):
 
 			else:
 
+				if self.use_corr == True:
+					imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
+					return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred) + self.corrs[imatch,:].unsqueeze(0))		
+
 				return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
+	
+				# return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
 
 
 ## Magnitude class
@@ -1611,6 +1631,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
