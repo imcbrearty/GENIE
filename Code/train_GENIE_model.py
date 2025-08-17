@@ -19,6 +19,7 @@ from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from torch_geometric.utils import degree
+from torch.nn import Softplus
 from torch_scatter import scatter
 from numpy.matlib import repmat
 from scipy.stats import gamma
@@ -355,6 +356,8 @@ def simulate_travel_times(prob_vec, chol_params, ftrns1, n_samples = 100, use_l1
 	travel_time_bias_scale_factor1 = chol_params['travel_time_bias_scale_factor1']
 	travel_time_bias_scale_factor2 = chol_params['travel_time_bias_scale_factor2']
 	correlation_scale_distance = chol_params['correlation_scale_distance']
+	softplus_beta = chol_params['softplus_beta']
+	softplus_shift = chol_params['softplus_shift']
 
 	## Setup absolute network parameters
 	tol = 1e-8
@@ -388,14 +391,14 @@ def simulate_travel_times(prob_vec, chol_params, ftrns1, n_samples = 100, use_l1
 		if sample_fixed == False:
 			time_trgt_p, time_trgt_s = Picks_P_lists[ichoose[i]][:,0].astype('int') - srcs_sample[i,3], Picks_S_lists[ichoose[i]][:,0].astype('int') - srcs_sample[i,3]
 			ind_trgt_p, ind_trgt_s = Picks_P_lists[ichoose[i]][:,1].astype('int'), Picks_S_lists[ichoose[i]][:,1].astype('int')
-			simulated_trv_p, scaled_mean_vec_p, std_val_p, log_likelihood_obs_p, log_likelihood_sim_p = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,0], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], ind_use_slice[i], observed_times = time_trgt_p, observed_indices = ind_trgt_p, compute_log_likelihood = True)
-			simulated_trv_s, scaled_mean_vec_s, std_val_s, log_likelihood_obs_s, log_likelihood_sim_s = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,1], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], ind_use_slice[i], observed_times = time_trgt_s, observed_indices = ind_trgt_s, compute_log_likelihood = True)
+			simulated_trv_p, scaled_mean_vec_p, std_val_p, log_likelihood_obs_p, log_likelihood_sim_p = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,0], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], softplus_beta, softplus_shift, ind_use_slice[i], observed_times = time_trgt_p, observed_indices = ind_trgt_p, compute_log_likelihood = True)
+			simulated_trv_s, scaled_mean_vec_s, std_val_s, log_likelihood_obs_s, log_likelihood_sim_s = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,1], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], softplus_beta, softplus_shift, ind_use_slice[i], observed_times = time_trgt_s, observed_indices = ind_trgt_s, compute_log_likelihood = True)
 			Log_prob_p.append(log_likelihood_sim_p/np.maximum(1.0, len(time_trgt_p))) ## Check normalization
 			Log_prob_s.append(log_likelihood_sim_s/np.maximum(1.0, len(time_trgt_s))) ## Check normalization
 
 		else:
-			simulated_trv_p, scaled_mean_vec_p, std_val_p = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,0], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], ind_use_slice[i])
-			simulated_trv_s, scaled_mean_vec_s, std_val_s = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,1], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], ind_use_slice[i])
+			simulated_trv_p, scaled_mean_vec_p, std_val_p = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,0], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], softplus_beta, softplus_shift, ind_use_slice[i])
+			simulated_trv_s, scaled_mean_vec_s, std_val_s = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,1], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], softplus_beta, softplus_shift, ind_use_slice[i])
 
 
 		Simulated_p.append(simulated_trv_p)
@@ -409,7 +412,7 @@ def simulate_travel_times(prob_vec, chol_params, ftrns1, n_samples = 100, use_l1
 	return srcs_sample, [], ichoose, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, np.array(Std_val_p), np.array(Std_val_s), np.array(Log_prob_p)/scale_log_prob, np.array(Log_prob_s)/scale_log_prob
 	# _, _, _, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, _, _
 
-def sample_correlated_travel_time_noise(cholesky_matrix_trv, mean_vec, bias_factors, std_factor, ind_use, compute_log_likelihood = False, observed_indices = None, observed_times = None, min_tol = 0.005, n_repeat = 1):
+def sample_correlated_travel_time_noise(cholesky_matrix_trv, mean_vec, bias_factors, std_factor, softplus_beta, softplus_shift, ind_use, compute_log_likelihood = False, observed_indices = None, observed_times = None, min_tol = 0.005, n_repeat = 1):
 	"""Generate spatially correlated noise using Cholesky decomposition.
 	TO DO: use pre-computed coefficients.
 	Args:
@@ -437,7 +440,11 @@ def sample_correlated_travel_time_noise(cholesky_matrix_trv, mean_vec, bias_fact
 	else:
 		std_val = std_factor[0]
 
-	standard_deviation = np.diag(mean_vec*std_val)
+	softplus = nn.Softplus(beta = np.pow(10.0, softplus_beta))
+	scale_val = softplus(torch.Tensor(bias_val*mean_vec*std_val + softplus_shift)).cpu().detach().numpy()
+	standard_deviation = np.diag(scale_val)
+	
+	# standard_deviation = np.diag(mean_vec*std_val)
 
 	# std_val = np.random.uniform(min_tol, std_factor)
 	# standard_deviation = np.diag(mean_vec*std_factor)
@@ -625,13 +632,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	use_correlated_travel_time_noise = True
 	if use_correlated_travel_time_noise == True:
-		trv_time_noise_params = np.array([0.0417, 0.0309, 0.0319, 0.0585, 126677.6764])
+		# trv_time_noise_params = np.array([0.0417, 0.0309, 0.0319, 0.0585, 126677.6764])
+		trv_time_noise_params = np.array([0.019731435811040067, 0.04961629822710047, 0.006929868148854273, 0.03715930048600429, 224205.70749207088, 0.5310707796290268, -24.559947281657784])
 		chol_params_trv = {}
 		chol_params_trv['relative_travel_time_factor1'] = trv_time_noise_params[0] 
 		chol_params_trv['relative_travel_time_factor2'] = trv_time_noise_params[1]
 		chol_params_trv['travel_time_bias_scale_factor1'] = trv_time_noise_params[2]
 		chol_params_trv['travel_time_bias_scale_factor2'] = trv_time_noise_params[3]
 		chol_params_trv['correlation_scale_distance'] = trv_time_noise_params[4]
+		chol_params_trv['softplus_beta'] = trv_time_noise_params[5]
+		chol_params_trv['softplus_shift'] = trv_time_noise_params[6]
 		ind_use_slice = [np.arange(len(locs)) for j in range(len(src_positions))] ## Note the dependency on which ind_use_slice and locs_use_list depend on eachother
 		locs_use_list = [locs[ind_use_slice[j]] for j in range(len(src_positions))]
 		## Need to add correlation between P and S waves
@@ -2559,6 +2569,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
