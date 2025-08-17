@@ -409,7 +409,7 @@ def simulate_travel_times(prob_vec, chol_params, ftrns1, n_samples = 100, use_l1
 		Std_val_s.append(std_val_s)
 
 
-	return srcs_sample, [], ichoose, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, np.array(Std_val_p), np.array(Std_val_s), np.array(Log_prob_p)/scale_log_prob, np.array(Log_prob_s)/scale_log_prob
+	return srcs_sample, [], ichoose, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, np.vstack(Std_val_p), np.vstack(Std_val_s), np.array(Log_prob_p)/scale_log_prob, np.array(Log_prob_s)/scale_log_prob
 	# _, _, _, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, _, _
 
 def sample_correlated_travel_time_noise(cholesky_matrix_trv, mean_vec, bias_factors, std_factor, softplus_beta, softplus_shift, ind_use, compute_log_likelihood = False, observed_indices = None, observed_times = None, min_tol = 0.005, n_repeat = 1):
@@ -476,7 +476,7 @@ def sample_correlated_travel_time_noise(cholesky_matrix_trv, mean_vec, bias_fact
 		log_likelihood_obs = -(len(observed_indices)/2.0)*np.log(2.0*np.pi) - 1.0*(np.log(np.diag(scaled_chol_matrix)).sum()) - 0.5*(res_vec_obs*inv_cov_prod_res).sum() # ((observed_times - scaled_mean_vec[ind_use[observed_indices]])*(inv_cov_subset @ (observed_times - scaled_mean_vec[ind_use[observed_indices]]).reshape(-1,1))).sum()
 		log_likelihood_sim = -(len(observed_indices)/2.0)*np.log(2.0*np.pi) - 1.0*(np.log(np.diag(scaled_chol_matrix)).sum()) - 0.5*(res_vec_sim*inv_cov_prod_sim).sum() # ((simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]])*(inv_cov_subset @ (simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]]).reshape(-1,1))).sum()
 
-		return simulated_times, scaled_mean_vec, std_val, log_likelihood_obs, log_likelihood_sim
+		return simulated_times, scaled_mean_vec, scale_val, log_likelihood_obs, log_likelihood_sim
 
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, return_only_data = False):
 
@@ -654,8 +654,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		Mean_trv_s = np.vstack(Mean_trv_s)
 		Res_p = Simulated_p - Mean_trv_p ## Res with respect to the biased travel time vector
 		Res_s = Simulated_s - Mean_trv_s
-		iexcess_noise_p1, iexcess_noise_p2 = np.where(np.abs(Res_p) > np.maximum(min_misfit_allowed, thresh_noise_max*Std_val_p.reshape(-1,1)*Simulated_p))
-		iexcess_noise_s1, iexcess_noise_s2 = np.where(np.abs(Res_s) > np.maximum(min_misfit_allowed, thresh_noise_max*Std_val_s.reshape(-1,1)*Simulated_s))
+		iexcess_noise_p1, iexcess_noise_p2 = np.where(np.abs(Res_p) > np.maximum(min_misfit_allowed, thresh_noise_max*Std_val_p)) # Std_val_p.reshape(-1,1)*Simulated_p
+		iexcess_noise_s1, iexcess_noise_s2 = np.where(np.abs(Res_s) > np.maximum(min_misfit_allowed, thresh_noise_max*Std_val_s)) # Std_val_s.reshape(-1,1)*Simulated_s
 		arrivals_theoretical = np.concatenate((np.expand_dims(Simulated_p, axis = 2), np.expand_dims(Simulated_s, axis = 2)), axis = 2)
 		mask_excess_noise = np.zeros(arrivals_theoretical.shape)
 		mask_excess_noise[iexcess_noise_p1, iexcess_noise_p2, 0] = 1
@@ -2569,6 +2569,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
