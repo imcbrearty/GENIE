@@ -564,9 +564,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	use_aftershocks = True
 	if (use_aftershocks == True)*(len(src_positions) > 0):
-			n_iterations = 2
+			n_iterations = 1
 			for i in range(n_iterations):
-				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.1, float(src_x_kernel/1.0), float(src_t_kernel/1.0)
+				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.2, float(src_x_kernel/1.0), float(src_t_kernel/1.0)
 				ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(aftershock_rate*len(src_positions))), replace = False)
 				rand_vec = np.random.randn(len(ichoose),3)
 				rand_vec = rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True)
@@ -630,7 +630,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	# arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
 
 
-	use_correlated_travel_time_noise = True
+	use_correlated_travel_time_noise = False
 	if use_correlated_travel_time_noise == True:
 		# trv_time_noise_params = np.array([0.0417, 0.0309, 0.0319, 0.0585, 126677.6764])
 		trv_time_noise_params = np.array([0.019731435811040067, 0.04961629822710047, 0.006929868148854273, 0.03715930048600429, 224205.70749207088, 0.5310707796290268, -24.559947281657784])
@@ -915,6 +915,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				n_sta_select = int(n_sta*(np.random.rand()*(n_sta_range[1] - n_sta_range[0]) + n_sta_range[0]))
 				ind_sta_select = np.sort(np.random.choice(n_sta, size = n_sta_select, replace = False))
 
+			min_spc_allowed = None
+			if min_spc_allowed is not None:
+				mp = LocalMarching(device = device)
+				locs_out = mp(np.concatenate((locs[ind_sta_select], np.zeros((len(ind_sta_select),1)), np.ones((len(ind_sta_select),1)) + 0.1*np.random.rand(len(ind_sta_select),1)), axis = 1), ftrns1, tc_win = 1.0, sp_win = min_spc_allowed)					
+				tree_locs = cKDTree(ftrns1(locs[ind_sta_select]))
+				ip_retained = tree.query(ftrns1(locs_out))[1]
+				ind_sta_select = ind_sta_select[ip_retained]
+				n_sta_select = len(ind_sta_select)
+				
+		
 		Trv_subset_p.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
 		Trv_subset_s.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
 		Station_indices.append(ind_sta_select) # record subsets used
@@ -2569,6 +2579,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
