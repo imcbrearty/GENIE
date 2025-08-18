@@ -1832,7 +1832,7 @@ for i in range(n_restart_step, n_epochs):
 	mx_pred_2[i] = mx_pred_val_2/n_batch
 	mx_pred_3[i] = mx_pred_val_3/n_batch
 	mx_pred_4[i] = mx_pred_val_4/n_batch
-	loss_regularize_val = loss_regularize_val/loss_regularize_cnt
+	loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
 	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, (10e4)*loss_regularize_val))
 
@@ -2621,6 +2621,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
