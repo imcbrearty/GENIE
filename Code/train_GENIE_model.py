@@ -567,7 +567,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if (use_aftershocks == True)*(len(src_positions) > 0):
 			n_iterations = 1
 			for i in range(n_iterations):
-				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.2, float(src_x_kernel/1.0), float(src_t_kernel/1.0)
+				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.1, float(src_x_kernel/0.5), float(src_t_kernel/0.5)
 				ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(aftershock_rate*len(src_positions))), replace = False)
 				rand_vec = np.random.randn(len(ichoose),3)
 				rand_vec = rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True)
@@ -2628,6 +2628,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
