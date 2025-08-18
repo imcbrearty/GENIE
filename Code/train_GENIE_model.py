@@ -1256,7 +1256,7 @@ if use_station_corrections == True:
 		print('No station corrections available')
 		locs_corr, corrs = None, None
 	else:
-		z = np.load(path_corrections)
+		z = np.load(path_station_corrections)
 		locs_corr, corrs = z['locs_corr'], z['corrs']
 		z.close()
 	
@@ -2641,6 +2641,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
