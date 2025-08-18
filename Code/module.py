@@ -553,17 +553,19 @@ else:
 # 		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
 
 class LocalSliceLgCollapse(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, device = 'cuda'):
+	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, n_dim_edges = 10, eps = eps, scale_rel = scale_rel, use_phase_types = use_phase_types, device = 'cuda'):
 		super(LocalSliceLgCollapse, self).__init__('mean') # NOTE: mean here? Or add is more expressive for individual arrivals?
-		self.fc1 = nn.Linear(ndim_in + n_edge, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
+		self.fc1 = nn.Linear(ndim_in + n_edge + n_dim_edges, n_hidden) # non-multi-edge type. Since just collapse on fixed stations, with fixed slice of Xq. (how to find nodes?)
 		self.fc2 = nn.Linear(n_hidden, ndim_out)
+		self.embed_edges = nn.Sequential(nn.Linear(3, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_dim_edges))
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
 		self.eps = eps
+		self.scale_rel = scale_rel
 		self.device = device
 		self.use_phase_types = use_phase_types
 
-	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, inpt, tlatent, n_temp, n_sta, k_infer = 10): # reference k nearest spatial points
+	def forward(self, A_edges, dt_partition, tpick, ipick, phase_label, inpt, tlatent, locs_cart, x_temp_cart, A_src_in_sta, n_temp, n_sta, k_infer = 10): # reference k nearest spatial points
 
 		## Assert is problem?
 		# k_infer = int(len(A_edges)/(n_sta*len(dt_partition)))
@@ -590,14 +592,16 @@ class LocalSliceLgCollapse(MessagePassing):
 			ikeep = torch.Tensor([]).long().to(device)
 
 		sliced_edges = sliced_edges[:,ikeep] # only use times within range. (need to specify target node cardinality)
-		out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), phase = phase_label, size = (N, M))))
+		edge_offset = self.embed_edges((locs_cart[A_src_in_sta[0][sliced_edges[0]] - x_temp_cart[A_src_in_sta[0][sliced_edges[0]])/(5.0*self.scale_rel))
+		
+		out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), edge_attr = edge_offset, phase = phase_label, size = (N, M))))
 
 		return out
 
 	## Adding back after removed
-	def message(self, x_j, pos_i, pos_j, phase_i):
+	def message(self, x_j, pos_i, pos_j, phase_i, edge_attr):
 
-		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, phase_i), dim = -1))) # note scaling of relative time
+		return self.activate1(self.fc1(torch.cat((x_j, (pos_i - pos_j)/self.eps, edge_attr, phase_i), dim = -1))) # note scaling of relative time
 		
 
 class StationSourceAttentionMergedPhases(MessagePassing):
@@ -871,8 +875,8 @@ if use_updated_model_definition == False:
 			if self.use_absolute_pos == True:
 				s = torch.cat((s, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
-			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size
-			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, s, tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), locs_use_cart, x_temp_cuda_cart, A_src_in_sta, n_temp, n_sta) ## arv_p and arv_s will be same size
+			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, s, tlatent[:,1].reshape(-1,1), locs_use_cart, x_temp_cuda_cart, A_src_in_sta, n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, locs_use_cart, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
 			
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
@@ -929,8 +933,8 @@ if use_updated_model_definition == False:
 				s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 				
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
-			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta)
-			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), locs_use_cart, x_temp_cuda_cart, self.A_src_in_sta, n_temp, n_sta)
+			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,1].reshape(-1,1), locs_use_cart, x_temp_cuda_cart, self.A_src_in_sta, n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, locs_use_cart, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
 			
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
@@ -1030,8 +1034,8 @@ elif use_updated_model_definition == True:
 				s = torch.cat((s, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 			
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # A_src_in_sta, locs_use_cart, x_temp_cuda_cart # detach x_latent. Just a "reference"
-			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size
-			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, s, tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), locs_use_cart, x_temp_cuda_cart, A_src_in_sta, n_temp, n_sta) ## arv_p and arv_s will be same size
+			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, s, tlatent[:,1].reshape(-1,1), locs_use_cart, x_temp_cuda_cart, A_src_in_sta, n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, locs_use_cart, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
 			
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
@@ -1095,8 +1099,8 @@ elif use_updated_model_definition == True:
 				s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 			
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart # detach x_latent. Just a "reference"
-			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta)
-			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), locs_use_cart, x_temp_cuda_cart, self.A_src_in_sta, n_temp, n_sta)
+			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,1].reshape(-1,1), locs_use_cart, x_temp_cuda_cart, self.A_src_in_sta, n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, locs_use_cart, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
 			
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
@@ -1631,6 +1635,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
