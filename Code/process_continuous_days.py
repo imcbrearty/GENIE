@@ -249,12 +249,12 @@ else:
 
 if use_station_corrections == True:
 	n_ver_corrections = 1
-	path_station_corrections = path_to_file + 'Grids' + seperator + 'station_corrections_ver_%d.npz'%n_ver_corrections)
+	path_station_corrections = path_to_file + 'Grids' + seperator + 'station_corrections_ver_%d.npz'%n_ver_corrections
 	if os.path.isfile(path_station_corrections) == False:
 		print('No station corrections available')
 		locs_corr, corrs = None, None
 	else:
-		z = np.load(path_corrections)
+		z = np.load(path_station_corrections)
 		locs_corr, corrs = z['locs_corr'], z['corrs']
 		z.close()
 
