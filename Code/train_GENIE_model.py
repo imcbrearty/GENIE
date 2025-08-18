@@ -151,7 +151,7 @@ if use_topography == True:
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
 load_subnetworks = train_config['fixed_subnetworks']
-if load_subnetworks == True:
+if (load_subnetworks == True)*(load_training_data == False): ## Only load subnetworks if not loading the data
 	
 	min_sta_per_graph = int(k_sta_edges + 1)
 
@@ -2579,6 +2579,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
