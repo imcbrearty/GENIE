@@ -592,7 +592,7 @@ class LocalSliceLgCollapse(MessagePassing):
 			ikeep = torch.Tensor([]).long().to(device)
 
 		sliced_edges = sliced_edges[:,ikeep] # only use times within range. (need to specify target node cardinality)
-		edge_offset = self.embed_edges((locs_cart[A_src_in_sta[0][sliced_edges[0]] - x_temp_cart[A_src_in_sta[0][sliced_edges[0]])/(5.0*self.scale_rel))
+		edge_offset = self.embed_edges((locs_cart[A_src_in_sta[0][sliced_edges[0]]] - x_temp_cart[A_src_in_sta[0][sliced_edges[0]]])/(5.0*self.scale_rel))
 		
 		out = self.activate2(self.fc2(self.propagate(sliced_edges, x = inpt, pos = (tlatent, tpick.view(-1,1)), edge_attr = edge_offset, phase = phase_label, size = (N, M))))
 
@@ -1635,6 +1635,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
