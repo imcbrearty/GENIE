@@ -172,6 +172,7 @@ use_physics_informed = config['use_physics_informed']
 use_phase_types = config['use_phase_types']
 use_subgraph = config['use_subgraph']
 use_sign_input = config.get('use_sign_input', False)
+use_station_corrections = config.get('use_station_corrections', False)
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
     k_nearest_pairs = config['k_nearest_pairs']
@@ -245,6 +246,19 @@ else:
 	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T # just subtract mean
 	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device) # just subtract mean
 
+
+if use_station_corrections == True:
+	n_ver_corrections = 1
+	path_station_corrections = path_to_file + 'Grids' + seperator + 'station_corrections_ver_%d.npz'%n_ver_corrections)
+	if os.path.isfile(path_station_corrections) == False:
+		print('No station corrections available')
+		locs_corr, corrs = None, None
+	else:
+		z = np.load(path_corrections)
+		locs_corr, corrs = z['locs_corr'], z['corrs']
+		z.close()
+
+
 if config['train_travel_time_neural_network'] == False:
 
 	## Load travel times
@@ -275,9 +289,9 @@ if config['train_travel_time_neural_network'] == False:
 elif config['train_travel_time_neural_network'] == True:
 
 	n_ver_trv_time_model_load = vel_model_ver
-	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, use_physics_informed = use_physics_informed, device = device)
-	trv_pairwise = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', use_physics_informed = use_physics_informed, device = device)
-	trv_pairwise1 = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', return_model = True, use_physics_informed = use_physics_informed, device = device)
+	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, locs_corr = locs_corr, corrs = corrs, use_physics_informed = use_physics_informed, device = device)
+	trv_pairwise = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', locs_corr = locs_corr, corrs = corrs, use_physics_informed = use_physics_informed, device = device)
+	trv_pairwise1 = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', return_model = True, locs_corr = locs_corr, corrs = corrs, use_physics_informed = use_physics_informed, device = device)
 
 if (use_differential_evolution_location == False)*(config['train_travel_time_neural_network'] == False):
 	hull = ConvexHull(X)
