@@ -1168,7 +1168,9 @@ for cnt, strs in enumerate([0]):
 		## From this, we may not have memory issues with competitive assignment. If so,
 		## can still reduce the size of disjoint groups.
 
-		if len(matched_src_arrival_indices) == 0: print('No sources detected')
+		if len(matched_src_arrival_indices) == 0: 
+			print('No sources detected')
+			continue ## Skipping rest of day
 		matched_src_arrival_indices = np.hstack(matched_src_arrival_indices)
 		matched_src_arrival_indices_p = np.hstack(matched_src_arrival_indices_p)
 		matched_src_arrival_indices_s = np.hstack(matched_src_arrival_indices_s)
