@@ -23,6 +23,7 @@ from torch.nn import Softplus
 from torch_scatter import scatter
 from numpy.matlib import repmat
 from scipy.stats import gamma
+from scipy.stats import chi2
 import pdb
 import pathlib
 import glob
@@ -1273,6 +1274,7 @@ elif config['train_travel_time_neural_network'] == True:
 	n_ver_trv_time_model_load = vel_model_ver # 1
 	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, use_physics_informed = use_physics_informed, device = device)
 	trv_pairwise = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', use_physics_informed = use_physics_informed, device = device)
+	trv_pairwise1 = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', return_model = True, use_physics_informed = use_physics_informed, device = device)
 
 use_only_active_stations = False
 if use_only_active_stations == True:
@@ -1371,6 +1373,7 @@ lon_range_interior = [lon_range[0], lon_range[1]]
 
 n_restart = train_config['restart_training']
 n_restart_step = train_config['n_restart_step']
+loss_regularize_val, loss_regularize_cnt = 0, 0
 if n_restart == False:
 	n_restart_step = 0 # overwrite to 0, if restart is off
 
@@ -1751,6 +1754,43 @@ for i in range(n_restart_step, n_epochs):
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 
+		use_sensitivity_loss = False
+		if use_sensitivity_loss == True:
+
+			sig_d = 0.15 ## Assumed pick uncertainty (seconds)
+			chi_pdf = chi2(df = 3).pdf(0.99)
+	
+			scale_val1 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
+			scale_val2 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
+			scale_val = 0.5*(scale_val1 + scale_val2)
+	
+			loss_regularize = torch.Tensor([0.0]).to(device)
+			scale_partials = torch.Tensor((1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)).to(device)
+			src_input_p = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
+			src_input_s = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
+			trv_out_p = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_p, method = 'direct')[:,0]
+			trv_out_s = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_s, method = 'direct')[:,1]
+			# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
+			d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
+			d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
+			d_p = d_p.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
+			d_s = d_s.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
+			d_grad = torch.Tensor([1000.0]).to(device)*(1.0/scale_partials)*torch.cat((torch.clip(out[2], min = 0.0)*d_p, torch.clip(out[3], min = 0.0)*d_s), dim = 0)/torch.Tensor([scale_val1, scale_val2, 1.0]).to(device).reshape(1,-1)
+			var_cart = torch.bmm(d_grad.transpose(1,2), d_grad)
+			# try:
+			scale_loss = 10000.0
+			tol_cond = 1000.0
+			icond = torch.where(torch.linalg.cond(var_cart) < tol_cond)[0]
+			if len(icond) == 3: icond = torch.cat((icond, torch.Tensor([icond[-1].item()]).to(device)), dim = 0).long()
+			var_cart_inv = torch.linalg.solve(var_cart[icond], torch.eye(3).to(device))*torch.Tensor([(sig_d**2)*chi_pdf]).to(device)
+			sigma_cart = torch.norm(var_cart_inv[:,torch.arange(3),torch.arange(3)]**(0.5), dim = 1)
+			loss_regularize = (0.000002)*loss_func1(sigma_cart/scale_loss, torch.zeros(sigma_cart.shape).to(device)) # 0.001 # 0.0002
+			if torch.isnan(loss_regularize) == False: loss = loss + loss_regularize
+			# losses_regularize[i] = loss_regularize.item()
+			loss_regularize_val += loss_regularize.item()
+			loss_regularize_cnt += 1
+		
+		
 		n_visualize_step = 1000
 		n_visualize_fraction = 0.2
 		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0)*(inc == 0): # (i0 < n_visualize_fraction*n_batch)
@@ -1791,15 +1831,16 @@ for i in range(n_restart_step, n_epochs):
 	mx_pred_2[i] = mx_pred_val_2/n_batch
 	mx_pred_3[i] = mx_pred_val_3/n_batch
 	mx_pred_4[i] = mx_pred_val_4/n_batch
+	loss_regularize_val = loss_regularize_val/loss_regularize_cnt
 
-	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
+	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, (10e4)*loss_regularize_val))
 
 	# Log losses
 	if use_wandb_logging == True:
 		wandb.log({"loss": loss_val})
 
 	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
-		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
+		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, (10e4)*loss_regularize_val))
 
 
 
@@ -2579,6 +2620,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
