@@ -257,7 +257,8 @@ if use_station_corrections == True:
 		z = np.load(path_station_corrections)
 		locs_corr, corrs = z['locs_corr'], z['corrs']
 		z.close()
-
+else:
+	locs_corr, corrs = None, None
 
 if config['train_travel_time_neural_network'] == False:
 
