@@ -592,6 +592,7 @@ min_pick_count = 7
 quantile_val = 0.9
 quantile_scale_dist = 1.25
 min_sta_neighbors = 15
+min_neighbor_picks = 2
 
 # n_ver_events = 8
 cnt_inc = 0
@@ -1542,7 +1543,7 @@ for cnt, strs in enumerate([0]):
 				embed_features[iunique_sta] = 1.0
 				out_val = scatter(embed_features.reshape(-1,1)[knn_sta_edges[0]], knn_sta_edges[1], dim = 0, dim_size = locs_use.shape[0], reduce = 'sum').cpu().detach().numpy().reshape(-1)
 				# out_val = embed_features.cpu().detach().numpy() - out_val ## If less than or equal to zero, at least one neighbor has a pick
-				iallowed = np.sort(np.array(list(set(iunique_sta).intersection( np.where(out_val > 0)[0] ))))
+				iallowed = np.sort(np.array(list(set(iunique_sta).intersection( np.where(out_val >= min_neighbor_picks)[0] ))))
 				if len(iallowed) == 0: iallowed = np.array([-1]).astype('int') ## This catches an empty iallowed
 				tree_allowed = cKDTree(iallowed.reshape(-1,1))
 				if len(Picks_P_perm[j]) > 0: Picks_P_perm[j] = Picks_P_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_P_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_P_perm[j][:,1].astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')]
