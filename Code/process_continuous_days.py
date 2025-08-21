@@ -554,6 +554,7 @@ if min_spc_allowed is not None:
 			ifind = np.where(P[:,1] == ind_use[j])[0]
 			P[ifind,1] = imatches[inc]
 			cnt_overwrite += len(ifind)
+	ind_use = np.unique(P[:,1]).astype('int')
 	print('Overwriting %d stations %d total picks'%(len(iremoved), cnt_overwrite))
 
 
