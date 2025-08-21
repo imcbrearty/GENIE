@@ -539,6 +539,7 @@ date = np.array([yr, mo, dy])
 P, ind_use = load_picks(path_to_file, date, spr_picks = spr_picks, n_ver = n_ver_picks)
 # P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
 
+
 min_spc_allowed = None ## Can remove nearby overlapping stations using min_spc_allowed
 if min_spc_allowed is not None:
 	mp = LocalMarching(device = device)
@@ -574,6 +575,29 @@ tsteps_abs = np.arange(tsteps.min() - t_win/2.0, tsteps.max() + t_win/2.0 + dt_w
 tree_tsteps = cKDTree(tsteps_abs.reshape(-1,1))
 n_batches = int(np.floor(len(tsteps)/n_batch))
 n_extra = len(tsteps) - n_batches*n_batch
+
+
+
+## Quality control parameters
+max_sigma = 1250.0 # 10e3 ## Remove events with uncertainity higher than this
+tree_stas = cKDTree(ftrns1(locs))
+max_perturb_offset = 50e3 ## 50 km
+
+mag_thresh_check = 4.0
+min_picks_check = 75
+
+min_sta_count = 4
+min_pick_count = 7
+
+quantile_val = 0.9
+quantile_scale_dist = 1.25
+min_sta_neighbors = 15
+
+# n_ver_events = 8
+cnt_inc = 0
+cnt_remove = 0
+cnt_remove_l = [0, 0, 0, 0]
+
 
 
 ## Input settings
@@ -1499,6 +1523,47 @@ for cnt, strs in enumerate([0]):
 
 	print('Number sources (after competitive assignment): %d'%len(srcs_refined))
 
+
+	use_additional_quality_control = False
+	if use_additional_quality_control == True:
+
+		## For each event, go through and remove the outlier picks
+		if quantile_val is not None:
+
+			max_dist = np.array([np.quantile(np.linalg.norm(ftrns1(locs_use[np.concatenate((Picks_P_perm[j][:,1], Picks_S_perm[j][:,1]), axis = 0).astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1), quantile_val) for j in range(len(Picks_P_perm))])
+
+			## Find isolated stations (i.e., no neighbors with associations) and remove
+			## Also remove picks far from a multiple of the upper qth quantile upper max source - reciever distance
+			knn_sta_edges = remove_self_loops(knn(torch.Tensor(ftrns1(locs_use)).to(device), torch.Tensor(ftrns1(locs_use)).to(device), k = min_sta_neighbors))[0].flip(0)
+			for j in range(len(Picks_P_perm)):
+
+				iunique_sta = np.unique(np.concatenate((Picks_P_perm[j][:,1], Picks_S_perm[j][:,1]), axis = 0).astype('int'))
+				embed_features = torch.zeros(len(locs_use)).to(device)
+				embed_features[iunique_sta] = 1.0
+				out_val = scatter(embed_features.reshape(-1,1)[knn_sta_edges[0]], knn_sta_edges[1], dim = 0, dim_size = locs_use.shape[0], reduce = 'sum').cpu().detach().numpy().reshape(-1)
+				# out_val = embed_features.cpu().detach().numpy() - out_val ## If less than or equal to zero, at least one neighbor has a pick
+				iallowed = np.sort(np.array(list(set(iunique_sta).intersection( np.where(out_val > 0)[0] ))))
+				if len(iallowed) == 0: iallowed = np.array([-1]).astype('int') ## This catches an empty iallowed
+				tree_allowed = cKDTree(iallowed.reshape(-1,1))
+				if len(Picks_P_perm[j]) > 0: Picks_P_perm[j] = Picks_P_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_P_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_P_perm[j][:,1].astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')]
+				if len(Picks_S_perm[j]) > 0: Picks_S_perm[j] = Picks_S_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_S_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_S_perm[j][:,1].astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')]
+
+
+		if min_sta_count is not None:
+			num_sta_found = np.array([len(np.unique(np.concatenate((Picks_P_perm[j][:,1], Picks_S_perm[j][:,1]), axis = 0))) for j in range(len(srcs_refined))])
+			num_pick_found = np.array([len(Picks_P_perm[j][:,1]) + len(Picks_S_perm[j][:,1]) for j in range(len(srcs_refined))])
+			ikeep_min_counts = np.array(list(set(np.where(num_sta_found >= min_sta_count)[0]).intersection(np.where(num_pick_found >= min_pick_count)[0])))
+			iremove_min_counts = np.delete(np.arange(len(srcs_refined)), ikeep_min_counts)
+			# ikeep = np.array(list(set(ikeep).intersection(np.where(num_sta_found >= min_num_sta)[0]))).astype('int')
+
+		if len(iremove_min_counts) > 0:
+			## Remove sources that are no longer stable
+			srcs_refined = srcs_refined[ikeep_min_counts]
+			Picks_P = [Picks_P[j] for j in ikeep_min_counts]
+			Picks_S = [Picks_S[j] for j in ikeep_min_counts]
+			Picks_P_perm = [Picks_P_perm[j] for j in ikeep_min_counts]
+			Picks_S_perm = [Picks_S_perm[j] for j in ikeep_min_counts]
+
 	use_location_trim = True
 	if use_location_trim == True:
 
@@ -1928,7 +1993,35 @@ for cnt, strs in enumerate([0]):
 	## Compute magnitudes.
 	# min_log_amplitude_val = -2.0 ## Choose this value to ignore very small amplitudes
 	if (compute_magnitudes == True)*(loaded_mag_model == True):
+
+
+		mag_r = []
+		mag_trv = []
 		
+		for i in range(srcs_refined.shape[0]):
+		
+			ind_p, log_amp_p = Picks_P[i][:,1].astype('int'), np.log10(Picks_P[i][:,2])
+			ind_s, log_amp_s = Picks_S[i][:,1].astype('int'), np.log10(Picks_S[i][:,2])
+
+			mag_p = Mag(torch.Tensor(ind_p).long().to(device), torch.Tensor(srcs_refined[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_p).to(device), torch.zeros(len(ind_p)).long().to(device))
+			mag_s = Mag(torch.Tensor(ind_s).long().to(device), torch.Tensor(srcs_refined[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_s).to(device), torch.ones(len(ind_s)).long().to(device))
+			mag_pred = np.median(np.concatenate((mag_p.cpu().detach().numpy().reshape(-1), mag_s.cpu().detach().numpy().reshape(-1)), axis = 0))
+			mag_r.append(mag_pred)
+			
+			mag_p = Mag(torch.Tensor(ind_p).long().to(device), torch.Tensor(srcs_trv[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_p).to(device), torch.zeros(len(ind_p)).long().to(device))
+			mag_s = Mag(torch.Tensor(ind_s).long().to(device), torch.Tensor(srcs_trv[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_s).to(device), torch.ones(len(ind_s)).long().to(device))
+			mag_pred = np.median(np.concatenate((mag_p.cpu().detach().numpy().reshape(-1), mag_s.cpu().detach().numpy().reshape(-1)), axis = 0))
+			mag_trv.append(mag_pred)
+
+		mag_r = np.hstack(mag_r)
+		mag_trv = np.hstack(mag_trv)
+	
+	else:
+
+		mag_r = np.nan*np.ones(srcs_trv.shape[0])
+		mag_trv = np.nan*np.ones(srcs_trv.shape[0])		
+
+
 		# mag_r = []
 		# mag_trv = []
 		# quant_range = [0.1, 0.9]
@@ -1985,31 +2078,191 @@ for cnt, strs in enumerate([0]):
 		# mag_r = np.hstack(mag_r)
 		# mag_trv = np.hstack(mag_trv)
 
-		mag_r = []
-		mag_trv = []
-		
-		for i in range(srcs_refined.shape[0]):
-		
-			ind_p, log_amp_p = Picks_P[i][:,1].astype('int'), np.log10(Picks_P[i][:,2])
-			ind_s, log_amp_s = Picks_S[i][:,1].astype('int'), np.log10(Picks_S[i][:,2])
+	####################################################################################
 
-			mag_p = Mag(torch.Tensor(ind_p).long().to(device), torch.Tensor(srcs_refined[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_p).to(device), torch.zeros(len(ind_p)).long().to(device))
-			mag_s = Mag(torch.Tensor(ind_s).long().to(device), torch.Tensor(srcs_refined[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_s).to(device), torch.ones(len(ind_s)).long().to(device))
-			mag_pred = np.median(np.concatenate((mag_p.cpu().detach().numpy().reshape(-1), mag_s.cpu().detach().numpy().reshape(-1)), axis = 0))
-			mag_r.append(mag_pred)
-			
-			mag_p = Mag(torch.Tensor(ind_p).long().to(device), torch.Tensor(srcs_trv[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_p).to(device), torch.zeros(len(ind_p)).long().to(device))
-			mag_s = Mag(torch.Tensor(ind_s).long().to(device), torch.Tensor(srcs_trv[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_s).to(device), torch.ones(len(ind_s)).long().to(device))
-			mag_pred = np.median(np.concatenate((mag_p.cpu().detach().numpy().reshape(-1), mag_s.cpu().detach().numpy().reshape(-1)), axis = 0))
-			mag_trv.append(mag_pred)
+	######################## Do additional quality control #############################
 
-		mag_r = np.hstack(mag_r)
-		mag_trv = np.hstack(mag_trv)
+	####################################################################################
+
+	# use_additional_quality_control = True
+	if use_additional_quality_control == True:
+
+		## Load data
+		# srcs_trv = z['srcs_trv'][:]
+		# srcs_r = np.copy(srcs_refined) # z['srcs'][:]
+		# locs_use = z['locs_use'][:]
+		# cnt = cnt_p + cnt_s
+		# mags = np.copy(mag_trv) # z['mag_trv'][:]
+		# sigma = np.copy(srcs_sigma) # z['srcs_sigma'][:]
+		# srcs_w = srcs_refined[:,4] ## Weight value of detection likelihood
+		# Picks_P_perm = [z['Picks/%d_Picks_P_perm'%j][:] for j in range(len(srcs_trv))]
+		# Picks_S_perm = [z['Picks/%d_Picks_S_perm'%j][:] for j in range(len(srcs_trv))]
+		# z.close()
+
+
+		## Remove based on high spatial perturbation (what causes this? small events and bad associations? Merging two seperate events)
+		if max_perturb_offset is not None:
+			## Distance offset
+			offset = np.linalg.norm(ftrns1(srcs_trv) - ftrns1(srcs_refined), axis = 1)
+			ioffset = np.where(offset > max_perturb_offset)[0] ## Remove based on distance offset
+		else:
+			ioffset = np.array([]).astype('int')
+
+
+		## Remove based on anomolously high magnitudes and low pick counts (split and mislocated events)
+		if mag_thresh_check is not None:
+			ioutlier_magnitude_and_count = np.where((mag_trv > mag_thresh_check)*((cnt_p + cnt_s) < min_picks_check))[0]
+		else:
+			ioutlier_magnitude_and_count = np.array([]).astype('int')
+
+
+		## Sigma removal (what causes this? small events and bad associations? Merging two seperate events)
+		if max_sigma is not None:
+			isigma = np.where(srcs_sigma > max_sigma)[0]
+		else:
+			isigma = np.array([]).astype('int')
+
+
+		iremove = np.unique(np.concatenate((ioffset, ioutlier_magnitude_and_count, isigma), axis = 0)) # iremove_min_counts
+		ikeep = np.array(list(set(np.arange(len(srcs_trv))).difference( iremove )))
+
+		srcs_refined = srcs_refined[ikeep]
+		srcs_trv = srcs_trv[ikeep]
+		srcs_sigmna = srcs_sigma[ikeep]
+		mag_r = mag_r[ikeep]
+		mag_trv = mag_trv[ikeep]
+		del_arv_p = del_arv_p[ikeep]
+		del_arv_s = del_arv_s[ikeep]
+		cnt_p = cnt_p[ikeep]
+		cnt_s = cnt_s[ikeep]
+
+		Picks_P = [Picks_P[j] for j in ikeep]
+		Picks_S = [Picks_S[j] for j in ikeep]
 	
-	else:
+		Picks_P_perm = [Picks_P_perm[j] for j in ikeep]
+		Picks_S_perm = [Picks_S_perm[j] for j in ikeep]		
 
-		mag_r = np.nan*np.ones(srcs_trv.shape[0])
-		mag_trv = np.nan*np.ones(srcs_trv.shape[0])		
+
+		# srcs_refined = srcs_refined[ikeep]
+		# srcs_trv = srcs_trv[ikeep]
+		# srcs_sigma = srcs_sigma[ikeep]
+		# del_arv_p = del_arv_p[ikeep]
+		# del_arv_s = del_arv_s[ikeep]
+		# cnt_p = cnt_p[ikeep]
+		# cnt_s = cnt_s[ikeep]
+
+		# if len(srcs_trv) == 0:
+		# 	print('No events left after minimum pick requirements')
+		# 	continue
+	
+		# Picks_P = [Picks_P[j] for j in ikeep]
+		# Picks_S = [Picks_S[j] for j in ikeep]
+	
+		# Picks_P_perm = [Picks_P_perm[j] for j in ikeep]
+		# Picks_S_perm = [Picks_S_perm[j] for j in ikeep]
+
+
+		## Sigma removal (what causes this? small events and bad associations? Merging two seperate events)
+		## Are some of these real events with just high uncertainty?
+		# if max_sigma is not None:
+		# 	isigma = np.where(sigma > max_sigma)[0]
+		# else:
+		# 	isigma = np.array([]).astype('int')
+
+
+		# ## For each event, go through and remove the outlier picks
+		# if quantile_val is not None:
+
+		# 	max_dist = np.array([np.quantile(np.linalg.norm(ftrns1(locs_use[np.concatenate((Picks_P_perm[j][:,1], Picks_S_perm[j][:,1]), axis = 0).astype('int')]) - ftrns1(srcs_trv[j,:].reshape(1,-1)), axis = 1), quantile_val) for j in range(len(Picks_P_perm))])
+
+		# 	## Find isolated stations (i.e., no neighbors with associations) and remove
+		# 	## Also remove picks far from a multiple of the upper qth quantile upper max source - reciever distance
+		# 	knn_sta_edges = remove_self_loops(knn(torch.Tensor(locs_use).to(device), torch.Tensor(locs_use).to(device), k = min_sta_neighbors))[0].flip(0)
+		# 	for j in range(len(Picks_P_perm)):
+
+		# 		iunique_sta = np.unique(np.concatenate((Picks_P_perm[j][:,1], Picks_S_perm[j][:,1]), axis = 0).astype('int'))
+		# 		embed_features = torch.zeros(len(locs_use)).to(device)
+		# 		embed_features[iunique_sta] = 1.0
+		# 		out_val = scatter(embed_features.reshape(-1,1)[knn_sta_edges[0]], knn_sta_edges[1], dim = 0, dim_size = locs_use.shape[0], reduce = 'sum').cpu().detach().numpy().reshape(-1)
+		# 		# out_val = embed_features.cpu().detach().numpy() - out_val ## If less than or equal to zero, at least one neighbor has a pick
+		# 		iallowed = np.sort(np.array(list(set(iunique_sta).intersection( np.where(out_val > 0)[0] ))))
+		# 		if len(iallowed) == 0: iallowed = np.array([-1]).astype('int') ## This catches an empty iallowed
+		# 		tree_allowed = cKDTree(iallowed.reshape(-1,1))
+		# 		if len(Picks_P_perm[j]) > 0: Picks_P_perm[j] = Picks_P_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_P_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_P_perm[j][:,1].astype('int')]) - ftrns1(srcs_trv[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')]
+		# 		if len(Picks_S_perm[j]) > 0: Picks_S_perm[j] = Picks_S_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_S_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_S_perm[j][:,1].astype('int')]) - ftrns1(srcs_trv[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')]
+
+
+		# if min_sta_count is not None:
+		# 	num_sta_found = np.array([len(np.unique(np.concatenate((Picks_P_perm[j][:,1], Picks_S_perm[j][:,1]), axis = 0))) for j in range(len(srcs_trv))])
+		# 	num_pick_found = np.array([len(Picks_P_perm[j][:,1]) + len(Picks_S_perm[j][:,1]) for j in range(len(srcs_trv))])
+		# 	ikeep_min_counts = np.array(list(set(np.where(num_sta_found >= min_sta_count)[0]).intersection(np.where(num_pick_found >= min_pick_count)[0])))
+		# 	iremove_min_counts = np.delete(np.arange(len(srcs_trv)), ikeep_min_counts)
+		# 	# ikeep = np.array(list(set(ikeep).intersection(np.where(num_sta_found >= min_num_sta)[0]))).astype('int')
+
+
+		# # srcs = np.copy(srcs_trv) # z['srcs_trv'][:]
+		# # sigma = z['srcs_sigma'][:]
+		# # locs_use = z['locs_use'][:]
+		# ista_match = tree_stas.query(ftrns1(locs_use)) # [1]
+		# assert(ista_match[0].max() < 1e3)
+		# ista_match = ista_match[1]
+		# perm_assign = (-10000*np.ones(len(locs_use))).astype('int')
+		# perm_assign[:] = np.copy(ista_match)
+
+		# ikeep = np.arange(len(srcs))
+		# ikeep1 = np.arange(len(srcs_ref))
+		# if len(lat_lim) > 0:
+		# 	ikeep = np.where((srcs[:,0] < lat_lim[1])*(srcs[:,0] > lat_lim[0])*(srcs[:,1] < lon_lim[1])*(srcs[:,1] > lon_lim[0]))[0]
+		# 	ikeep1 = np.where((srcs_ref[:,0] < lat_lim[1])*(srcs_ref[:,0] > lat_lim[0])*(srcs_ref[:,1] < lon_lim[1])*(srcs_ref[:,1] > lon_lim[0]))[0]
+		# 	# srcs_ref = srcs_ref[ikeep1]
+
+
+		## Overwrite ikeep based on the quality criteria
+		# iremove = np.unique(np.concatenate((ioffset, ioutlier_magnitude_and_count, isigma, iremove_min_counts), axis = 0))
+		# ikeep = np.array(list(set(ikeep).difference( iremove )))
+		# cnt_remove += len(iremove)
+		# cnt_remove_l[0] += len(ioffset)
+		# cnt_remove_l[1] += len(ioutlier_magnitude_and_count)
+		# cnt_remove_l[2] += len(isigma)
+		# cnt_remove_l[3] += len(iremove_min_counts)
+
+
+		# # if max_sigma is not None:
+		# # 	ikeep = np.array(list(set(ikeep).intersection(np.where(sigma < max_sigma)[0]))).astype('int')
+
+		# ## Subset sources
+		# # srcs_ref = srcs_ref[ikeep1]
+		# srcs = srcs[ikeep]
+		# srcs_w = srcs_w[ikeep]
+		# sigma = sigma[ikeep]
+		# mags = mags[ikeep]
+
+		# if len(srcs) > 0:
+		# 	cnt_p_slice = [len(Picks_P_perm[j]) for j in ikeep]
+		# 	cnt_s_slice = [len(Picks_S_perm[j]) for j in ikeep]
+		# 	cnt_p_l.extend(cnt_p_slice)
+		# 	cnt_s_l.extend(cnt_s_slice)
+
+		# for inc, j in enumerate(ikeep):
+		# 	Picks_P.append(Picks_P_perm[j]) ## Returning to absolute indices
+		# 	Picks_S.append(Picks_S_perm[j])
+		# 	Picks_P[-1][:,1] = perm_assign[Picks_P[-1][:,1].astype('int')]
+		# 	Picks_S[-1][:,1] = perm_assign[Picks_S[-1][:,1].astype('int')]
+		# 	# z1['Picks_P_%d'%cnt_inc] = Picks_P[-1]
+		# 	# z1['Picks_S_%d'%cnt_inc] = Picks_S[-1]
+		# 	t0 = UTCDateTime(yr, mo, dy) + srcs[inc,3]
+		# 	seconds_frac = t0 - UTCDateTime(t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second)
+		# 	Times.append(np.array([t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second + seconds_frac]).reshape(1,-1))
+		# 	cnt_inc += 1
+
+		# z.close()
+
+
+
+
+
+
+
 
 	trv_out1 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
 	trv_out1_all = trv(torch.Tensor(locs).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
