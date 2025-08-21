@@ -539,6 +539,23 @@ date = np.array([yr, mo, dy])
 P, ind_use = load_picks(path_to_file, date, spr_picks = spr_picks, n_ver = n_ver_picks)
 # P, ind_use = load_picks(path_to_file, date, locs, stas, lat_range, lon_range, spr_picks = spr_picks, n_ver = n_ver_picks)
 
+min_spc_allowed = None ## Can remove nearby overlapping stations using min_spc_allowed
+if min_spc_allowed is not None:
+	mp = LocalMarching(device = device)
+	locs_out = mp(np.concatenate((locs[ind_use], np.zeros((len(ind_use),1)), np.ones((len(ind_use),1)) + 0.1*np.random.rand(len(ind_use),1)), axis = 1), ftrns1, tc_win = 1.0, sp_win = min_spc_allowed)[:,0:3]					
+	cnt_overwrite = 0
+	if len(locs_out) < len(ind_use):
+		tree_locs = cKDTree(ftrns1(locs[ind_use]))
+		ip_retained = tree_locs.query(ftrns1(locs_out))[1]
+		iremoved = np.delete(np.arange(len(ind_use)), ip_retained, axis = 0)
+		imatches = tree_locs.query(ftrns1(locs[ind_use[iremoved]]))[1]
+		for inc, j in enumerate(iremoved):
+			ifind = np.where(P[:,1] == ind_use[j])[0]
+			P[ifind,1] = imatches[inc]
+			cnt_overwrite += len(ifind)
+	print('Overwriting %d stations %d total picks'%(len(iremoved), cnt_overwrite))
+
+
 if use_phase_types == False:
 	P[:,4] = 0 ## No phase types
 locs_use = locs[ind_use]
