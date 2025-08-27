@@ -2130,7 +2130,7 @@ for cnt, strs in enumerate([0]):
 
 		srcs_refined = srcs_refined[ikeep]
 		srcs_trv = srcs_trv[ikeep]
-		srcs_sigmna = srcs_sigma[ikeep]
+		srcs_sigma = srcs_sigma[ikeep]
 		mag_r = mag_r[ikeep]
 		mag_trv = mag_trv[ikeep]
 		del_arv_p = del_arv_p[ikeep]
