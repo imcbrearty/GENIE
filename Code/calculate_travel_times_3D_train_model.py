@@ -749,7 +749,7 @@ if train_travel_time_neural_network == True:
 		if compute_reference_times == True: ## Can include a data loss
 			travel_times_p = Tp_samples[isample] #
 			travel_times_s = Ts_samples[isample] # = sample_inputs_unweighted(n_batch)
-			trgt_data = torch.Tensor(np.concatenate((travel_times_p.reshape(-1,1), travel_times_s.reshape(-1,1)), axis = 1)).to(device)
+			# trgt_data = torch.Tensor(np.concatenate((travel_times_p.reshape(-1,1), travel_times_s.reshape(-1,1)), axis = 1)).to(device)
 
 		pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method = 'direct', train = True)
 		# pred_perturb = pred_perturb1 + pred_perturb2
