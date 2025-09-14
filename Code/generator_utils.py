@@ -2,9 +2,8 @@ import numpy as np
 from sklearn.metrics import pairwise_distances as pd
 from utils import *
 from matplotlib.colors import LinearSegmentedColormap, Normalize
-
-
-
+from matplotlib import pyplot as plt
+import pdb
 
 def inv_2x2(matrix):
 	"""Compute inverse of a 2x2 matrix using direct formula."""
@@ -34,7 +33,6 @@ def radial_function(points, center, inv_cov, p_exp=3.0, scale_factor=1.0, d_nois
 	try:
 		radial_pdf = scale_factor * np.exp(-(1/(2 * 9**(p_exp - 1))) * np.power(mahalanobis2, 2.0*p_exp))
 	except:
-		pdb.set_trace()
 		print(f"radial_pdf range: {radial_pdf.min():.6f} to {radial_pdf.max():.6f}")
 		print(f"scale_factor: {scale_factor}")
 		print(f"p_exp: {p_exp}")
@@ -151,7 +149,7 @@ def morans_I_binary(W, selected):
 	I = (len(y) / np.maximum(row_sum, 1e-5)) * (num / np.maximum(denom, 1e-5))
 	return I
 
-def sample_synthetic_moveout_pattern_generator(Srcs, Mags, Inds, locs, prob_vec, chol_params, ftrns1, pdist_p, pdist_s, n_samples = 100, srcs = None, mags = None, locs_use_list = None, inds = None, use_l1 = False, mask_noise = False, return_features = True,  Picks_P_lists=None, Picks_S_lists=None, distance_abs = None, debug=False):
+def sample_synthetic_moveout_pattern_generator(Srcs, Mags, Inds, locs, prob_vec, chol_params, ftrns1, pdist_p, pdist_s, n_samples = 100, srcs = None, mags = None, locs_use_list = None, inds = None, use_l1 = False, mask_noise = False, return_features = True,  Picks_P_lists=None, Picks_S_lists=None, distance_abs = None, debug=False, debug_ver=1):
 	## Sample sources
 	if srcs is None: ## If srcs is None, assume global dataset Srcs is available and sample from this. 
 		## Otherwise, sample the given input lists of sources and magnitudes
@@ -181,19 +179,30 @@ def sample_synthetic_moveout_pattern_generator(Srcs, Mags, Inds, locs, prob_vec,
 	miss_pick_rate = chol_params['miss_pick_rate']
 	sigma_noise = chol_params['sigma_noise']
 	lambda_noise = chol_params['lambda_noise']
-	perturb_factor = chol_params['perturb_factor']
-	angle = 0.0
+	radial_perturb_factor = chol_params['radial_perturb_factor']
+	axis_perturb_factor = chol_params['axis_perturb_factor']
+	angle_perturb = chol_params['angle_perturb']
 
 	scale_factor = 1 - miss_pick_rate
 	
+	## Angle values per sources (need to add per-source random perturb, not fixed scaling)
+	angle_range = [-angle_perturb, angle_perturb]
+	angle_p = np.random.rand(n_samples)*(angle_range[1] - angle_range[0]) + angle_range[0]
+	angle_s = (np.random.rand(n_samples)*0.2 + 0.9)*angle_p ## S wave angle is perturbed by 20% of P wave angle
 	## Note: could likely remove scale_factor, and only use these per phase type and event scale factors
-	peturb_range = [1.0 - perturb_factor, 1.0 + perturb_factor]
+	radial_perturb_range = [1.0 - radial_perturb_factor, 1.0 + radial_perturb_factor]
 	# perturb_factor_sample = np.random.rand(n_samples)*(peturb_range[1] - peturb_range[0]) + peturb_range[0]
-	perturb_factor_p, perturb_factor_s = np.random.rand(2,n_samples)*(peturb_range[1] - peturb_range[0]) + peturb_range[0]
+	perturb_factor_p, perturb_factor_s = np.random.rand(2,n_samples)*(radial_perturb_range[1] - radial_perturb_range[0]) + radial_perturb_range[0]
 	
 	## Radius values per sources (need to add per-source random perturb, not fixed scaling)
 	sigma_radial_p = radial_factor_p * perturb_factor_p * np.array([pdist_p(magnitude) for magnitude in mags_sample])/3  # P-wave detection radius
 	sigma_radial_s = radial_factor_s * perturb_factor_s * np.array([pdist_s(magnitude) for magnitude in mags_sample])/3  # S-wave detection radius
+
+	length_range = [1.0 - axis_perturb_factor, 1.0 + axis_perturb_factor]
+	length1_p = (np.random.rand(n_samples)*(length_range[1] - length_range[0]) + length_range[0])*sigma_radial_p
+	length2_p = (np.random.rand(n_samples)*(length_range[1] - length_range[0]) + length_range[0])*sigma_radial_p
+	length1_s = (np.random.rand(n_samples)*(length_range[1] - length_range[0]) + length_range[0])*sigma_radial_s
+	length2_s = (np.random.rand(n_samples)*(length_range[1] - length_range[0]) + length_range[0])*sigma_radial_s
 	
 	# Noise correlation range
 	phase_noise_corr_range = [0.1, 0.4] ## Range to "weight" the independent S wave noise probabilities compared to P waves
@@ -220,10 +229,8 @@ def sample_synthetic_moveout_pattern_generator(Srcs, Mags, Inds, locs, prob_vec,
 	ikeep_s1, ikeep_s2 = [], []
 
 	for i in range(n_samples):
-
-		# angle_p, length1_p, length2_p = experiment_result_p['parameters']['angle'], experiment_result_p['parameters']['length1'], experiment_result_p['parameters']['length2']
-		angle, length1, length2, _, inv_cov_p = generate_ellipse_parameters(angle = angle, length1 = None, length2 = None, sigma_radial=sigma_radial_p[i])
-		angle, length1, length2, _, inv_cov_s = generate_ellipse_parameters(angle = angle, length1 = None, length2 = None, sigma_radial=sigma_radial_s[i])
+		_, _, _, _, inv_cov_p = generate_ellipse_parameters(angle = angle_p[i], length1 = length1_p[i], length2 = length2_p[i], sigma_radial=sigma_radial_p[i])
+		_, _, _, _, inv_cov_s = generate_ellipse_parameters(angle = angle_s[i], length1 = length1_s[i], length2 = length2_s[i], sigma_radial=sigma_radial_s[i])
 		# points, center, inv_cov, sigma_radial
 
 		## Sample P and S wave noise (do not use pre-built Cholesky matrix for S wave sampling)
@@ -462,7 +469,9 @@ def sample_synthetic_moveout_pattern_generator(Srcs, Mags, Inds, locs, prob_vec,
 
 		# error('Not yet implemented')
 		# pass
-
+	if debug:
+		print(f"Features: {Features}")
+	
 	return srcs_sample, mags_sample, Features, ichoose, [ikeep_p1, ikeep_p2, ikeep_s1, ikeep_s2]
 
 def comparison_plots(chol_params, srcs, mags, locs, inds, locs_use_list, Picks_P_lists, Picks_S_lists, n_samples = 100, srcs_sample = None, mags_sample = None, locs_use_cart_list = None, inds_use = None):
