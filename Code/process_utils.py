@@ -457,7 +457,7 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 
 # 	return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta]
 
-def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta, trv_times = None, max_t = 300.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, return_embedding = False, device = 'cpu'): ## pred_params[1]
+def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta, trv_times = None, max_t = 300.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, use_sign_input = False, return_embedding = False, device = 'cpu'): ## pred_params[1]
 
 	## Travel time calculator
 	## Picks
@@ -607,6 +607,12 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 		val_embed_p1 = embed_p[trv_read_ind_p] ## P waves accessing P labeled picks
 		val_embed_s1 = embed_s[trv_read_ind_s] ## S waves accessing S labeled picks
 
+		if use_sign_input == True: ## Note, for differences, should account for the different windows
+			val_embed_p = val_embed_p*torch.sign(-1.0*torch.diff(embed, append = embed[[-1]] + (embed[[-1]] - embed[[-2]]), dim = 0))[trv_read_ind_p] ## Pointwise multiply by slope of embedding
+			val_embed_s = val_embed_s*torch.sign(-1.0*torch.diff(embed, append = embed[[-1]] + (embed[[-1]] - embed[[-2]]), dim = 0))[trv_read_ind_s] ## Pointwise multiply by slope of embedding
+			val_embed_p1 = val_embed_p1*torch.sign(-1.0*torch.diff(embed_p, append = embed_p[[-1]] + (embed_p[[-1]] - embed_p[[-2]]), dim = 0))[trv_read_ind_p] ## Pointwise multiply by slope of embedding
+			val_embed_s1 = val_embed_s1*torch.sign(-1.0*torch.diff(embed_s, append = embed_s[[-1]] + (embed_s[[-1]] - embed_s[[-2]]), dim = 0))[trv_read_ind_s] ## Pointwise multiply by slope of embedding
+
 		# write_indices = torch.Tensor((src_ind_vec*len(ind_use) + sta_ind_vec_abs).reshape(-1)).long().to(device)
 		# write_indices = torch.Tensor((A_src_in_sta[1][ifind]*len(ind_use) + A_src_in_sta[0][ifind]).reshape(-1)).long().to(device)
 		write_indices = torch.Tensor(ifind).long().to(device) ## Can skip the scatter operation, since there should be no duplicated entries?
@@ -620,7 +626,7 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 		thresh_mask = 0.01
 		val_embed = torch.cat((val_embed_p.reshape(-1,1), val_embed_s.reshape(-1,1), val_embed_p1.reshape(-1,1), val_embed_s1.reshape(-1,1)), dim = 1)
 		Inpts = [scatter(val_embed, write_indices, dim = 0, dim_size = len(A_src_in_sta[0]), reduce = 'sum')] ## Sum should not exceed original values. This should be onto
-		Masks = [1.0*(Inpts[-1] > thresh_mask)] ## Putting into lists for consistency with batching
+		Masks = [1.0*(torch.abs(Inpts[-1]) > thresh_mask)] ## Putting into lists for consistency with batching
 		# Inpts = [Inpt]
 		# Masks = [Mask]
 
@@ -1269,6 +1275,86 @@ def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, l
 
 	return optim.x.reshape(1,-1), likelihood_estimate(optim.x.reshape(-1,1))
 
+def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, time_range, sig_t = 1.5, weight = [1.0, 0.85], popsize = 75, maxiter = 1000, trim = 0.2, min_picks = 5, device = 'cpu', surface_profile = None, disp = True, vectorized = True):
+
+	if (len(arv_p) + len(arv_s)) == 0:
+		return np.nan*np.ones((1,3)), np.nan
+
+	if surface_profile is None:
+
+		def likelihood_estimate(x):
+
+			# x = x.reshape(-1,3)
+			if x.ndim == 1:
+				x = x.reshape(-1,1)
+	
+			# pdb.set_trace()
+			n_picks = len(ind_p) + len(ind_s)
+			num_trim = int(np.floor(trim*n_picks))
+			if n_picks - num_trim < min_picks: num_trim = n_picks - min_picks
+			pred = trv(torch.Tensor(locs_use).to(device), torch.Tensor(x.T[:,0:3]).to(device)).cpu().detach().numpy() + x[3,:].reshape(-1,1,1)
+			pred_vals = np.concatenate((pred[:,ind_p,0], pred[:,ind_s,1]), axis = 1) # , 1)
+			logprob = ((trgt - pred_vals)**2)*weight_vec/(f_linear(pred_vals)**2) # , axis = 1)/n_picks
+			irank = np.ones(logprob.shape)
+			if (trim > 0)*(num_trim > 0)*(trim is not None)*(trim is not False):
+				irank[np.arange(len(irank)).reshape(-1,1), np.argsort(logprob, axis = 1)[:,-num_trim::]] = 0.0
+			logprob = -0.5*(irank*logprob).sum(1)/(n_picks - num_trim)
+
+			return -1.0*logprob
+	
+	else:
+
+		## Use surface to zero out probabilities in air
+		x1_dim = np.unique(surface_profile[:,0])
+		x2_dim = np.unique(surface_profile[:,1])
+		nlen1, nlen2 = len(x1_dim), len(x2_dim)
+		dx1, dx2 = np.diff(x1_dim)[0], np.diff(x2_dim)[0]
+
+		def likelihood_estimate(x):
+	
+			# x = x.reshape(-1,3)
+			if x.ndim == 1:
+				x = x.reshape(-1,1)
+
+			ind1 = np.maximum(np.minimum(np.floor((x[0,:] - x1_dim[0])/dx1).astype('int'), nlen1 - 1), 0)
+			ind2 = np.maximum(np.minimum(np.floor((x[1,:] - x2_dim[0])/dx2).astype('int'), nlen2 - 1), 0)
+			surf_elev = surface_profile[ind1 + ind2*nlen1, 2]
+			prob_mask = np.ones(x.shape[1])
+			prob_mask[x[2,:] > surf_elev] = 1e5
+	
+
+			n_picks = len(ind_p) + len(ind_s)
+			num_trim = int(np.floor(0.2*n_picks))
+			if n_picks - num_trim < min_picks: num_trim = n_picks - min_picks
+			pred = trv(torch.Tensor(locs_use).to(device), torch.Tensor(x.T[:,0:3]).to(device)).cpu().detach().numpy() + x[3,:].reshape(-1,1,1)
+			pred_vals = np.concatenate((pred[:,ind_p,0], pred[:,ind_s,1]), axis = 1) # , 1)
+			logprob = ((trgt - pred_vals)**2)*weight_vec/(f_linear(pred_vals)**2) # , axis = 1)/n_picks
+			irank = np.ones(logprob.shape)
+			if (trim > 0)*(num_trim > 0)*(trim is not None)*(trim is not False):
+				irank[np.arange(len(irank)).reshape(-1,1), np.argsort(logprob, axis = 1)[:,-num_trim::]] = 0.0
+			logprob = -0.5*(irank*logprob).sum(1)/(n_picks - num_trim)
+	
+
+			return -1.0*(logprob*prob_mask)
+	
+	n_loc = locs_use.shape[1]
+	n_picks = len(arv_p) + len(arv_s)
+	trgt = np.concatenate((arv_p, arv_s), axis = 0).reshape(1, -1) # , 1)
+	if len(weight) == n_picks:
+		weight_vec = np.copy(np.array(weight)).reshape(1,-1)
+	else:
+		weight_vec = np.concatenate((weight[0]*np.ones(len(ind_p)), weight[1]*np.ones(len(ind_s))), axis = 0).reshape(1,-1)
+
+	## Make sig_t adaptive to average distance of stations..
+	f_linear = lambda t: sig_t*np.ones(t.shape)
+
+	# pdb.set_trace()
+	bounds = [(lat_range[0], lat_range[1]), (lon_range[0], lon_range[1]), (depth_range[0], depth_range[1]), (time_range[0], time_range[1])]
+	optim = scipy.optimize.differential_evolution(likelihood_estimate, bounds, popsize = popsize, maxiter = maxiter, disp = disp, vectorized = vectorized)
+
+	return optim.x[0:3].reshape(1,-1), optim.x[3].reshape(-1), likelihood_estimate(optim.x.reshape(-1,1))
+
+
 def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
 
 	if (len(arv_p) + len(arv_s)) == 0:
@@ -1541,6 +1627,14 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
+
+
+
+
+
+
+
 
 
 

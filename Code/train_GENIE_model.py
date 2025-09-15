@@ -19,8 +19,12 @@ from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from torch_geometric.utils import degree
+from torch.nn import Softplus
 from torch_scatter import scatter
 from numpy.matlib import repmat
+from scipy.stats import gamma
+from scipy.stats import chi2
+import pdb
 import pathlib
 import glob
 import sys
@@ -63,7 +67,9 @@ k_time_edges = config['k_time_edges']
 use_physics_informed = config['use_physics_informed']
 use_phase_types = config['use_phase_types']
 use_subgraph = config['use_subgraph']
+use_sign_input = config.get('use_sign_input', False)
 use_topography = config['use_topography']
+use_station_corrections = config.get('use_station_corrections', False)
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
     k_nearest_pairs = config['k_nearest_pairs']	
@@ -147,7 +153,7 @@ if use_topography == True:
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
 load_subnetworks = train_config['fixed_subnetworks']
-if load_subnetworks == True:
+if (load_subnetworks == True)*(load_training_data == False): ## Only load subnetworks if not loading the data
 	
 	min_sta_per_graph = int(k_sta_edges + 1)
 
@@ -322,7 +328,159 @@ use_shallow_sources = train_config['use_shallow_sources']
 use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, return_only_data = False):
+def simulate_travel_times(prob_vec, chol_params, ftrns1, n_samples = 100, use_l1 = False, srcs = None, mags = None, ichoose = None, locs_use_list = None, ind_use_slice = None, return_features = True): # n_repeat : can repeatedly draw either from the covariance matrices, or the binomial distribution
+
+	if srcs is None:
+		## Sample sources
+		if ichoose is None: ichoose = np.random.choice(len(Srcs), p = prob_vec, size = n_samples)
+		locs_use_list = [locs[Inds[j]] for j in ichoose]
+		locs_use_cart_list = [ftrns1(l) for l in locs_use_list]
+		srcs_sample = Srcs[ichoose]
+		# mags_sample = Mags[ichoose]
+		srcs_samples_cart = ftrns1(srcs_sample)
+		ind_use_slice = [Inds[ichoose[i]] for i in range(len(ichoose))]
+		sample_fixed = False
+
+	else:
+		ichoose = np.arange(len(srcs))
+		n_samples = len(srcs)
+		locs_use_cart_list = [ftrns1(l) for l in locs_use_list]
+		srcs_sample = np.copy(srcs)
+		# mags_sample = np.copy(mags_sample)
+		srcs_samples_cart = ftrns1(srcs_sample)
+		# ind_use_slice = [np.arange(len(locs)) for i in range(len(ichoose))]
+		sample_fixed = True
+
+	## Removing the use of mags from the function
+
+	rel_trv_factor1 = chol_params['relative_travel_time_factor1'] # random_scale_factor_phase = 0.35
+	rel_trv_factor2 = chol_params['relative_travel_time_factor2'] # random_scale_factor_phase = 0.35
+	travel_time_bias_scale_factor1 = chol_params['travel_time_bias_scale_factor1']
+	travel_time_bias_scale_factor2 = chol_params['travel_time_bias_scale_factor2']
+	correlation_scale_distance = chol_params['correlation_scale_distance']
+	softplus_beta = chol_params['softplus_beta']
+	softplus_shift = chol_params['softplus_shift']
+
+	## Setup absolute network parameters
+	tol = 1e-8
+	distance_abs = pd(ftrns1(locs), ftrns1(locs)) ## Absolute stations
+	if use_l1 == False:
+		# covariance_abs = np.exp(-0.5*(distance_abs**2) / (sigma_noise**2)) + tol*np.eye(distance_abs.shape[0])
+		covariance_trv = np.exp(-0.5*(distance_abs**2) / (correlation_scale_distance**2)) + tol*np.eye(distance_abs.shape[0])
+	else:
+		# covariance_abs = np.exp(-1.0*np.abs(distance_abs) / (sigma_noise**1)) + tol*np.eye(distance_abs.shape[0])
+		covariance_trv = np.exp(-1.0*np.abs(distance_abs) / (correlation_scale_distance**1)) + tol*np.eye(distance_abs.shape[0])
+
+
+	chol_trv_matrix = np.linalg.cholesky(covariance_trv)
+
+
+	Log_prob_p = []
+	Log_prob_s = []
+	Simulated_p = []
+	Simulated_s = []
+	Mean_trv_p = []
+	Mean_trv_s = []
+	Std_val_p = []
+	Std_val_s = []
+	scale_log_prob = 100.0
+
+	locs_cuda = torch.Tensor(locs).to(device)
+	srcs_cuda = torch.Tensor(srcs_sample).to(device)
+	for i in range(n_samples):
+		## Sample correlated travel time noise
+		trv_out_vals = trv(locs_cuda, srcs_cuda[i].reshape(1,-1)).cpu().detach().numpy()
+		if sample_fixed == False:
+			time_trgt_p, time_trgt_s = Picks_P_lists[ichoose[i]][:,0].astype('int') - srcs_sample[i,3], Picks_S_lists[ichoose[i]][:,0].astype('int') - srcs_sample[i,3]
+			ind_trgt_p, ind_trgt_s = Picks_P_lists[ichoose[i]][:,1].astype('int'), Picks_S_lists[ichoose[i]][:,1].astype('int')
+			simulated_trv_p, scaled_mean_vec_p, std_val_p, log_likelihood_obs_p, log_likelihood_sim_p = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,0], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], softplus_beta, softplus_shift, ind_use_slice[i], observed_times = time_trgt_p, observed_indices = ind_trgt_p, compute_log_likelihood = True)
+			simulated_trv_s, scaled_mean_vec_s, std_val_s, log_likelihood_obs_s, log_likelihood_sim_s = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,1], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], softplus_beta, softplus_shift, ind_use_slice[i], observed_times = time_trgt_s, observed_indices = ind_trgt_s, compute_log_likelihood = True)
+			Log_prob_p.append(log_likelihood_sim_p/np.maximum(1.0, len(time_trgt_p))) ## Check normalization
+			Log_prob_s.append(log_likelihood_sim_s/np.maximum(1.0, len(time_trgt_s))) ## Check normalization
+
+		else:
+			simulated_trv_p, scaled_mean_vec_p, std_val_p = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,0], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], softplus_beta, softplus_shift, ind_use_slice[i])
+			simulated_trv_s, scaled_mean_vec_s, std_val_s = sample_correlated_travel_time_noise(chol_trv_matrix, trv_out_vals[0,:,1], [travel_time_bias_scale_factor1, travel_time_bias_scale_factor2], [rel_trv_factor1, rel_trv_factor2], softplus_beta, softplus_shift, ind_use_slice[i])
+
+
+		Simulated_p.append(simulated_trv_p)
+		Simulated_s.append(simulated_trv_s)
+		Mean_trv_p.append(scaled_mean_vec_p)
+		Mean_trv_s.append(scaled_mean_vec_s)
+		Std_val_p.append(std_val_p)
+		Std_val_s.append(std_val_s)
+
+
+	return srcs_sample, [], ichoose, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, np.vstack(Std_val_p), np.vstack(Std_val_s), np.array(Log_prob_p)/scale_log_prob, np.array(Log_prob_s)/scale_log_prob
+	# _, _, _, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, _, _
+
+def sample_correlated_travel_time_noise(cholesky_matrix_trv, mean_vec, bias_factors, std_factor, softplus_beta, softplus_shift, ind_use, compute_log_likelihood = False, observed_indices = None, observed_times = None, min_tol = 0.005, n_repeat = 1):
+	"""Generate spatially correlated noise using Cholesky decomposition.
+	TO DO: use pre-computed coefficients.
+	Args:
+		points (np.ndarray): Array of points
+		sigma_noise (float): Covariance scale parameter
+		cholesky_matrix (np.ndarray): Pre-computed Cholesky matrix
+	Returns:
+	np.ndarray: Spatially correlated noise
+	"""
+	# covariance = compute_covariance(distance, sigma_noise=sigma_noise)
+	# if cholesky_matrix == None:
+	# 	L = np.linalg.cholesky(covariance[ind_use.reshape(-1,1), ind_use.reshape(1,-1)])
+	# else:
+	# 	L = np.copy(cholesky_matrix)
+
+	## Scale absolute "mean" travel times by bias factor
+	if len(bias_factors) > 1:
+		bias_val = np.random.uniform(1.0 - bias_factors[0], 1.0 + bias_factors[1])
+	else:
+		bias_val = np.random.uniform(1.0 - bias_factors[0], 1.0 + bias_factors[0])		
+
+	## Set the standard deviation as proportional to travel time
+	if len(std_factor) > 1:
+		std_val = np.random.uniform(std_factor[0], std_factor[0] + std_factor[1])
+	else:
+		std_val = std_factor[0]
+
+	softplus = nn.Softplus(beta = np.pow(10.0, softplus_beta))
+	scale_val = softplus(torch.Tensor(bias_val*mean_vec*std_val + softplus_shift)).cpu().detach().numpy()
+	standard_deviation = np.diag(scale_val)
+	
+	# standard_deviation = np.diag(mean_vec*std_val)
+
+	# std_val = np.random.uniform(min_tol, std_factor)
+	# standard_deviation = np.diag(mean_vec*std_factor)
+
+	z = np.random.randn(len(cholesky_matrix_trv), n_repeat)
+
+	# z = np.random.multivariate_normal(np.zeros(len(points)), np.identity(len(points)))
+	scaled_chol_matrix = (standard_deviation @ cholesky_matrix_trv)
+	scaled_mean_vec = mean_vec*bias_val
+
+	# Compute simulated times
+	simulated_times = ((scaled_chol_matrix @ z) + (scaled_mean_vec).reshape(-1,1))[ind_use].squeeze() # [ind_use]
+
+	if compute_log_likelihood == False:
+
+		return simulated_times, scaled_mean_vec, std_val
+
+	else: ## In this case, compute the log likelihood of the observations (and simulations) given the model
+
+		# pdb.set_trace()
+		# inv_cov_subset = np.linalg.pinv((cholesky_matrix_trv @ cholesky_matrix_trv.T)[ind_use[observed_indices].reshape(-1,1), ind_use[observed_indices].reshape(1,-1)])
+		cov_subset = (scaled_chol_matrix @ scaled_chol_matrix.T)[ind_use[observed_indices].reshape(-1,1), ind_use[observed_indices].reshape(1,-1)]
+		res_vec_obs = observed_times - scaled_mean_vec[ind_use[observed_indices]]
+		res_vec_sim = simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]]
+		inv_cov_prod_res = np.linalg.solve(cov_subset, res_vec_obs.reshape(-1,1))
+		inv_cov_prod_sim = np.linalg.solve(cov_subset, res_vec_sim.reshape(-1,1))
+		# log_likelihood_obs = -(len(observed_indices)/2.0)*np.log(2.0*np.pi) - 1.0*(np.log(np.diag(scaled_chol_matrix)).sum()) - 0.5*((observed_times - scaled_mean_vec[ind_use[observed_indices]])*(inv_cov_subset @ (observed_times - scaled_mean_vec[ind_use[observed_indices]]).reshape(-1,1))).sum()
+		# log_likelihood_sim = -(len(observed_indices)/2.0)*np.log(2.0*np.pi) - 1.0*(np.log(np.diag(scaled_chol_matrix)).sum()) - 0.5*((simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]])*(inv_cov_subset @ (simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]]).reshape(-1,1))).sum()
+		log_likelihood_obs = -(len(observed_indices)/2.0)*np.log(2.0*np.pi) - 1.0*(np.log(np.diag(scaled_chol_matrix)).sum()) - 0.5*(res_vec_obs*inv_cov_prod_res).sum() # ((observed_times - scaled_mean_vec[ind_use[observed_indices]])*(inv_cov_subset @ (observed_times - scaled_mean_vec[ind_use[observed_indices]]).reshape(-1,1))).sum()
+		log_likelihood_sim = -(len(observed_indices)/2.0)*np.log(2.0*np.pi) - 1.0*(np.log(np.diag(scaled_chol_matrix)).sum()) - 0.5*(res_vec_sim*inv_cov_prod_sim).sum() # ((simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]])*(inv_cov_subset @ (simulated_times[observed_indices] - scaled_mean_vec[ind_use[observed_indices]]).reshape(-1,1))).sum()
+
+		return simulated_times, scaled_mean_vec, scale_val, log_likelihood_obs, log_likelihood_sim
+
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, return_only_data = False):
 
 	if verbose == True:
 		st = time.time()
@@ -406,11 +564,25 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		sample_random_depths = -sample_random_depths*(scale_x[0,2] - 2e3) + (offset_x[0,2] + scale_x[0,2] - 2e3) # Project along axis, going negative direction. Removing 2e3 on edges.
 		src_positions[:,2] = sample_random_depths
 
+	use_aftershocks = True
+	if (use_aftershocks == True)*(len(src_positions) > 0):
+			n_iterations = 1
+			for i in range(n_iterations):
+				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.1, float(src_x_kernel/0.5), float(src_t_kernel/0.5)
+				ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(aftershock_rate*len(src_positions))), replace = False)
+				rand_vec = np.random.randn(len(ichoose),3)
+				rand_vec = rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True)
+				samp_spc = gamma.rvs(0.5, 1.0, size = len(rand_vec))*aftershock_scale_x
+				rand_vec = rand_vec*samp_spc.reshape(-1,1)
+				src_positions[ichoose] = ftrns2(ftrns1(src_positions[ichoose - 1]) + rand_vec)
+				src_positions = np.clip(src_positions, np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1))
+				src_times[ichoose] = src_times[ichoose - 1] + aftershock_scale_t*gamma.rvs(0.5, 1.0, size = len(rand_vec))
+	
 	if use_topography == True: ## Don't simulate any sources in the air
 		imatch = tree_surface.query(src_positions[:,0:2])[1]
 		ifind_match = np.where(src_positions[:,2] > surface_profile[imatch,2])[0]
 		src_positions[ifind_match,2] = np.random.rand(len(ifind_match))*(surface_profile[imatch[ifind_match],2] - depth_range[0]) + depth_range[0]
-	
+		
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
 	use_uniform_distance_threshold = False
@@ -449,6 +621,13 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			dist_thresh = beta(2,5).rvs(size = n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
 			ireplace = np.random.choice(len(dist_thresh), size = int(0.15*len(dist_thresh)), replace = False)
 			dist_thresh[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
+
+	
+	use_large_distances = True
+	if use_large_distances == True:
+		ireplace = np.random.choice(len(dist_thresh), size = int(0.05*len(dist_thresh)), replace = False)
+		dist_thresh[ireplace] = 3.0*beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]	
+
 	
 	# create different distance dependent thresholds.
 	dist_thresh_p = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None] # Increased sig from 20e3 to 25e3 # Decreased to 10 km
@@ -457,33 +636,75 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ikeep_p1, ikeep_p2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_p))
 	ikeep_s1, ikeep_s2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_s))
 
-	arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
+	# arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
 
-	add_bias_scaled_travel_time_noise = True ## This way, some "true moveouts" will have travel time 
-	## errors that are from a velocity model different than used for sampling, training, and application, etc.
-	## Uses a different bias for both p and s waves, but constant for all stations, for each event
-	if add_bias_scaled_travel_time_noise == True:
-		# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
-		# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
-		# avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
-		# avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
-		# mean_ps_ratio = avg_p_vel/avg_s_vel
-		## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
-		frac_bias_s_ratio = 0.3
-		scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
-		scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
-		scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
-		# scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
-		# scale_bias_s = 
-		scale_bias = scale_bias + 1.0
-		arrivals_theoretical = arrivals_theoretical*scale_bias
+
+	use_correlated_travel_time_noise = False
+	if use_correlated_travel_time_noise == True:
+		# trv_time_noise_params = np.array([0.0417, 0.0309, 0.0319, 0.0585, 126677.6764])
+		trv_time_noise_params = np.array([0.019731435811040067, 0.04961629822710047, 0.006929868148854273, 0.03715930048600429, 224205.70749207088, 0.5310707796290268, -24.559947281657784])
+		chol_params_trv = {}
+		chol_params_trv['relative_travel_time_factor1'] = trv_time_noise_params[0] 
+		chol_params_trv['relative_travel_time_factor2'] = trv_time_noise_params[1]
+		chol_params_trv['travel_time_bias_scale_factor1'] = trv_time_noise_params[2]
+		chol_params_trv['travel_time_bias_scale_factor2'] = trv_time_noise_params[3]
+		chol_params_trv['correlation_scale_distance'] = trv_time_noise_params[4]
+		chol_params_trv['softplus_beta'] = trv_time_noise_params[5]
+		chol_params_trv['softplus_shift'] = trv_time_noise_params[6]
+		ind_use_slice = [np.arange(len(locs)) for j in range(len(src_positions))] ## Note the dependency on which ind_use_slice and locs_use_list depend on eachother
+		locs_use_list = [locs[ind_use_slice[j]] for j in range(len(src_positions))]
+		## Need to add correlation between P and S waves
+		_, _, _, Simulated_p, Simulated_s, Mean_trv_p, Mean_trv_s, Std_val_p, Std_val_s, _, _ = simulate_travel_times([], chol_params_trv, ftrns1, srcs = src_positions, locs_use_list = locs_use_list, ind_use_slice = ind_use_slice, return_features = False)
+		## Can use difference between Simulated_p, Simulatred_s, and Mean_trv_P, Mean_trv_s, to define the "remove outliers" re-labelling approach
+		## Can assume there's always at least one source, and all moveout vectors are the same size
+		Simulated_p = np.vstack(Simulated_p)
+		Simulated_s = np.vstack(Simulated_s)
+		Mean_trv_p = np.vstack(Mean_trv_p)
+		Mean_trv_s = np.vstack(Mean_trv_s)
+		Res_p = Simulated_p - Mean_trv_p ## Res with respect to the biased travel time vector
+		Res_s = Simulated_s - Mean_trv_s
+		iexcess_noise_p1, iexcess_noise_p2 = np.where(np.abs(Res_p) > np.maximum(min_misfit_allowed, thresh_noise_max*Std_val_p)) # Std_val_p.reshape(-1,1)*Simulated_p
+		iexcess_noise_s1, iexcess_noise_s2 = np.where(np.abs(Res_s) > np.maximum(min_misfit_allowed, thresh_noise_max*Std_val_s)) # Std_val_s.reshape(-1,1)*Simulated_s
+		arrivals_theoretical = np.concatenate((np.expand_dims(Simulated_p, axis = 2), np.expand_dims(Simulated_s, axis = 2)), axis = 2)
+		mask_excess_noise = np.zeros(arrivals_theoretical.shape)
+		mask_excess_noise[iexcess_noise_p1, iexcess_noise_p2, 0] = 1
+		mask_excess_noise[iexcess_noise_s1, iexcess_noise_s2, 1] = 1
+		# pdb.set_trace()
+
+	else:
+
+		arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
+		mask_excess_noise = np.expand_dims(src_times.reshape(-1,1).repeat(len(locs), axis = 1), axis = 2).repeat(2, axis = 2)
+	
+	if use_correlated_travel_time_noise == False:
+		add_bias_scaled_travel_time_noise = True ## This way, some "true moveouts" will have travel time 
+		## errors that are from a velocity model different than used for sampling, training, and application, etc.
+		## Uses a different bias for both p and s waves, but constant for all stations, for each event
+		if add_bias_scaled_travel_time_noise == True:
+			# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
+			# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
+			# avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
+			# avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
+			# mean_ps_ratio = avg_p_vel/avg_s_vel
+			## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
+			frac_bias_s_ratio = 0.3
+			scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+			scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
+			scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
+			# scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+			# scale_bias_s = 
+			scale_bias = scale_bias + 1.0
+			arrivals_theoretical = arrivals_theoretical*scale_bias
 	
 	arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)
 	arrivals_indices = np.arange(n_sta).reshape(1,-1).repeat(n_src, 0)
 	src_indices = np.arange(n_src).reshape(-1,1).repeat(n_sta, 1)
 
-	arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), arrival_origin_times[ikeep_p1, ikeep_p2].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
-	arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), arrival_origin_times[ikeep_s1, ikeep_s2].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
+	## Save the excess noise mask in the fourth column instead of the origin time; after using this mask, can overwrite back to the origin time
+	# arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), arrival_origin_times[ikeep_p1, ikeep_p2].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
+	# arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), arrival_origin_times[ikeep_s1, ikeep_s2].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
+	arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), mask_excess_noise[ikeep_p1, ikeep_p2, 0].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
+	arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), mask_excess_noise[ikeep_s1, ikeep_s2, 1].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
 	arrivals = np.concatenate((arrivals_p, arrivals_s), axis = 0)
 
 	if len(arrivals) == 0:
@@ -548,7 +769,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	# n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
 	if int(max_num_spikes*T/(3600*24)) > 0:
 		n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
-		n_spikes_extent = np.random.randint(int(np.floor(n_sta*0.5)), high = n_sta, size = n_spikes) ## This many stations per spike
+		n_spikes_extent = np.random.randint(int(np.floor(n_sta*0.35)), high = n_sta, size = n_spikes) ## This many stations per spike
 		time_spikes = np.random.rand(n_spikes)*T
 		sta_ind_spikes = [np.random.choice(n_sta, size = n_spikes_extent[j], replace = False) for j in range(n_spikes)]
 		if len(sta_ind_spikes) > 0: ## Add this catch, to avoid error of np.hstack if len(sta_ind_spikes) == 0
@@ -561,22 +782,41 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	# use_stable_association_labels = True
 	## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
 	iexcess_noise = []
+	assert(use_stable_association_labels == True)
 	if use_stable_association_labels == True: ## It turns out association results are fairly sensitive to this choice
 		# thresh_noise_max = 2.5 # ratio of sig_t*travel time considered excess noise
 		# min_misfit_allowed = 1.0 # min misfit time for establishing excess noise (now set in train_config.yaml)
 		iz = np.where(arrivals[:,4] >= 0)[0]
-		noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-		iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
-		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+
+
+		if use_correlated_travel_time_noise == True:
+		
+			iexcess_noise = np.where(arrivals[iz,3] > 0)[0]
+			# noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+			# iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+			arrivals[iz,0] = arrivals[iz,0] + src_times[arrivals[iz,2].astype('int')] # + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+			arrivals[iz,3] = src_times[arrivals[iz,2].astype('int')] ## Write real picks fourth column back to origin times, for consistency with previous approach
+		
+		else:
+			noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+			iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+			arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+		
 		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
 			init_phase_type = arrivals[iz[iexcess_noise],4]
 			arrivals[iz[iexcess_noise],2] = -1
-			arrivals[iz[iexcess_noise],3] = 0
+			arrivals[iz[iexcess_noise],3] = 0 ## Could choose to leave this equal to the original source time, as it was originally connected to those sources (must check if this column is ever used later based on noise class)
 			arrivals[iz[iexcess_noise],4] = -1
-	
+
 	else: ## This was the original version
 		iz = np.where(arrivals[:,4] >= 0)[0]
 		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+
+
+	
+	# else: ## This was the original version
+	# 	iz = np.where(arrivals[:,4] >= 0)[0]
+	# 	arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 
 	
 	## Check which sources are active
@@ -586,6 +826,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	n_unique_station_counts = np.array([len(np.unique(arrivals[lp[j],1])) for j in range(n_events)])
 	cnt_p_srcs = np.array([len(np.where(arrivals[lp[j],4] == 0)[0]) for j in range(n_events)])
 	cnt_s_srcs = np.array([len(np.where(arrivals[lp[j],4] == 1)[0]) for j in range(n_events)])
+	## Compute density of counts based on stations
 	# active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] # subset of sources
 	active_sources = np.where(((n_unique_station_counts >= min_sta_arrival)*((cnt_p_srcs + cnt_s_srcs) >= min_pick_arrival)))[0] # subset of sources
 
@@ -683,6 +924,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				n_sta_select = int(n_sta*(np.random.rand()*(n_sta_range[1] - n_sta_range[0]) + n_sta_range[0]))
 				ind_sta_select = np.sort(np.random.choice(n_sta, size = n_sta_select, replace = False))
 
+			min_spc_allowed = None
+			if min_spc_allowed is not None:
+				mp = LocalMarching(device = device)
+				locs_out = mp(np.concatenate((locs[ind_sta_select], np.zeros((len(ind_sta_select),1)), np.ones((len(ind_sta_select),1)) + 0.1*np.random.rand(len(ind_sta_select),1)), axis = 1), ftrns1, tc_win = 1.0, sp_win = min_spc_allowed)[:,0:3]					
+				tree_locs = cKDTree(ftrns1(locs[ind_sta_select]))
+				ip_retained = tree_locs.query(ftrns1(locs_out))[1]
+				ind_sta_select = ind_sta_select[ip_retained]
+				n_sta_select = len(ind_sta_select)
+				
+		
 		Trv_subset_p.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
 		Trv_subset_s.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
 		Station_indices.append(ind_sta_select) # record subsets used
@@ -735,8 +986,18 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ip_p_pad = np.minimum(np.maximum(ip_p_pad, 0), n_arvs - 1) 
 	ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
 
-	rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-	rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
+	if use_sign_input == False:
+		rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
+	else:
+		rel_t_p = query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		rel_t_s = query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]
+		rel_t_p_ind = np.argmin(np.abs(rel_t_p), axis = 1)
+		rel_t_s_ind = np.argmin(np.abs(rel_t_s), axis = 1)
+		rel_t_p_slice = rel_t_p[np.arange(len(rel_t_p)),rel_t_p_ind]
+		rel_t_s_slice = rel_t_s[np.arange(len(rel_t_s)),rel_t_s_ind]
+		rel_t_p = np.sign(rel_t_p_slice)*np.abs(rel_t_p_slice) ## Preserve sign information
+		rel_t_s = np.sign(rel_t_s_slice)*np.abs(rel_t_s_slice)
 
 	## With phase type information
 	ip_p1 = np.searchsorted(arrivals_select[iwhere_p,0], query_time_p)
@@ -747,18 +1008,40 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ip_p1_pad = np.minimum(np.maximum(ip_p1_pad, 0), n_arvs_p - 1) 
 	ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
 
-	if len(iwhere_p) > 0:
-		rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-	else:
-		# rel_t_p1 = np.zeros(rel_t_p.shape)
-		rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+	if use_sign_input == False:
+	
+		if len(iwhere_p) > 0:
+			rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+		else:
+			# rel_t_p1 = np.zeros(rel_t_p.shape)
+			rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+	
+		if len(iwhere_s) > 0:
+			rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
+		else:
+			# rel_t_s1 = np.zeros(rel_t_s.shape)
+			rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
 
-	if len(iwhere_s) > 0:
-		rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
 	else:
-		# rel_t_s1 = np.zeros(rel_t_s.shape)
-		rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
-		
+
+		if len(iwhere_p) > 0:
+			rel_t_p1 = query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+			rel_t_p1_ind = np.argmin(np.abs(rel_t_p1), axis = 1)
+			rel_t_p1_slice = rel_t_p1[np.arange(len(rel_t_p1)),rel_t_p1_ind]
+			rel_t_p1 = np.sign(rel_t_p1_slice)*np.abs(rel_t_p1_slice) ## Preserve sign information
+		else:
+			# rel_t_p1 = np.zeros(rel_t_p.shape)
+			rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+	
+		if len(iwhere_s) > 0:
+			rel_t_s1 = query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+			rel_t_s1_ind = np.argmin(np.abs(rel_t_s1), axis = 1)
+			rel_t_s1_slice = rel_t_s1[np.arange(len(rel_t_s1)),rel_t_s1_ind]
+			rel_t_s1 = np.sign(rel_t_s1_slice)*np.abs(rel_t_s1_slice) ## Preserve sign information
+		else:
+			# rel_t_s1 = np.zeros(rel_t_s.shape)
+			rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+			
 
 	Inpts = []
 	Masks = []
@@ -794,14 +1077,20 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		n_sta_slice = len(sta_select)
 
 		inpt = np.zeros((x_grids[Grid_indices[i]].shape[0], n_sta, 4)) # Could make this smaller (on the subset of stations), to begin with.
-		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
-		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
-		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
-		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
-
+		if use_sign_input == False:
+			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
+			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
+			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
+			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
+		else:
+			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.sign(rel_t_p[ind_select])*np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
+			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.sign(rel_t_s[ind_select])*np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
+			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.sign(rel_t_p1[ind_select])*np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
+			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.sign(rel_t_s1[ind_select])*np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
+		
 		trv_out = x_grids_trv[grid_select][:,sta_select,:] ## Subsetting, into sliced indices.
 		Inpts.append(inpt[:,sta_select,:]) # sub-select, subset of stations.
-		Masks.append(1.0*(inpt[:,sta_select,:] > thresh_mask))
+		Masks.append(1.0*(np.abs(inpt[:,sta_select,:]) > thresh_mask))
 		Trv_out.append(trv_out)
 		Locs.append(locs[sta_select])
 		X_fixed.append(x_grids[grid_select])
@@ -959,202 +1248,20 @@ def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_
 
 	return lbl_trgt
 
-def sample_picks(P, locs_abs, t_sample_win = 120.0, windows = [40e3, 150e3, 300e3], t_win_ball = [10.0, 15.0, 25.0]): # windows = [40e3, 150e3, 300e3]
 
-	Trgts = []
-
-	iunique = np.sort(np.unique(P[:,1]).astype('int'))
-	lunique = len(iunique)
-
-	locs_use = np.copy(locs_abs[iunique]) # Overwrite locs_use
-
-	## An additional metric than can be added is the number of stations with a pick 
-	## within a "convex hull" (or the ratio of stations) connecting the source and stations at different distances..
-	## Hence, measures how much "filled in" versus "noisy" the foot print of associated stations is
-	## (would need a reference catalog, and should only sample "large" sources, since reference
-	## catalog would be biased to large sources)
-
-	perm_vec = -1*np.ones(len(locs_abs))
-	perm_vec[iunique] = np.arange(len(iunique))
-	perm_vec = perm_vec.astype('int')
-	P[:,1] = perm_vec[P[:,1].astype('int')] ## Overwrite pick indices
-	iunique = np.sort(np.unique(P[:,1]).astype('int'))
-	assert(len(iunique) == lunique)
-	assert(iunique.min() == 0)
-	assert(iunique.max() == (lunique - 1))
-
-	pw_dist = pd(ftrns1(locs_use), ftrns1(locs_use))
-
-	max_t_observed = P[:,0].max()
-	counts_in_time, bins_in_time = np.histogram(P[:,0], bins = np.arange(0, max_t_observed + 3600, t_sample_win))
-	upper_fifth_percentile = np.where(counts_in_time >= np.quantile(counts_in_time, 0.95))[0]
-
-
-	tree_times = cKDTree(P[:,[0]])
-	tree_indices = cKDTree(P[:,[1]])
-
-	## [1] Average pick rates
-
-	# ifind_per_sta = [np.where(P[:,1] == iunique[j])[0] for j in range(len(iunique))]
-	# counts_per_sta = [len(ifind_per_sta[j]) for j in range(len(iunique))]
-	ifind_per_sta = [np.where(P[:,1] == j)[0] for j in range(len(locs_use))]
-	counts_per_sta = [len(ifind_per_sta[j]) for j in range(len(locs_use))]
-	counts_per_hour = np.vstack([np.histogram(P[ifind_per_sta[j],0], bins = np.arange(0, max_t_observed + 3600, 3600.0))[0].reshape(1,-1) for j in range(len(ifind_per_sta))])
-	upper_fifth_percentile_stas = iunique[np.where(counts_per_sta >= np.quantile(counts_per_sta, 0.95))[0]]
-
-	Quants_counts = np.quantile(counts_per_hour, np.arange(0.1, 1.0, 0.2), axis = 0)
-	Trgts.append(np.median(Quants_counts, axis = 1))
-
-	## [2] Average "ratio" of picks within narrow spatial windows compared to outside, over max_t window (for random origin times)
-	# windows = [40e3, 150e3, 300e3] # [0.029238671690285857, 0.07309667922571464, 0.14619335845142928] of pw_dist_max
-	Ratio_bins = [[] for w in windows]
-	num_iter = 150
-	for j in range(num_iter):
-		for inc, k in enumerate(range(len(windows))):
-
-			ipick = np.random.choice(locs_use.shape[0]) ## Pick random station
-			ifind = np.where(pw_dist[ipick,:] < windows[k])[0] ## Find other stations within window distance
-			# ifind_outside = np.delete(np.arange(locs_use.shape[0]), ifind, axis = 0) ## Stations outside window distance
-
-			## Choose random origin time
-			t0 = np.random.rand()*3600*24
-
-			## Find all picks within t0 + max_t*fraction
-
-			fraction = 0.3
-			ifind_time = np.array(tree_times.query_ball_point(np.array([t0]).reshape(1,1), r = max_t*fraction)[0]).astype('int')
-			# tree_pick_indices = cKDTree(P[ifind_time,1].reshape(-1,1))
-			tree_pick_indices = cKDTree(ifind.reshape(-1,1))
-
-			## Of these picks, find subset that are nearby root station, and those that are not.
-			ifind_picks_inside = np.where(tree_pick_indices.query(P[ifind_time,1].astype('int').reshape(-1,1))[0] == 0)[0]
-			ifind_picks_outside = np.delete(np.arange(len(ifind_time)), ifind_picks_inside, axis = 0) ## Stations outside window distance
-
-			Ratio_bins[inc].append(len(ifind_picks_inside)/np.maximum(len(ifind_picks_outside), 1.0))
-
-	Ratio_bins = np.vstack([np.quantile(Ratio_bins[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Ratio_bins))])
-	Trgts.append(Ratio_bins)
-
-
-	## [3] Average "ratio" of picks within narrow spatial windows compared to outside, over max_t window (for "optimal" origin times and stations; e.g., near sources)
-	# windows = [40e3, 150e3, 300e3] # [0.029238671690285857, 0.07309667922571464, 0.14619335845142928] of pw_dist_max
-	Ratio_bins1 = [[] for w in windows]
-	num_iter = 150
-	prob_counts = 1.0/(1.0 + np.flip(np.argsort(Quants_counts.mean(0))))
-	prob_counts = prob_counts/prob_counts.sum()
-	for j in range(num_iter):
-		for inc, k in enumerate(range(len(windows))):
-
-			ipick = np.random.choice(upper_fifth_percentile_stas) ## Pick random station
-			ifind = np.where(pw_dist[ipick,:] < windows[k])[0] ## Find other stations within window distance
-			# ifind_outside = np.delete(np.arange(locs_use.shape[0]), ifind, axis = 0) ## Stations outside window distance
-
-			## Choose origin time focused on the high pick count time intervals
-			t0 = bins_in_time[np.random.choice(upper_fifth_percentile)] + np.random.rand()*t_sample_win
-
-			## Find all picks within t0 + max_t*fraction
-
-			fraction = 0.3
-			ifind_time = np.array(tree_times.query_ball_point(np.array([t0]).reshape(1,1), r = max_t*fraction)[0]).astype('int')
-			# tree_pick_indices = cKDTree(P[ifind_time,1].reshape(-1,1))
-			tree_pick_indices = cKDTree(ifind.reshape(-1,1))
-
-			## Of these picks, find subset that are nearby root station, and those that are not.
-			ifind_picks_inside = np.where(tree_pick_indices.query(P[ifind_time,1].astype('int').reshape(-1,1))[0] == 0)[0]
-			ifind_picks_outside = np.delete(np.arange(len(ifind_time)), ifind_picks_inside, axis = 0) ## Stations outside window distance
-
-			Ratio_bins1[inc].append(len(ifind_picks_inside)/np.maximum(len(ifind_picks_outside), 1.0))
-
-	Ratio_bins1 = np.vstack([np.quantile(Ratio_bins1[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Ratio_bins1))])
-	Trgts.append(Ratio_bins1)
-
-	## [4] Counts of station, for each neighboring station, if they have a pick at a similar time
-	## Instead of random picks, could pick picks nearby times of high activity
-	k_sta = 1*k_sta_edges + 0 # 10
-	# locs_use_use = locs_use[iunique]
-	edges = remove_self_loops(knn(torch.Tensor(ftrns1(locs_use)).to(device)/1000.0, torch.Tensor(ftrns1(locs_use)).to(device)/1000.0, k = k_sta))[0].flip(0).cpu().detach().numpy()
-
-	tree_edges = cKDTree(edges[1].reshape(-1,1))
-
-	# t_win_ball = [10.0, 15.0, 25.0]
-	num_picks = 1000
-	n_picks = len(P)
-	Ratio_neighbors = [[] for t in t_win_ball]
-	for j in range(num_picks):
-		for k in range(len(t_win_ball)):
-			ichoose = np.random.choice(n_picks)
-			ifind_ball = np.array(tree_times.query_ball_point(np.array([P[ichoose,0]]).reshape(-1,1), r = t_win_ball[k])[0]).astype('int')
-			ineighbors = edges[0][np.array(tree_edges.query_ball_point(np.array([P[ichoose,1]]).reshape(-1,1), r = 0)[0])]
-			size_intersection = len(list(set(ineighbors).intersection(P[ifind_ball,1].astype('int'))))
-			Ratio_neighbors[k].append(size_intersection/k_sta)
-
-	Ratio_neighbors = np.vstack([np.quantile(Ratio_neighbors[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Ratio_neighbors))])
-	Trgts.append(Ratio_neighbors)
-
-	## [5] For each pick, number of times another pick occurs within ~15 seconds, 30 seconds, 45 seconds, etc.
-	# t_win_ball = [5.0, 10.0, 15.0]
-	num_picks = 1500
-	Num_adjacent_picks = [[] for t in t_win_ball]
-	for j in range(num_picks):
-		for k in range(len(t_win_ball)):
-			ichoose = np.random.choice(n_picks)
-			sta_ind = P[ichoose,1]
-			ifind_ball = np.array(tree_times.query_ball_point(np.array([P[ichoose,0]]).reshape(-1,1) + t_win_ball[k]/2.0 + 0.1, r = t_win_ball[k]/2.0)[0]).astype('int')
-			min_sta_dist = (sta_ind == P[ifind_ball,1]).sum()
-			Num_adjacent_picks[k].append(min_sta_dist)
-
-	Num_adjacent_picks = np.vstack([np.quantile(Num_adjacent_picks[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Num_adjacent_picks))])
-	Trgts.append(Num_adjacent_picks)
-
-	## [6] Possibly correlation of pick traces between nearby stations
-
-	return Trgts
-
-def evaluate_bayesian_objective(x, n_random = 30, t_sample_win = 120.0, windows = [40e3, 150e3, 300e3], t_win_ball = [10.0, 15.0, 25.0], return_vals = False): # 	windows = [40e3, 150e3, 300e3], 	
-
-
-	training_params_2[0] = x[0] # spc_random
-	training_params_2[2] = x[1] # spc_thresh_rand
-	training_params_2[4] = x[2] # coda_rate
-	training_params_2[5][1] = x[3] # coda_win
-
-	training_params_3[1][0] = x[4] # dist_range[0]
-	training_params_3[1][1] = x[5] # dist_range[1]
-	training_params_3[2] = x[6] # max_rate_events
-	training_params_3[3] = x[7] # max_miss_events
-	training_params_3[4] = x[6]*x[8] # max_false_events (input of false rate to generate is an absolute number, not the ratio, which is x[8])
-	training_params_3[5][0] = x[9] # miss_pick_fraction[0]
-	training_params_3[5][1] = x[10] # miss_pick_fraction[0]
-
-	arrivals = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, return_only_data = True)[0]
-
-	P = np.copy(arrivals)
-
-	Trgts = sample_picks(P, locs, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win)
-
-	res1, res2, res3, res4, res5 = 0, 0, 0, 0, 0
-
-	for n in range(n_random):
-
-		ichoose = np.random.choice(len(Trgts_list))
-
-		res1 += np.linalg.norm(Trgts[0] - Trgts_list[ichoose][0])/np.maximum(np.linalg.norm(Trgts_list[ichoose][0]), 1e-5)/n_random
-		res2 += np.linalg.norm(Trgts[1] - Trgts_list[ichoose][1])/np.maximum(np.linalg.norm(Trgts_list[ichoose][1]), 1e-5)/n_random
-		res3 += np.linalg.norm(Trgts[2] - Trgts_list[ichoose][2])/np.maximum(np.linalg.norm(Trgts_list[ichoose][2]), 1e-5)/n_random
-		res4 += np.linalg.norm(Trgts[3] - Trgts_list[ichoose][3])/np.maximum(np.linalg.norm(Trgts_list[ichoose][3]), 1e-5)/n_random
-		res5 += np.linalg.norm(Trgts[4] - Trgts_list[ichoose][4])/np.maximum(np.linalg.norm(Trgts_list[ichoose][4]), 1e-5)/n_random
-
-	res = res1 + res2 + res3 + res4 + res5 ## Residual is average relative residual over all five objectives
-
-	print(res)
-
-	if return_vals == False:
-
-		return res
-
+if use_station_corrections == True:
+	n_ver_corrections = 1
+	path_station_corrections = path_to_file + 'Grids' + seperator + 'station_corrections_ver_%d.npz'%n_ver_corrections
+	if os.path.isfile(path_station_corrections) == False:
+		print('No station corrections available')
+		locs_corr, corrs = None, None
 	else:
-
-		return res, Trgts, arrivals
+		z = np.load(path_station_corrections)
+		locs_corr, corrs = z['locs_corr'], z['corrs']
+		z.close()
+else:
+	locs_corr, corrs = None, None
+	
 	
 if config['train_travel_time_neural_network'] == False:
 
@@ -1187,8 +1294,9 @@ if config['train_travel_time_neural_network'] == False:
 elif config['train_travel_time_neural_network'] == True:
 
 	n_ver_trv_time_model_load = vel_model_ver # 1
-	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, use_physics_informed = use_physics_informed, device = device)
-	trv_pairwise = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', use_physics_informed = use_physics_informed, device = device)
+	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, locs_corr = locs_corr, corrs = corrs, use_physics_informed = use_physics_informed, device = device)
+	trv_pairwise = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', locs_corr = locs_corr, corrs = corrs, use_physics_informed = use_physics_informed, device = device)
+	trv_pairwise1 = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', return_model = True, locs_corr = locs_corr, corrs = corrs, use_physics_informed = use_physics_informed, device = device)
 
 use_only_active_stations = False
 if use_only_active_stations == True:
@@ -1252,6 +1360,7 @@ max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))
 
 for i in range(len(x_grids)):
 	
+	## Note, this definition of dt and win must match the definition used in process_continous_days
 	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(x_grids_trv[i], k = k_time_edges, max_t = max_t, dt = kernel_sig_t/5.0, win = kernel_sig_t*2.0)
 
 	if config['train_travel_time_neural_network'] == False:
@@ -1273,6 +1382,7 @@ max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))
 mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, device = device).to(device)
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
 loss_func = torch.nn.MSELoss()
+loss_func1 = torch.nn.L1Loss()
 np.random.seed() ## randomize seed
 
 losses = np.zeros(n_epochs)
@@ -1286,6 +1396,7 @@ lon_range_interior = [lon_range[0], lon_range[1]]
 
 n_restart = train_config['restart_training']
 n_restart_step = train_config['n_restart_step']
+loss_regularize_val, loss_regularize_cnt = 0, 0
 if n_restart == False:
 	n_restart_step = 0 # overwrite to 0, if restart is off
 
@@ -1296,81 +1407,7 @@ if load_training_data == True:
 	if build_training_data == False:
 		assert(len(files_load) > 0)
 
-if optimize_training_data == True:
 
-	# https://scikit-optimize.github.io/stable/auto_examples/bayesian-optimization.html
-
-	from skopt import gp_minimize
-
-	# Load configuration from YAML
-	with open('process_config.yaml', 'r') as file:
-		process_config = yaml.safe_load(file)
-		n_ver_picks = process_config['n_ver_picks']
-
-	## If true, run Bayesian optimization to determine optimal training parameters
-	st_load = glob.glob(path_to_file + 'Picks/19*') # Load years 1900's
-	st_load.extend(glob.glob(path_to_file + 'Picks/20*')) # Load years 2000's
-	iarg = np.argsort([int(st_load[i].split(seperator)[-1]) for i in range(len(st_load))])
-	st_load = [st_load[i] for i in iarg]
-	st_load_l = []
-	for i in range(len(st_load)):
-		st = glob.glob(st_load[i] + seperator + '*ver_%d.npz'%(n_ver_picks))
-		if len(st) > 0:
-			st_load_l.extend(st)
-	print('Loading %d detected files for comparisons'%len(st_load_l))
-
-	t_sample_win = 120.0 ## Bins to count picks in, and focus sampling around
-	windows = [40e3, 150e3, 300e3]
-	t_win_ball = [10.0, 15.0, 25.0]
-	n_ver_optimize = 1
-	n_max_files = 500
-
-	if len(st_load_l) > n_max_files:
-		ichoose = np.sort(np.random.choice(len(st_load_l), size = n_max_files, replace = False))
-		st_load_l = [st_load_l[j] for j in ichoose]
-
-	Trgts_list = []
-	for n in range(len(st_load_l)):
-		P = np.load(st_load_l[n])['P']
-		Trgts_list.append(sample_picks(P, locs, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win))
-		print('Finished file %d of %d'%(n, len(st_load_l)))
-
-	evaluate_bayesian_objective_evaluate = lambda x: evaluate_bayesian_objective(x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win)
-
-	## Now apply Bayesian optimization to training parameters
-
-	bounds = [(100.0, 300e3), # spc_random
-	          (100.0, 300e3), # spc_thresh_rand
-	          (0.001, 0.3), # coda_rate
-	          (1.0, 180.0), # coda_win
-	          (5000.0, 149e3), # dist_range[0]
-	          (300e3, 800e3), # dist_range[1]
-	          (5, 250), # max_rate_events
-	          (5, 250), # max_miss_events
-	          (0.2, 5.0), # max_false_events # (5, 350)
-	          (0, 0.25), # miss_pick_fraction[0]
-	          (0.25, 0.6)] # ] # miss_pick_fraction[0]
-
-	optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
-	                  bounds,      # the bounds on each dimension of x
-	                  acq_func="EI",      # the acquisition function
-	                  n_calls=150,         # the number of evaluations of f
-	                  n_random_starts=100,  # the number of random initialization points
-	                  noise='gaussian',       # the noise level (optional)
-	                  random_state=1234, # the random seed
-	                  initial_point_generator = 'lhs',
-	                  model_queue_size = 150)
-
-	res, Trgts, arrivals = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
-
-	strings = ['spc_random', 'spc_thresh_rand', 'coda_rate', 'coda_win', 'dist_range[0]', 'dist_range[1]', 'max_rate_events', 'max_miss_events', 'max_false_events', 'miss_pick_fraction[0]', 'miss_pick_fraction[0]']
-	
-	np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d.npz'%(name_of_project, n_ver_optimize), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings)
-
-	print('Finished optimized training data')
-
-	print('Data set optimized; call the training script again to build training data')
-	sys.exit()
 
 if build_training_data == True:
 
@@ -1740,6 +1777,43 @@ for i in range(n_restart_step, n_epochs):
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 
+		use_sensitivity_loss = False
+		if use_sensitivity_loss == True:
+
+			sig_d = 0.15 ## Assumed pick uncertainty (seconds)
+			chi_pdf = chi2(df = 3).pdf(0.99)
+	
+			scale_val1 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
+			scale_val2 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
+			scale_val = 0.5*(scale_val1 + scale_val2)
+	
+			loss_regularize = torch.Tensor([0.0]).to(device)
+			scale_partials = torch.Tensor((1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)).to(device)
+			src_input_p = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
+			src_input_s = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
+			trv_out_p = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_p, method = 'direct')[:,0]
+			trv_out_s = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_s, method = 'direct')[:,1]
+			# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
+			d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
+			d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
+			d_p = d_p.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
+			d_s = d_s.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
+			d_grad = torch.Tensor([1000.0]).to(device)*(1.0/scale_partials)*torch.cat((torch.clip(out[2], min = 0.0)*d_p, torch.clip(out[3], min = 0.0)*d_s), dim = 0)/torch.Tensor([scale_val1, scale_val2, 1.0]).to(device).reshape(1,-1)
+			var_cart = torch.bmm(d_grad.transpose(1,2), d_grad)
+			# try:
+			scale_loss = 10000.0
+			tol_cond = 1000.0
+			icond = torch.where(torch.linalg.cond(var_cart) < tol_cond)[0]
+			if len(icond) == 3: icond = torch.cat((icond, torch.Tensor([icond[-1].item()]).to(device)), dim = 0).long()
+			var_cart_inv = torch.linalg.solve(var_cart[icond], torch.eye(3).to(device))*torch.Tensor([(sig_d**2)*chi_pdf]).to(device)
+			sigma_cart = torch.norm(var_cart_inv[:,torch.arange(3),torch.arange(3)]**(0.5), dim = 1)
+			loss_regularize = (0.000002)*loss_func1(sigma_cart/scale_loss, torch.zeros(sigma_cart.shape).to(device)) # 0.001 # 0.0002
+			if torch.isnan(loss_regularize) == False: loss = loss + loss_regularize
+			# losses_regularize[i] = loss_regularize.item()
+			loss_regularize_val += loss_regularize.item()
+			loss_regularize_cnt += 1
+		
+		
 		n_visualize_step = 1000
 		n_visualize_fraction = 0.2
 		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0)*(inc == 0): # (i0 < n_visualize_fraction*n_batch)
@@ -1780,21 +1854,295 @@ for i in range(n_restart_step, n_epochs):
 	mx_pred_2[i] = mx_pred_val_2/n_batch
 	mx_pred_3[i] = mx_pred_val_3/n_batch
 	mx_pred_4[i] = mx_pred_val_4/n_batch
+	loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
-	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
+	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, (10e4)*loss_regularize_val))
 
 	# Log losses
 	if use_wandb_logging == True:
 		wandb.log({"loss": loss_val})
 
 	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
-		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4))
+		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, (10e4)*loss_regularize_val))
 
 
 
 
 
+# if optimize_training_data == True:
 
+# 	# https://scikit-optimize.github.io/stable/auto_examples/bayesian-optimization.html
+
+# 	from skopt import gp_minimize
+
+# 	# Load configuration from YAML
+# 	with open('process_config.yaml', 'r') as file:
+# 		process_config = yaml.safe_load(file)
+# 		n_ver_picks = process_config['n_ver_picks']
+
+# 	## If true, run Bayesian optimization to determine optimal training parameters
+# 	st_load = glob.glob(path_to_file + 'Picks/19*') # Load years 1900's
+# 	st_load.extend(glob.glob(path_to_file + 'Picks/20*')) # Load years 2000's
+# 	iarg = np.argsort([int(st_load[i].split(seperator)[-1]) for i in range(len(st_load))])
+# 	st_load = [st_load[i] for i in iarg]
+# 	st_load_l = []
+# 	for i in range(len(st_load)):
+# 		st = glob.glob(st_load[i] + seperator + '*ver_%d.npz'%(n_ver_picks))
+# 		if len(st) > 0:
+# 			st_load_l.extend(st)
+# 	print('Loading %d detected files for comparisons'%len(st_load_l))
+
+# 	t_sample_win = 120.0 ## Bins to count picks in, and focus sampling around
+# 	windows = [40e3, 150e3, 300e3]
+# 	t_win_ball = [10.0, 15.0, 25.0]
+# 	n_ver_optimize = 1
+# 	n_max_files = 500
+
+# 	if len(st_load_l) > n_max_files:
+# 		ichoose = np.sort(np.random.choice(len(st_load_l), size = n_max_files, replace = False))
+# 		st_load_l = [st_load_l[j] for j in ichoose]
+
+# 	Trgts_list = []
+# 	for n in range(len(st_load_l)):
+# 		P = np.load(st_load_l[n])['P']
+# 		Trgts_list.append(sample_picks(P, locs, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win))
+# 		print('Finished file %d of %d'%(n, len(st_load_l)))
+
+# 	evaluate_bayesian_objective_evaluate = lambda x: evaluate_bayesian_objective(x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win)
+
+# 	## Now apply Bayesian optimization to training parameters
+
+# 	bounds = [(100.0, 300e3), # spc_random
+# 	          (100.0, 300e3), # spc_thresh_rand
+# 	          (0.001, 0.3), # coda_rate
+# 	          (1.0, 180.0), # coda_win
+# 	          (5000.0, 149e3), # dist_range[0]
+# 	          (300e3, 800e3), # dist_range[1]
+# 	          (5, 250), # max_rate_events
+# 	          (5, 250), # max_miss_events
+# 	          (0.2, 5.0), # max_false_events # (5, 350)
+# 	          (0, 0.25), # miss_pick_fraction[0]
+# 	          (0.25, 0.6)] # ] # miss_pick_fraction[0]
+
+# 	optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
+# 	                  bounds,      # the bounds on each dimension of x
+# 	                  acq_func="EI",      # the acquisition function
+# 	                  n_calls=150,         # the number of evaluations of f
+# 	                  n_random_starts=100,  # the number of random initialization points
+# 	                  noise='gaussian',       # the noise level (optional)
+# 	                  random_state=1234, # the random seed
+# 	                  initial_point_generator = 'lhs',
+# 	                  model_queue_size = 150)
+
+# 	res, Trgts, arrivals = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
+
+# 	strings = ['spc_random', 'spc_thresh_rand', 'coda_rate', 'coda_win', 'dist_range[0]', 'dist_range[1]', 'max_rate_events', 'max_miss_events', 'max_false_events', 'miss_pick_fraction[0]', 'miss_pick_fraction[0]']
+	
+# 	np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d.npz'%(name_of_project, n_ver_optimize), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings)
+
+# 	print('Finished optimized training data')
+
+# 	print('Data set optimized; call the training script again to build training data')
+# 	sys.exit()
+
+
+
+# def sample_picks(P, locs_abs, t_sample_win = 120.0, windows = [40e3, 150e3, 300e3], t_win_ball = [10.0, 15.0, 25.0]): # windows = [40e3, 150e3, 300e3]
+
+# 	Trgts = []
+
+# 	iunique = np.sort(np.unique(P[:,1]).astype('int'))
+# 	lunique = len(iunique)
+
+# 	locs_use = np.copy(locs_abs[iunique]) # Overwrite locs_use
+
+# 	## An additional metric than can be added is the number of stations with a pick 
+# 	## within a "convex hull" (or the ratio of stations) connecting the source and stations at different distances..
+# 	## Hence, measures how much "filled in" versus "noisy" the foot print of associated stations is
+# 	## (would need a reference catalog, and should only sample "large" sources, since reference
+# 	## catalog would be biased to large sources)
+
+# 	perm_vec = -1*np.ones(len(locs_abs))
+# 	perm_vec[iunique] = np.arange(len(iunique))
+# 	perm_vec = perm_vec.astype('int')
+# 	P[:,1] = perm_vec[P[:,1].astype('int')] ## Overwrite pick indices
+# 	iunique = np.sort(np.unique(P[:,1]).astype('int'))
+# 	assert(len(iunique) == lunique)
+# 	assert(iunique.min() == 0)
+# 	assert(iunique.max() == (lunique - 1))
+
+# 	pw_dist = pd(ftrns1(locs_use), ftrns1(locs_use))
+
+# 	max_t_observed = P[:,0].max()
+# 	counts_in_time, bins_in_time = np.histogram(P[:,0], bins = np.arange(0, max_t_observed + 3600, t_sample_win))
+# 	upper_fifth_percentile = np.where(counts_in_time >= np.quantile(counts_in_time, 0.95))[0]
+
+
+# 	tree_times = cKDTree(P[:,[0]])
+# 	tree_indices = cKDTree(P[:,[1]])
+
+# 	## [1] Average pick rates
+
+# 	# ifind_per_sta = [np.where(P[:,1] == iunique[j])[0] for j in range(len(iunique))]
+# 	# counts_per_sta = [len(ifind_per_sta[j]) for j in range(len(iunique))]
+# 	ifind_per_sta = [np.where(P[:,1] == j)[0] for j in range(len(locs_use))]
+# 	counts_per_sta = [len(ifind_per_sta[j]) for j in range(len(locs_use))]
+# 	counts_per_hour = np.vstack([np.histogram(P[ifind_per_sta[j],0], bins = np.arange(0, max_t_observed + 3600, 3600.0))[0].reshape(1,-1) for j in range(len(ifind_per_sta))])
+# 	upper_fifth_percentile_stas = iunique[np.where(counts_per_sta >= np.quantile(counts_per_sta, 0.95))[0]]
+
+# 	Quants_counts = np.quantile(counts_per_hour, np.arange(0.1, 1.0, 0.2), axis = 0)
+# 	Trgts.append(np.median(Quants_counts, axis = 1))
+
+# 	## [2] Average "ratio" of picks within narrow spatial windows compared to outside, over max_t window (for random origin times)
+# 	# windows = [40e3, 150e3, 300e3] # [0.029238671690285857, 0.07309667922571464, 0.14619335845142928] of pw_dist_max
+# 	Ratio_bins = [[] for w in windows]
+# 	num_iter = 150
+# 	for j in range(num_iter):
+# 		for inc, k in enumerate(range(len(windows))):
+
+# 			ipick = np.random.choice(locs_use.shape[0]) ## Pick random station
+# 			ifind = np.where(pw_dist[ipick,:] < windows[k])[0] ## Find other stations within window distance
+# 			# ifind_outside = np.delete(np.arange(locs_use.shape[0]), ifind, axis = 0) ## Stations outside window distance
+
+# 			## Choose random origin time
+# 			t0 = np.random.rand()*3600*24
+
+# 			## Find all picks within t0 + max_t*fraction
+
+# 			fraction = 0.3
+# 			ifind_time = np.array(tree_times.query_ball_point(np.array([t0]).reshape(1,1), r = max_t*fraction)[0]).astype('int')
+# 			# tree_pick_indices = cKDTree(P[ifind_time,1].reshape(-1,1))
+# 			tree_pick_indices = cKDTree(ifind.reshape(-1,1))
+
+# 			## Of these picks, find subset that are nearby root station, and those that are not.
+# 			ifind_picks_inside = np.where(tree_pick_indices.query(P[ifind_time,1].astype('int').reshape(-1,1))[0] == 0)[0]
+# 			ifind_picks_outside = np.delete(np.arange(len(ifind_time)), ifind_picks_inside, axis = 0) ## Stations outside window distance
+
+# 			Ratio_bins[inc].append(len(ifind_picks_inside)/np.maximum(len(ifind_picks_outside), 1.0))
+
+# 	Ratio_bins = np.vstack([np.quantile(Ratio_bins[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Ratio_bins))])
+# 	Trgts.append(Ratio_bins)
+
+
+# 	## [3] Average "ratio" of picks within narrow spatial windows compared to outside, over max_t window (for "optimal" origin times and stations; e.g., near sources)
+# 	# windows = [40e3, 150e3, 300e3] # [0.029238671690285857, 0.07309667922571464, 0.14619335845142928] of pw_dist_max
+# 	Ratio_bins1 = [[] for w in windows]
+# 	num_iter = 150
+# 	prob_counts = 1.0/(1.0 + np.flip(np.argsort(Quants_counts.mean(0))))
+# 	prob_counts = prob_counts/prob_counts.sum()
+# 	for j in range(num_iter):
+# 		for inc, k in enumerate(range(len(windows))):
+
+# 			ipick = np.random.choice(upper_fifth_percentile_stas) ## Pick random station
+# 			ifind = np.where(pw_dist[ipick,:] < windows[k])[0] ## Find other stations within window distance
+# 			# ifind_outside = np.delete(np.arange(locs_use.shape[0]), ifind, axis = 0) ## Stations outside window distance
+
+# 			## Choose origin time focused on the high pick count time intervals
+# 			t0 = bins_in_time[np.random.choice(upper_fifth_percentile)] + np.random.rand()*t_sample_win
+
+# 			## Find all picks within t0 + max_t*fraction
+
+# 			fraction = 0.3
+# 			ifind_time = np.array(tree_times.query_ball_point(np.array([t0]).reshape(1,1), r = max_t*fraction)[0]).astype('int')
+# 			# tree_pick_indices = cKDTree(P[ifind_time,1].reshape(-1,1))
+# 			tree_pick_indices = cKDTree(ifind.reshape(-1,1))
+
+# 			## Of these picks, find subset that are nearby root station, and those that are not.
+# 			ifind_picks_inside = np.where(tree_pick_indices.query(P[ifind_time,1].astype('int').reshape(-1,1))[0] == 0)[0]
+# 			ifind_picks_outside = np.delete(np.arange(len(ifind_time)), ifind_picks_inside, axis = 0) ## Stations outside window distance
+
+# 			Ratio_bins1[inc].append(len(ifind_picks_inside)/np.maximum(len(ifind_picks_outside), 1.0))
+
+# 	Ratio_bins1 = np.vstack([np.quantile(Ratio_bins1[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Ratio_bins1))])
+# 	Trgts.append(Ratio_bins1)
+
+# 	## [4] Counts of station, for each neighboring station, if they have a pick at a similar time
+# 	## Instead of random picks, could pick picks nearby times of high activity
+# 	k_sta = 1*k_sta_edges + 0 # 10
+# 	# locs_use_use = locs_use[iunique]
+# 	edges = remove_self_loops(knn(torch.Tensor(ftrns1(locs_use)).to(device)/1000.0, torch.Tensor(ftrns1(locs_use)).to(device)/1000.0, k = k_sta))[0].flip(0).cpu().detach().numpy()
+
+# 	tree_edges = cKDTree(edges[1].reshape(-1,1))
+
+# 	# t_win_ball = [10.0, 15.0, 25.0]
+# 	num_picks = 1000
+# 	n_picks = len(P)
+# 	Ratio_neighbors = [[] for t in t_win_ball]
+# 	for j in range(num_picks):
+# 		for k in range(len(t_win_ball)):
+# 			ichoose = np.random.choice(n_picks)
+# 			ifind_ball = np.array(tree_times.query_ball_point(np.array([P[ichoose,0]]).reshape(-1,1), r = t_win_ball[k])[0]).astype('int')
+# 			ineighbors = edges[0][np.array(tree_edges.query_ball_point(np.array([P[ichoose,1]]).reshape(-1,1), r = 0)[0])]
+# 			size_intersection = len(list(set(ineighbors).intersection(P[ifind_ball,1].astype('int'))))
+# 			Ratio_neighbors[k].append(size_intersection/k_sta)
+
+# 	Ratio_neighbors = np.vstack([np.quantile(Ratio_neighbors[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Ratio_neighbors))])
+# 	Trgts.append(Ratio_neighbors)
+
+# 	## [5] For each pick, number of times another pick occurs within ~15 seconds, 30 seconds, 45 seconds, etc.
+# 	# t_win_ball = [5.0, 10.0, 15.0]
+# 	num_picks = 1500
+# 	Num_adjacent_picks = [[] for t in t_win_ball]
+# 	for j in range(num_picks):
+# 		for k in range(len(t_win_ball)):
+# 			ichoose = np.random.choice(n_picks)
+# 			sta_ind = P[ichoose,1]
+# 			ifind_ball = np.array(tree_times.query_ball_point(np.array([P[ichoose,0]]).reshape(-1,1) + t_win_ball[k]/2.0 + 0.1, r = t_win_ball[k]/2.0)[0]).astype('int')
+# 			min_sta_dist = (sta_ind == P[ifind_ball,1]).sum()
+# 			Num_adjacent_picks[k].append(min_sta_dist)
+
+# 	Num_adjacent_picks = np.vstack([np.quantile(Num_adjacent_picks[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Num_adjacent_picks))])
+# 	Trgts.append(Num_adjacent_picks)
+
+# 	## [6] Possibly correlation of pick traces between nearby stations
+
+# 	return Trgts
+
+# def evaluate_bayesian_objective(x, n_random = 30, t_sample_win = 120.0, windows = [40e3, 150e3, 300e3], t_win_ball = [10.0, 15.0, 25.0], return_vals = False): # 	windows = [40e3, 150e3, 300e3], 	
+
+
+# 	training_params_2[0] = x[0] # spc_random
+# 	training_params_2[2] = x[1] # spc_thresh_rand
+# 	training_params_2[4] = x[2] # coda_rate
+# 	training_params_2[5][1] = x[3] # coda_win
+
+# 	training_params_3[1][0] = x[4] # dist_range[0]
+# 	training_params_3[1][1] = x[5] # dist_range[1]
+# 	training_params_3[2] = x[6] # max_rate_events
+# 	training_params_3[3] = x[7] # max_miss_events
+# 	training_params_3[4] = x[6]*x[8] # max_false_events (input of false rate to generate is an absolute number, not the ratio, which is x[8])
+# 	training_params_3[5][0] = x[9] # miss_pick_fraction[0]
+# 	training_params_3[5][1] = x[10] # miss_pick_fraction[0]
+
+# 	arrivals = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, return_only_data = True)[0]
+
+# 	P = np.copy(arrivals)
+
+# 	Trgts = sample_picks(P, locs, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win)
+
+# 	res1, res2, res3, res4, res5 = 0, 0, 0, 0, 0
+
+# 	for n in range(n_random):
+
+# 		ichoose = np.random.choice(len(Trgts_list))
+
+# 		res1 += np.linalg.norm(Trgts[0] - Trgts_list[ichoose][0])/np.maximum(np.linalg.norm(Trgts_list[ichoose][0]), 1e-5)/n_random
+# 		res2 += np.linalg.norm(Trgts[1] - Trgts_list[ichoose][1])/np.maximum(np.linalg.norm(Trgts_list[ichoose][1]), 1e-5)/n_random
+# 		res3 += np.linalg.norm(Trgts[2] - Trgts_list[ichoose][2])/np.maximum(np.linalg.norm(Trgts_list[ichoose][2]), 1e-5)/n_random
+# 		res4 += np.linalg.norm(Trgts[3] - Trgts_list[ichoose][3])/np.maximum(np.linalg.norm(Trgts_list[ichoose][3]), 1e-5)/n_random
+# 		res5 += np.linalg.norm(Trgts[4] - Trgts_list[ichoose][4])/np.maximum(np.linalg.norm(Trgts_list[ichoose][4]), 1e-5)/n_random
+
+# 	res = res1 + res2 + res3 + res4 + res5 ## Residual is average relative residual over all five objectives
+
+# 	print(res)
+
+# 	if return_vals == False:
+
+# 		return res
+
+# 	else:
+
+# 		return res, Trgts, arrivals
 
 
 
@@ -2295,6 +2643,32 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

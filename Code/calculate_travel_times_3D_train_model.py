@@ -175,6 +175,12 @@ z.close()
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
 
+
+## Overwrite range based on station locations and buffer
+d_pad = deg_pad # 0.15
+lat_range_extend = [np.minimum(lat_range_extend[0], locs[:,0].min() - d_pad), np.maximum(lat_range_extend[1], locs[:,0].max() + d_pad)]
+lon_range_extend = [np.minimum(lon_range_extend[0], locs[:,1].min() - d_pad), np.maximum(lon_range_extend[1], locs[:,1].max() + d_pad)]
+
 scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
 scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
@@ -743,7 +749,7 @@ if train_travel_time_neural_network == True:
 		if compute_reference_times == True: ## Can include a data loss
 			travel_times_p = Tp_samples[isample] #
 			travel_times_s = Ts_samples[isample] # = sample_inputs_unweighted(n_batch)
-			trgt_data = torch.Tensor(np.concatenate((travel_times_p.reshape(-1,1), travel_times_s.reshape(-1,1)), axis = 1)).to(device)
+			# trgt_data = torch.Tensor(np.concatenate((travel_times_p.reshape(-1,1), travel_times_s.reshape(-1,1)), axis = 1)).to(device)
 
 		pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method = 'direct', train = True)
 		# pred_perturb = pred_perturb1 + pred_perturb2

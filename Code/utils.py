@@ -673,7 +673,7 @@ def compute_travel_times(trv, locs, x_grids, n_max_chunks = int(50e3), device = 
 	for i in range(len(x_grids)):
 		
 		n_sta, n_temp = len(locs), len(x_grids[i])
-		n_chunks = int((n_sta*n_temp)/n_max_chunks)
+		n_chunks = int(np.maximum(1, int((n_sta*n_temp)/n_max_chunks)))
 		n_int = int(len(locs)/n_chunks)
 		inds = [np.arange(n_int) + n_int*j for j in range(n_chunks)]
 		if len(inds) == 0: inds = np.arange(len(locs))
@@ -794,7 +794,7 @@ def load_files_with_travel_times(path_to_file, name_of_project, template_ver, ve
 
 	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
 
-def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs', return_model = False, use_physics_informed = False):
+def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs', corrs = None, locs_corr = None, return_model = False, use_physics_informed = False):
 
 	if use_physics_informed == False:
 	
@@ -851,7 +851,7 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		inorm_time = lambda t: t*max_time
 		inorm_vel = lambda v: v*vp_max	
 		
-		m = TravelTimesPN(ftrns1, ftrns2, n_phases = n_phases, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
+		m = TravelTimesPN(ftrns1, ftrns2, n_phases = n_phases, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, corrs = corrs, locs_corr = locs_corr, device = device).to(device)
 		m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
 		if return_model == False:
 			m.eval()
@@ -1223,6 +1223,8 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
+
 
 
 
