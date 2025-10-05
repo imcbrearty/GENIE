@@ -660,8 +660,8 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, scale_rel = scale_rel, k_sta_edges = k_sta_edges, eps = eps, use_neighbor_assoc_edges = use_neighbor_assoc_edges, use_phase_types = use_phase_types, device = device):
 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
-		if use_neighbor_assoc_edges == True: ndim_extra = ndim_extra + 1 + 3 ## Add one bimary feature to indicate if edge is for a common station, and the relative offset positions
-		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6, n_hidden) # add edge data (observed arrival - theoretical arrival)
+		if use_neighbor_assoc_edges == True: ndim_extra = ndim_extra + 1 + 3 + 1 ## Add one bimary feature to indicate if edge is for a common station, and the relative offset positions
+		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6 + ndim_extra - 1, n_hidden) # add edge data (observed arrival - theoretical arrival)
 		self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
 		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + 2, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
 		self.f_src_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # only use single tranform layer for source embdding (which already has sufficient information)
@@ -708,11 +708,34 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		arrival = torch.cat((arrival_p, arrival_s), dim = 1) # Concatenate across feature axis
 
 		edges = torch.Tensor(np.copy(np.flip(np.hstack([np.ascontiguousarray(np.array(list(zip(itertools.product(unique_sta_lists[j], np.concatenate((unique_sta_lists[j], np.array([n_arv])), axis = 0)))))[:,0,:].T) for j in range(len(unique_sta_lists))]), axis = 0))).long().to(self.device) # note: preferably could remove loop here.
+		if (self.use_neighbor_assoc_edges == True)*(len(ipick) > (self.k_sta_edges + 1)):
+			# k_edges = remove_self_loops(knn(locs_cart[ip_unique]/1000.0, locs_cart[ip_unique]/1000.0, k = self.k_sta_edges + 1))[0].flip(0)
+			k_edges = remove_self_loops(knn(locs_cart/1000.0, locs_cart/1000.0, k = self.k_sta_edges + 1))[0].flip(0)
+			## Note: if use locs_cart[ip_unique] instead, would allow "longer range" knn edges only between stations with picks
+
+			sub_edges = subgraph(ipick, k_edges, num_nodes = len(locs_cart))[0].cpu().detach().numpy()
+			tree_edges = cKDTree(sub_edges[1].reshape(-1,1))
+			# unique_edge_lists = tree_edges.query_ball_point(ip_unique.reshape(-1,1), r = 0)
+			unique_edge_lists = tree_edges.query_ball_point(ipick.cpu().detach().numpy().reshape(-1,1), r = 0)
+			perm_vec = (-1*np.ones(len(locs_cart))).astype('int')
+			perm_vec[ip_unique.astype('int')] = np.arange(len(ip_unique))
+			iwhere_non_zero = np.where([len(unique_edge_lists[j]) > 0 for j in range(len(unique_edge_lists))])[0]
+			if len(iwhere_non_zero) > 0:
+				edges_neighbors = [np.hstack([unique_sta_lists[k] for k in perm_vec[sub_edges[0,np.array(unique_edge_lists[j])]]]) for j in iwhere_non_zero] # .long().to(self.device) # note: preferably could remove loop here.
+				edges_neighbors = torch.Tensor(np.hstack([np.concatenate((edges_neighbors[inc].reshape(1,-1), iwhere_non_zero[inc]*np.ones((1,len(edges_neighbors[inc])))), axis = 0) for inc in range(len(iwhere_non_zero))]).astype('int')).long().to(device)
+				edges = torch.cat((edges, edges_neighbors), dim = 1)
+
+			## Could use k-nn graphs to find max distance, per station, then use radius graphs to find all picks within this per-station radius (would require some normalization; may not be feasible)
+			# neighbor_picks = ipick[k_edges[1]]
+
+
 		n_edge = edges.shape[1]
+
 
 		## Now must duplicate edges, for each unique source. (different accumulation points)
 		edges = (edges.repeat(1, n_src) + torch.cat((torch.zeros(1, n_src*n_edge).to(self.device), (torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device)), dim = 0)).long().contiguous()
 		src_index = torch.arange(n_src).repeat_interleave(n_edge).contiguous().long().to(self.device)
+		# stindex_repeat = 
 
 		use_sparse = True
 		if use_sparse == True:
@@ -723,27 +746,22 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 			ikeep = torch.where(((torch.abs(rel_t_p) < 2.0*torch.sqrt(self.t_kernel_sq)) + (torch.abs(rel_t_s) < 2.0*torch.sqrt(self.t_kernel_sq))).reshape(-1) > 0)[0].cpu().detach().numpy() ## Either query is within the threshold amount of time
 			# edges = edges[:,ikeep]
 			edges = torch.cat((edges[0][ikeep].reshape(1,-1), edges[1][ikeep].reshape(1,-1)), dim = 0).contiguous()
+
+			## For each pick, should add k minimum edges, regardless, to constrain it.
+
 			src_index = src_index[ikeep]
 
-		
-		## Add neighbor edges
-		if self.use_neighbor_assoc_edges == True:
-			## Can only run k nearest neighbors for one 
-			k_edges = knn(locs_cart/1000.0, locs_cart/1000.0, k = self.k_sta_edges + 1).flip(0)
-			iactive_sta = (-1*torch.ones(len(locs_cart)).to(device)).long()
-			iactive_sta[ipick[edges[1]]] = 1 ## At least one pick for a station
 			
-			
-			
-		
 		N = n_arv + 1 # still correct?
 		M = n_arv*n_src
 
-		out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = arrival, sembed = src_embed, stime = stime, tsrc_p = torch.cat((trv_src[:,:,0], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach(), tsrc_s = torch.cat((trv_src[:,:,1], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach(), sindex = src_index, stindex = torch.cat((ipick, torch.Tensor([n_sta]).long().to(self.device)), dim = 0), atime = torch.cat((tpick, torch.Tensor([-self.eps]).to(self.device)), dim = 0), phase = torch.cat((phase_label, torch.Tensor([-1.0]).reshape(1,1).to(self.device)), dim = 0), size = (N, M)).mean(1)))) # M is output. Taking mean over heads
+		# lpicks1 = locs_cart[ipick[edges[0].clamp_(max = n_arv)]]/self.scale_rel
+
+		out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = arrival, lpicks1 = locs_cart[ipick[edges[0].clamp_(max = (n_arv - 1))]]/self.scale_rel, lpicks2 = locs_cart[ipick[torch.remainder(edges[1], torch.Tensor([n_arv]).to(self.device)).long()]]/self.scale_rel, sembed = src_embed, stime = stime, tsrc_p = torch.cat((trv_src[:,:,0], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach(), tsrc_s = torch.cat((trv_src[:,:,1], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach(), sindex = src_index, stindex = torch.cat((ipick, torch.Tensor([n_sta]).long().to(self.device)), dim = 0), atime = torch.cat((tpick, torch.Tensor([-self.eps]).to(self.device)), dim = 0), phase = torch.cat((phase_label, torch.Tensor([-1.0]).reshape(1,1).to(self.device)), dim = 0), size = (N, M)).mean(1)))) # M is output. Taking mean over heads
 
 		return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
 
-	def message(self, x_j, edge_index, index, tsrc_p, tsrc_s, sembed, sindex, stindex, stime, atime, phase_j): # Can use phase_j, or directly call edge_index, like done for atime, stindex, etc.
+	def message(self, x_j, edge_index, index, lpicks1, lpicks2, tsrc_p, tsrc_s, sembed, sindex, stindex, stime, atime, phase_j): # Can use phase_j, or directly call edge_index, like done for atime, stindex, etc.
 
 		assert(abs(edge_index[1] - index).max().item() == 0)
 
@@ -758,9 +776,13 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		# Denote self-links by a feature.
 		self_link = (edge_index[0] == torch.remainder(edge_index[1], edge_index[0].max().item())).reshape(-1,1).detach().float() # Each accumulation index (an entry from src cross arrivals). The number of arrivals is edge_index.max() exactly (since tensor is composed of number arrivals + 1)
 		null_link = (edge_index[0] == edge_index[0].max().item()).reshape(-1,1).detach().float()
-		contexts = self.f_src_context_2(self.activate1(self.f_src_context_1(torch.cat((sembed[sindex], stime[sindex].reshape(-1,1).detach(), self_link, null_link), dim = 1)))).view(-1, self.n_heads, self.n_latent)
-		queries = self.f_arrival_query_2(self.activate2(self.f_arrival_query_1(torch.cat((x_j, rel_t_p, rel_t_s), dim = 1)))).view(-1, self.n_heads, self.n_latent)
-		values = self.f_values_2(self.activate3(self.f_values_1(torch.cat((x_j, rel_t_p, rel_t_s, self_link, null_link), dim = 1)))).view(-1, self.n_heads, self.n_latent)
+		rel_pos = (1.0 - null_link)*(lpicks1 - lpicks2)
+		self_link_pos = (torch.max(rel_pos, dim = 1, keepdim = True).values == 0).detach().float() # reshape(-1,1)
+		norm_pos = torch.exp(-0.5*torch.norm(rel_pos, dim = 1, keepdim = True)**2/(3.0**2))
+
+		contexts = self.f_src_context_2(self.activate1(self.f_src_context_1(torch.cat((sembed[sindex], stime[sindex].reshape(-1,1).detach(), rel_pos, norm_pos, self_link, null_link, self_link_pos), dim = 1)))).view(-1, self.n_heads, self.n_latent)
+		queries = self.f_arrival_query_2(self.activate2(self.f_arrival_query_1(torch.cat((x_j, rel_t_p, rel_t_s, rel_pos, norm_pos, self_link_pos), dim = 1)))).view(-1, self.n_heads, self.n_latent)
+		values = self.f_values_2(self.activate3(self.f_values_1(torch.cat((x_j, rel_t_p, rel_t_s, rel_pos, norm_pos, self_link, null_link, self_link_pos), dim = 1)))).view(-1, self.n_heads, self.n_latent)
 
 		# When using sparse, this assert is not true
 		# assert(self_link.sum() == (len(atime) - 1)*tsrc_p.shape[0])
@@ -768,8 +790,125 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		## Do computation
 		scores = (queries*contexts).sum(-1)/self.scale
 		alpha = softmax(scores, index)
+		# pdb.set_trace()
 
 		return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
+
+
+# class StationSourceAttentionMergedPhases(MessagePassing):
+# 	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, scale_rel = scale_rel, k_sta_edges = k_sta_edges, eps = eps, use_neighbor_assoc_edges = use_neighbor_assoc_edges, use_phase_types = use_phase_types, device = device):
+# 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
+
+# 		if use_neighbor_assoc_edges == True: ndim_extra = ndim_extra + 1 + 3 ## Add one bimary feature to indicate if edge is for a common station, and the relative offset positions
+# 		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6, n_hidden) # add edge data (observed arrival - theoretical arrival)
+# 		self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
+# 		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + 2, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
+# 		self.f_src_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # only use single tranform layer for source embdding (which already has sufficient information)
+
+# 		self.f_values_1 = nn.Linear(2*ndim_arv_in + ndim_extra + 7, n_hidden) # add second layer transformation.
+# 		self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
+
+# 		self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
+# 		self.proj_2 = nn.Linear(n_hidden, ndim_out) # can remove this layer possibly.
+
+# 		self.scale = np.sqrt(n_latent)
+# 		self.n_heads = n_heads
+# 		self.n_latent = n_latent
+# 		self.eps = eps
+# 		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
+# 		self.ndim_feat = ndim_arv_in + ndim_extra
+# 		self.use_phase_types = use_phase_types
+# 		self.use_neighbor_assoc_edges = use_neighbor_assoc_edges
+
+# 		frac_sta_edges = 1.0
+# 		self.k_sta_edges = int(np.ceil(frac_sta_edges*k_sta_edges))
+
+# 		self.activate1 = nn.PReLU()
+# 		self.activate2 = nn.PReLU()
+# 		self.activate3 = nn.PReLU()
+# 		self.activate4 = nn.PReLU()
+# 		self.scale_rel = scale_rel
+# 		# self.activate5 = nn.PReLU()
+# 		self.device = device
+
+# 	def forward(self, src, stime, src_embed, trv_src, locs_cart, arrival_p, arrival_s, tpick, ipick, phase_label): # reference k nearest spatial points
+
+# 		# src isn't used. Only trv_src is needed.
+# 		n_src, n_sta, n_arv = src.shape[0], trv_src.shape[1], len(tpick) # + 1 ## Note: adding 1 to size of arrivals!
+# 		# n_arv = len(tpick)
+# 		ip_unique = torch.unique(ipick).float().cpu().detach().numpy() # unique stations
+# 		tree_indices = cKDTree(ipick.float().cpu().detach().numpy().reshape(-1,1))
+# 		unique_sta_lists = tree_indices.query_ball_point(ip_unique.reshape(-1,1), r = 0)
+# 		if self.use_phase_types == False:
+# 			phase_label = phase_label*0.0
+
+# 		arrival_p = torch.cat((arrival_p, torch.zeros(1,arrival_p.shape[1]).to(self.device)), dim = 0) # add null arrival, that all arrivals link too. This acts as a "stabalizer" in the inner-product space, and allows softmax to not blow up for arrivals with only self loops. May not be necessary.
+# 		arrival_s = torch.cat((arrival_s, torch.zeros(1,arrival_s.shape[1]).to(self.device)), dim = 0) # add null arrival, that all arrivals link too. This acts as a "stabalizer" in the inner-product space, and allows softmax to not blow up for arrivals with only self loops. May not be necessary.
+# 		arrival = torch.cat((arrival_p, arrival_s), dim = 1) # Concatenate across feature axis
+
+# 		edges = torch.Tensor(np.copy(np.flip(np.hstack([np.ascontiguousarray(np.array(list(zip(itertools.product(unique_sta_lists[j], np.concatenate((unique_sta_lists[j], np.array([n_arv])), axis = 0)))))[:,0,:].T) for j in range(len(unique_sta_lists))]), axis = 0))).long().to(self.device) # note: preferably could remove loop here.
+# 		n_edge = edges.shape[1]
+
+# 		## Now must duplicate edges, for each unique source. (different accumulation points)
+# 		edges = (edges.repeat(1, n_src) + torch.cat((torch.zeros(1, n_src*n_edge).to(self.device), (torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device)), dim = 0)).long().contiguous()
+# 		src_index = torch.arange(n_src).repeat_interleave(n_edge).contiguous().long().to(self.device)
+
+# 		use_sparse = True
+# 		if use_sparse == True:
+# 			# pdb.set_trace()
+# 			## Find which values have offset times that exceed max time, and ignore these edges (does this work?)
+# 			rel_t_p = (torch.cat((tpick, torch.Tensor([-self.eps]).to(self.device)), dim = 0)[edges[0]] - (torch.cat((trv_src[:,:,0], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach()[src_index, torch.cat((ipick, torch.Tensor([n_sta]).long().to(self.device)), dim = 0)[edges[0]]] + stime[src_index])).reshape(-1,1).detach()
+# 			rel_t_s = (torch.cat((tpick, torch.Tensor([-self.eps]).to(self.device)), dim = 0)[edges[0]] - (torch.cat((trv_src[:,:,1], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach()[src_index, torch.cat((ipick, torch.Tensor([n_sta]).long().to(self.device)), dim = 0)[edges[0]]] + stime[src_index])).reshape(-1,1).detach()
+# 			ikeep = torch.where(((torch.abs(rel_t_p) < 2.0*torch.sqrt(self.t_kernel_sq)) + (torch.abs(rel_t_s) < 2.0*torch.sqrt(self.t_kernel_sq))).reshape(-1) > 0)[0].cpu().detach().numpy() ## Either query is within the threshold amount of time
+# 			# edges = edges[:,ikeep]
+# 			edges = torch.cat((edges[0][ikeep].reshape(1,-1), edges[1][ikeep].reshape(1,-1)), dim = 0).contiguous()
+# 			src_index = src_index[ikeep]
+
+		
+# 		## Add neighbor edges
+# 		if self.use_neighbor_assoc_edges == True:
+# 			## Can only run k nearest neighbors for one 
+# 			k_edges = knn(locs_cart/1000.0, locs_cart/1000.0, k = self.k_sta_edges + 1).flip(0)
+# 			iactive_sta = (-1*torch.ones(len(locs_cart)).to(device)).long()
+# 			iactive_sta[ipick[edges[1]]] = 1 ## At least one pick for a station
+			
+			
+			
+		
+# 		N = n_arv + 1 # still correct?
+# 		M = n_arv*n_src
+
+# 		out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = arrival, sembed = src_embed, stime = stime, tsrc_p = torch.cat((trv_src[:,:,0], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach(), tsrc_s = torch.cat((trv_src[:,:,1], -self.eps*torch.ones(n_src,1).to(self.device)), dim = 1).detach(), sindex = src_index, stindex = torch.cat((ipick, torch.Tensor([n_sta]).long().to(self.device)), dim = 0), atime = torch.cat((tpick, torch.Tensor([-self.eps]).to(self.device)), dim = 0), phase = torch.cat((phase_label, torch.Tensor([-1.0]).reshape(1,1).to(self.device)), dim = 0), size = (N, M)).mean(1)))) # M is output. Taking mean over heads
+
+# 		return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
+
+# 	def message(self, x_j, edge_index, index, tsrc_p, tsrc_s, sembed, sindex, stindex, stime, atime, phase_j): # Can use phase_j, or directly call edge_index, like done for atime, stindex, etc.
+
+# 		assert(abs(edge_index[1] - index).max().item() == 0)
+
+# 		ifind = torch.where(edge_index[0] == edge_index[0].max())[0]
+
+# 		rel_t_p = (atime[edge_index[0]] - (tsrc_p[sindex, stindex[edge_index[0]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
+# 		rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p), phase_j), dim = 1) # phase[edge_index[0]]
+
+# 		rel_t_s = (atime[edge_index[0]] - (tsrc_s[sindex, stindex[edge_index[0]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
+# 		rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s), phase_j), dim = 1) # phase[edge_index[0]]
+
+# 		# Denote self-links by a feature.
+# 		self_link = (edge_index[0] == torch.remainder(edge_index[1], edge_index[0].max().item())).reshape(-1,1).detach().float() # Each accumulation index (an entry from src cross arrivals). The number of arrivals is edge_index.max() exactly (since tensor is composed of number arrivals + 1)
+# 		null_link = (edge_index[0] == edge_index[0].max().item()).reshape(-1,1).detach().float()
+# 		contexts = self.f_src_context_2(self.activate1(self.f_src_context_1(torch.cat((sembed[sindex], stime[sindex].reshape(-1,1).detach(), self_link, null_link), dim = 1)))).view(-1, self.n_heads, self.n_latent)
+# 		queries = self.f_arrival_query_2(self.activate2(self.f_arrival_query_1(torch.cat((x_j, rel_t_p, rel_t_s), dim = 1)))).view(-1, self.n_heads, self.n_latent)
+# 		values = self.f_values_2(self.activate3(self.f_values_1(torch.cat((x_j, rel_t_p, rel_t_s, self_link, null_link), dim = 1)))).view(-1, self.n_heads, self.n_latent)
+
+# 		# When using sparse, this assert is not true
+# 		# assert(self_link.sum() == (len(atime) - 1)*tsrc_p.shape[0])
+
+# 		## Do computation
+# 		scores = (queries*contexts).sum(-1)/self.scale
+# 		alpha = softmax(scores, index)
+
+# 		return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
 
 
 # class StationSourceAttentionMergedPhases(MessagePassing):
@@ -1687,6 +1826,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
