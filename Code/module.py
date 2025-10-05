@@ -722,7 +722,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 			iwhere_non_zero = np.where([len(unique_edge_lists[j]) > 0 for j in range(len(unique_edge_lists))])[0]
 			if len(iwhere_non_zero) > 0:
 				edges_neighbors = [np.hstack([unique_sta_lists[k] for k in perm_vec[sub_edges[0,np.array(unique_edge_lists[j])]]]) for j in iwhere_non_zero] # .long().to(self.device) # note: preferably could remove loop here.
-				edges_neighbors = torch.Tensor(np.hstack([np.concatenate((edges_neighbors[inc].reshape(1,-1), iwhere_non_zero[inc]*np.ones((1,len(edges_neighbors[inc])))), axis = 0) for inc in range(len(iwhere_non_zero))]).astype('int')).long().to(device)
+				edges_neighbors = torch.Tensor(np.hstack([np.concatenate((edges_neighbors[inc].reshape(1,-1), iwhere_non_zero[inc]*np.ones((1,len(edges_neighbors[inc])))), axis = 0) for inc in range(len(iwhere_non_zero))]).astype('int')).long().to(self.device)
 				edges = torch.cat((edges, edges_neighbors), dim = 1)
 
 			## Could use k-nn graphs to find max distance, per station, then use radius graphs to find all picks within this per-station radius (would require some normalization; may not be feasible)
@@ -1826,6 +1826,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
