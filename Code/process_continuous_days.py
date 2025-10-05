@@ -545,6 +545,7 @@ if min_spc_allowed is not None:
 	mp = LocalMarching(device = device)
 	locs_out = mp(np.concatenate((locs[ind_use], np.zeros((len(ind_use),1)), np.ones((len(ind_use),1)) + 0.1*np.random.rand(len(ind_use),1)), axis = 1), ftrns1, tc_win = 1.0, sp_win = min_spc_allowed)[:,0:3]					
 	cnt_overwrite = 0
+	iremoved = []
 	if len(locs_out) < len(ind_use):
 		tree_locs = cKDTree(ftrns1(locs[ind_use]))
 		ip_retained = tree_locs.query(ftrns1(locs_out))[1]
