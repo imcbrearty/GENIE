@@ -93,6 +93,7 @@ use_absolute_pos: False ## If True, append the absolute station and source coord
 use_sign_input: False ## If true, tag the misfit features with sign information
 use_station_corrections: False ## if True, attach station corrections to travel times (loading from the file Grids/station_corrections_ver_1.npz with fields "locs_corr" and "corrs")
 use_updated_model_definition: False ## if True, add additional edge features to the Data Aggregation modules 
+use_neighbor_assoc_edges: True ## If True, also use between-station edges during the source-station-attention layer
 
 ## Additional training params
 device: 'cuda' # or 'cpu'
@@ -100,6 +101,7 @@ max_number_pick_association_labels_per_sample: 1500 # Max number of picks to com
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
 make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
+
 
 
 
