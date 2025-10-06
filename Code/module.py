@@ -687,6 +687,7 @@ class LocalSliceLgCollapse(MessagePassing):
 			phase_label = phase_label*0.0
 
 		t_index = torch.floor((tpick - dt_partition[0])/torch.Tensor([dt]).to(self.device)).long() # index into A_edges, which is each station, each dt_point, each k.
+		t_index = torch.clamp(t_index, 0, l_dt - 1)
 		t_index = ((ipick*l_dt*k_infer + t_index*k_infer).view(-1,1) + torch.arange(k_infer).view(1,-1).to(self.device)).reshape(-1).long() # check this
 
 		src_index = torch.arange(n_arvs).view(-1,1).repeat(1,k_infer).view(1,-1).to(self.device)
