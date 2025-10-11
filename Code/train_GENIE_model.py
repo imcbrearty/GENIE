@@ -1781,14 +1781,14 @@ for i in range(n_restart_step, n_epochs):
 		use_dice_loss = False
 		if use_dice_loss == True:
 			def dice_loss(p, t, epsilon = 1e-6):
-				return (2.0*((p*t).sum()) + epsilon)/(p.pow(2).sum() + t.pow(2).sum() + epsilon)
+				return (2.0*((p.clamp_(min = 0.0, max = 1.0)*t.clamp_(min = 0.0, max = 1.0)).sum()) + epsilon)/(p.clamp_(min = 0.0, max = 1.0).pow(2).sum() + t.clamp_(min = 0.0, max = 1.0).pow(2).sum() + epsilon)
 
 			min_val_trgt = 0.1
 			z_vec = torch.Tensor([1.0]).to(device)
-			dice1 = z_vec if Lbls[i0].max() < min_val_trgt else dice_loss(torch.relu(out[0][:,:,0]), torch.Tensor(Lbls[i0]).to(device))
-			dice2 = z_vec if Lbls_query[i0].max() < min_val_trgt else dice_loss(torch.relu(out[1][:,:,0]), torch.Tensor(Lbls_query[i0]).to(device))
-			dice3 = z_vec if pick_lbls[:,:,0].max() < min_val_trgt else dice_loss(torch.relu(out[2][:,:,0]), pick_lbls[:,:,0])
-			dice4 = z_vec if Lbls[i0].max() < min_val_trgt else dice_loss(torch.relu(out[3][:,:,0]), pick_lbls[:,:,1])
+			dice1 = z_vec if Lbls[i0].max() < min_val_trgt else dice_loss(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device))
+			dice2 = z_vec if Lbls_query[i0].max() < min_val_trgt else dice_loss(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device))
+			dice3 = z_vec if pick_lbls[:,:,0].max() < min_val_trgt else dice_loss(out[2][:,:,0], pick_lbls[:,:,0])
+			dice4 = z_vec if Lbls[i0].max() < min_val_trgt else dice_loss(out[3][:,:,0], pick_lbls[:,:,1])
 			loss_dice = 1.0 - (weights[0]*dice1 + weights[1]*dice2 + weights[2]*dice3 + weights[3]*dice4)			
 			# loss_dice = (weights[0]*dice_loss(torch.relu(out[0][:,:,0]), torch.Tensor(Lbls[i0]).to(device)) + weights[1]*dice_loss(torch.relu(out[1][:,:,0]), torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*dice_loss(torch.relu(out[2][:,:,0]), pick_lbls[:,:,0]) + weights[3]*dice_loss(torch.relu(out[3][:,:,0]), pick_lbls[:,:,1]))/n_batch
 			loss = 0.5*loss + (0.5*loss_dice)/100.0
@@ -2662,6 +2662,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
