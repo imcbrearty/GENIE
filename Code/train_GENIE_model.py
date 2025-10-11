@@ -1396,7 +1396,6 @@ lon_range_interior = [lon_range[0], lon_range[1]]
 
 n_restart = train_config['restart_training']
 n_restart_step = train_config['n_restart_step']
-loss_regularize_val, loss_regularize_cnt = 0, 0
 if n_restart == False:
 	n_restart_step = 0 # overwrite to 0, if restart is off
 
@@ -1570,6 +1569,7 @@ for i in range(n_restart_step, n_epochs):
 	
 	
 	loss_val = 0
+	loss_regularize_val, loss_regularize_cnt = 0, 0
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
 	mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4 = 0.0, 0.0, 0.0, 0.0
 
@@ -1777,9 +1777,14 @@ for i in range(n_restart_step, n_epochs):
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 
+		min_val_use = 0.1
 		use_sensitivity_loss = False
-		if use_sensitivity_loss == True:
+		loss_regularize = torch.Tensor([0.0]).to(device)
+		if (use_sensitivity_loss == True)*(((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)) == False):
 
+			# if ((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)):
+			# 	continue
+			
 			sig_d = 0.15 ## Assumed pick uncertainty (seconds)
 			chi_pdf = chi2(df = 3).pdf(0.99)
 	
@@ -1787,7 +1792,6 @@ for i in range(n_restart_step, n_epochs):
 			scale_val2 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
 			scale_val = 0.5*(scale_val1 + scale_val2)
 	
-			loss_regularize = torch.Tensor([0.0]).to(device)
 			scale_partials = torch.Tensor((1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)).to(device)
 			src_input_p = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
 			src_input_s = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
@@ -2643,6 +2647,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
