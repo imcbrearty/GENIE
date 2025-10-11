@@ -1835,7 +1835,8 @@ for i in range(n_restart_step, n_epochs):
 			if len(icond) == 3: icond = torch.cat((icond, torch.Tensor([icond[-1].item()]).to(device)), dim = 0).long()
 			var_cart_inv = torch.linalg.solve(var_cart[icond], torch.eye(3).to(device))*torch.Tensor([(sig_d**2)*chi_pdf]).to(device)
 			sigma_cart = torch.norm(var_cart_inv[:,torch.arange(3),torch.arange(3)]**(0.5), dim = 1)
-			loss_regularize = (0.000002)*loss_func1(sigma_cart/scale_loss, torch.zeros(sigma_cart.shape).to(device)) # 0.001 # 0.0002
+			# loss_regularize = (0.000002)*loss_func1(sigma_cart/scale_loss, torch.zeros(sigma_cart.shape).to(device)) # 0.001 # 0.0002
+			loss_regularize = (0.00005)*loss_func1(sigma_cart/scale_loss, torch.zeros(sigma_cart.shape).to(device)) # 0.001 # 0.0002
 			if torch.isnan(loss_regularize) == False: loss = loss + loss_regularize
 			# losses_regularize[i] = loss_regularize.item()
 			loss_regularize_val += loss_regularize.item()
@@ -2671,6 +2672,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
