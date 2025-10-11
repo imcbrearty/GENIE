@@ -1396,7 +1396,6 @@ lon_range_interior = [lon_range[0], lon_range[1]]
 
 n_restart = train_config['restart_training']
 n_restart_step = train_config['n_restart_step']
-loss_regularize_val, loss_regularize_cnt = 0, 0
 if n_restart == False:
 	n_restart_step = 0 # overwrite to 0, if restart is off
 
@@ -1570,6 +1569,7 @@ for i in range(n_restart_step, n_epochs):
 	
 	
 	loss_val = 0
+	loss_regularize_val, loss_regularize_cnt = 0, 0
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
 	mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4 = 0.0, 0.0, 0.0, 0.0
 
@@ -1780,9 +1780,13 @@ for i in range(n_restart_step, n_epochs):
 		use_sensitivity_loss = False
 		if use_sensitivity_loss == True:
 
+			min_val_use = 0.1
+			if ((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)):
+				continue
+			
 			sig_d = 0.15 ## Assumed pick uncertainty (seconds)
 			chi_pdf = chi2(df = 3).pdf(0.99)
-	
+			
 			scale_val1 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
 			scale_val2 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
 			scale_val = 0.5*(scale_val1 + scale_val2)
@@ -2643,6 +2647,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
