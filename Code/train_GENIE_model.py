@@ -882,7 +882,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		inot_sample = np.delete(np.arange(len(time_samples)), ichoose_sample, axis = 0).astype('int')
 		time_samples1 = time_samples[ichoose_sample].repeat(2) ## Use repeated time steps if use_consistency_loss = True
 		if len(time_samples1) < len(time_samples):
-			time_samples = np.concatenate((time_samples, time_samples[inot_sample[0]]), axis = 0)
+			time_samples = np.concatenate((time_samples1, time_samples[inot_sample[0]]), axis = 0)
 		else:
 			time_samples = 1.0*time_samples1 + 0.0
 
@@ -2690,6 +2690,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
