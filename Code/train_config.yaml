@@ -54,7 +54,7 @@ fixed_subnetworks : True ## If True, this uses realistic sets of stations availa
 use_preferential_sampling : True ## This concentrates more of the samples around times of known events, so labels arn't too sparse (e.g., trgt values in "project_name"_output.txt in GNN_TrainedNModels should not be all zeros)
 use_extra_nearby_moveouts : True ## This up-samples the amount of sources with moveouts only to nearby stations (e.g., it uses ~half of the distance range set in dist_range for 50% of events)
 use_shallow_sources : False
-use_consistency_loss: False
+use_consistency_loss: True
 
 ## Use reference density for source distribution
 use_reference_spatial_density: False ## If True, must store reference sources in "Calibration/"yr"/"project_name"_reference_2023_1_3_ver_1.npz with field "srcs_ref"
