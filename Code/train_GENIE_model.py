@@ -119,7 +119,7 @@ else:
 load_training_data = train_config['load_training_data']
 build_training_data = train_config['build_training_data'] ## If try, will use system argument to build a set of data
 optimize_training_data = train_config['optimize_training_data']
-
+use_consistency_loss = train_config.get('use_consistency_loss', False)
 
 max_number_pick_association_labels_per_sample = config['max_number_pick_association_labels_per_sample']
 make_visualize_predictions = config['make_visualize_predictions']
@@ -876,6 +876,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	time_samples = np.sort(time_samples)
 
+	if use_consistency_loss == True:
+		ilen = int(np.floor(len(time_samples)/2))
+		ichoose_sample = np.sort(np.random.choice(len(time_samples), size = ilen, replace = False))
+		inot_sample = np.delete(np.arange(len(time_samples), ichoose_sample), axis = 0)
+		time_samples1 = time_samples[ichoose_sample].repeat(2) ## Use repeated time steps if use_consistency_loss = True
+		if len(time_samples1) < len(time_samples):
+			time_samples = torch.cat((time_samples, time_samples[inot_sample[0]]), dim = 0)
+		else:
+			time_samples = 1.0*time_samples1 + 0.0
+
 	max_t = float(np.ceil(max([x_grids_trv[j].max() for j in range(len(x_grids_trv))])))
 
 	tree_src_times_all = cKDTree(src_times[:,np.newaxis])
@@ -908,7 +918,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	active_sources_per_slice_l = []
 
 	for i in range(n_batch):
-		i0 = np.random.randint(0, high = len(x_grids))
+
+		if (use_consistency_loss == True)*(np.mod(i, 2) == 1):
+			i0 = Grid_indices[i - 1] ## Use repeated grid if use_consistency_loss = True
+		else:
+			i0 = np.random.randint(0, high = len(x_grids))
+		
 		n_spc = x_grids[i0].shape[0]
 		if use_full_network == True:
 			n_sta_select = n_sta
@@ -1206,6 +1221,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			x_query_focused = np.maximum(np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), x_query_focused)
 			x_query_focused = np.minimum(np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1), x_query_focused)
 			x_query[ind_overwrite_focused_queries] = x_query_focused
+
+		if (use_consistency_loss == True)*(np.mod(i, 2) == 1):
+			x_query = X_query[i - 1]
 		
 		if len(active_sources_per_slice) == 0:
 			lbls_grid = np.zeros((x_grids[grid_select].shape[0], len(t_slice)))
@@ -2672,6 +2690,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
