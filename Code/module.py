@@ -43,6 +43,7 @@ eps = train_config['kernel_sig_t']*5.0
 # use_updated_model_definition = True
 use_phase_types = config['use_phase_types']
 use_absolute_pos = config['use_absolute_pos']
+use_station_embedding = config['use_station_embedding']
 use_neighbor_assoc_edges = config.get('use_neighbor_assoc_edges', False)
 
 device = torch.device('cuda') ## or use cpu
@@ -210,6 +211,62 @@ else:
 		# 		return torch.cat((x_j, mask_j*self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 				
 
+class DataAggregationEmbedding(MessagePassing): # make equivelent version with sum operations.
+	def __init__(self, in_channels, out_channels, n_hidden = 30, scale_rel = scale_rel, n_dim = 3, ndim_proj = 3):
+		super(DataAggregationEmbedding, self).__init__('mean') # node dim
+		## Use two layers of SageConv.
+		self.in_channels = in_channels
+		self.out_channels = out_channels
+		self.n_hidden = n_hidden
+
+		self.activate = nn.PReLU() # can extend to each channel
+		self.init_trns = nn.Linear(in_channels, n_hidden)
+
+		# self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
+		self.l1_t1_2 = nn.Linear(2*n_hidden, n_hidden)
+
+		# self.l1_t2_1 = nn.Linear(n_hidden, n_hidden)
+		self.l1_t2_2 = nn.Linear(2*n_hidden, n_hidden)
+		self.activate11 = nn.PReLU() # can extend to each channel
+		self.activate12 = nn.PReLU() # can extend to each channel
+		self.activate1 = nn.PReLU() # can extend to each channel
+
+		self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
+		self.l2_t1_2 = nn.Linear(3*n_hidden, out_channels)
+
+		self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
+		self.l2_t2_2 = nn.Linear(3*n_hidden, out_channels)
+		self.activate21 = nn.PReLU() # can extend to each channel
+		self.activate22 = nn.PReLU() # can extend to each channel
+		self.activate2 = nn.PReLU() # can extend to each channel
+
+		self.scale_rel = scale_rel
+		self.merge_edges = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
+
+	def forward(self, tr, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src):
+
+		# tr = torch.cat((tr, mask), dim = -1)
+		tr = self.activate(self.init_trns(tr))
+
+		# embed_sta_edges = self.fproj_edges_sta(pos_loc/1e6)
+
+		pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]]/1000.0 - pos_loc[A_src_in_sta[0][A_in_sta[1]]]/1000.0)/(self.scale_rel/1000.0) # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]]/1000.0 - pos_src[A_src_in_sta[1][A_in_src[1]]]/1000.0)/(self.scale_rel/1000.0) # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+
+		## Could add binary edge type information to indicate data type
+		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), edge_attr = pos_rel_sta)), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(tr), edge_attr = pos_rel_src)), dim = 1))
+		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
+
+		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), edge_attr = pos_rel_sta)), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), edge_attr = pos_rel_src)), dim = 1))
+		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
+
+		return tr # the new embedding.
+
+	def message(self, x_j, edge_attr):
+
+		return self.merge_edges(torch.cat((x_j, edge_attr), dim = 1)) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 
 class BipartiteGraphOperator(MessagePassing):
 	def __init__(self, ndim_in, ndim_out, ndim_edges = 3):
@@ -661,7 +718,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
 		if use_neighbor_assoc_edges == True: ndim_extra = ndim_extra + 1 + 3 + 1 ## Add one bimary feature to indicate if edge is for a common station, and the relative offset positions
-		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6 + ndim_extra - 1, n_hidden) # add edge data (observed arrival - theoretical arrival)
+		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6 + ndim_extra - 1 + 2, n_hidden) # add edge data (observed arrival - theoretical arrival)
 		self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
 		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + 2, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
 		self.f_src_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # only use single tranform layer for source embdding (which already has sufficient information)
@@ -781,7 +838,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		norm_pos = torch.exp(-0.5*torch.norm(rel_pos, dim = 1, keepdim = True)**2/(3.0**2))
 
 		contexts = self.f_src_context_2(self.activate1(self.f_src_context_1(torch.cat((sembed[sindex], stime[sindex].reshape(-1,1).detach(), rel_pos, norm_pos, self_link, null_link, self_link_pos), dim = 1)))).view(-1, self.n_heads, self.n_latent)
-		queries = self.f_arrival_query_2(self.activate2(self.f_arrival_query_1(torch.cat((x_j, rel_t_p, rel_t_s, rel_pos, norm_pos, self_link_pos), dim = 1)))).view(-1, self.n_heads, self.n_latent)
+		queries = self.f_arrival_query_2(self.activate2(self.f_arrival_query_1(torch.cat((x_j, rel_t_p, rel_t_s, rel_pos, norm_pos, self_link, null_link, self_link_pos), dim = 1)))).view(-1, self.n_heads, self.n_latent)
 		values = self.f_values_2(self.activate3(self.f_values_1(torch.cat((x_j, rel_t_p, rel_t_s, rel_pos, norm_pos, self_link, null_link, self_link_pos), dim = 1)))).view(-1, self.n_heads, self.n_latent)
 
 		# When using sparse, this assert is not true
@@ -1016,13 +1073,14 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 if use_updated_model_definition == False:
 
 	class GCN_Detection_Network_extended(nn.Module):
-		def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, use_absolute_pos = use_absolute_pos, device = 'cuda'):
+		def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, use_absolute_pos = use_absolute_pos, use_station_embedding = use_station_embedding, n_dim_embedding = 10, device = 'cuda'):
 			super(GCN_Detection_Network_extended, self).__init__()
+			if use_station_embedding == False: n_dim_embedding = 0
 			# Define modules and other relavent fixed objects (scaling coefficients.)
 			# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
-			self.DataAggregation = DataAggregation(4, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
+			self.DataAggregation = DataAggregation(4 + n_dim_embedding, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
 			self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 3).to(device) # 30, 15
-			self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
+			self.SpatialAggregation1 = SpatialAggregation(15 + n_dim_embedding, 30).to(device) # 15, 30
 			self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
 			self.SpatialAggregation3 = SpatialAggregation(30, 30).to(device) # 15, 30
 			self.SpatialDirect = SpatialDirect(30, 30).to(device) # 15, 30
@@ -1030,14 +1088,36 @@ if use_updated_model_definition == False:
 			self.TemporalAttention = TemporalAttention(30, 1, 15).to(device)
 	
 			self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
-			self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
+			self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15 + n_dim_embedding, 15).to(device) # need to add concatenation
 			self.LocalSliceLgCollapseP = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3, device = device).to(device)
 			# self.ArrivalS = StationSourceAttention(30, 15, 1, 15, n_heads = 3).to(device)
 			self.use_absolute_pos = use_absolute_pos
+			self.use_station_embedding = use_station_embedding
 			self.scale_rel = scale_rel
-			
+			self.device = device
+
+			if self.use_station_embedding == True:
+				if self.use_absolute_pos == False:
+					self.DataAggregationEmbedding = DataAggregationEmbedding(1, 15).to(device) ## Unit input; or could pass in degree information
+				else:
+					self.DataAggregationEmbedding = DataAggregationEmbedding(7, 15).to(device) ## Unit input and absolute position
+
+				self.Bipartite_Embedding = BipartiteGraphOperator(30, 15, ndim_edges = 3).to(device)
+				self.SpatialAggregationEmbedding = SpatialAggregation(15, 30).to(device)
+				self.BipartiteGraphReadOutEmbedding = BipartiteGraphReadOutOperator(30, 15).to(device)
+
+				if self.use_absolute_pos == False:
+					self.DataAggregationAssociationEmbedding = DataAggregationAssociationPhase(15, 15, n_dim_mask = 2).to(device) ## Unit input; or could pass in degree information
+				else:
+					self.DataAggregationAssociationEmbedding = DataAggregationAssociationPhase(15 + 6, 15, n_dim_mask = 2).to(device) ## Unit input and absolute position
+
+				# self.DataAggregationAssociationEmbedding = DataAggregationAssociationPhase(15, 15).to(device)
+				self.merge_embedding = nn.Sequential(nn.Linear(30, n_dim_embedding), nn.PReLU())
+				self.merge_embedding1 = nn.Sequential(nn.Linear(30, n_dim_embedding), nn.PReLU())
+				self.merge_embedding2 = nn.Sequential(nn.Linear(30, n_dim_embedding), nn.PReLU())
+
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
 	
@@ -1049,8 +1129,28 @@ if use_updated_model_definition == False:
 			if self.use_absolute_pos == True:
 				Slice = torch.cat((Slice, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
+			if self.use_station_embedding == True:
+				if self.use_absolute_pos == False:
+					embed_prod = self.DataAggregationEmbedding(torch.ones((Slice.shape[0],1)).to(self.device), A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart)
+				else:
+					embed_prod = self.DataAggregationEmbedding(torch.cat((torch.ones((Slice.shape[0],1)).to(self.device), Slice[:,-6::]), dim = 1), A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart)
+				mask_embed = torch.ones((Slice.shape[0],1)).to(self.device)
+				mask_embed1 = torch.ones((x_temp_cuda_cart.shape[0],1)).to(self.device)
+				embed_spc = self.Bipartite_Embedding(embed_prod, A_src_in_edges, mask_embed, n_sta, n_temp)
+				embed_spc = self.SpatialAggregationEmbedding(embed_spc, A_src, x_temp_cuda_cart)
+				embed_prod_out, mask_out_embed = self.BipartiteGraphReadOutEmbedding(embed_spc, A_Lg_in_src, mask_embed1, n_sta, n_temp)
+				# embed_prod_out = self.DataAggregationAssociationPhase(embed_prod_out, embed_prod.detach(), mask_out_embed, mask_embed, A_in_sta, A_in_src)
+				embed_prod_out = self.DataAggregationAssociationEmbedding(embed_prod_out, embed_prod, mask_out_embed, mask_embed, A_in_sta, A_in_src)
+				embed_prod = self.merge_embedding(embed_prod)
+				embed_spc = self.merge_embedding1(embed_spc)
+				embed_prod_out = self.merge_embedding2(embed_prod_out)
+				Slice = torch.cat((Slice, embed_prod), dim = 1)
+
 			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
+			if self.use_station_embedding == True:
+				x = torch.cat((x, embed_spc), dim = 1)
+
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
@@ -1063,8 +1163,13 @@ if use_updated_model_definition == False:
 			## Note below: why detach x_latent?
 			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
+
+			if self.use_station_embedding == True:
+				s = torch.cat((s, embed_prod_out), dim = 1)
+
 			if self.use_absolute_pos == True:
 				s = torch.cat((s, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
+
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
 			arv_p = self.LocalSliceLgCollapseP(A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size # locs_use_cart, x_temp_cuda_cart, A_src_in_sta
 			arv_s = self.LocalSliceLgCollapseS(A_edges_s, dt_partition, tpick, ipick, phase_label, s, tlatent[:,1].reshape(-1,1), n_temp, n_sta)
@@ -1093,8 +1198,31 @@ if use_updated_model_definition == False:
 			self.A_edges_s = A_edges_s
 			self.dt_partition = dt_partition
 			self.tlatent = tlatent
+			n_sta, n_temp = len(pos_loc), len(pos_src)
+
 			# self.pos_rel_sta = pos_rel_sta
 			# self.pos_rel_src = pos_rel_src
+
+			if self.use_station_embedding == True:
+				if self.use_absolute_pos == False:
+					embed_prod = self.DataAggregationEmbedding(torch.ones((A_src_in_sta.shape[1],1)).to(self.device), A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src)
+				else:
+					embed_prod = self.DataAggregationEmbedding(torch.cat((torch.ones((A_src_in_sta.shape[1],1)).to(self.device), Slice[:,-6::]), dim = 1), A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src)
+
+				mask_embed = torch.ones((A_src_in_sta.shape[1],1)).to(self.device)
+				mask_embed1 = torch.ones((pos_src.shape[0],1)).to(self.device)
+				embed_spc = self.Bipartite_Embedding(embed_prod, A_src_in_edges, torch.ones((A_src_in_sta.shape[1],1)).to(self.device), n_sta, n_temp)
+				embed_spc = self.SpatialAggregationEmbedding(embed_spc, A_src, pos_src)
+				embed_prod_out, mask_out_embed = self.BipartiteGraphReadOutEmbedding(embed_spc, A_Lg_in_src, mask_embed1, n_sta, n_temp)
+				# embed_prod_out = self.DataAggregationAssociationPhase(embed_prod_out, embed_prod.detach(), mask_out_embed, mask_embed, A_in_sta, A_in_src)
+				embed_prod_out = self.DataAggregationAssociationEmbedding(embed_prod_out, embed_prod, mask_out_embed, mask_embed, A_in_sta, A_in_src)
+				embed_prod = self.merge_embedding(embed_prod)
+				embed_spc = self.merge_embedding1(embed_spc)
+				embed_prod_out = self.merge_embedding2(embed_prod_out)
+				self.embed_prod = embed_prod.detach()
+				self.embed_spc = embed_spc.detach()
+				self.embed_prod_out = embed_prod_out.detach()
+
 		
 		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
@@ -1103,11 +1231,17 @@ if use_updated_model_definition == False:
 			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 			if self.use_absolute_pos == True:
 				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)		
-			
+		
+			if self.use_station_embedding == True:
+				Slice = torch.cat((Slice, self.embed_prod), dim = 1)
+
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
 			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
+			if self.use_station_embedding == True:
+				x = torch.cat((x, self.embed_spc), dim = 1)
+
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
@@ -1120,6 +1254,9 @@ if use_updated_model_definition == False:
 			## Note below: why detach x_latent?
 			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
+			if self.use_station_embedding == True:
+				s = torch.cat((s, self.embed_prod_out), dim = 1)
+
 			if self.use_absolute_pos == True:
 				s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 				
@@ -1140,11 +1277,16 @@ if use_updated_model_definition == False:
 			if self.use_absolute_pos == True:
 				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
+			if self.use_station_embedding == True:
+				Slice = torch.cat((Slice, self.embed_prod), dim = 1)
 			
 			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
 			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
 			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
+			if self.use_station_embedding == True:
+				x = torch.cat((x, self.embed_spc), dim = 1)
+
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
@@ -1826,7 +1968,6 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
-
 
 
 
