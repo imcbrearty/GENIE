@@ -1790,7 +1790,7 @@ for i in range(n_restart_step, n_epochs):
 			dice3 = z_vec if (pick_lbls[:,:,0].max() < min_val_trgt)*(out[2][:,:,0].max().item() < min_val_trgt) else dice_loss(out[2][:,:,0], pick_lbls[:,:,0])
 			dice4 = z_vec if (Lbls[i0].max() < min_val_trgt)*(out[3][:,:,0].max() < min_val_trgt) else dice_loss(out[3][:,:,0], pick_lbls[:,:,1])
 			loss_dice = 1.0 - (weights[0]*dice1 + weights[1]*dice2 + weights[2]*dice3 + weights[3]*dice4)
-			loss = 0.5*loss + (0.5*loss_dice)/100.0
+			loss = 0.5*loss + (0.5*loss_dice)/500.0
 
 			# min_val_trgt = 0.1
 			# z_vec = torch.Tensor([1.0]).to(device)
@@ -2672,6 +2672,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
