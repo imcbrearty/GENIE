@@ -1810,7 +1810,7 @@ for i in range(n_restart_step, n_epochs):
 		# 	loss_dice = 1.0 - (weights[0]*dice1 + weights[1]*dice2 + weights[2]*dice3 + weights[3]*dice4)
 		# 	loss = 0.5*loss + (0.5*loss_dice)/500.0
 
-		use_dice_loss = False
+		use_dice_loss = True
 		if (use_dice_loss == True)*(i > int(n_epochs/5)):
 			def dice_loss(p, t, epsilon = 1e-6):
 				return (2.0*((p.clamp(min = 0.0, max = 1.0)*t.clamp(min = 0.0, max = 1.0)).sum()) + epsilon)/(p.clamp(min = 0.0, max = 1.0).pow(2).sum() + t.clamp(min = 0.0, max = 1.0).pow(2).sum() + epsilon)
@@ -1843,6 +1843,20 @@ for i in range(n_restart_step, n_epochs):
 			# loss_dice = 1.0 - (weights[0]*dice1 + weights[1]*dice2 + weights[2]*dice3 + weights[3]*dice4)			
 			# loss_dice = (weights[0]*dice_loss(torch.relu(out[0][:,:,0]), torch.Tensor(Lbls[i0]).to(device)) + weights[1]*dice_loss(torch.relu(out[1][:,:,0]), torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*dice_loss(torch.relu(out[2][:,:,0]), pick_lbls[:,:,0]) + weights[3]*dice_loss(torch.relu(out[3][:,:,0]), pick_lbls[:,:,1]))/n_batch
 
+		
+		if use_consistency_loss == True:
+			if np.mod(inc, 2) == 1:
+				if (i == iter_loss[0])*(inc == (iter_loss[1] + 1)):
+					# pdb.set_trace()
+					weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
+					weight2 = ((Lbls_query[i0] - Lbls_save[1]).max() == 0) # .float()
+					loss_consistency = (weight1*weights[0]*loss_func(out_save[0], out[0]) + weight2*weights[1]*loss_func(out_save[1], out[1]))/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+					loss = loss + 0.25*loss_consistency
+			out_save = [out[0], out[1]]
+			Lbls_save = [Lbls[i0], Lbls_query[i0]]
+			iter_loss = [i, inc]
+		
+		
 		min_val_use = 0.1
 		use_sensitivity_loss = False
 		loss_regularize = torch.Tensor([0.0]).to(device)
@@ -2712,6 +2726,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
