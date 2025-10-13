@@ -250,12 +250,16 @@ else:
 
 ## Check for reference catalog
 if use_reference_spatial_density == True:
-
+	
 	n_reference_ver = 1
 	load_reference_density = True
 	if (os.path.isfile(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_1.npz') == 1)*(load_reference_density == True):
 		srcs_ref = np.load(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver)['srcs_ref']
+		
 	else:
+
+		from sklearn.cluster import KMeans
+		
 		st1 = glob.glob(path_to_file + 'Calibration/19*') ## Assuming years are 1900 and 2000's
 		st2 = glob.glob(path_to_file + 'Calibration/20*')
 		st = np.concatenate((st1, st2), axis = 0)
@@ -265,27 +269,63 @@ if use_reference_spatial_density == True:
 			srcs_ref.append(np.load(s)['srcs_ref'])
 			print('Read %s'%s)
 		srcs_ref = np.vstack(srcs_ref)
-		scale_x_ = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-		offset_x_ = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
-		if (min_magnitude_ref is not False)*(np.isnan(srcs_ref[:,4]).sum() == 0):
-			srcs_ref = srcs_ref[srcs_ref[:,4] >= min_magnitude_ref,:]
-		
-		srcs_ref = kmeans_packing_fit_sources(srcs_ref, scale_x_, offset_x_, 3, n_reference_clusters, ftrns1, ftrns2, n_batch = 5000, n_steps = 5000, blur_sigma = spatial_sigma)[0]
-		m_ref = KernelDensity(kernel = 'gaussian', bandwidth = spatial_sigma).fit(ftrns1(srcs_ref))
-		## Make uniform grid, query if prob > percentile prob of the kernel density; keep these points and repeat kmeans_packing_fit_sources
-		dlen1, dlen2 = np.diff(lat_range_extend), np.diff(lon_range_extend)
-		dscale = np.sqrt(dlen1*dlen2)[0]/50
-		dscale_depth = np.minimum(spatial_sigma, 110e3*dscale)
-		x1_lat, x2_lon, x3_depth = np.arange(lat_range_extend[0], lat_range_extend[1], dscale), np.arange(lon_range_extend[0], lon_range_extend[1], dscale), np.arange(depth_range[0], depth_range[1] + dscale_depth, dscale_depth)
-		x11, x12, x13 = np.meshgrid(x1_lat, x2_lon, x3_depth)
-		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-		prob = m_ref.score_samples(ftrns1(xx))
-		prob = np.exp(prob - prob.max())
-		itrue = np.where(prob > percentile_threshold_ref)[0] # np.where(prob/prob.max() > np.quantile(prob/prob.max(), percentile_threshold_ref))[0]
-		srcs_ref = kmeans_packing_fit_sources(xx[itrue], scale_x_, offset_x_, 3, n_reference_clusters, ftrns1, ftrns2, n_batch = 5000, n_steps = 5000, blur_sigma = spatial_sigma)[0]
-		
+
+		min_counts = 10 ## This many sources per cell
+		n_grid_size = 150 ## Number of cells in grid
+		smooth_pos = 2000.0 ## 2 km smoothing of positions
+
+		a = plt.hexbin(srcs_ref[:,1], srcs_ref[:,0], gridsize = n_grid_size, bins = 'log')
+		pos = np.flip(a.get_offsets(), axis = 1)
+		counts = a.get_array().data
+		# min_counts = np.quantile(counts, min_quantile)
+		ifind = np.where(counts > min_counts)[0]
+		pos = np.concatenate((pos[ifind], np.zeros((len(ifind),1))), axis = 1)
+		rand_vec = np.random.randn(n_reference_clusters*5,3)
+		rand_vec = rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True)
+		pos_src = np.minimum(np.maximum(ftrns2(ftrns1(pos[np.random.choice(len(pos), size = n_reference_clusters*5)]) + smooth_pos*rand_vec), offset_x), offset_x + scale_x)
+		pos_src = ftrns2(KMeans(n_clusters = n_reference_clusters).fit(ftrns1(pos_src)).cluster_centers_)
+
+		# clusters = np.flip(KMeans(n_clusters = n_reference_clusters).fit(np.flip(pos[ifind], axis = 1)).cluster_centers_, axis = 1)
+		# clusters = np.concatenate((clusters, np.zeros((len(clusters),1))), axis = 1)
+
 		if load_reference_density == True:
-			np.savez_compressed(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver, srcs_ref = srcs_ref)
+			np.savez_compressed(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver, srcs_ref = pos_src)
+	
+	# n_reference_ver = 1
+	# load_reference_density = True
+	# if (os.path.isfile(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_1.npz') == 1)*(load_reference_density == True):
+	# 	srcs_ref = np.load(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver)['srcs_ref']
+	# else:
+	# 	st1 = glob.glob(path_to_file + 'Calibration/19*') ## Assuming years are 1900 and 2000's
+	# 	st2 = glob.glob(path_to_file + 'Calibration/20*')
+	# 	st = np.concatenate((st1, st2), axis = 0)
+	# 	st = np.hstack([glob.glob(s + '/*ver_%d.npz'%n_reference_ver) for s in st])
+	# 	srcs_ref = []
+	# 	for s in st:
+	# 		srcs_ref.append(np.load(s)['srcs_ref'])
+	# 		print('Read %s'%s)
+	# 	srcs_ref = np.vstack(srcs_ref)
+	# 	scale_x_ = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+	# 	offset_x_ = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
+	# 	if (min_magnitude_ref is not False)*(np.isnan(srcs_ref[:,4]).sum() == 0):
+	# 		srcs_ref = srcs_ref[srcs_ref[:,4] >= min_magnitude_ref,:]
+		
+	# 	srcs_ref = kmeans_packing_fit_sources(srcs_ref, scale_x_, offset_x_, 3, n_reference_clusters, ftrns1, ftrns2, n_batch = 5000, n_steps = 5000, blur_sigma = spatial_sigma)[0]
+	# 	m_ref = KernelDensity(kernel = 'gaussian', bandwidth = spatial_sigma).fit(ftrns1(srcs_ref))
+	# 	## Make uniform grid, query if prob > percentile prob of the kernel density; keep these points and repeat kmeans_packing_fit_sources
+	# 	dlen1, dlen2 = np.diff(lat_range_extend), np.diff(lon_range_extend)
+	# 	dscale = np.sqrt(dlen1*dlen2)[0]/50
+	# 	dscale_depth = np.minimum(spatial_sigma, 110e3*dscale)
+	# 	x1_lat, x2_lon, x3_depth = np.arange(lat_range_extend[0], lat_range_extend[1], dscale), np.arange(lon_range_extend[0], lon_range_extend[1], dscale), np.arange(depth_range[0], depth_range[1] + dscale_depth, dscale_depth)
+	# 	x11, x12, x13 = np.meshgrid(x1_lat, x2_lon, x3_depth)
+	# 	xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+	# 	prob = m_ref.score_samples(ftrns1(xx))
+	# 	prob = np.exp(prob - prob.max())
+	# 	itrue = np.where(prob > percentile_threshold_ref)[0] # np.where(prob/prob.max() > np.quantile(prob/prob.max(), percentile_threshold_ref))[0]
+	# 	srcs_ref = kmeans_packing_fit_sources(xx[itrue], scale_x_, offset_x_, 3, n_reference_clusters, ftrns1, ftrns2, n_batch = 5000, n_steps = 5000, blur_sigma = spatial_sigma)[0]
+		
+	# 	if load_reference_density == True:
+	# 		np.savez_compressed(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver, srcs_ref = srcs_ref)
 						      
 ## Training synthic data parameters
 
@@ -2726,6 +2766,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
