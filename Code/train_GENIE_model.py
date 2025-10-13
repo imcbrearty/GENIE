@@ -28,6 +28,7 @@ import pdb
 import pathlib
 import glob
 import sys
+import random
 
 from utils import *
 from module import *
@@ -61,6 +62,7 @@ path_to_file += '\\' if '\\' in path_to_file else '/'
 seperator = '\\' if '\\' in path_to_file else '/'
 
 ## Graph params
+dense_array = config['dense_array']
 k_sta_edges = config['k_sta_edges']
 k_spc_edges = config['k_spc_edges']
 k_time_edges = config['k_time_edges']
@@ -72,7 +74,27 @@ use_topography = config['use_topography']
 use_station_corrections = config.get('use_station_corrections', False)
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
-    k_nearest_pairs = config['k_nearest_pairs']	
+    k_nearest_pairs = config['k_nearest_pairs']
+
+# Dense array graph parameters
+if dense_array == True:
+	density_radius = config['density_radius']
+	base_K = config['base_K']
+	C = config['C']
+	base_p = config['base_p']
+	R_far = config['R_far']
+	low_density_thresh = config['low_density_thresh']
+
+# Set random seeds for reproducibility
+random_seed = config['random_seed']
+random.seed(random_seed)
+np.random.seed(random_seed)
+torch.manual_seed(random_seed)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(random_seed)
+    torch.cuda.manual_seed_all(random_seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
@@ -1191,13 +1213,20 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		lp_srcs.append(src_subset)
 
 		if skip_graphs == False:
-		
-			A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), k = k_sta_edges + 1).flip(0).contiguous())[0]
+			if dense_array == True:
+				densities = compute_local_density(ftrns1(locs[sta_select]), density_radius)
+				A_sta_sta = remove_self_loops(torch.Tensor(create_edges_for_dense_nodes(ftrns1(locs[sta_select]), densities, base_K=base_K, C=C, base_p=base_p, R_far=R_far, low_density_thresh=low_density_thresh)).to(device).T)[0]
+				print(f'Number of station edges are: {A_sta_sta.shape[1]}')
+				A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(A_sta_sta.shape[1]).view(1,-1).to(device)).contiguous()
+			else:
+				A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), k = k_sta_edges + 1).flip(0).contiguous())[0]
+				print(f'Number of station edges are: {A_sta_sta.shape[1]}')
+				A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1).to(device)).contiguous()
+
 			A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
 			## Cross-product graph is: source node x station node. Order as, for each source node, all station nodes.
 	
 			# Cross-product graph, nodes connected by: same source node, connected stations
-			A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1).to(device)).contiguous()
 			A_prod_src_src = (n_sta_slice*A_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1).to(device)).contiguous()	
 	
 			# For each unique spatial point, sum in all edges.
@@ -1401,7 +1430,6 @@ if config['train_travel_time_neural_network'] == False:
 x_grids_trv = compute_travel_times(trv, locs, x_grids, device = device)
 
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
-
 # for i in range(len(x_grids)):
 
 # 	if locs.shape[0]*x_grids[i].shape[0] > 150e3:
@@ -1817,7 +1845,7 @@ for i in range(n_restart_step, n_epochs):
 			A_src_src_l[i0],
 			torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
 			torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
-			torch.Tensor(A_edges_ref_l[i0]).to(device),
+			A_edges_ref_l[i0],  # Keep as numpy array for numerical precision
 			trv_out,
 			torch.Tensor(lp_times[i0]).to(device),
 			torch.Tensor(lp_stations[i0]).long().to(device),
