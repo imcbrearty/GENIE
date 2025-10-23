@@ -45,6 +45,8 @@ use_phase_types = config['use_phase_types']
 use_absolute_pos = config['use_absolute_pos']
 use_neighbor_assoc_edges = config.get('use_neighbor_assoc_edges', False)
 
+use_time_shift = config['use_time_shift'] ## If True, must concatenate time offsets into offsets
+
 device = torch.device('cuda') ## or use cpu
 
 if use_updated_model_definition == False:
@@ -1687,6 +1689,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
