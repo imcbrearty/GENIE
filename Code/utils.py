@@ -599,11 +599,12 @@ def interp_1D_velocity_model_to_3D_travel_times(X, locs, Xmin, X0, Dx, Mn, Tp, T
 
 
 ### PREP INPUTS ###
-def assemble_time_pointers_for_stations(trv_out, max_t = None, dt = 1.0, k = 10, win = 10.0):
+def assemble_time_pointers_for_stations(trv_out, max_t = None, min_t = None, dt = 1.0, k = 10, win = 10.0):
 
 	n_temp, n_sta = trv_out.shape[0:2]
 	if max_t is None: max_t = trv_out.max()
-	dt_partition = np.arange(-win, win + max_t + dt, dt) # + tbuffer
+	if min_t is None: min_t = 0.0
+	dt_partition = np.arange(-win + min_t, win + max_t + dt, dt) # + tbuffer
 
 	edges_p = []
 	edges_s = []
@@ -621,10 +622,11 @@ def assemble_time_pointers_for_stations(trv_out, max_t = None, dt = 1.0, k = 10,
 
 	return edges_p, edges_s, dt_partition
 
-def assemble_time_pointers_for_stations_multiple_grids(trv_out, max_t, dt = 1.0, k = 10, win = 10.0):
+def assemble_time_pointers_for_stations_multiple_grids(trv_out, max_t, min_t = None, dt = 1.0, k = 10, win = 10.0):
 
 	n_temp, n_sta = trv_out.shape[0:2]
-	dt_partition = np.arange(-win, win + max_t + dt, dt)
+	if min_t is None: min_t = 0.0
+	dt_partition = np.arange(-win + min_t, win + max_t + dt, dt)
 
 	edges_p = []
 	edges_s = []
@@ -934,7 +936,7 @@ def load_station_corrections(trv, locs, path_to_file, name_of_project, n_ver_cor
 	## Can we overwrite the function?
 	return TrvTimesCorrection(trv, x_grid_corr, locs_use, coefs, ftrns1_diff, coefs_ker = coefs_ker, interp_type = interp_type, k = k_spc_interp, trv_direct = trv_direct, sig = sig_ker)
 
-def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = None, dt_embed = 1.0, t_win = 10.0, device = 'cpu'):
+def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = None, min_t = None, time_shifts = None, dt_embed = 1.0, t_win = 10.0, device = 'cpu'):
 
 	k_sta_edges, k_spc_edges, k_time_edges = graph_params
 
@@ -948,6 +950,7 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 
 	## Replacing the loop with this seperate function
 	x_grids_trv = compute_travel_times(trv, locs, x_grids, device = device)
+	if time_shifts is not None: x_grids_trv = x_grids_trv + np.expand_dims(time_shifts, axis = 2)
 	
 	# for i in range(len(x_grids)):
 
@@ -970,10 +973,12 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 		# x_grids_edges.append(edge_index)
 
 	if max_t is None: max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # *1.1 # + 10.0
+	if min_t is None: min_t = 0.0
+	# if max_t is None: max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # *1.1 # + 10.0
 
 	for i in range(len(x_grids)):
 
-		A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations_multiple_grids(x_grids_trv[i], max_t, dt = dt_embed, win = t_win)
+		A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations_multiple_grids(x_grids_trv[i], max_t, min_t = min_t, dt = dt_embed, win = t_win)
 		x_grids_trv_pointers_p.append(A_edges_time_p)
 		x_grids_trv_pointers_s.append(A_edges_time_s)
 		x_grids_trv_refs.append(dt_partition) # save as cuda tensor, or no?
@@ -1223,6 +1228,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
