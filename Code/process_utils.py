@@ -848,17 +848,19 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 
 	return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
-def compute_time_embedding_vectors(trv_pairwise, locs, x_grid, A_src_in_sta, max_t, dt_res = float(eps/15.0), k_times = 10, t_win = 10, device = 'cpu'): ## Note: now calling dt_res and t_win from inside scripts
+def compute_time_embedding_vectors(trv_pairwise, locs, x_grid, A_src_in_sta, max_t, min_t = None, time_shift = None, dt_res = float(eps/15.0), k_times = 10, t_win = 10, device = 'cpu'): ## Note: now calling dt_res and t_win from inside scripts
 
 	## Find sparse set of arrival embedding indices for each station into the subgraph
 	trv_out = trv_pairwise(torch.Tensor(locs).to(device)[A_src_in_sta[0]], torch.Tensor(x_grid).to(device)[A_src_in_sta[1]])
-
+	if time_shift is not None: trv_out = trv_out + torch.Tensor(time_shift).to(device)[A_src_in_sta[1]]
+	if min_t is None: min_t = 0.0
+	
 	## Make tree and find look up
 	scale_sta_ind = 2.0*(max_t + t_win + dt_res) ## max_t*2.0 ## Note updated scale_sta_ind
 	tree_p = cKDTree(np.concatenate((scale_sta_ind*A_src_in_sta[0].cpu().detach().numpy().reshape(-1,1), trv_out[:,0].cpu().detach().numpy().reshape(-1,1)), axis = 1))
 	tree_s = cKDTree(np.concatenate((scale_sta_ind*A_src_in_sta[0].cpu().detach().numpy().reshape(-1,1), trv_out[:,1].cpu().detach().numpy().reshape(-1,1)), axis = 1))
 
-	dt_partition = np.arange(-t_win, max_t + t_win + dt_res, dt_res) ## Note: removing + eps
+	dt_partition = np.arange(-t_win + min_t, max_t + t_win + dt_res, dt_res) ## Note: removing + eps
 	sta_ind_range = np.arange(0, len(locs))
 	x11, x12 = np.meshgrid(dt_partition, sta_ind_range)
 	query_points = np.concatenate((scale_sta_ind*x12.reshape(-1,1), x11.reshape(-1,1)), axis = 1)
@@ -1627,6 +1629,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
