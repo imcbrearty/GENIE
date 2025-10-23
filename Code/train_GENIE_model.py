@@ -76,6 +76,16 @@ if use_subgraph == True:
 
 graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
+## Load time shift variables
+use_time_shift = config['use_time_shift']
+time_shift_range = config['time_shift_range'] # 30.0
+time_shift_scale = config['time_shift_scale'] # 8.0
+time_shift_scale = 0 if use_time_shift == False else time_shift_scale
+if use_time_shift == True:
+	z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
+	time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
+	z.close()
+
 # File versions
 template_ver = train_config['template_ver'] # spatial grid version
 vel_model_ver = train_config['vel_model_ver'] # velocity model version
@@ -2647,6 +2657,7 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
