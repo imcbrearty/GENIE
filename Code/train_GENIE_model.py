@@ -78,13 +78,10 @@ graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
 ## Load time shift variables
 use_time_shift = config['use_time_shift']
-time_shift_range = config['time_shift_range'] # 30.0
-time_shift_scale = config['time_shift_scale'] # 8.0
-time_shift_scale = 0 if use_time_shift == False else time_shift_scale
-if use_time_shift == True:
-	z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
-	time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
-	z.close()
+# time_shift_range = config['time_shift_range'] # 30.0
+# time_shift_scale = config['time_shift_scale'] # 8.0
+# time_shift_scale = 0 if use_time_shift == False else time_shift_scale
+
 
 # File versions
 template_ver = train_config['template_ver'] # spatial grid version
@@ -115,6 +112,8 @@ src_x_kernel = train_config['src_x_kernel'] # Kernel for source label, horizonta
 src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
 src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
 # t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
+
+scale_time = train_config['scale_time']
 
 use_adaptive_window = True
 if use_adaptive_window == True:
@@ -238,6 +237,14 @@ offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_rang
 rbest_cuda = torch.Tensor(rbest).to(device)
 mn_cuda = torch.Tensor(mn).to(device)
 
+if use_time_shift == True:
+	z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
+	time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
+	z.close()
+else:
+	time_shifts = None # np.zeros((x_grids.shape[0], x_grids.shape[1]))
+
+
 # use_spherical = False
 if config['use_spherical'] == True:
 
@@ -256,7 +263,7 @@ else:
 
 	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T
 	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device)
-	
+
 
 ## Check for reference catalog
 if use_reference_spatial_density == True:
@@ -490,7 +497,7 @@ def sample_correlated_travel_time_noise(cholesky_matrix_trv, mean_vec, bias_fact
 
 		return simulated_times, scaled_mean_vec, scale_val, log_likelihood_obs, log_likelihood_sim
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, return_only_data = False):
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, use_time_shift = use_time_shift, return_only_data = False):
 
 	if verbose == True:
 		st = time.time()
@@ -882,19 +889,22 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if (use_preferential_sampling == True)*(len(src_times_active) > 1): # Should the second condition just be (len(src_times_active) > 0) ?
 		for j in range(n_batch):
 			if np.random.rand() > 0.5: # 30% of samples, re-focus time. # 0.7
-				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*src_t_kernel*np.random.laplace()
+				# time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*src_t_kernel*np.random.laplace()
+				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*time_shift_range*np.random.laplace()
 
 	time_samples = np.sort(time_samples)
 
 	max_t = float(np.ceil(max([x_grids_trv[j].max() for j in range(len(x_grids_trv))])))
+	min_t = float(np.floor(min([x_grids_trv[j].min() for j in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
 
 	tree_src_times_all = cKDTree(src_times[:,np.newaxis])
 	tree_src_times = cKDTree(src_times_active[:,np.newaxis])
-	lp_src_times_all = tree_src_times_all.query_ball_point(time_samples[:,np.newaxis], r = 3.0*src_t_kernel)
+	# lp_src_times_all = tree_src_times_all.query_ball_point(time_samples[:,np.newaxis], r = 3.0*src_t_kernel)
+	lp_src_times_all = tree_src_times_all.query_ball_point(time_samples[:,np.newaxis], r = 1.0*time_shift_range)
 
 	st = time.time()
 	tree = cKDTree(arrivals[:,0][:,None])
-	lp = tree.query_ball_point(time_samples.reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0) 
+	lp = tree.query_ball_point(time_samples.reshape(-1,1) + (max_t - min_t)/2.0 + min_t, r = t_win + (max_t - min_t)/2.0) 
 
 	lp_concat = np.hstack([np.array(list(lp[j])) for j in range(n_batch)]).astype('int')
 	if len(lp_concat) == 0:
@@ -943,9 +953,19 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				ind_sta_select = ind_sta_select[ip_retained]
 				n_sta_select = len(ind_sta_select)
 				
-		
+		# if use_time_shift == False:
+
 		Trv_subset_p.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
 		Trv_subset_s.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
+
+		# else:
+
+		# Trv_subset_p.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
+		# Trv_subset_s.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
+
+		# Trv_subset_p[-1] = Trv_subset_p[-1]
+
+
 		Station_indices.append(ind_sta_select) # record subsets used
 		Batch_indices.append(i*np.ones(len(ind_sta_select)*n_spc))
 		Grid_indices.append(i0)
@@ -965,7 +985,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	Batch_indices = np.hstack(Batch_indices)
 
 
-	offset_per_batch = 1.5*max_t
+	offset_per_batch = 1.5*(np.abs(max_t - min_t))
 	offset_per_station = 1.5*n_batch*offset_per_batch
 
 
@@ -1148,7 +1168,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		if skip_graphs == False:
 		
 			A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), k = k_sta_edges + 1).flip(0).contiguous())[0]
-			A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
+			# A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
+
+			A_src_src = remove_self_loops(knn(torch.cat((torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), scale_time*torch.Tensor(x_grids[grid_select][:,3].reshape(-1,1)).to(device)), dim = 1), torch.cat((torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), scale_time*torch.Tensor(x_grids[grid_select][:,3].reshape(-1,1)).to(device)), dim = 1), k = k_spc_edges + 1).flip(0).contiguous())[0]
+
+
 			## Cross-product graph is: source node x station node. Order as, for each source node, all station nodes.
 	
 			# Cross-product graph, nodes connected by: same source node, connected stations
@@ -1195,9 +1219,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			A_edges_ref_l.append([])			
 		
 		x_query = np.random.rand(n_spc_query, 3)*scale_x + offset_x # Check if scale_x and offset_x are correct.
+		x_query_t = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(x_query))
 
 		if len(lp_srcs[-1]) > 0:
 			x_query[0:len(lp_srcs[-1]),0:3] = lp_srcs[-1][:,0:3]
+			x_query_t[0:len(lp_srcs[-1])] = lp_srcs[-1][:,3]
 
 		n_frac_focused_queries = 0.2
 		n_concentration_focused_queries = 0.05 # 5% of scale of domain
@@ -1210,16 +1236,24 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			# x_query_focused = x_query_focused + lp_srcs[-1][ind_source_focused,0:3]
 			x_query_focused = 2.0*np.random.randn(n_focused_queries, 3)*np.mean([src_x_kernel, src_depth_kernel])			
 			x_query_focused = ftrns2(x_query_focused + ftrns1(lp_srcs[-1][ind_source_focused,0:3]))
+
 			ioutside = np.where(((x_query_focused[:,2] < depth_range[0]) + (x_query_focused[:,2] > depth_range[1])) > 0)[0]
-			x_query_focused[ioutside,2] = np.random.rand(len(ioutside))*(depth_range[1] - depth_range[0]) + depth_range[0]
-			
+			x_query_focused[ioutside,2] = np.random.rand(len(ioutside))*(depth_range[1] - depth_range[0]) + depth_range[0]			
 			x_query_focused = np.maximum(np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), x_query_focused)
 			x_query_focused = np.minimum(np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1), x_query_focused)
 			x_query[ind_overwrite_focused_queries] = x_query_focused
-		
+
+			x_query_focused_t = 2.0*np.random.randn(n_focused_queries)*src_t_kernel			
+			x_query_focused_t = lp_srcs[-1][ind_source_focused,3] + x_query_focused_t
+			ioutside = np.where(((x_query_focused_t < min_t) + (x_query_focused_t > max_t)) > 0)[0]
+			x_query_focused_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
+			x_query_t[ind_overwrite_focused_queries] = x_query_focused_t
+
+
 		if len(active_sources_per_slice) == 0:
-			lbls_grid = np.zeros((x_grids[grid_select].shape[0], len(t_slice)))
-			lbls_query = np.zeros((n_spc_query, len(t_slice)))
+			lbls_grid = np.zeros((x_grids[grid_select].shape[0], 1))
+			lbls_query = np.zeros((n_spc_query, 1))
+
 		else:
 			active_sources_per_slice = active_sources_per_slice.astype('int')
 			
@@ -1227,11 +1261,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			# lbls_grid = (np.expand_dims(spatial_exp_term.sum(2), axis=1) * temporal_exp_term).max(2)
 			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 
-			lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
-			lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
+			lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+			lbls_query = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_query_t).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
 
+			# lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
+			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
+
+			# lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
+			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 		
-		X_query.append(x_query)
+		X_query.append(np.concatenate((x_query, x_query_t.reshape(-1,1)), axis = 1))
 		Lbls.append(lbls_grid)
 		Lbls_query.append(lbls_query)
 
@@ -1352,7 +1391,16 @@ if config['train_travel_time_neural_network'] == False:
 
 x_grids_trv = compute_travel_times(trv, locs, x_grids, device = device)
 
+if use_time_shift == True:
+	for i in range(len(x_grids_trv)):
+		x_grids_trv[i] = x_grids_trv[i] + time_shifts[i].reshape(-1,1,1)
+	print('Appending time shifts')
+
+
+time_shift_range = np.max([time_shifts[j].max() - time_shifts[j].min() for j in range(len(time_shifts))])
+
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
+min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
 
 # for i in range(len(x_grids)):
 
@@ -1371,7 +1419,7 @@ max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))
 for i in range(len(x_grids)):
 	
 	## Note, this definition of dt and win must match the definition used in process_continous_days
-	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(x_grids_trv[i], k = k_time_edges, max_t = max_t, dt = kernel_sig_t/5.0, win = kernel_sig_t*2.0)
+	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(x_grids_trv[i], k = k_time_edges, max_t = max_t, min_t = min_t, dt = kernel_sig_t/5.0, win = kernel_sig_t*2.0)
 
 	if config['train_travel_time_neural_network'] == False:
 		assert(x_grids_trv[i].min() > 0.0)
@@ -1386,7 +1434,8 @@ for i in range(len(x_grids)):
 	# x_grids_edges.append(edge_index)
 
 ## Check if this can cause an issue (can increase max_t to a bit larger than needed value)
-max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # + 10.0
+# max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # + 10.0
+# min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0 # + 10.0
 
 ## Implement training.
 mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, device = device).to(device)
@@ -1404,6 +1453,8 @@ weights = torch.Tensor([0.1, 0.4, 0.25, 0.25]).to(device)
 lat_range_interior = [lat_range[0], lat_range[1]]
 lon_range_interior = [lon_range[0], lon_range[1]]
 
+cnt_plot = 0
+
 n_restart = train_config['restart_training']
 n_restart_step = train_config['n_restart_step']
 if n_restart == False:
@@ -1415,6 +1466,7 @@ if load_training_data == True:
 	print('Number of found training files %d'%len(files_load))
 	if build_training_data == False:
 		assert(len(files_load) > 0)
+
 
 
 
@@ -1663,6 +1715,10 @@ for i in range(n_restart_step, n_epochs):
 		## and true labels
 		x_src_query = np.random.rand(n_src_query,3)*scale_x_extend + offset_x_extend
 
+		tq_sample = torch.rand(n_src_query).to(device)*t_win - t_win/2.0
+		if use_time_shift == True:
+			tq_sample = torch.Tensor(np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = n_src_query)).to(device)
+
 
 		n_frac_focused_association_queries = 0.2 # concentrate 10% of association queries around true sources
 		n_concentration_focused_association_queries = 0.03 # 3% of scale of domain
@@ -1682,30 +1738,52 @@ for i in range(n_restart_step, n_epochs):
 			x_query_focused = np.minimum(np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1), x_query_focused)
 			x_src_query[ind_overwrite_focused_queries] = x_query_focused
 
+			x_query_focused_t = 2.0*np.random.randn(n_focused_queries)*src_t_kernel			
+			x_query_focused_t = lp_srcs[i0][ind_source_focused,3] + x_query_focused_t
+			ioutside = np.where(((x_query_focused_t < min_t) + (x_query_focused_t > max_t)) > 0)[0]
+			x_query_focused_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
+			tq_sample[ind_overwrite_focused_queries] = torch.Tensor(x_query_focused_t).to(device)
+
+
 		if len(lp_srcs[i0]) > 0:
 			x_src_query[0:len(lp_srcs[i0]),0:3] = lp_srcs[i0][:,0:3]
 		
+		if len(lp_srcs[i0]) > 0:
+			ifind_src = np.where(np.abs(lp_srcs[i0][:,3]) <= t_win/2.0)[0]
+			tq_sample[ifind_src] = torch.Tensor(lp_srcs[i0][ifind_src,3]).to(device)
+
 		x_src_query_cart = ftrns1(x_src_query)
 		
 		trv_out_src = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(x_src_query).to(device)).detach()
 
+		if use_time_shift == True: 
+			grid_match = np.argmin([np.linalg.norm(X_fixed[i0] - x_grids[j]) for j in range(len(x_grids))])
 		
 		if use_subgraph == True:
-			# A_src_in_prod_l[i0] = Data(torch.Tensor(A_src_in_prod_x_l[i0]).to(device), edge_index = torch.Tensor(A_src_in_prod_edges_l[i0]).long().to(device))
-			trv_out = trv_pairwise(torch.Tensor(Locs[i0][A_src_in_sta_l[i0][0].cpu().detach().numpy()]).to(device), torch.Tensor(X_fixed[i0][A_src_in_sta_l[i0][1].cpu().detach().numpy()]).to(device))
-			spatial_vals = torch.Tensor((X_fixed[i0][A_src_in_prod_l[i0][1].cpu().detach().numpy()] - Locs[i0][A_src_in_sta_l[i0][0][A_src_in_prod_l[i0][0]].cpu().detach().numpy()])/scale_x_extend).to(device)
+			if use_time_shift == False:
+				# A_src_in_prod_l[i0] = Data(torch.Tensor(A_src_in_prod_x_l[i0]).to(device), edge_index = torch.Tensor(A_src_in_prod_edges_l[i0]).long().to(device))
+				trv_out = trv_pairwise(torch.Tensor(Locs[i0][A_src_in_sta_l[i0][0].cpu().detach().numpy()]).to(device), torch.Tensor(X_fixed[i0][A_src_in_sta_l[i0][1].cpu().detach().numpy()]).to(device))
+			else:
+				trv_out = trv_pairwise(torch.Tensor(Locs[i0][A_src_in_sta_l[i0][0].cpu().detach().numpy()]).to(device), torch.Tensor(X_fixed[i0][A_src_in_sta_l[i0][1].cpu().detach().numpy()]).to(device)) + torch.Tensor(time_shifts[grid_match, A_src_in_sta_l[i0][1].cpu().detach().numpy()]).reshape(-1,1).to(device)
+
+			spatial_vals = torch.cat((torch.Tensor((X_fixed[i0][A_src_in_prod_l[i0][1].cpu().detach().numpy()][:,0:3] - Locs[i0][A_src_in_sta_l[i0][0][A_src_in_prod_l[i0][0]].cpu().detach().numpy()])/scale_x_extend).to(device), torch.Tensor(X_fixed[i0][A_src_in_prod_l[i0][1].cpu().detach().numpy()][:,[3]]).to(device)/time_shift_range), dim = 1)
 
 		else:
-			trv_out = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(X_fixed[i0]).to(device)).detach().reshape(-1,2) ## Note: could also just take this from x_grids_trv
-			spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(X_fixed[i0], axis = 1), Locs[i0].shape[0], axis = 1) - np.repeat(np.expand_dims(Locs[i0], axis = 0), X_fixed[i0].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
-	
-		
-		tq_sample = torch.rand(n_src_query).to(device)*t_win - t_win/2.0
-		tq = torch.arange(-t_win/2.0, t_win/2.0 + dt_win, dt_win).reshape(-1,1).float().to(device)
 
-		if len(lp_srcs[i0]) > 0:
-			ifind_src = np.where(np.abs(lp_srcs[i0][:,3]) <= t_win/2.0)[0]
-			tq_sample[ifind_src] = torch.Tensor(lp_srcs[i0][ifind_src,3]).to(device)
+			if use_time_shift == False:
+				trv_out = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(X_fixed[i0]).to(device)).detach().reshape(-1,2) ## Note: could also just take this from x_grids_trv
+			else:
+				trv_out = (trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(X_fixed[i0]).to(device)).detach() + torch.Tensor(np.expand_dims(time_shift[[grid_match],:], axis = 0)).to(device)).reshape(-1,2) ## Note: could also just take this from x_grids_trv
+
+
+			spatial_vals = torch.cat((torch.Tensor(((np.repeat(np.expand_dims(X_fixed[i0][:,0:3], axis = 1), Locs[i0].shape[0], axis = 1) - np.repeat(np.expand_dims(Locs[i0], axis = 0), X_fixed[i0].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device), torch.Tensor(X_fixed[i0][:,[3]]).to(device)/time_shift_range), dim = 1)
+	
+
+
+		tq = torch.arange(-t_win/2.0, t_win/2.0 + dt_win, dt_win).reshape(-1,1).float().to(device)
+		if use_time_shift == True:
+			tq = torch.arange(-time_shift_range/2.0, time_shift_range/2.0 + dt_win, dt_win).reshape(-1,1).float().to(device)
+
 
 		if use_phase_types == False:
 			Inpts[i0][:,2::] = 0.0 ## Phase type informed features zeroed out
@@ -1776,16 +1854,43 @@ for i in range(n_restart_step, n_epochs):
 			torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
 			torch.Tensor(ftrns1(Locs[i0])).to(device),
 			torch.Tensor(ftrns1(X_fixed[i0])).to(device),
+			torch.Tensor(X_fixed[i0][:,3]).to(device),
 			torch.Tensor(ftrns1(X_query[i0])).to(device),
 			torch.Tensor(x_src_query_cart).to(device),
-			tq, tq_sample, trv_out_src
+			torch.Tensor(X_query[i0][:,3]).to(device), tq_sample, trv_out_src
 		]
 
 		# Call the model with pre-processed tensors
 		out = mz(*input_tensors)
+
+
+		make_plot = False
+		if make_plot == True:
+			fig, ax = plt.subplots(4, 1, sharex = True)
+			for j in range(2):
+				i1 = np.where(Lbls_query[0][:,0] > 0.1)[0]
+				i2 = np.where(out[1][:,0].cpu().detach().numpy() > 0.1)[0]
+				ax[2*j].scatter(X_query[0][i1,3], X_query[0][i1,j], c = Lbls_query[0][i1,0])
+				ax[2*j + 1].scatter(X_query[0][i2,3], X_query[0][i2,j], c = out[1][i2,0].cpu().detach().numpy())
+				ax[2*j].set_xlim(X_query[0][:,3].min(), X_query[0][:,3].max())
+				ax[2*j + 1].set_xlim(X_query[0][:,3].min(), X_query[0][:,3].max())
+				ax[2*j].set_ylim(X_query[0][:,j].min(), X_query[0][:,j].max())
+				ax[2*j + 1].set_ylim(X_query[0][:,j].min(), X_query[0][:,j].max())
+
+			fig.set_size_inches(10,8)
+			fig.savefig(path_to_file + 'Plots/example_sources_%d.png'%cnt_plot)
+
+			fig, ax = plt.subplots(2, 1, sharex = True, sharey = True)
+			ax[0].scatter(X_query[0][:,3], Lbls_query[0][:,0], c = X_query[0][:,0])
+			ax[1].scatter(X_query[0][:,3], out[1][:,0].cpu().detach().numpy(), c = X_query[0][:,0])
+			fig.savefig(path_to_file + 'Plots/example_sources_in_time_%d.png'%cnt_plot)
+			print('Saved figures %d'%cnt_plot)
+			cnt_plot += 1
+			plt.close('all')
+
 		
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
-		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+		loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 
 		min_val_use = 0.1
 		use_sensitivity_loss = False
@@ -1830,6 +1935,7 @@ for i in range(n_restart_step, n_epochs):
 		
 		n_visualize_step = 1000
 		n_visualize_fraction = 0.2
+		make_visualize_predictions = False
 		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0)*(inc == 0): # (i0 < n_visualize_fraction*n_batch)
 			save_plots_path = path_to_file + seperator + 'Plots' + seperator
 			visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
@@ -2657,7 +2763,6 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
-
 
 
 
