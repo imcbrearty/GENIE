@@ -950,7 +950,10 @@ def load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_par
 
 	## Replacing the loop with this seperate function
 	x_grids_trv = compute_travel_times(trv, locs, x_grids, device = device)
-	if time_shifts is not None: x_grids_trv = x_grids_trv + np.expand_dims(time_shifts, axis = 2)
+	if time_shifts is not None:
+		assert(len(x_grids_trv) == len(time_shifts))
+		for i in range(len(x_grids_trv)):
+			x_grids_trv[i] = x_grids_trv[i] + time_shifts[i].reshape(-1,1,1)
 	
 	# for i in range(len(x_grids)):
 
@@ -1228,6 +1231,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
