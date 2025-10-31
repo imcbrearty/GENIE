@@ -779,7 +779,7 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	if scale_time is None:
 		A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
 	else:
-		A_src_src = re
+		A_src_src = remove_self_loops(knn(torch.cat((torch.Tensor(ftrns1(x_grid)/1000.0).to(device), scale_time*torch.Tensor(x_grid[:,3].reshape(-1,1)).to(device)), dim = 1), torch.cat((torch.Tensor(ftrns1(x_grid)/1000.0).to(device), scale_time*torch.Tensor(x_grid[:,3].reshape(-1,1)).to(device)), dim = 1), k = k_spc_edges + 1).flip(0).contiguous())[0]
 
 	
 	## Make "incoming" edges for all sources based on epsilon-distance graphs, since these are the nodes that need nearest stations
@@ -1642,6 +1642,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
