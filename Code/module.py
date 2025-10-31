@@ -1094,7 +1094,7 @@ if use_updated_model_definition == False:
 
 			# y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
 			x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
-			x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
+			# x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
 			x = self.proj_soln(x)
 	
 			if n_reshape > 1: ## Use this to map (n_reshape) repeated spatial queries (x_temp_cuda_cart) at different origin times, to predictions for fixed coordinates and across time
@@ -1774,6 +1774,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
