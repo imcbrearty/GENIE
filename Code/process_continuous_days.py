@@ -152,6 +152,14 @@ load_prebuilt_sampling_grid = process_config['load_prebuilt_sampling_grid']
 use_expanded_competitive_assignment = process_config['use_expanded_competitive_assignment']
 use_differential_evolution_location = process_config['use_differential_evolution_location']
 
+use_time_shift = config['use_time_shift']
+
+with open('train_config.yaml', 'r') as file:
+    train_config = yaml.safe_load(file)
+
+scale_time = train_config['scale_time']
+
+
 ## Minimum required picks and stations per event
 min_required_picks = process_config['min_required_picks']
 min_required_sta = process_config['min_required_sta']
@@ -198,6 +206,7 @@ z.close()
 # Load templates
 z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
 x_grids = z['x_grids']
+x_grids_init = np.copy(x_grids)
 z.close()
 
 # Load stations
@@ -225,6 +234,15 @@ offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_rang
 
 rbest_cuda = torch.Tensor(rbest).to(device)
 mn_cuda = torch.Tensor(mn).to(device)
+
+
+if use_time_shift == True:
+	z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
+	time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
+	z.close()
+else:
+	time_shifts = None # np.zeros((x_grids.shape[0], x_grids.shape[1]))
+
 
 
 # use_spherical = False
@@ -315,13 +333,39 @@ if device.type == 'cuda' or device.type == 'cpu':
 use_only_one_grid = process_config['use_only_one_grid']
 x_grids_trv = compute_travel_times(trv, locs, x_grids, device = device)
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
+min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
+
+
+if use_time_shift == True:
+	for i in range(len(x_grids_trv)):
+		x_grids_trv[i] = x_grids_trv[i] + time_shifts[i].reshape(-1,1,1)
+	print('Appending time shifts')
+
+
+time_shift_range = np.max([time_shifts[j].max() - time_shifts[j].min() for j in range(len(time_shifts))])
+
 
 # if (use_only_one_grid == True)*(1 == 0): ## Speeds up the initilization of the code by only loading one grid
 if use_only_one_grid == True: ## Speeds up the initilization of the code by only loading one grid
 	grid_choose = np.random.choice(len(x_grids))
 	x_grids = np.expand_dims(x_grids[grid_choose], axis = 0)
 	x_grids_trv = [x_grids_trv[grid_choose]]
-x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t_ = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = max_t, dt_embed = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device) ## Note: setting time embedding vectors with respect to kernel_sig_t
+	time_shifts = np.expand_dims(time_shifts[grid_choose], axis = 0)
+
+x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t_ = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = max_t, min_t = mint_t, time_shifts = time_shifts, dt_embed = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device) ## Note: setting time embedding vectors with respect to kernel_sig_t
+
+
+## Check subsetting of grids was correct
+if use_only_one_grid == True:
+	assert(len(time_shifts) == 1)
+	assert(len(x_grids) == 1)
+	assert(len(x_grids_trv) == 1)
+	for i in range(len(x_grids_init)):
+		diff = np.linalg.norm(time_shifts[0,:] - x_grids_init[i,:,3])
+		if diff == 0:
+			assert(np.linalg.norm(x_grids_init[i,:,:] - x_grids[0]) == 0)
+	assert(np.abs(x_grids_trv[0] - (trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[0]).to(device)).cpu().detach().numpy() + x_grids[0][:,3].reshape(-1,1,1))).max() < 1e-2)
+
 assert(max_t_ == max_t)
 x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])).to(device) for i in range(len(x_grids))]
 
@@ -379,6 +423,7 @@ elif step_size == 'half':
 	n_overlap = 2.0 ## Check this
 	assert(use_adaptive_window == True)
 	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
+
 
 # pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
 tc_win = pred_params[2]*1.35 # 1.25 # process_config['tc_win'] # Temporal window (s) to link events in Local Marching
@@ -624,27 +669,39 @@ for cnt, strs in enumerate([0]):
 		if use_subgraph == False:
 		
 			# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
-			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref = extract_inputs_adjacencies(trv, locs, ind_use, x_grids[i], x_grids_trv[i], x_grids_trv_refs[i], x_grids_trv_pointers_p[i], x_grids_trv_pointers_s[i], ftrns1, graph_params, device = device)
+			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref = extract_inputs_adjacencies(trv, locs, ind_use, x_grids[i], x_grids_trv[i], x_grids_trv_refs[i], x_grids_trv_pointers_p[i], x_grids_trv_pointers_s[i], ftrns1, graph_params, scale_time = scale_time, device = device)
 
 			A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(len(ind_use)), len(x_grids[i])).reshape(1,-1), np.arange(len(x_grids[i])).repeat(len(ind_use), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
-			spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(x_grids[i], axis = 1), len(ind_use), axis = 1) - np.repeat(np.expand_dims(locs[ind_use], axis = 0), x_grids[i].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
+			if use_time_shift == False:
+				spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(x_grids[i], axis = 1), len(ind_use), axis = 1) - np.repeat(np.expand_dims(locs[ind_use], axis = 0), x_grids[i].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
+			else:
+				spatial_vals = torch.cat((torch.Tensor(((np.repeat(np.expand_dims(x_grids[i], axis = 1), len(ind_use), axis = 1) - np.repeat(np.expand_dims(locs[ind_use], axis = 0), x_grids[i].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device), torch.Tensor(x_grids[i][:,[3]]).to(device)/time_shift_range), dim = 1)
+
 			A_src_in_edges = Data(x = spatial_vals, edge_index = A_src_in_prod).to(device)
 			A_Lg_in_src = Data(x = spatial_vals, edge_index = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod.cpu().detach().numpy(), axis = 0))).long()).to(device)
 			trv_out = trv(torch.Tensor(locs[ind_use]).to(device), torch.Tensor(x_grids[i]).to(device)).detach().reshape(-1,2) ## Can replace trv_out with Trv_out
+			if use_time_shift == True: trv_out = trv_out + torch.Tensor(time_shifts[i]).to(device)[A_src_in_sta[1]].reshape(-1,1)
+
 			mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src_src, torch.Tensor(A_edges_time_p).long().to(device), torch.Tensor(A_edges_time_s).long().to(device), torch.Tensor(A_edges_ref).to(device), trv_out, torch.Tensor(ftrns1(locs_use)).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device))
 			A_src_in_sta_l.append(A_src_in_sta.cpu().detach().numpy())
 
 		else:
 
 			# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
-			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(locs_use, x_grids[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, device = device)
-			A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, locs_use, x_grids[i], A_src_in_sta, max_t, dt_res = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device)
-			spatial_vals = torch.Tensor((x_grids[i][A_src_in_prod[1].cpu().detach().numpy()] - locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()])/scale_x_extend).to(device)
-			A_src_in_prod = Data(x = spatial_vals, edge_index = A_src_in_prod)
+			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(locs_use, x_grids[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, scale_time = scale_time, device = device)
+			A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, locs_use, x_grids[i], A_src_in_sta, max_t, dt_res = pred_params[1]/5.0, t_win = pred_params[1]*2.0, min_t = min_t, time_shift = time_shifts, device = device)
 			
+			if use_time_shift == False:
+				spatial_vals = torch.Tensor((x_grids[i][A_src_in_prod[1].cpu().detach().numpy()] - locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()])/scale_x_extend).to(device)
+			else:
+				spatial_vals = torch.cat((torch.Tensor((x_grids[i][A_src_in_prod[1].cpu().detach().numpy()] - locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()])/scale_x_extend).to(device), torch.Tensor(x_grids[i][A_src_in_prod[1].cpu().detach().numpy(),[3]]).to(device)/time_shift_range), dim = 1)
+
+			A_src_in_prod = Data(x = spatial_vals, edge_index = A_src_in_prod)
 			flipped_edge = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod.edge_index.cpu().detach().numpy(), axis = 0))).long().to(device)
 			A_src_in_prod_flipped = Data(x = spatial_vals, edge_index = flipped_edge).to(device)
 			trv_out = trv_pairwise(torch.Tensor(locs_use[A_src_in_sta[0].cpu().detach().numpy()]).to(device), torch.Tensor(x_grids[i][A_src_in_sta[1].cpu().detach().numpy()]).to(device))
+			if use_time_shift == True: trv_out = trv_out + torch.Tensor(time_shifts[i]).to(device)[A_src_in_sta[1]].reshape(-1,1)
+
 			mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_prod_flipped, A_src_in_sta, A_src_src, torch.Tensor(A_edges_time_p).long().to(device), torch.Tensor(A_edges_time_s).long().to(device), torch.Tensor(dt_partition).to(device), trv_out, torch.Tensor(ftrns1(locs_use)).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device))
 			A_src_in_sta_l.append(A_src_in_sta.cpu().detach().numpy())
 
@@ -665,7 +722,7 @@ for cnt, strs in enumerate([0]):
 			# 	P1[:,4] = 0 ## No phase types
 	
 			x_grid_ind = x_grid_ind_list[0] ## Note: if this fails, essentially dt_embed_discretize is too small (resulting in too many time steps x number stations (combined with max moveout, max_t) leading to too large of graphs in the scatter operation for extracting inputs (e.g., ~ 100 million nodes))
-			embed_p, embed_s, ind_unique_, abs_time_ref_, n_time_series_, n_sta_unique_ = extract_input_from_data(trv_pairwise, P1, np.array([src_origin]), ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, return_embedding = True, device = device)
+			embed_p, embed_s, ind_unique_, abs_time_ref_, n_time_series_, n_sta_unique_ = extract_input_from_data(trv_pairwise, P1, np.array([src_origin]), ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, return_embedding = True, device = device)
 	
 			## Check positive points
 			vec_p_ = embed_p.reshape(n_sta_unique_, n_time_series_)
@@ -773,7 +830,7 @@ for cnt, strs in enumerate([0]):
 
 			else:
 
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, tsteps_slice, ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, tsteps_slice, ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
 
 			# if use_subgraph == True:
 			# 	for i in range(len(Inpts)):
@@ -955,7 +1012,7 @@ for cnt, strs in enumerate([0]):
 
 			else:
 			
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, srcs_slice[:,3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, srcs_slice[:,3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
 			
 			# if use_subgraph == True:
 			# 	for i in range(len(Inpts)):
@@ -1025,7 +1082,7 @@ for cnt, strs in enumerate([0]):
 
 			else:
 
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, srcs_refined[:,3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)				
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, srcs_refined[:,3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)				
 
 			# if use_subgraph == True:
 			# 	for i in range(len(Inpts)):
