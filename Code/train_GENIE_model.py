@@ -890,7 +890,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		for j in range(n_batch):
 			if np.random.rand() > 0.5: # 30% of samples, re-focus time. # 0.7
 				# time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*src_t_kernel*np.random.laplace()
-				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*time_shift_range*np.random.laplace()
+				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*(time_shift_range/2.0)*np.random.laplace()
 
 	time_samples = np.sort(time_samples)
 
@@ -900,7 +900,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	tree_src_times_all = cKDTree(src_times[:,np.newaxis])
 	tree_src_times = cKDTree(src_times_active[:,np.newaxis])
 	# lp_src_times_all = tree_src_times_all.query_ball_point(time_samples[:,np.newaxis], r = 3.0*src_t_kernel)
-	lp_src_times_all = tree_src_times_all.query_ball_point(time_samples[:,np.newaxis], r = 1.0*time_shift_range)
+	lp_src_times_all = tree_src_times_all.query_ball_point(time_samples[:,np.newaxis], r = 1.0*(time_shift_range/2.0))
 
 	st = time.time()
 	tree = cKDTree(arrivals[:,0][:,None])
