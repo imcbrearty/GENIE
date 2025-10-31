@@ -39,13 +39,12 @@ k_sta_edges = config['k_sta_edges']
 # eps = config['eps'] # 15.0
 scale_t = train_config['kernel_sig_t']*3.0
 eps = train_config['kernel_sig_t']*5.0
+scale_time = train_config['scale_time']
 
 # use_updated_model_definition = True
 use_phase_types = config['use_phase_types']
 use_absolute_pos = config['use_absolute_pos']
 use_neighbor_assoc_edges = config.get('use_neighbor_assoc_edges', False)
-
-use_time_shift = config['use_time_shift'] ## If True, must concatenate time offsets into offsets
 
 device = torch.device('cuda') ## or use cpu
 
@@ -214,7 +213,7 @@ else:
 
 
 class BipartiteGraphOperator(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, ndim_edges = 3):
+	def __init__(self, ndim_in, ndim_out, ndim_edges = 4):
 		super(BipartiteGraphOperator, self).__init__('add')
 		# include a single projection map
 		self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
@@ -253,6 +252,17 @@ class SpatialAggregation(MessagePassing):
 class SpatialDirect(nn.Module):
 	def __init__(self, inpt_dim, out_channels):
 		super(SpatialDirect, self).__init__() #  "Max" aggregation.
+
+		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
+		self.activate = nn.PReLU()
+
+	def forward(self, inpts):
+
+		return self.activate(self.f_direct(inpts))
+
+class SpaceTimeDirect(nn.Module):
+	def __init__(self, inpt_dim, out_channels):
+		super(SpaceTimeDirect, self).__init__() #  "Max" aggregation.
 
 		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
 		self.activate = nn.PReLU()
@@ -329,8 +339,45 @@ class TemporalAttention(MessagePassing): ## Hopefully replace this.
 
 		return self.proj_2(self.activate5(self.proj_1(self.activate4((((context.unsqueeze(1)*query.unsqueeze(0)).sum(-1, keepdims = True)/self.scale)*values.unsqueeze(1)).mean(2))))) # linear.
 
+class SpaceTimeAttention(MessagePassing):
+	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, n_hidden = 30, n_heads = 5, scale_rel = scale_rel, scale_time = scale_time):
+		super(SpaceTimeAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
+		# notice node_dim = 0.
+		self.param_vector = nn.Parameter(nn.init.xavier_uniform_(torch.Tensor(1, n_heads, n_latent)))
+		self.f_context = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
+		self.f_values = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
+		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
+		self.proj = nn.Linear(n_latent, out_channels) # can remove this layer possibly.
+		self.scale = np.sqrt(n_latent)
+		self.n_heads = n_heads
+		self.n_latent = n_latent
+		self.scale_rel = scale_rel
+		self.activate1 = nn.PReLU()
+		self.activate2 = nn.PReLU()
+		self.scale_time = scale_time ## 1 Second is 10 km
+		# self.activate3 = nn.PReLU()
+
+	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, k = 30): # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
+
+		edge_index = knn(torch.cat((x_context/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_query/1000.0, self.scale_time*x_query_t.reshape(-1,1)), dim = 1), k = k).flip(0)
+		edge_attr = torch.cat(((x_query[edge_index[1],0:3] - x_context[edge_index[0],0:3])/self.scale_rel, x_query_t[edge_index[1]].reshape(-1,1)/self.scale_time - x_context_t[edge_index[0]].reshape(-1,1)/self.scale_time), dim = 1) # /scale_x
+
+		return self.activate2(self.proj(self.propagate(edge_index, x = inpts, edge_attr = edge_attr, size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
+
+	def message(self, x_j, index, edge_attr):
+
+		## Why are there no queries in this layer
+
+		context_embed = self.f_context(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
+		value_embed = self.f_values(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
+		alpha = self.activate1((self.param_vector*context_embed).sum(-1)/self.scale)
+
+		alpha = softmax(alpha, index)
+
+		return alpha.unsqueeze(-1)*value_embed
+
 class BipartiteGraphReadOutOperator(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, ndim_edges = 3):
+	def __init__(self, ndim_in, ndim_out, ndim_edges = 4):
 		super(BipartiteGraphReadOutOperator, self).__init__('add')
 		# include a single projection map
 		self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
@@ -662,7 +709,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, scale_rel = scale_rel, k_sta_edges = k_sta_edges, eps = eps, use_neighbor_assoc_edges = use_neighbor_assoc_edges, use_phase_types = use_phase_types, device = device):
 		super(StationSourceAttentionMergedPhases, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
-		if use_neighbor_assoc_edges == True: ndim_extra = ndim_extra + 1 + 3 ## Add one bimary feature to indicate if edge is for a common station, and the relative offset positions
+		# if use_neighbor_assoc_edges == True: ndim_extra = ndim_extra + 1 + 3 ## Add one bimary feature to indicate if edge is for a common station, and the relative offset positions
 		self.f_arrival_query_1 = nn.Linear(2*ndim_arv_in + 6, n_hidden) # add edge data (observed arrival - theoretical arrival)
 		self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
 		self.f_src_context_1 = nn.Linear(ndim_src_in + ndim_extra + 2, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
@@ -731,10 +778,10 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 		## Add neighbor edges
 		if self.use_neighbor_assoc_edges == True:
 			## Can only run k nearest neighbors for one 
-			k_edges = knn(locs_cart/1000.0, locs_cart/1000.0, k = self.k_sta_edges + 1).flip(0)
-			iactive_sta = (-1*torch.ones(len(locs_cart)).to(device)).long()
-			iactive_sta[ipick[edges[1]]] = 1 ## At least one pick for a station
-			
+			# k_edges = knn(locs_cart/1000.0, locs_cart/1000.0, k = self.k_sta_edges + 1).flip(0)
+			# iactive_sta = (-1*torch.ones(len(locs_cart)).to(device)).long()
+			# iactive_sta[ipick[edges[1]]] = 1 ## At least one pick for a station
+			pass
 			
 			
 		
@@ -884,13 +931,14 @@ if use_updated_model_definition == False:
 			# Define modules and other relavent fixed objects (scaling coefficients.)
 			# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
 			self.DataAggregation = DataAggregation(4, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
-			self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 3).to(device) # 30, 15
+			self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 4).to(device) # 30, 15
 			self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
 			self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
 			self.SpatialAggregation3 = SpatialAggregation(30, 30).to(device) # 15, 30
-			self.SpatialDirect = SpatialDirect(30, 30).to(device) # 15, 30
-			self.SpatialAttention = SpatialAttention(30, 30, 3, 15).to(device)
-			self.TemporalAttention = TemporalAttention(30, 1, 15).to(device)
+			self.SpaceTimeDirect = SpaceTimeDirect(30, 30).to(device) # 15, 30
+			self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 4, 15).to(device)
+			self.proj_soln = nn.Sequential(nn.Linear(30, 30), nn.PReLU(), nn.Linear(30, 1))
+			# self.TemporalAttention = TemporalAttention(30, 1, 15).to(device)
 	
 			self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
 			self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
@@ -904,7 +952,7 @@ if use_updated_model_definition == False:
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
 	
-		def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+		def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
@@ -912,19 +960,33 @@ if use_updated_model_definition == False:
 			if self.use_absolute_pos == True:
 				Slice = torch.cat((Slice, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
+			## Now, t_query are the pointwise query times of all x_query_cart queries
+			## And there's a new input of the template node times as well, x_temp_cuda_t
+
+			## Should adapt Bipartite Read in to use space-time informtion
+			## Should add time information to node features of Cartesian product
+			## Or implement as relative time information on edges
+
+
 			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
-			y_latent = self.SpatialDirect(x_spatial) # contains data on spatial solution.
-			y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
-			x = self.SpatialAttention(x_spatial, x_query_cart, x_temp_cuda_cart) # second slowest module (could use this embedding to seed source source attention vector).
-			x_src = self.SpatialAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart) # obtain spatial embeddings, source want to query associations for.
-			x = self.TemporalAttention(x, t_query) # on random queries
-	
+			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
+			y = self.proj_soln(y_latent)
+
+			# y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
+			x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
+			x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
+			x = self.proj_soln(x)
+
+			# x = self.TemporalAttention(x, t_query) # on random queries
+			## In LocalSliceLg Collapse should use relative node time information between arrivals and moveouts
+			## (it may already be included in relative travel time vectors (e.g., tlatent?))
+
 			## Note below: why detach x_latent?
-			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
+			mask_out = 1.0*(y.detach() > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
 			if self.use_absolute_pos == True:
 				s = torch.cat((s, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
@@ -959,43 +1021,7 @@ if use_updated_model_definition == False:
 			# self.pos_rel_sta = pos_rel_sta
 			# self.pos_rel_src = pos_rel_src
 		
-		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
-	
-			n_line_nodes = Slice.shape[0]
-			mask_p_thresh = 0.01
-			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
-			if self.use_absolute_pos == True:
-				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)		
-			
-			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
-			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
-			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
-			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
-			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
-			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
-			y_latent = self.SpatialDirect(x_spatial) # contains data on spatial solution.
-			y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
-			x = self.SpatialAttention(x_spatial, x_query_cart, x_temp_cuda_cart) # second slowest module (could use this embedding to seed source source attention vector).
-			x_src = self.SpatialAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart) # obtain spatial embeddings, source want to query associations for.
-			x = self.TemporalAttention(x, t_query) # on random queries
-	
-			## Note below: why detach x_latent?
-			mask_out = 1.0*(y[:,:,0].detach().max(1, keepdims = True)[0] > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
-			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
-			if self.use_absolute_pos == True:
-				s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
-				
-			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
-			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta) # locs_use_cart, x_temp_cuda_cart, self.A_src_in_sta
-			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,1].reshape(-1,1), n_temp, n_sta)
-			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, locs_use_cart, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
-			
-			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
-	
-			return y, x, arv_p, arv_s
-
-		def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_query_cart, t_query):
+		def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 	
 			n_line_nodes = Slice.shape[0]
 			mask_p_thresh = 0.01
@@ -1003,19 +1029,78 @@ if use_updated_model_definition == False:
 			if self.use_absolute_pos == True:
 				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
-			
-			# x_temp_cuda_cart = self.ftrns1(x_temp_cuda)
-			# x = self.TemporalConvolve(Slice).view(n_line_nodes,-1) # slowest module
+			## Now, t_query are the pointwise query times of all x_query_cart queries
+			## And there's a new input of the template node times as well, x_temp_cuda_t
+
+			## Should adapt Bipartite Read in to use space-time informtion
+			## Should add time information to node features of Cartesian product
+			## Or implement as relative time information on edges
+
+
 			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
 			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
 			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
 			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
-			y_latent = self.SpatialDirect(x_spatial) # contains data on spatial solution.
-			y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
-			x = self.SpatialAttention(x_spatial, x_query_cart, x_temp_cuda_cart) # second slowest module (could use this embedding to seed source source attention vector).
-			x = self.TemporalAttention(x, t_query) # on random queries
+			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
+			y = self.proj_soln(y_latent)
+
+			# y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
+			x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
+			x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
+			x = self.proj_soln(x)
+
+			# x = self.TemporalAttention(x, t_query) # on random queries
+			## In LocalSliceLg Collapse should use relative node time information between arrivals and moveouts
+			## (it may already be included in relative travel time vectors (e.g., tlatent?))
+
+			## Note below: why detach x_latent?
+			mask_out = 1.0*(y.detach() > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
+			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
+			if self.use_absolute_pos == True:
+				s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
+			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size # locs_use_cart, x_temp_cuda_cart, A_src_in_sta
+			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, dt_partition, tpick, ipick, phase_label, s, tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, locs_use_cart, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+			
+			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
 	
+
+			return y, x, arv_p, arv_s
+
+		def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, t_query, n_reshape = 1):
+		
+			n_line_nodes = Slice.shape[0]
+			mask_p_thresh = 0.01
+			n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
+			if self.use_absolute_pos == True:
+				Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
+
+			## Now, t_query are the pointwise query times of all x_query_cart queries
+			## And there's a new input of the template node times as well, x_temp_cuda_t
+
+			## Should adapt Bipartite Read in to use space-time informtion
+			## Should add time information to node features of Cartesian product
+			## Or implement as relative time information on edges
+
+			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
+			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
+			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
+			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
+			y = self.proj_soln(y_latent)
+
+			# y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
+			x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
+			x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
+			x = self.proj_soln(x)
+	
+			if n_reshape > 1: ## Use this to map (n_reshape) repeated spatial queries (x_temp_cuda_cart) at different origin times, to predictions for fixed coordinates and across time
+				y = y.reshape(-1,n_reshape,1) ## Assumed feature dimension output is 1
+				x = x.reshape(-1,n_reshape,1)
+
 			return y, x
 
 elif use_updated_model_definition == True:
@@ -1689,8 +1774,6 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
-
-
 
 
 
