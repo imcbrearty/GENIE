@@ -458,7 +458,7 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 
 # 	return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta]
 
-def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta, trv_times = None, max_t = 300.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, use_sign_input = False, return_embedding = False, device = 'cpu'): ## pred_params[1]
+def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta, trv_times = None, max_t = 300.0, min_t = 0.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, use_sign_input = False, return_embedding = False, device = 'cpu'): ## pred_params[1]
 
 	## Travel time calculator
 	## Picks
@@ -474,7 +474,7 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 	# 	t0 = float(t0)
 
 	# ineed = np.where((P[:,0] > (t0 - 3.0*kernel_sig_t))*(P[:,0] < (t0 + max_t + 3.0*kernel_sig_t)))[0]
-	ineed = np.where((P[:,0] > (t0 - 2.0*kernel_sig_t))*(P[:,0] < (t0 + max_t + 2.0*kernel_sig_t)))[0] #
+	ineed = np.where((P[:,0] > (t0 + min_t - 2.0*kernel_sig_t))*(P[:,0] < (t0 + max_t + 2.0*kernel_sig_t)))[0] #
 	P_slice = np.copy(P[ineed])
 
 	## Find pick indices with stations in desired subset (note could do this after the next query instead)
@@ -499,7 +499,7 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 
 	t_offset = 3.0*kernel_sig_t
 	# int_offset = int(np.ceil(t_offset/dt))
-	abs_time_ref = np.arange(t0 - t_offset, t0 + max_t + t_offset + dt, dt)
+	abs_time_ref = np.arange(t0 + min_t - t_offset, t0 + max_t + t_offset + dt, dt)
 	## Note: Pick times of t0, should be mapped to indices of int_offset.
 
 	n_time_series = len(abs_time_ref) # int((3*kernel_sig_t + 3*kernel_sig_t + max_t)/dt)
@@ -635,14 +635,14 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 	# if isinstance(t0, float) or isinstance(t0, int):
 	# 	t0 = [t0]
 
-	lp_times, lp_stations, lp_phases, lp_meta = extract_pick_inputs_from_data(P_slice, locs, ind_use, t0, max_t, use_batch = False, verbose = False)
+	lp_times, lp_stations, lp_phases, lp_meta = extract_pick_inputs_from_data(P_slice, locs, ind_use, t0, max_t, mint_t = min_t, use_batch = False, verbose = False)
 
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st_start))		
 
 	return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta]
 
-def extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, t_win = 10.0, use_batch = False, verbose = False):
+def extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, min_t = 0.0, t_win = 10.0, use_batch = False, verbose = False):
 
 	if verbose == True:
 		st = time.time()
@@ -664,7 +664,7 @@ def extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, t
 
 	n_sta = len(locs)
 
-	lp = arrivals_tree.query_ball_point(time_samples.reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0) 
+	lp = arrivals_tree.query_ball_point(time_samples.reshape(-1,1) + (max_t - min_t)/2.0, r = t_win + (max_t - min_t)/2.0) 
 
 	lp_times = [] # duplicate
 	lp_stations = [] # duplicate
@@ -1642,6 +1642,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
