@@ -635,7 +635,7 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 	# if isinstance(t0, float) or isinstance(t0, int):
 	# 	t0 = [t0]
 
-	lp_times, lp_stations, lp_phases, lp_meta = extract_pick_inputs_from_data(P_slice, locs, ind_use, t0, max_t, mint_t = min_t, use_batch = False, verbose = False)
+	lp_times, lp_stations, lp_phases, lp_meta = extract_pick_inputs_from_data(P_slice, locs, ind_use, t0, max_t, min_t = min_t, use_batch = False, verbose = False)
 
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st_start))		
@@ -1642,6 +1642,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
