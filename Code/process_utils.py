@@ -865,7 +865,7 @@ def compute_time_embedding_vectors(trv_pairwise, locs, x_grid, A_src_in_sta, max
 
 	## Find sparse set of arrival embedding indices for each station into the subgraph
 	trv_out = trv_pairwise(torch.Tensor(locs).to(device)[A_src_in_sta[0]], torch.Tensor(x_grid).to(device)[A_src_in_sta[1]])
-	if time_shift is not None: trv_out = trv_out + torch.Tensor(time_shift).to(device)[A_src_in_sta[1]]
+	if time_shift is not None: trv_out = trv_out + torch.Tensor(time_shift).to(device)[A_src_in_sta[1]].reshape(-1,1)
 	if min_t is None: min_t = 0.0
 	
 	## Make tree and find look up
@@ -1642,6 +1642,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
