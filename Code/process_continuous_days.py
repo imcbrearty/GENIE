@@ -816,6 +816,9 @@ for cnt, strs in enumerate([0]):
   
 	# with torch.no_grad():
 
+	tq_repeat = tq.repeat(len(X_query_cart),1)
+	X_query_cart_repeat = X_query_cart.repeat_interleave(len(tq), dim = 0)
+
 	for n in range(len(times_need)):
 
 		tsteps_slice = times_need[n]
@@ -853,11 +856,8 @@ for cnt, strs in enumerate([0]):
 
 				## Need x_src_query_cart and trv_out_src
 
-				tq_repeat = tq.repeat(len(X_query_cart),1)
-				X_query_cart_repeat = X_query_cart.repeat_interleave(len(tq), dim = 0)
-
 				# out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i0]).to(device), torch.Tensor(Masks[i0]).to(device), torch.Tensor(lp_times[i0]).to(device), torch.Tensor(lp_stations[i0]).long().to(device), torch.Tensor(lp_phases[i0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind,3].reshape(-1,1)).to(device), X_query_cart, tq)
-				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i0]).to(device), torch.Tensor(Masks[i0]).to(device), torch.Tensor(lp_times[i0]).to(device), torch.Tensor(lp_stations[i0]).long().to(device), torch.Tensor(lp_phases[i0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind,3].reshape(-1,1)).to(device), X_query_cart_repeat, tq_repeat, n_reshape = len(tq))
+				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i0]).to(device), torch.Tensor(Masks[i0]).to(device), torch.Tensor(lp_times[i0]).to(device), torch.Tensor(lp_stations[i0]).long().to(device), torch.Tensor(lp_phases[i0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_query_cart_repeat, tq_repeat, n_reshape = len(tq))
 
 				# Out_1[:,ip_need[1]] += out[0][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
 				# Out_2[:,ip_need[1]] += out[1][:,0:-1,0].cpu().detach().numpy()/n_overlap/n_scale_x_grid
@@ -1038,12 +1038,12 @@ for cnt, strs in enumerate([0]):
 
 				ipick, tpick = lp_stations[i].astype('int'), lp_times[i] ## are these constant across different x_grid_ind?
 				
-				tq_repeat = tq.repeat(len(X_query_1_cart_list[i]))
+				tq_repeat = tq.repeat(len(X_query_1_cart_list[i]),1)
 				X_query_cart_repeat = X_query_1_cart_list[i].repeat_interleave(len(tq), dim = 0)
 
 				# note, trv_out_sources, is already on cuda, may cause memory issue with too many sources
 				# out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind,3].reshape(-1,1)).to(device), X_query_1_cart_list[i], tq)
-				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind,3].reshape(-1,1)).to(device), X_query_cart_repeat, tq_repeat, n_reshape = len(tq))
+				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_query_cart_repeat, tq_repeat, n_reshape = len(tq))
 
 				Out_refined[i] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 
@@ -1127,7 +1127,10 @@ for cnt, strs in enumerate([0]):
 				if len(lp_times[i]) == 0:
 					continue ## It will fail if len(lp_times[i0]) == 0!				
 				
-				out = mz_list[x_grid_ind].forward_fixed(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).long().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], X_save_cart, torch.Tensor(ftrns1(srcs_refined[i,0:3].reshape(1,-1))).to(device), tq, torch.zeros(1).to(device), trv_out_srcs_slice[[i],:,:])
+				# tq_query = 
+				# out = mz_list[x_grid_ind].forward_fixed(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).long().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_save_cart, torch.Tensor(ftrns1(srcs_refined[i,0:3].reshape(1,-1))).to(device), tq, torch.zeros(1).to(device), trv_out_srcs_slice[[i],:,:])
+				out = mz_list[x_grid_ind].forward_fixed(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).long().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_save_cart, torch.Tensor(ftrns1(srcs_refined[i,0:3].reshape(1,-1))).to(device), torch.Tensor([srcs_refined[i,3]]).reshape(1,1).to(device), torch.zeros(1).to(device), trv_out_srcs_slice[[i],:,:])
+
 				# Out_save[i,:,:] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 				Out_p_save[i] += out[2][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 				Out_s_save[i] += out[3][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
