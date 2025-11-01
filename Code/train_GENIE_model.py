@@ -897,12 +897,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	time_samples = np.sort(time_samples)
 
 	ilen = 0
-	if use_consistency_loss == True:
+	if use_consistency_loss == True: # (i > int(n_epochs/5))
 		ilen = int(np.floor(len(time_samples)/2/2))
-		ind_sample_consistency 
+		# ind_sample_consistency 
 
 		ichoose_sample = np.sort(np.random.choice(len(time_samples), size = ilen, replace = False)).astype('int')
-		inot_sample = np.delete(np.arange(len(time_samples)), ichoose_sample, axis = 0).astype('int')
+		inot_sample = np.sort(np.random.choice(np.delete(np.arange(len(time_samples)), ichoose_sample, axis = 0).astype('int'), size = n_batch - 2*ilen, replace = False))
 		irandt_shift = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = ilen)/2.0
 		irandt_shift_repeat = (irandt_shift.repeat(2))*np.tile(np.array([0,1]), len(irandt_shift))
 
@@ -1286,7 +1286,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			ioutside = np.where(((x_query_t < min_t) + (x_query_t > max_t)) > 0)[0]
 			x_query_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
 
-						
+
 		if len(active_sources_per_slice) == 0:
 			lbls_grid = np.zeros((x_grids[grid_select].shape[0], 1))
 			lbls_query = np.zeros((n_spc_query, 1))
@@ -1960,17 +1960,18 @@ for i in range(n_restart_step, n_epochs):
 
 			if (np.mod(inc, 2) == 1)*(inc >= (n_batch - 2*ilen)):
 				if (i == iter_loss[0])*(inc == (iter_loss[1] + 1)):
-					ind_consistency = int(np.floor(len(Lbls_save[1])/2))
+					ind_consistency = int(np.floor(len(Lbls_save[0])/2))
 					# pdb.set_trace()
 					# weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
-					mask_loss = (torch.abs(Lbls_query[i0][ind_consistency::] - Lbls_save[1][ind_consistency::]) < 0.01)  # .float()
+					mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::] - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
 					# loss_consistency = (weight1*weights[0]*loss_func(out_save[0], out[0]) + weight2*weights[1]*loss_func(out_save[1], out[1]))/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-					loss_consistency = loss_func(mask_loss*out_save[1][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+					loss_consistency = loss_func(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
 					loss = loss + 0.25*loss_consistency
 
 			out_save = [out[1]]
 			Lbls_save = [Lbls_query[i0]]
 			iter_loss = [i, inc]
+			X_query_save = [X_query[i0]]
 
 
 		min_val_use = 0.1
