@@ -159,6 +159,8 @@ if use_topography == True:
 	surface_profile = np.load(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project)['surface_profile'] # (os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == True)
 	tree_surface = cKDTree(surface_profile[:,0:2])
 
+use_consistency_loss = True
+
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
 load_subnetworks = train_config['fixed_subnetworks']
@@ -894,6 +896,21 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	time_samples = np.sort(time_samples)
 
+	ilen = 0
+	if use_consistency_loss == True:
+		ilen = int(np.floor(len(time_samples)/2/2))
+		ind_sample_consistency 
+
+		ichoose_sample = np.sort(np.random.choice(len(time_samples), size = ilen, replace = False)).astype('int')
+		inot_sample = np.delete(np.arange(len(time_samples)), ichoose_sample, axis = 0).astype('int')
+		irandt_shift = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = ilen) # /2.0
+		irandt_shift_repeat = (irandt_shift.repeat(2))*np.tile(np.array([0,1]), len(irandt_shift))
+
+		time_samples = np.concatenate((time_samples[inot_sample], time_samples[ichoose_sample].repeat(2) + irandt_shift_repeat), axis = 0)
+
+		# time_samples[-ilen::] = time_samples[ichoose_sample]
+
+
 	max_t = float(np.ceil(max([x_grids_trv[j].max() for j in range(len(x_grids_trv))])))
 	min_t = float(np.floor(min([x_grids_trv[j].min() for j in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
 
@@ -928,7 +945,19 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	active_sources_per_slice_l = []
 
 	for i in range(n_batch):
+
+		# if (use_consistency_loss == True)*(np.mod(i, 2) == 1)*(i >= (n_batch - 2*ilen)):
+		# 	i0 = Grid_indices[i - 1] ## Use repeated grid if use_consistency_loss = True
+		# else:
+		# 	i0 = np.random.randint(0, high = len(x_grids))
+
+		# if (use_consistency_loss == True)*(np.mod(i, 2) == 1)*(i >= (n_batch - 2*ilen)):
+		# 	i0 = Grid_indices[i - 1] ## Use repeated grid if use_consistency_loss = True
+		# else:
+		
 		i0 = np.random.randint(0, high = len(x_grids))
+
+		# i0 = np.random.randint(0, high = len(x_grids))
 		n_spc = x_grids[i0].shape[0]
 		if use_full_network == True:
 			n_sta_select = n_sta
@@ -1248,6 +1277,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			ioutside = np.where(((x_query_focused_t < min_t) + (x_query_focused_t > max_t)) > 0)[0]
 			x_query_focused_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
 			x_query_t[ind_overwrite_focused_queries] = x_query_focused_t
+
+
+		if (use_consistency_loss == True)*(np.mod(i, 2) == 1)*(i >= (n_batch - 2*ilen)):
+			ind_consistency = int(np.floor(len(X_query[i - 1])/2))
+			x_query[ind_consistency::] = X_query[i - 1][ind_consistency::,0:3]
+			x_query_t[ind_consistency::] = X_query[i - 1][ind_consistency::,3] - irandt_shift[int((i - (n_batch - 2*ilen))/2)]
 
 
 		if len(active_sources_per_slice) == 0:
@@ -1916,6 +1951,24 @@ for i in range(n_restart_step, n_epochs):
 			loss_dice = 1.0 - (0.5*loss_dice1 + 0.5*loss_dice2)
 
 			loss = 0.5*loss + (0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
+
+
+		if use_consistency_loss == True:
+			ilen = int(np.floor(n_batch/2/2))
+
+			if (np.mod(inc, 2) == 1)*(inc >= (n_batch - 2*ilen)):
+				if (i == iter_loss[0])*(inc == (iter_loss[1] + 1)):
+					ind_consistency = int(np.floor(len(Lbls_save[1])/2))
+					# pdb.set_trace()
+					# weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
+					mask_loss = (torch.abs(Lbls_query[i0][ind_consistency::] - Lbls_save[1][ind_consistency::]) < 0.01)  # .float()
+					# loss_consistency = (weight1*weights[0]*loss_func(out_save[0], out[0]) + weight2*weights[1]*loss_func(out_save[1], out[1]))/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+					loss_consistency = loss_func(mask_loss*out_save[1][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+					loss = loss + 0.25*loss_consistency
+
+			out_save = [out[1]]
+			Lbls_save = [Lbls_query[i0]]
+			iter_loss = [i, inc]
 
 
 		min_val_use = 0.1
