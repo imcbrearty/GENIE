@@ -903,7 +903,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 		ichoose_sample = np.sort(np.random.choice(len(time_samples), size = ilen, replace = False)).astype('int')
 		inot_sample = np.delete(np.arange(len(time_samples)), ichoose_sample, axis = 0).astype('int')
-		irandt_shift = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = ilen) # /2.0
+		irandt_shift = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = ilen)/2.0
 		irandt_shift_repeat = (irandt_shift.repeat(2))*np.tile(np.array([0,1]), len(irandt_shift))
 
 		time_samples = np.concatenate((time_samples[inot_sample], time_samples[ichoose_sample].repeat(2) + irandt_shift_repeat), axis = 0)
@@ -1283,8 +1283,10 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			ind_consistency = int(np.floor(len(X_query[i - 1])/2))
 			x_query[ind_consistency::] = X_query[i - 1][ind_consistency::,0:3]
 			x_query_t[ind_consistency::] = X_query[i - 1][ind_consistency::,3] - irandt_shift[int((i - (n_batch - 2*ilen))/2)]
+			ioutside = np.where(((x_query_t < min_t) + (x_query_t > max_t)) > 0)[0]
+			x_query_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
 
-
+						
 		if len(active_sources_per_slice) == 0:
 			lbls_grid = np.zeros((x_grids[grid_select].shape[0], 1))
 			lbls_query = np.zeros((n_spc_query, 1))
