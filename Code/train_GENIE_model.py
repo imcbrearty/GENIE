@@ -1515,7 +1515,7 @@ if build_training_data == True:
 
 			if use_subgraph == True:
 				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, device = device)
-				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[i], X_fixed[i], A_src_in_sta, max_t, dt_res = kernel_sig_t/5.0, t_win = kernel_sig_t*2.0, device = device)
+				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[i], X_fixed[i], A_src_in_sta, max_t, min_t = min_t, time_shift = X_fixed[i][:,3], dt_res = kernel_sig_t/5.0, t_win = kernel_sig_t*2.0, device = device)
 				A_sta_sta_l[i] = A_sta_sta ## These should be equal
 				A_src_src_l[i] = A_src_src ## These should be equal
 				A_prod_sta_sta_l[i] = A_prod_sta_sta
@@ -1616,7 +1616,7 @@ for i in range(n_restart_step, n_epochs):
 			
 			for n in range(len(Inpts)):
 				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[n], X_fixed[n], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, device = device)
-				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[n], X_fixed[n], A_src_in_sta, max_t, dt_res = kernel_sig_t/5.0, t_win = kernel_sig_t*2.0, device = device)
+				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[n], X_fixed[n], A_src_in_sta, max_t, min_t = min_t, time_shift = X_fixed[n][:,3], dt_res = kernel_sig_t/5.0, t_win = kernel_sig_t*2.0, device = device)
 				A_sta_sta_l[n] = A_sta_sta ## These should be equal
 				A_src_src_l[n] = A_src_src ## These should be equal
 				A_prod_sta_sta_l[n] = A_prod_sta_sta
@@ -1891,6 +1891,32 @@ for i in range(n_restart_step, n_epochs):
 		
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 		loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+
+
+		use_dice_loss = True
+		if (use_dice_loss == True)*(i > int(n_epochs/5)):
+			def dice_loss(p, t, epsilon = 1e-6):
+				return (2.0*((p.clamp(min = 0.0, max = 1.0)*t.clamp(min = 0.0, max = 1.0)).sum()) + epsilon)/(p.clamp(min = 0.0, max = 1.0).pow(2).sum() + t.clamp(min = 0.0, max = 1.0).pow(2).sum() + epsilon)
+
+			def dice_loss1(p, t, epsilon = 1e-6):
+				return (2.0*((p.clamp(min = 0.0, max = 1.0)*t.clamp(min = 0.0, max = 1.0)).sum(1)) + epsilon)/(p.clamp(min = 0.0, max = 1.0).pow(2).sum(1) + t.clamp(min = 0.0, max = 1.0).pow(2).sum(1) + epsilon)
+
+			min_val_trgt = 0.1
+			z_vec = torch.Tensor([1.0]).to(device)
+			dice1 = z_vec if (Lbls[i0].max() < min_val_trgt)*(out[0].max().item() < min_val_trgt) else dice_loss(out[0], torch.Tensor(Lbls[i0]).to(device))
+			dice2 = z_vec if (Lbls_query[i0].max() < min_val_trgt)*(out[1].max().item() < min_val_trgt) else dice_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+			loss_dice1 = (weights[0]*dice1 + weights[1]*dice2)/(weights[0] + weights[1])
+
+			mask_dice3 = ((pick_lbls[:,:,0].max(1).values < min_val_trgt)*(out[2][:,:,0].max(1).values < min_val_trgt)).float()
+			mask_dice4 = ((pick_lbls[:,:,1].max(1).values < min_val_trgt)*(out[3][:,:,0].max(1).values < min_val_trgt)).float()
+			dice3 = mask_dice3 + (1.0 - mask_dice3)*dice_loss1(out[2][:,:,0], pick_lbls[:,:,0])
+			dice4 = mask_dice4 + (1.0 - mask_dice4)*dice_loss1(out[3][:,:,0], pick_lbls[:,:,1])
+			loss_dice2 = (weights[2]*dice3.mean() + weights[3]*dice4.mean())/(weights[2] + weights[3])
+
+			loss_dice = 1.0 - (0.5*loss_dice1 + 0.5*loss_dice2)
+
+			loss = 0.5*loss + (0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
+
 
 		min_val_use = 0.1
 		use_sensitivity_loss = False
