@@ -588,15 +588,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			n_iterations = 1
 			for i in range(n_iterations):
 				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.1, float(src_x_kernel/0.5), float(src_t_kernel/0.5)
-				ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(aftershock_rate*len(src_positions))), replace = False)
-				rand_vec = np.random.randn(len(ichoose),3)
-				rand_vec = rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True)
-				samp_spc = gamma.rvs(0.5, 1.0, size = len(rand_vec))*aftershock_scale_x
-				rand_vec = rand_vec*samp_spc.reshape(-1,1)
-				src_positions[ichoose] = ftrns2(ftrns1(src_positions[ichoose - 1]) + rand_vec)
-				src_positions = np.clip(src_positions, np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1))
-				src_times[ichoose] = src_times[ichoose - 1] + aftershock_scale_t*gamma.rvs(0.5, 1.0, size = len(rand_vec))
-	
+				if int(np.ceil(aftershock_rate*len(src_positions))) > 0:
+					ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(aftershock_rate*len(src_positions))), replace = False)
+					rand_vec = np.random.randn(len(ichoose),3)
+					rand_vec = rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True)
+					samp_spc = gamma.rvs(0.5, 1.0, size = len(rand_vec))*aftershock_scale_x
+					rand_vec = rand_vec*samp_spc.reshape(-1,1)
+					src_positions[ichoose] = ftrns2(ftrns1(src_positions[ichoose - 1]) + rand_vec)
+					src_positions = np.clip(src_positions, np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1))
+					src_times[ichoose] = src_times[ichoose - 1] + aftershock_scale_t*gamma.rvs(0.5, 1.0, size = len(rand_vec))
+		
 	if use_topography == True: ## Don't simulate any sources in the air
 		imatch = tree_surface.query(src_positions[:,0:2])[1]
 		ifind_match = np.where(src_positions[:,2] > surface_profile[imatch,2])[0]
@@ -1955,7 +1956,7 @@ for i in range(n_restart_step, n_epochs):
 			loss = 0.5*loss + (0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
 
 
-		if use_consistency_loss == True:
+		if (use_consistency_loss == True)*(i > int(n_epochs/5)):
 			ilen = int(np.floor(n_batch/2/2))
 
 			if (np.mod(inc, 2) == 1)*(inc >= (n_batch - 2*ilen)):
