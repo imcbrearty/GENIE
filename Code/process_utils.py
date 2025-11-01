@@ -664,7 +664,8 @@ def extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, m
 
 	n_sta = len(locs)
 
-	lp = arrivals_tree.query_ball_point(time_samples.reshape(-1,1) + (max_t - min_t)/2.0, r = t_win + (max_t - min_t)/2.0) 
+	# lp = arrivals_tree.query_ball_point(time_samples.reshape(-1,1) + (max_t - min_t)/2.0, r = t_win + (max_t - min_t)/2.0) 
+	lp = arrivals_tree.query_ball_point(time_samples.reshape(-1,1) + (max_t - min_t)/2.0 + min_t, r = t_win + (max_t - min_t)/2.0) 
 
 	lp_times = [] # duplicate
 	lp_stations = [] # duplicate
@@ -1642,6 +1643,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
