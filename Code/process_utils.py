@@ -770,7 +770,7 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 			perm_vec_expand = np.random.permutation(np.arange(x_grid.shape[0])).astype('int')
 			Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
 		else:
-			perm_vec_expand = np.arange(x_grids[grid_select].shape[0]).astype('int')
+			perm_vec_expand = np.arange(x_grid.shape[0]).astype('int')
 			Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
 
 		Ac_prod_src_src = build_src_src_product(Ac_src_src, A_src_in_sta, locs[ind_use], x_grid, device = device)
@@ -925,7 +925,7 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 			perm_vec_expand = np.random.permutation(np.arange(x_grid.shape[0])).astype('int')
 			Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
 		else:
-			perm_vec_expand = np.arange(x_grids[grid_select].shape[0]).astype('int')
+			perm_vec_expand = np.arange(x_grid.shape[0]).astype('int')
 			Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
 		Ac_prod_src_src = build_src_src_product(Ac_src_src, A_src_in_sta, locs[ind_use], x_grid, device = device)
 
@@ -1719,6 +1719,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
