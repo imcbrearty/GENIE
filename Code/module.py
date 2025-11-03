@@ -46,6 +46,7 @@ use_phase_types = config['use_phase_types']
 use_absolute_pos = config['use_absolute_pos']
 use_neighbor_assoc_edges = config.get('use_neighbor_assoc_edges', False)
 use_expanded = config['use_expanded']
+use_gradient_loss = train_config['use_gradient_loss']
 
 device = torch.device('cuda') ## or use cpu
 
@@ -1113,7 +1114,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 if use_updated_model_definition == False:
 
 	class GCN_Detection_Network_extended(nn.Module):
-		def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, use_expanded = use_expanded, device = 'cuda'):
+		def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, device = 'cuda'):
 			super(GCN_Detection_Network_extended, self).__init__()
 			# Define modules and other relavent fixed objects (scaling coefficients.)
 			# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
@@ -1144,6 +1145,7 @@ if use_updated_model_definition == False:
 			self.scale_rel = scale_rel
 			self.scale_time = scale_time
 			self.use_expanded = use_expanded
+			self.use_gradient_loss = use_gradient_loss
 
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
@@ -1163,21 +1165,46 @@ if use_updated_model_definition == False:
 			## Should add time information to node features of Cartesian product
 			## Or implement as relative time information on edges
 
-
 			x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+
+			if self.use_gradient_loss == True:
+				x_temp_cuda = Variable(x_temp_cuda, requires_grad = True)
+				x_query_cart = Variable(x_query_cart, requires_grad = True)
+				t_query = Variable(t_query, requires_grad = True)
 
 			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
 			x = self.SpatialAggregation1(x, A_src, x_temp_cuda) # x_temp_cuda_cart
 			x = self.SpatialAggregation2(x, A_src, x_temp_cuda)
 			x_spatial = self.SpatialAggregation3(x, A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+			
+			# if self.use_gradient_loss == True:
+			#	x_spatial = Variable(x_spatial, requires_grad = True)
+
 			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 			y = self.proj_soln(y_latent)
 
 			# y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
+
+			# if self
+
 			x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
 			x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
 			x = self.proj_soln(x)
+
+
+			if self.use_gradient_loss == True:
+
+				torch_one_vec = torch.ones(len(x_temp_cuda_cart)).to(x_temp_cuda_cart.device)
+				grad_grid = torch.autograd.grad(inputs = x_temp_cuda, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
+				# grad_grid_t = torch.autograd.grad(inputs = t_query, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
+				grad_grid_src, grad_grid_t = grad_grid[:,0:3], grad_grid[:,3]/(1000.0*self.scale_time)
+
+				torch_one_vec = torch.ones(len(x_query_src_cart)).to(x_query_src_cart.device)
+				grad_query_src = torch.autograd.grad(inputs = x_query_src_cart, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
+				grad_query_t = torch.autograd.grad(inputs = t_query, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
+
+
 
 			# x = self.TemporalAttention(x, t_query) # on random queries
 			## In LocalSliceLg Collapse should use relative node time information between arrivals and moveouts
@@ -1195,7 +1222,13 @@ if use_updated_model_definition == False:
 			
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
 	
-			return y, x, arv_p, arv_s
+			if self.use_gradient_loss == False:
+
+				return y, x, arv_p, arv_s
+
+			else:
+
+				return y, x, arv_p, arv_s, [grad_grid_src, grad_grid_t, grad_query_src, grad_query_t]
 	
 		def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, pos_loc, pos_src):
 
