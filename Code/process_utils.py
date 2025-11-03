@@ -700,7 +700,7 @@ def extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, m
 
 	return [lp_times, lp_stations, lp_phases, lp_meta]
 
-def build_src_src_product(Ac_src_src, A_src_in_sta, locs, x_grid):
+def build_src_src_product(Ac_src_src, A_src_in_sta, locs, x_grid, device = device):
 
 	n_sta = len(locs)
 
@@ -773,7 +773,7 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 			perm_vec_expand = np.arange(x_grids[grid_select].shape[0]).astype('int')
 			Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
 
-		Ac_prod_src_src = build_src_src_product(Ac_src_src, A_src_in_sta, locs[ind_use], x_grid)
+		Ac_prod_src_src = build_src_src_product(Ac_src_src, A_src_in_sta, locs[ind_use], x_grid, device = device)
 
 	
 	A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1).to(device)).contiguous()
@@ -927,7 +927,7 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 		else:
 			perm_vec_expand = np.arange(x_grids[grid_select].shape[0]).astype('int')
 			Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
-		Ac_prod_src_src = build_src_src_product(Ac_src_src, A_src_in_sta, locs[ind_use], x_grid)
+		Ac_prod_src_src = build_src_src_product(Ac_src_src, A_src_in_sta, locs[ind_use], x_grid, device = device)
 
 	if Ac is False:
 
