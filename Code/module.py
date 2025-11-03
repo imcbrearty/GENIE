@@ -45,6 +45,7 @@ scale_time = train_config['scale_time']
 use_phase_types = config['use_phase_types']
 use_absolute_pos = config['use_absolute_pos']
 use_neighbor_assoc_edges = config.get('use_neighbor_assoc_edges', False)
+use_expanded = config['use_expanded']
 
 device = torch.device('cuda') ## or use cpu
 
@@ -230,7 +231,7 @@ class BipartiteGraphOperator(MessagePassing):
 		return self.activate2(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = mask.max(1, keepdims = True)[0]*self.activate1(self.fc1(torch.cat((inpt, A_src_in_edges.x), dim = -1))))))
 
 class SpatialAggregation(MessagePassing):
-	def __init__(self, in_channels, out_channels, scale_rel = scale_rel, n_dim = 3, n_global = 5, n_hidden = 30):
+	def __init__(self, in_channels, out_channels, scale_rel = scale_rel, scale_time = scale_time, n_dim = 4, n_global = 5, n_hidden = 30):
 		super(SpatialAggregation, self).__init__('mean') # node dim
 		## Use two layers of SageConv. Explictly or implicitly?
 		self.fc1 = nn.Linear(in_channels + n_dim + n_global, n_hidden)
@@ -926,7 +927,7 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 if use_updated_model_definition == False:
 
 	class GCN_Detection_Network_extended(nn.Module):
-		def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, use_absolute_pos = use_absolute_pos, device = 'cuda'):
+		def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, device = 'cuda'):
 			super(GCN_Detection_Network_extended, self).__init__()
 			# Define modules and other relavent fixed objects (scaling coefficients.)
 			# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
@@ -948,6 +949,7 @@ if use_updated_model_definition == False:
 			# self.ArrivalS = StationSourceAttention(30, 15, 1, 15, n_heads = 3).to(device)
 			self.use_absolute_pos = use_absolute_pos
 			self.scale_rel = scale_rel
+			self.scale_time = scale_time
 			
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
@@ -968,11 +970,13 @@ if use_updated_model_definition == False:
 			## Or implement as relative time information on edges
 
 
+			x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+
 			x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
-			x = self.SpatialAggregation1(x, A_src, x_temp_cuda_cart)
-			x = self.SpatialAggregation2(x, A_src, x_temp_cuda_cart)
-			x_spatial = self.SpatialAggregation3(x, A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+			x = self.SpatialAggregation1(x, A_src, x_temp_cuda) # x_temp_cuda_cart
+			x = self.SpatialAggregation2(x, A_src, x_temp_cuda)
+			x_spatial = self.SpatialAggregation3(x, A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 			y = self.proj_soln(y_latent)
 
@@ -1037,11 +1041,13 @@ if use_updated_model_definition == False:
 			## Or implement as relative time information on edges
 
 
+			x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+
 			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
-			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
-			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
-			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
+			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 			y = self.proj_soln(y_latent)
 
@@ -1059,9 +1065,9 @@ if use_updated_model_definition == False:
 			s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
 			if self.use_absolute_pos == True:
 				s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
-			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
-			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, dt_partition, tpick, ipick, phase_label, s, tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size # locs_use_cart, x_temp_cuda_cart, A_src_in_sta
-			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, dt_partition, tpick, ipick, phase_label, s, tlatent[:,1].reshape(-1,1), n_temp, n_sta)
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
+			arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size # locs_use_cart, x_temp_cuda_cart, A_src_in_sta
+			arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,1].reshape(-1,1), n_temp, n_sta)
 			arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, locs_use_cart, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
 			
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
@@ -1084,11 +1090,13 @@ if use_updated_model_definition == False:
 			## Should add time information to node features of Cartesian product
 			## Or implement as relative time information on edges
 
+			x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+
 			x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 			x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
-			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda_cart)
-			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda_cart)
-			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda_cart) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+			x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+			x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
+			x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 			y = self.proj_soln(y_latent)
 
@@ -1098,7 +1106,7 @@ if use_updated_model_definition == False:
 			x = self.proj_soln(x)
 	
 			if n_reshape > 1: ## Use this to map (n_reshape) repeated spatial queries (x_temp_cuda_cart) at different origin times, to predictions for fixed coordinates and across time
-				y = y.reshape(-1,n_reshape,1) ## Assumed feature dimension output is 1
+				# y = y.reshape(-1,n_reshape,1) ## Assumed feature dimension output is 1
 				x = x.reshape(-1,n_reshape,1)
 
 			return y, x
@@ -1774,7 +1782,6 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
-
 
 
 
