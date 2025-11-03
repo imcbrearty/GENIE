@@ -116,6 +116,7 @@ src_x_kernel = train_config['src_x_kernel'] # Kernel for source label, horizonta
 src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
 src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
 # t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
+src_kernel_mean = np.mean([src_x_kernel, src_x_kernel, src_depth_kernel])
 
 scale_time = train_config['scale_time']
 
@@ -1373,6 +1374,10 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			lbls_grid = np.zeros((x_grids[grid_select].shape[0], 1))
 			lbls_query = np.zeros((n_spc_query, 1))
 
+			if use_gradient_loss == True:
+				lbls_grid = [lbls_grid, np.zeros(((len(lbls_grid)),3)), np.zeros(len(lbls_grid))]
+				lbls_query = [lbls_query, np.zeros(((len(lbls_query)),3)), np.zeros(len(lbls_query))]
+
 		else:
 			active_sources_per_slice = active_sources_per_slice.astype('int')
 			
@@ -1423,14 +1428,16 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				# d3 = torch.autograd.grad(inputs = inpt_grad, outputs = pred, grad_outputs = torch_three_vec, retain_graph = True, create_graph = True)[0]
 
 
-
-
 			# lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 
 			# lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 		
+		# print('Grad')
+		# print(lbls_grid[-1].shape)
+		# print(lbls_query[-1].shape)
+
 		X_query.append(np.concatenate((x_query, x_query_t.reshape(-1,1)), axis = 1))
 		Lbls.append(lbls_grid)
 		Lbls_query.append(lbls_query)
@@ -2132,8 +2139,15 @@ for i in range(n_restart_step, n_epochs):
 			]			
 
 		# Call the model with pre-processed tensors
-		out = mz(*input_tensors)
 
+		if use_gradient_loss == False:
+
+			out = mz(*input_tensors)
+
+		else:
+
+			out, grads = mz(*input_tensors)
+			grad_grid_src, grad_grid_t, grad_query_src, grad_query_t = grads
 
 		make_plot = False
 		if make_plot == True:
@@ -2161,11 +2175,17 @@ for i in range(n_restart_step, n_epochs):
 
 		
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
-		loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+		loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 
 
-		if use_gradient_loss == True:
-			pass
+		if (use_gradient_loss == True)*(i > int(n_epochs/5)):
+
+			loss_grad1 = 0.5*weights[0]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, Lbls_grad_spc[i0]) + 0.5*weights[0]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, Lbls_grad_t[i0])
+			loss_grad2 = 0.5*weights[1]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, Lbls_query_grad_spc[i0]) + 0.5*weights[1]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), Lbls_query_grad_t[i0])
+			loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
+
+			loss = 0.5*loss + 0.5*loss_grad
 
 
 		use_dice_loss = True
@@ -2213,45 +2233,51 @@ for i in range(n_restart_step, n_epochs):
 			X_query_save = [X_query[i0]]
 
 
-		min_val_use = 0.1
-		use_sensitivity_loss = False
-		loss_regularize = torch.Tensor([0.0]).to(device)
-		if (use_sensitivity_loss == True)*(((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)) == False):
+		## Normalize with respect to batch size (note this changes relative scaling bewteen L2 loss and dice loss)
+		loss = loss/n_batch
 
-			# if ((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)):
-			# 	continue
+
+
+		# min_val_use = 0.1
+		# use_sensitivity_loss = False
+		# loss_regularize = torch.Tensor([0.0]).to(device)
+		# if (use_sensitivity_loss == True)*(((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)) == False):
+
+		# 	# if ((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)):
+		# 	# 	continue
 			
-			sig_d = 0.15 ## Assumed pick uncertainty (seconds)
-			chi_pdf = chi2(df = 3).pdf(0.99)
+		# 	sig_d = 0.15 ## Assumed pick uncertainty (seconds)
+		# 	chi_pdf = chi2(df = 3).pdf(0.99)
 	
-			scale_val1 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
-			scale_val2 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
-			scale_val = 0.5*(scale_val1 + scale_val2)
+		# 	scale_val1 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
+		# 	scale_val2 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
+		# 	scale_val = 0.5*(scale_val1 + scale_val2)
 	
-			scale_partials = torch.Tensor((1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)).to(device)
-			src_input_p = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
-			src_input_s = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
-			trv_out_p = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_p, method = 'direct')[:,0]
-			trv_out_s = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_s, method = 'direct')[:,1]
-			# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
-			d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
-			d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
-			d_p = d_p.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
-			d_s = d_s.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
-			d_grad = torch.Tensor([1000.0]).to(device)*(1.0/scale_partials)*torch.cat((torch.clip(out[2], min = 0.0)*d_p, torch.clip(out[3], min = 0.0)*d_s), dim = 0)/torch.Tensor([scale_val1, scale_val2, 1.0]).to(device).reshape(1,-1)
-			var_cart = torch.bmm(d_grad.transpose(1,2), d_grad)
-			# try:
-			scale_loss = 10000.0
-			tol_cond = 1000.0
-			icond = torch.where(torch.linalg.cond(var_cart) < tol_cond)[0]
-			if len(icond) == 3: icond = torch.cat((icond, torch.Tensor([icond[-1].item()]).to(device)), dim = 0).long()
-			var_cart_inv = torch.linalg.solve(var_cart[icond], torch.eye(3).to(device))*torch.Tensor([(sig_d**2)*chi_pdf]).to(device)
-			sigma_cart = torch.norm(var_cart_inv[:,torch.arange(3),torch.arange(3)]**(0.5), dim = 1)
-			loss_regularize = (0.000002)*loss_func1(sigma_cart/scale_loss, torch.zeros(sigma_cart.shape).to(device)) # 0.001 # 0.0002
-			if torch.isnan(loss_regularize) == False: loss = loss + loss_regularize
-			# losses_regularize[i] = loss_regularize.item()
-			loss_regularize_val += loss_regularize.item()
-			loss_regularize_cnt += 1
+		# 	scale_partials = torch.Tensor((1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)).to(device)
+		# 	src_input_p = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
+		# 	src_input_s = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
+		# 	trv_out_p = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_p, method = 'direct')[:,0]
+		# 	trv_out_s = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_s, method = 'direct')[:,1]
+		# 	# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
+		# 	d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
+		# 	d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
+		# 	d_p = d_p.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
+		# 	d_s = d_s.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
+		# 	d_grad = torch.Tensor([1000.0]).to(device)*(1.0/scale_partials)*torch.cat((torch.clip(out[2], min = 0.0)*d_p, torch.clip(out[3], min = 0.0)*d_s), dim = 0)/torch.Tensor([scale_val1, scale_val2, 1.0]).to(device).reshape(1,-1)
+		# 	var_cart = torch.bmm(d_grad.transpose(1,2), d_grad)
+		# 	# try:
+		# 	scale_loss = 10000.0
+		# 	tol_cond = 1000.0
+		# 	icond = torch.where(torch.linalg.cond(var_cart) < tol_cond)[0]
+		# 	if len(icond) == 3: icond = torch.cat((icond, torch.Tensor([icond[-1].item()]).to(device)), dim = 0).long()
+		# 	var_cart_inv = torch.linalg.solve(var_cart[icond], torch.eye(3).to(device))*torch.Tensor([(sig_d**2)*chi_pdf]).to(device)
+		# 	sigma_cart = torch.norm(var_cart_inv[:,torch.arange(3),torch.arange(3)]**(0.5), dim = 1)
+		# 	loss_regularize = (0.000002)*loss_func1(sigma_cart/scale_loss, torch.zeros(sigma_cart.shape).to(device)) # 0.001 # 0.0002
+		# 	if torch.isnan(loss_regularize) == False: 
+		# 		loss = loss + loss_regularize
+		# 	# losses_regularize[i] = loss_regularize.item()
+		# 	loss_regularize_val += loss_regularize.item()
+		# 	loss_regularize_cnt += 1
 		
 		
 		n_visualize_step = 1000
