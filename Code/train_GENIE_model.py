@@ -1421,8 +1421,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				grad_query_spc = src_spatial_kernel_cuda.mean()*torch.autograd.grad(inputs = inpt_query, outputs = lbls_query, grad_outputs = torch_query_vec, retain_graph = True, create_graph = True)[0]
 				grad_query_t = src_t_kernel_cuda*torch.autograd.grad(inputs = inpt_query_t, outputs = lbls_query, grad_outputs = torch_query_vec, retain_graph = True, create_graph = True)[0]
 
-				lbls_grid = [lbls_grid.cpu().detach().numpy(), grad_grid_spc.cpu().detach().numpy(), grad_grid_t.cpu().detach().numpy()]
-				lbls_query = [lbls_query.cpu().detach().numpy(), grad_query_spc.cpu().detach().numpy(), grad_query_t.cpu().detach().numpy()]
+				lbls_grid = [lbls_grid.cpu().detach().numpy().reshape(-1,1), grad_grid_spc.cpu().detach().numpy(), grad_grid_t.cpu().detach().numpy()]
+				lbls_query = [lbls_query.cpu().detach().numpy().reshape(-1,1), grad_query_spc.cpu().detach().numpy(), grad_query_t.cpu().detach().numpy()]
 
 				# d2 = torch.autograd.grad(inputs = inpt_grad, outputs = pred, grad_outputs = torch_two_vec, retain_graph = True, create_graph = True)[0]
 				# d3 = torch.autograd.grad(inputs = inpt_grad, outputs = pred, grad_outputs = torch_three_vec, retain_graph = True, create_graph = True)[0]
