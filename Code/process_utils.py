@@ -700,7 +700,43 @@ def extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, m
 
 	return [lp_times, lp_stations, lp_phases, lp_meta]
 
-def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_trv_ref, x_grid_trv_pointers_p, x_grid_trv_pointers_s, ftrns1, graph_params, scale_time = None, device = 'cpu', verbose = False):
+def build_src_src_product(Ac_src_src, A_src_in_sta, locs, x_grid):
+
+	n_sta = len(locs)
+
+	# A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(locs.shape[0]), len(x_grid)).reshape(1,-1), np.arange(len(x_grid)).repeat(len(locs), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
+	tree_src_in_sta = cKDTree(A_src_in_sta[0].reshape(-1,1).cpu().detach().numpy())
+	lp_fixed_stas = tree_src_in_sta.query_ball_point(np.arange(locs.shape[0]).reshape(-1,1), r = 0)
+
+	degree_of_src_nodes = degree(A_src_in_sta[1])
+	cum_count_degree_of_src_nodes = np.concatenate((np.array([0]), np.cumsum(degree_of_src_nodes.cpu().detach().numpy())), axis = 0).astype('int')
+
+	sta_ind_lists = []
+	for i in range(x_grid.shape[0]):
+		ind_list = -1*np.ones(locs.shape[0])
+		ind_list[A_src_in_sta[0,cum_count_degree_of_src_nodes[i]:cum_count_degree_of_src_nodes[i+1]].cpu().detach().numpy()] = np.arange(degree_of_src_nodes[i].item())
+		sta_ind_lists.append(ind_list)
+	sta_ind_lists = np.hstack(sta_ind_lists).astype('int')
+
+	Ac_prod_src_src = []
+	for i in range(locs.shape[0]):
+	
+		slice_edges = subgraph(A_src_in_sta[1,np.array(lp_fixed_stas[i])], Ac_src_src, relabel_nodes = False)[0].cpu().detach().numpy()
+
+		## This can happen when a station is only linked to one source
+		if slice_edges.shape[1] == 0:
+			continue
+
+		shift_ind = sta_ind_lists[slice_edges*n_sta + i]
+		assert(shift_ind.min() >= 0)
+		## For each source, need to find where that station index is in the "order" of the subgraph Cartesian product
+		Ac_prod_src_src.append(torch.Tensor(cum_count_degree_of_src_nodes[slice_edges] + shift_ind).to(device))
+
+	Ac_prod_src_src = torch.Tensor(np.hstack(Ac_prod_src_src)).long().to(device)
+
+	return Ac_prod_src_src
+
+def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_trv_ref, x_grid_trv_pointers_p, x_grid_trv_pointers_s, ftrns1, graph_params, scale_time = None, device = 'cpu', Ac = False, verbose = False):
 
 	if verbose == True:
 		st = time.time()
@@ -723,6 +759,21 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 		A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
 	else:
 		A_src_src = remove_self_loops(knn(torch.cat((torch.Tensor(ftrns1(x_grid)/1000.0).to(device), scale_time*torch.Tensor(x_grid[:,3].reshape(-1,1)).to(device)), dim = 1), torch.cat((torch.Tensor(ftrns1(x_grid)/1000.0).to(device), scale_time*torch.Tensor(x_grid[:,3].reshape(-1,1)).to(device)), dim = 1), k = k_spc_edges + 1).flip(0).contiguous())[0]
+
+
+	if Ac is not False:
+
+		A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(locs[ind_use].shape[0]), len(x_grid)).reshape(1,-1), np.arange(len(x_grid)).repeat(len(locs[ind_use]), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
+
+		use_perm_expand = True
+		if use_perm_expand == True:
+			perm_vec_expand = np.random.permutation(np.arange(x_grid.shape[0])).astype('int')
+			Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
+		else:
+			perm_vec_expand = np.arange(x_grids[grid_select].shape[0]).astype('int')
+			Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
+
+		Ac_prod_src_src = build_src_src_product(Ac_src_src, A_src_in_sta, locs[ind_use], x_grid)
 
 	
 	A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1).to(device)).contiguous()
@@ -747,9 +798,16 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
 
-	return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+	if Ac is False:
 
-def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_offset = 5.0, k_nearest_pairs = 30, k_sta_edges = 10, k_spc_edges = 15, verbose = False, scale_pairwise_sta_in_src_distances = 100e3, scale_deg = 110e3, scale_time = None, device = 'cpu'):
+		return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+
+	else:
+
+		return [A_sta_sta, [A_src_src, Ac_src_src], A_prod_sta_sta, [A_prod_src_src, Ac_prod_src_src], A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+
+
+def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_offset = 5.0, k_nearest_pairs = 30, k_sta_edges = 10, k_spc_edges = 15, verbose = False, scale_pairwise_sta_in_src_distances = 100e3, scale_deg = 110e3, scale_time = None, Ac = False, device = 'cpu'):
 
 	## Connect all source-reciever pairs to their k_nearest_pairs, and those connections within max_deg_offset.
 	## By using the K-nn neighbors as well as epsilon-pairs, this ensures all source nodes are at least
@@ -860,7 +918,25 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	isort = np.lexsort((A_prod_src_src[0].cpu().detach().numpy(), A_prod_src_src[1].cpu().detach().numpy())) # Likely not actually necessary
 	A_prod_src_src = A_prod_src_src[:,isort]
 
-	return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+
+	if Ac is not False:
+		use_perm_expand = True
+		if use_perm_expand == True:
+			perm_vec_expand = np.random.permutation(np.arange(x_grid.shape[0])).astype('int')
+			Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
+		else:
+			perm_vec_expand = np.arange(x_grids[grid_select].shape[0]).astype('int')
+			Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
+		Ac_prod_src_src = build_src_src_product(Ac_src_src, A_src_in_sta, locs[ind_use], x_grid)
+
+	if Ac is False:
+
+		return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+
+	else:
+
+		return [A_sta_sta, [A_src_src, Ac_src_src], A_prod_sta_sta, [A_prod_src_src, Ac_prod_src_src], A_src_in_prod, A_src_in_sta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+
 
 def compute_time_embedding_vectors(trv_pairwise, locs, x_grid, A_src_in_sta, max_t, min_t = None, time_shift = None, dt_res = float(eps/15.0), k_times = 10, t_win = 10, device = 'cpu'): ## Note: now calling dt_res and t_win from inside scripts
 
@@ -1643,7 +1719,6 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
-
 
 
 
