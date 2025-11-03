@@ -19,6 +19,7 @@ from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from torch_geometric.utils import degree
+from torch.autograd import Variable
 from torch.nn import Softplus
 from torch_scatter import scatter
 from numpy.matlib import repmat
@@ -509,7 +510,7 @@ def sample_correlated_travel_time_noise(cholesky_matrix_trv, mean_vec, bias_fact
 
 		return simulated_times, scaled_mean_vec, scale_val, log_likelihood_obs, log_likelihood_sim
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, use_time_shift = use_time_shift, use_expanded = use_expanded, Ac = Ac, return_only_data = False):
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, use_time_shift = use_time_shift, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, Ac = Ac, return_only_data = False):
 
 	if verbose == True:
 		st = time.time()
@@ -1386,9 +1387,42 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 			else:
 
-				lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
-				lbls_query = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_query_t).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
-				
+				# x_inpt = Variable(torch.Tensor(np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1)))
+
+				lbls_grid_arg = np.argmax((np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))), axis = 1) # .max(1) # .reshape(-1,1)
+				lbls_query_arg = np.argmax((np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_query_t).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))), axis = 1) # .max(1).reshape(-1,1)
+
+				# lbls_grid = (np.exp(-0.5*(((ftrns1(x_grids[grid_select]) - ftrns1(src_positions[active_sources_per_slice[lbls_grid_arg]].reshape(1,-1)))**2)/(src_spatial_kernel**2)).sum(1))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1) - src_times[active_sources_per_slice[lbls_grid_arg]].reshape(-1))**2)/(src_t_kernel**2))) # .max(1).reshape(-1,1)
+				# lbls_query = (np.exp(-0.5*(((ftrns1(x_query) - ftrns1(src_positions[active_sources_per_slice[lbls_query_arg]].reshape(1,-1)))**2)/(src_spatial_kernel**2)).sum(1))*np.exp(-0.5*(((time_samples[i] + x_query_t).reshape(-1) - src_times[active_sources_per_slice[lbls_query_arg]].reshape(-1))**2)/(src_t_kernel**2))) # .max(1).reshape(-1,1)
+
+				src_t_kernel_cuda = torch.Tensor([src_t_kernel]).to(device)
+				src_spatial_kernel_cuda = torch.Tensor(src_spatial_kernel[0]).to(device)
+				inpt_grid = Variable(ftrns1_diff(torch.Tensor(x_grids[grid_select]).to(device)), requires_grad = True)
+				inpt_query = Variable(ftrns1_diff(torch.Tensor(x_query).to(device)), requires_grad = True)
+				inpt_grid_t = Variable(torch.Tensor(x_grids[grid_select][:,3]).to(device), requires_grad = True)
+				inpt_query_t = Variable(torch.Tensor(x_query_t).to(device), requires_grad = True)
+
+				# lbls_grid = (torch.exp(-0.5*(((ftrns1_diff(x_grids[grid_select]) - ftrns1_diff(torch.Tensor(src_positions[active_sources_per_slice[lbls_grid_arg]].reshape(1,-1)).to(device)))**2)/(src_spatial_kernel_cuda**2)).sum(1))*torch.exp(-0.5*(((torch.Tensor(time_samples[i]).to(device) + x_grids[grid_select][:,3]).reshape(-1) - torch.Tensor(src_times[active_sources_per_slice[lbls_grid_arg]].reshape(-1))**2)/(src_t_kernel_cuda**2)))) # .max(1).reshape(-1,1)
+				# lbls_query = (torch.exp(-0.5*(((ftrns1_diff(x_query) - ftrns1_diff(torch.Tensor(src_positions[active_sources_per_slice[lbls_query_arg]].reshape(1,-1)).to(device)))**2)/(src_spatial_kernel_cuda**2)).sum(1))*torch.exp(-0.5*(((torch.Tensor(time_samples[i]).to(device) + x_query_t).reshape(-1) - torch.Tensor(src_times[active_sources_per_slice[lbls_query_arg]].reshape(-1))**2)/(src_t_kernel_cuda**2)))) # .max(1).reshape(-1,1)
+				lbls_grid = (torch.exp(-0.5*(((inpt_grid - ftrns1_diff(torch.Tensor(src_positions[active_sources_per_slice[lbls_grid_arg]].reshape(1,-1)).to(device)))**2)/(src_spatial_kernel_cuda**2)).sum(1))*torch.exp(-0.5*(((torch.Tensor([time_samples[i]]).to(device) + inpt_grid_t).reshape(-1) - torch.Tensor(src_times[active_sources_per_slice[lbls_grid_arg]]).to(device).reshape(-1))**2)/(src_t_kernel_cuda**2))) # .max(1).reshape(-1,1)
+				lbls_query = (torch.exp(-0.5*(((inpt_query - ftrns1_diff(torch.Tensor(src_positions[active_sources_per_slice[lbls_query_arg]].reshape(1,-1)).to(device)))**2)/(src_spatial_kernel_cuda**2)).sum(1))*torch.exp(-0.5*(((torch.Tensor([time_samples[i]]).to(device) + inpt_query_t).reshape(-1) - torch.Tensor(src_times[active_sources_per_slice[lbls_query_arg]]).to(device).reshape(-1))**2)/(src_t_kernel_cuda**2))) # .max(1).reshape(-1,1)
+
+				torch_grid_vec = torch.ones(len(inpt_grid)).to(device)
+				torch_query_vec = torch.ones(len(inpt_query)).to(device)
+
+				grad_grid_spc = src_spatial_kernel_cuda.mean()*torch.autograd.grad(inputs = inpt_grid, outputs = lbls_grid, grad_outputs = torch_grid_vec, retain_graph = True, create_graph = True)[0]
+				grad_grid_t = src_t_kernel_cuda*torch.autograd.grad(inputs = inpt_grid_t, outputs = lbls_grid, grad_outputs = torch_grid_vec, retain_graph = True, create_graph = True)[0]
+
+				grad_query_spc = src_spatial_kernel_cuda.mean()*torch.autograd.grad(inputs = inpt_query, outputs = lbls_query, grad_outputs = torch_query_vec, retain_graph = True, create_graph = True)[0]
+				grad_query_t = src_t_kernel_cuda*torch.autograd.grad(inputs = inpt_query_t, outputs = lbls_query, grad_outputs = torch_query_vec, retain_graph = True, create_graph = True)[0]
+
+				lbls_grid = [lbls_grid.cpu().detach().numpy(), grad_grid_spc.cpu().detach().numpy(), grad_grid_t.cpu().detach().numpy()]
+				lbls_query = [lbls_query.cpu().detach().numpy(), grad_query_spc.cpu().detach().numpy(), grad_query_t.cpu().detach().numpy()]
+
+				# d2 = torch.autograd.grad(inputs = inpt_grad, outputs = pred, grad_outputs = torch_two_vec, retain_graph = True, create_graph = True)[0]
+				# d3 = torch.autograd.grad(inputs = inpt_grad, outputs = pred, grad_outputs = torch_three_vec, retain_graph = True, create_graph = True)[0]
+
+
 
 
 			# lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
@@ -1686,8 +1720,18 @@ if build_training_data == True:
 			h['X_query_%d'%i] = X_query[i]
 			h['Locs_%d'%i] = Locs[i]
 			h['Trv_out_%d'%i] = Trv_out[i]
-			h['Lbls_%d'%i] = Lbls[i]
-			h['Lbls_query_%d'%i] = Lbls_query[i]
+
+			if use_gradient_loss == False:
+				h['Lbls_%d'%i] = Lbls[i]
+				h['Lbls_query_%d'%i] = Lbls_query[i]
+			else:
+				h['Lbls_%d'%i] = Lbls[i][0]
+				h['Lbls_query_%d'%i] = Lbls_query[i][0]
+				h['Lbls_grad_spc_%d'%i] = Lbls[i][1]
+				h['Lbls_query_grad_spc_%d'%i] = Lbls_query[i][1]
+				h['Lbls_grad_t_%d'%i] = Lbls[i][2]
+				h['Lbls_query_grad_t_%d'%i] = Lbls_query[i][2]
+
 			h['lp_times_%d'%i] = lp_times[i]
 			h['lp_stations_%d'%i] = lp_stations[i]
 			h['lp_phases_%d'%i] = lp_phases[i]
@@ -1803,6 +1847,14 @@ for i in range(n_restart_step, n_epochs):
 					Ac_prod_src_src_l[n] = Ac_prod_src_src
 
 
+		if use_gradient_loss == True:
+			Lbls_grad_t = [Lbls[n][2] for n in range(len(Lbls))]
+			Lbls_grad_spc = [Lbls[n][1] for n in range(len(Lbls))]
+			Lbls_query_grad_t = [Lbls_query[n][2] for n in range(len(Lbls_query))]
+			Lbls_query_grad_spc = [Lbls_query[n][1] for n in range(len(Lbls_query))]
+			Lbls = [Lbls[n][0] for n in range(len(Lbls))]	
+			Lbls_query = [Lbls_query[n][0] for n in range(len(Lbls_query))]
+
 	
 	loss_val = 0
 	loss_regularize_val, loss_regularize_cnt = 0, 0
@@ -1850,6 +1902,11 @@ for i in range(n_restart_step, n_epochs):
 				Ac_src_src_l = []
 				Ac_prod_src_src_l = []
 
+			if use_gradient_loss == True:
+				Lbls_grad_t = []
+				Lbls_grad_spc = []
+				Lbls_query_grad_t = []
+				Lbls_query_grad_spc = []
 
 			## Note: it would be more efficient (speed and memory) to pass 
 			## in each sample one at time, rather than appending batch to a list
@@ -1887,6 +1944,11 @@ for i in range(n_restart_step, n_epochs):
 				Ac_src_src_l.append(torch.Tensor(h['Ac_src_src_%d'%i0][:]).long().to(device))
 				Ac_prod_src_src_l.append(torch.Tensor(h['Ac_prod_src_src_%d'%i0][:]).long().to(device))
 
+			if use_gradient_loss == True:
+				Lbls_grad_spc.append(h['Lbls_grad_spc_%d'%i0][:])
+				Lbls_grad_t.append(h['Lbls_grad_t_%d'%i0][:])
+				Lbls_query_grad_spc.append(h['Lbls_query_grad_spc_%d'%i0][:])
+				Lbls_query_grad_t.append(h['Lbls_query_grad_t_%d'%i0][:])
 
 			i0 = 0 ## Over-write, so below indexing 
 
@@ -2100,6 +2162,10 @@ for i in range(n_restart_step, n_epochs):
 		
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 		loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+
+
+		if use_gradient_loss == True:
+			pass
 
 
 		use_dice_loss = True
