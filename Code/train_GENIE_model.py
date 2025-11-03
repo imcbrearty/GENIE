@@ -2181,8 +2181,8 @@ for i in range(n_restart_step, n_epochs):
 
 		if (use_gradient_loss == True)*(i > int(n_epochs/5)):
 
-			loss_grad1 = 0.5*weights[0]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, Lbls_grad_spc[i0]) + 0.5*weights[0]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, Lbls_grad_t[i0])
-			loss_grad2 = 0.5*weights[1]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, Lbls_query_grad_spc[i0]) + 0.5*weights[1]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), Lbls_query_grad_t[i0])
+			loss_grad1 = 0.5*weights[0]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
+			loss_grad2 = 0.5*weights[1]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
 			loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
 
 			loss = 0.5*loss + 0.5*loss_grad
@@ -2210,7 +2210,7 @@ for i in range(n_restart_step, n_epochs):
 
 			loss_dice = 1.0 - (0.5*loss_dice1 + 0.5*loss_dice2)
 
-			loss = 0.5*loss + (0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
+			loss = 0.5*loss + 2*(0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
 
 
 		if (use_consistency_loss == True)*(i > int(n_epochs/5)):
