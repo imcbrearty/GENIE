@@ -485,3 +485,567 @@ if skip_making_grid == False:
 print("All files saved successfully!")
 print("✔ Script execution: Done")
 
+create_dense_graphs = True
+if create_dense_graphs == True:
+
+	import os
+	os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+	import yaml
+	import numpy as np
+	from matplotlib import pyplot as plt
+	import torch
+	from torch import nn, optim
+	from sklearn.metrics import pairwise_distances as pd
+	from scipy.signal import fftconvolve
+	from scipy.spatial import cKDTree
+	from scipy.stats import gamma, beta
+	import time
+	from torch_cluster import knn
+	from torch_geometric.utils import remove_self_loops, subgraph
+	from torch_geometric.utils import from_networkx
+	from sklearn.neighbors import KernelDensity
+	from torch_geometric.data import Data
+	from torch_geometric.nn import MessagePassing
+	from torch_geometric.utils import softmax
+	from torch_geometric.utils import degree
+	from sklearn.cluster import KMeans
+	from torch.nn import Softplus
+	from torch_scatter import scatter
+	from numpy.matlib import repmat
+	from scipy.stats import gamma
+	from scipy.stats import chi2
+	import pdb
+	import pathlib
+	import glob
+	import sys
+
+	from utils import *
+	from module import *
+	from process_utils import *
+	# from generate_synthetic_data import generate_synthetic_data 
+	## For now not using the seperate files definition of generate_synthetic_data
+
+	## Note: you should try changing the synthetic data parameters and visualizing the 
+	## results some, some values are better than others depending on region and stations
+
+	# Load configuration from YAML
+	with open('config.yaml', 'r') as file:
+	    config = yaml.safe_load(file)
+
+	# Load training configuration from YAML
+	with open('train_config.yaml', 'r') as file:
+	    train_config = yaml.safe_load(file)
+
+	name_of_project = config['name_of_project']
+
+	path_to_file = str(pathlib.Path().absolute())
+	path_to_file += '\\' if '\\' in path_to_file else '/'
+	seperator = '\\' if '\\' in path_to_file else '/'
+
+	## Graph params
+	k_sta_edges = config['k_sta_edges']
+	k_spc_edges = config['k_spc_edges']
+	k_time_edges = config['k_time_edges']
+	use_physics_informed = config['use_physics_informed']
+	use_phase_types = config['use_phase_types']
+	use_subgraph = config['use_subgraph']
+	use_sign_input = config.get('use_sign_input', False)
+	use_topography = config['use_topography']
+	use_station_corrections = config.get('use_station_corrections', False)
+	number_of_spatial_nodes = config['number_of_spatial_nodes']
+	number_of_grids = config['number_of_grids']
+	if use_subgraph == True:
+	    max_deg_offset = config['max_deg_offset']
+	    k_nearest_pairs = config['k_nearest_pairs']	
+
+	graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
+
+	# File versions
+	template_ver = train_config['template_ver'] # spatial grid version
+	vel_model_ver = train_config['vel_model_ver'] # velocity model version
+	n_ver = train_config['n_ver'] # GNN save version
+
+
+	device = torch.device(config['device']) ## or use cpu
+
+	if torch.cuda.is_available() == False:
+		print('No GPU available')
+		device = torch.device('cpu')
+		if config['device'] == 'cuda':
+			print('Overwritting cuda to cpu since no gpu available')
+
+	# Load region
+	z = np.load(path_to_file + '%s_region.npz'%name_of_project)
+	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
+	z.close()
+
+	# Load templates
+	z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
+	x_grids = z['x_grids']
+	z.close()
+
+	# Load stations
+	z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
+	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
+	z.close()
+
+	## Create path to write files
+	seperator = '\\' if '\\' in path_to_file else '/'
+	write_training_file = path_to_file + 'GNN_TrainedModels' + seperator + name_of_project + '_'
+
+	lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
+	lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
+
+	scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+	offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
+	scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+	offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
+
+	rbest_cuda = torch.Tensor(rbest).to(device)
+	mn_cuda = torch.Tensor(mn).to(device)
+
+	# use_spherical = False
+	if config['use_spherical'] == True:
+
+		earth_radius = 6371e3
+		ftrns1 = lambda x: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T
+		ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius)
+
+		ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, e = 0.0, a = earth_radius, device = device) - mn_cuda).T).T
+		ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, e = 0.0, a = earth_radius, device = device)
+
+	else:
+
+		earth_radius = 6378137.0
+		ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T
+		ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)
+
+		ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T
+		ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device)
+
+
+
+	ftrns1_center = lambda x: lla2ecef(x) # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
+	ftrns2_center = lambda x: ecef2lla(x) # invert ftrns1
+
+
+
+	def spherical_packing_nodes(n, depth_range, use_depth_scale = True, use_rotate = True, use_rand_phase = True):
+
+		## Based on The Fibonacci Lattice
+		## https://extremelearning.com.au/evenly-distributing-points-on-a-sphere/
+
+		ftrns1_sphere_unit = lambda pos: lla2ecef(pos, a = 1.0, e = 0.0) # a = 6378137.0, e = 8.18191908426215e-2
+		ftrns2_sphere_unit = lambda pos: ecef2lla(pos, a = 1.0, e = 0.0)
+
+		# n = 30000
+		# n_init = np.random.randint()
+		i = np.arange(0, n).astype('float') + 0.5
+		phi = np.arccos(1 - 2*i/n)
+		goldenRatio = (1 + 5**0.5)/2
+		theta = 2*np.pi * i / goldenRatio
+		rand_phase = np.random.rand()*2*np.pi if use_rand_phase == True else 0.0
+		x, y, z = np.cos(theta + rand_phase) * np.sin(phi + rand_phase), np.sin(theta + rand_phase) * np.sin(phi + rand_phase), np.cos(phi + rand_phase);
+		xlat = ftrns2_sphere_unit(np.concatenate((x.reshape(-1,1), y.reshape(-1,1), z.reshape(-1,1)), axis = 1))
+
+		def sample_radial(n):
+			earth_radius = 6378137.0
+			p = lambda x: 4.0*np.pi*(x >= offset_x[0,2])*(x <= (offset_x[0,2] + scale_x[0,2]))*((((earth_radius + x)/1000.0)**2))
+			# p =  # trapezoid(y, x=None, dx=1.0
+			x_grid = np.linspace(offset_x[0,2], offset_x[0,2] + scale_x[0,2], 1000)
+			p_val = p(x_grid)
+			# integrand = scipy.trapezoid(p_val, x = x_grid) # , dx=1.0
+			mass = scipy.integrate.trapezoid(p_val, dx = np.diff(x_grid[0:2])) # , dx=1.0
+			p_val = p_val/mass
+			p_val = p_val/p_val.sum()
+			# print(p_val.sum())
+			# q_vals = np.quantile()
+			# cum_pdf = np.cumsum(p_val)
+			x = x_grid[np.random.choice(len(x_grid), size = n, p = p_val)] + np.random.rand(n)*np.diff(x_grid[0:2])
+
+			# val = 4.0*np.pi*(x >= offset_x[0,2])*(x <= (offset_x[0,2] + scale_x[0,2]))*((x)**2)
+			return x
+
+		r_max = earth_radius + depth_range[1]
+		r_min = earth_radius + depth_range[0]
+		u = np.random.rand(n)
+		r = ((u * (r_max**3 - r_min**3)) + r_min**3)**(1.0/3.0)
+
+		xlat[:,2] = r - earth_radius # sample_radial(len(xlat))
+
+		return xlat
+
+	# import numpy as np
+
+	## ChatGPT Fibonnaci lattice with random phase
+	def fibonacci_lattice_4d(N, domain_min, domain_max, seed=None):
+	    if seed is not None:
+	        np.random.seed(seed)
+	    
+	    phi = (1 + np.sqrt(5)) / 2  # golden ratio
+	    # irrational direction vector
+	    alpha = np.array([1/phi**i for i in range(1,5)])
+	    # random phase shift (per dimension)
+	    phase = np.random.rand(4)
+	    
+	    i = np.arange(N)[:, None]  # shape (N,1)
+	    pts = (i * alpha + phase) % 1.0  # modulo 1 (fractional part)
+	    
+	    # rescale to domain
+	    domain_min = np.array(domain_min)
+	    domain_max = np.array(domain_max)
+	    pts = domain_min + pts * (domain_max - domain_min)
+	    return pts
+
+	# Example usage
+	domain_min = [0, 0, 0, 0]
+	domain_max = [1, 1, 1, 0.2]  # e.g., [x,y,z,t]
+	points = fibonacci_lattice_4d(5000, domain_min, domain_max, seed=42)
+
+	print(points.shape, points[:5])
+
+
+	def rotate_vectors_from_z_to_c(vectors, c):
+		"""
+		Rotate vectors so that unit vector (0,0,1) maps to unit vector c.
+		vectors: (n,3) array
+		c: length-3 array, unit vector
+		"""
+		c = np.asarray(c, dtype=float)
+		assert np.isclose(np.linalg.norm(c), 1.0)
+		k = np.cross([0,0,1.0], c)
+		k_norm = np.linalg.norm(k)
+		if k_norm < 1e-12:
+			# already aligned or anti-aligned
+			if c[2] > 0:
+				return vectors.copy()
+			else:
+				return vectors * np.array([1.0, -1.0, -1.0])  # rotate 180 deg about x (or any axis)
+		k = k / k_norm
+		angle = np.arccos(np.clip(np.dot([0,0,1.0], c), -1.0, 1.0))
+		K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+		R = np.eye(3) + np.sin(angle)*K + (1-np.cos(angle))*(K@K)
+		return vectors @ R.T
+
+	def sobol_sphere_sampling(n, trgt_point = None, theta_max = None, scramble = True, skip = 0):
+		""" ## This sampling function generated by ChatGPT for quasi uniform sampling of a section of a sphere
+		Return n quasi-uniform points on the unit-sphere cap 0<=theta<=theta_max (polar axis = +z).
+		theta_max_rad : angular radius in radians
+		Returns: array (n,3) of unit vectors.
+		"""
+		sampler = qmc.Sobol(d = 2, scramble = scramble)
+		# some Sobol implementations require specifying n as a power-of-two when using skip/resume;
+		# SciPy's sampler.generate can produce any n.
+		pts = sampler.random(n = n + skip)[skip: n+skip]  # shape (n,2)
+		u = pts[:, 0]   # for phi
+		v = pts[:, 1]   # for area (maps to cos(theta))
+
+		phi = 2.0 * np.pi * u
+		cos_theta_max = np.cos(theta_max*np.pi/180.0)
+		# theta = (180.0/np.pi)*np.arccos(1.0 - v * (1.0 - cos_theta_max))
+		# theta = 90.0 - theta ## Map points to being centered on north pole
+		cos_theta = 1.0 - v * (1.0 - cos_theta_max)   # area-preserving
+		sin_theta = np.sqrt(np.clip(1.0 - cos_theta**2, 0.0, 1.0))
+
+	    ## x, y, z points centered on north pole. How to map to the pole of the chosen vector?
+		x = sin_theta * np.cos(phi)
+		y = sin_theta * np.sin(phi)
+		z = cos_theta
+
+		xx = np.concatenate((x.reshape(-1,1), y.reshape(-1,1), z.reshape(-1,1)), axis = 1)
+		trgt_unit_vec = ftrns1_center(trgt_point.reshape(1,-1))
+		trgt_unit_vec = trgt_unit_vec/np.linalg.norm(trgt_unit_vec, axis = 1)
+		xx = rotate_vectors_from_z_to_c(xx, trgt_unit_vec.reshape(-1))
+		xx = earth_radius*xx/np.linalg.norm(xx, axis = 1, keepdims = True)
+		xx = ftrns2_center(xx)
+		xx[:,2] = 0.0
+
+		return xx # ftrns2((r @ proj.T).T)
+
+	def sobol_sphere_sampling_band(n, trgt_point = None, theta_min = 0.0, theta_max = None, scramble = True, skip = 0):
+		""" ## This sampling function generated by ChatGPT for quasi uniform sampling of a section of a sphere
+		Return n quasi-uniform points on the unit-sphere cap 0<=theta<=theta_max (polar axis = +z).
+		theta_max_rad : angular radius in radians
+		Returns: array (n,3) of unit vectors.
+		"""
+		sampler = qmc.Sobol(d = 2, scramble = scramble)
+		# some Sobol implementations require specifying n as a power-of-two when using skip/resume;
+		# SciPy's sampler.generate can produce any n.
+		pts = sampler.random(n = n + skip)[skip: n+skip]  # shape (n,2)
+		u = pts[:, 0]   # for phi
+		v = pts[:, 1]   # for area (maps to cos(theta))
+
+		phi = 2.0 * np.pi * u
+		cos_theta_max = np.cos(theta_max*np.pi/180.0)
+		cos_theta_min = np.cos(theta_min*np.pi/180.0)
+		# theta = (180.0/np.pi)*np.arccos(1.0 - v * (1.0 - cos_theta_max))
+		# theta = 90.0 - theta ## Map points to being centered on north pole
+		# cos_theta = 1.0 - v * (1.0 - cos_theta_max)   # area-preserving
+		cos_theta = cos_theta_min + v*(cos_theta_max - cos_theta_min)
+		sin_theta = np.sqrt(np.clip(1.0 - cos_theta**2, 0.0, 1.0))
+
+	    ## x, y, z points centered on north pole. How to map to the pole of the chosen vector?
+		x = sin_theta * np.cos(phi)
+		y = sin_theta * np.sin(phi)
+		z = cos_theta
+
+		xx = np.concatenate((x.reshape(-1,1), y.reshape(-1,1), z.reshape(-1,1)), axis = 1)
+		trgt_unit_vec = ftrns1_center(trgt_point.reshape(1,-1))
+		trgt_unit_vec = trgt_unit_vec/np.linalg.norm(trgt_unit_vec, axis = 1)
+		xx = rotate_vectors_from_z_to_c(xx, trgt_unit_vec.reshape(-1))
+		xx = earth_radius*xx/np.linalg.norm(xx, axis = 1, keepdims = True)
+		xx = ftrns2_center(xx)
+		xx[:,2] = 0.0
+
+		return xx # ftrns2((r @ proj.T).T)
+
+	# if use_station_corrections == True:
+	# 	n_ver_corrections = 1
+	# 	path_station_corrections = path_to_file + 'Grids' + seperator + 'station_corrections_ver_%d.npz'%n_ver_corrections
+	# 	if os.path.isfile(path_station_corrections) == False:
+	# 		print('No station corrections available')
+	# 		locs_corr, corrs = None, None
+	# 	else:
+	# 		z = np.load(path_station_corrections)
+	# 		locs_corr, corrs = z['locs_corr'], z['corrs']
+	# 		z.close()
+	# else:
+	# 	locs_corr, corrs = None, None
+
+
+	# if config['train_travel_time_neural_network'] == False:
+
+	# 	## Load travel times
+	# 	z = np.load(path_to_file + '1D_Velocity_Models_Regional/%s_1d_velocity_model_ver_%d.npz'%(name_of_project, vel_model_ver))
+		
+	# 	Tp = z['Tp_interp']
+	# 	Ts = z['Ts_interp']
+		
+	# 	locs_ref = z['locs_ref']
+	# 	X = z['X']
+	# 	z.close()
+		
+	# 	x1 = np.unique(X[:,0])
+	# 	x2 = np.unique(X[:,1])
+	# 	x3 = np.unique(X[:,2])
+	# 	assert(len(x1)*len(x2)*len(x3) == X.shape[0])
+		
+	# 	## Load fixed grid for velocity models
+	# 	Xmin = X.min(0)
+	# 	Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
+	# 	Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
+	# 	N = np.array([len(x1), len(x2), len(x3)])
+	# 	X0 = np.array([locs_ref[0,0], locs_ref[0,1], 0.0]).reshape(1,-1)
+		
+	# 	trv = interp_1D_velocity_model_to_3D_travel_times(X, locs_ref, Xmin, X0, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2, device = device) # .to(device)
+
+	# 	z.close()
+
+	# elif config['train_travel_time_neural_network'] == True:
+
+	# 	n_ver_trv_time_model_load = vel_model_ver # 1
+	# 	trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, locs_corr = locs_corr, corrs = corrs, use_physics_informed = use_physics_informed, device = device)
+	# 	trv_pairwise = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', locs_corr = locs_corr, corrs = corrs, use_physics_informed = use_physics_informed, device = device)
+	# 	trv_pairwise1 = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, method = 'direct', return_model = True, locs_corr = locs_corr, corrs = corrs, use_physics_informed = use_physics_informed, device = device)
+
+	## To implement Floyds algorithm, we must just randomly sample with rejection sampling
+	## Then create veronal cells (note: all random points assigned to nearest "cluster centroid").
+	## Then the distinct "volumes" of random points all assigned to point cluster centroid become the
+	## new "unit", and it's centroid becomes the new centroid. Then repeat until convergence.
+	## Could in theory use the random spherical sampling approach (Sobolov points), and just project to the finite domains.
+	## This would help account for depth sensitivity.
+	## Hence for space-time sampling we simply sample 3D Sobolov points and then time points, merge in the metric
+	## to run Floyd refinement. Should produce a quasi-regular grid in 4D.
+
+	time_range = 30.0
+	scale_t = 10000.0 # 6500.0 ## 1 second is 1000 m
+	scale_depth = 10.0 # 6.5
+
+	n_samples_fraction = 150 # 300
+	trgt_samples = int(n_samples_fraction*number_of_spatial_nodes)
+	n_batch = int(100000)
+
+	def inside_domain(x, l1, l2, l3):
+		return np.where((x[:,0] < l1[1])*(x[:,0] > l1[0])*(x[:,1] < l2[1])*(x[:,1] > l2[0])*(x[:,2] < l3[1])*(x[:,2] > l3[0]))[0] 
+
+	clusters_l = []
+	for n in range(number_of_grids):
+
+		inc_collect = 0
+		nodes_cnt = 0
+		samples_collect = []
+		print('Target samples %d'%trgt_samples)
+		while nodes_cnt < trgt_samples:
+
+			samples = spherical_packing_nodes(n_batch, depth_range)
+			ifind = inside_domain(samples, lat_range_extend, lon_range_extend, depth_range)
+			samples_collect.append(samples[ifind])
+			nodes_cnt += len(ifind)
+			inc_collect += 1
+			if np.mod(inc_collect, 10) == 0: print('%d %d'%(inc_collect, nodes_cnt))
+
+		samples_collect = np.vstack(samples_collect)
+		print('Samples')
+		print(len(np.unique(samples_collect, axis = 0)))
+		print(len(np.unique(samples_collect[:,0:2], axis = 0)))
+		print(np.quantile(samples_collect[:,0], np.arange(0, 1.1, 0.1))); print('\n')
+		print(np.quantile(samples_collect[:,1], np.arange(0, 1.1, 0.1))); print('\n')
+		print(np.quantile(samples_collect[:,2], np.arange(0, 1.1, 0.1))); print('\n')
+		# print(np.quantile(samples_collect[:,3], np.arange(0, 1.1, 0.1)))
+
+		time_samples = np.random.uniform(-time_range, time_range, size = len(samples_collect)).reshape(-1,1)
+		# samples_collect = np.concatenate((samples_collect, np.random.uniform(-time_range, time_range, size = len(samples_collect)).reshape(-1,1)), axis = 1)
+
+		# scale_dist = np.array([1.0, 1.0, scale_depth, scale_t]).reshape(1,-1)/1000.0
+		scale_dist = np.array([1.0, 1.0, scale_depth]).reshape(1,-1) # /1000.0
+
+		inpt = np.concatenate((ftrns1(samples_collect*scale_dist), time_samples*scale_t), axis = 1)/1000.0 # *scale_dist # /1000.0
+
+		# scale_dist = np.array([1.0, 1.0, scale_depth, scale_t]).reshape(1,-1)/1000.0
+
+		print('Clusters')
+		clusters = 1000.0*KMeans(n_clusters = number_of_spatial_nodes).fit(inpt).cluster_centers_
+		clusters_x = ftrns2(clusters[:,0:3])/scale_dist
+		clusters_t = clusters[:,3]/scale_t
+		clusters = np.concatenate((clusters_x, clusters_t.reshape(-1,1)), axis = 1)
+		print(np.quantile((clusters_x[:,0] - lat_range_extend[0])/(lat_range_extend[1] - lat_range_extend[0]), np.arange(0, 1.1, 0.1))); print('\n')
+		print(np.quantile((clusters_x[:,1] - lon_range_extend[0])/(lon_range_extend[1] - lon_range_extend[0]), np.arange(0, 1.1, 0.1))); print('\n')
+		print(np.quantile((clusters_x[:,2] - depth_range[0])/(depth_range[1] - depth_range[0]), np.arange(0, 1.1, 0.1))); print('\n')
+		print(np.quantile((clusters_t - 0*time_range)/(1*time_range), np.arange(0, 1.1, 0.1))); print('\n')
+
+		## Now use relaxation forces
+		## Must interleave: (i). Quasi-uniform sampling (e.g., Fibonnaci or Sobolov)
+		## (ii). KMeans or Floyd
+		## (iii). Repuslive relaxation (with boundary constraint potential)
+		## Then interleave (ii). and (iii).
+
+		clusters_l.append(np.expand_dims(clusters, axis = 0))
+
+	clusters_l = np.vstack(clusters_l)
+
+
+	np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = clusters_l, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
+	np.savez_compressed(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz', time_shifts = clusters_l[:,:,3])
+
+
+	build_Cayley_graphs = True
+	if build_Cayley_graphs == True:
+
+
+		def make_cayleigh_graph(n):
+
+			generators = [np.array([1, 1, 0, 1]).reshape(2,2), np.array([1, 0, 1, 1]).reshape(2,2)]
+			nodes = np.vstack([generators[0].reshape(1,-1), generators[1].reshape(1,-1)])
+			edges = []
+
+			new = np.inf
+			cnt = 0
+
+			while new > 0:
+
+				print('iteration %d, num nodes %d'%(cnt, len(nodes)))
+
+				tree = cKDTree(nodes)
+				len_nodes = len(nodes)
+
+				new_nodes_1 = []
+				new_nodes_2 = []
+
+				for i in range(len(nodes)):
+
+					new_nodes_1.append(np.mod(nodes[i].reshape(2,2) @ generators[0], n).reshape(1,-1))
+					new_nodes_2.append(np.mod(nodes[i].reshape(2,2) @ generators[1], n).reshape(1,-1))
+
+				new_nodes_1 = np.vstack(new_nodes_1) # has size nodes
+				new_nodes_2 = np.vstack(new_nodes_2)
+				new_nodes = np.unique(np.concatenate((new_nodes_1, new_nodes_2), axis = 0), axis = 0)
+
+				q = tree.query(new_nodes)[0]
+				inew = np.where(q > 0)[0]
+				new_nodes = new_nodes[inew]
+
+				if len(inew) == 0:
+					new = 0
+					continue # Break loop
+
+				## Now need to find which entries in new_nodes are linked for each input node
+				tree_new = cKDTree(new_nodes)
+				ip = tree_new.query(new_nodes_1)
+				ip1 = np.where(ip[0] == 0)[0] ## Points to current absolute node indices that are linked to new node
+				edges_new_1 = np.concatenate((ip1.reshape(-1,1), len_nodes + ip[1][ip1].reshape(-1,1)), axis = 1)
+
+				ip = tree_new.query(new_nodes_2)
+				ip1 = np.where(ip[0] == 0)[0] ## Points to current absolute node indices that are linked to new node
+				edges_new_2 = np.concatenate((ip1.reshape(-1,1), len_nodes + ip[1][ip1].reshape(-1,1)), axis = 1)
+
+				# edges.append(np.unique(np.concatenate((edges_new_1, edges_new_2), axis = 0), axis = 0))
+				nodes = np.concatenate((nodes, new_nodes), axis = 0)
+				
+				cnt += 1
+
+			## Find inverses to generators
+			inv_indices_1 = []
+			inv_indices_2 = []
+			for i in range(len(nodes)):
+				if np.abs(np.mod(generators[0] @ nodes[i].reshape(2,2), n) - np.eye(2)).max() == 0:
+					inv_indices_1.append(i)
+				if np.abs(np.mod(generators[1] @ nodes[i].reshape(2,2), n) - np.eye(2)).max() == 0:
+					inv_indices_2.append(i)
+
+			assert(len(inv_indices_1) == 1)
+			assert(len(inv_indices_2) == 1)
+
+			generators_inverses = [nodes[inv_indices_1[0]].reshape(2,2), nodes[inv_indices_2[0]].reshape(2,2)]
+
+			## Now must add missing edges between all previously created nodes. (can do this outside of the loop)
+			for i in range(len(nodes)):
+				for j in range(len(nodes)):
+					dist1 = np.abs(np.mod(nodes[i].reshape(2,2) @ generators[0], n) - nodes[j].reshape(2,2)).max()
+					dist2 = np.abs(np.mod(nodes[i].reshape(2,2) @ generators[1], n) - nodes[j].reshape(2,2)).max()
+					if ((dist1 == 0) + (dist2 == 0)) > 0:
+						edges.append(np.array([i,j]).reshape(1,-1))
+
+			for i in range(len(nodes)):
+				for j in range(len(nodes)):
+					dist1 = np.abs(np.mod(nodes[i].reshape(2,2) @ generators_inverses[0], n) - nodes[j].reshape(2,2)).max()
+					dist2 = np.abs(np.mod(nodes[i].reshape(2,2) @ generators_inverses[1], n) - nodes[j].reshape(2,2)).max()
+					if ((dist1 == 0) + (dist2 == 0)) > 0:
+						edges.append(np.array([i,j]).reshape(1,-1))
+
+			edges = np.unique(np.vstack(edges), axis = 0)
+			## Check for all edges, if each node is really linked to the declared nodes.
+			for i in range(len(edges)):
+				dist1 = np.abs(np.mod(nodes[edges[i,0]].reshape(2,2) @ generators[0], n) - nodes[edges[i,1]].reshape(2,2)).max()
+				dist2 = np.abs(np.mod(nodes[edges[i,0]].reshape(2,2) @ generators[1], n) - nodes[edges[i,1]].reshape(2,2)).max()
+				dist3 = np.abs(np.mod(nodes[edges[i,0]].reshape(2,2) @ generators_inverses[0], n) - nodes[edges[i,1]].reshape(2,2)).max()
+				dist4 = np.abs(np.mod(nodes[edges[i,0]].reshape(2,2) @ generators_inverses[1], n) - nodes[edges[i,1]].reshape(2,2)).max()
+				assert(((dist1 == 0) + (dist2 == 0) + (dist3 == 0) + (dist4 == 0)) > 0)
+				print(i)
+
+			return edges
+
+		## Choose type of expander graph (or none)
+		use_gabber = False
+		if number_of_spatial_nodes > 2500: use_gabber = True
+
+		if use_gabber == False: ## Then use cayley graphs
+
+			# A_c_l = []
+			n_max = 0
+			cnt = 2
+			while n_max < number_of_spatial_nodes:
+				A_edges = make_cayleigh_graph(cnt)
+				# A_c_l.append(A_edges)
+				n_max = A_edges.max() + 1
+				cnt += 1
+			Ac = subgraph(torch.arange(number_of_spatial_nodes), torch.Tensor(A_edges.T).long())[0].flip(0).cpu().detach().numpy() # .to(device)
+
+		else:
+
+			int_need = int(np.ceil(np.sqrt(number_of_spatial_nodes)))
+			A_edges_c = from_networkx(nx.margulis_gabber_galil_graph(int_need)).edge_index.long().flip(0).contiguous()
+			Ac = subgraph(torch.arange(number_of_spatial_nodes), A_edges_c)[0].cpu().detach().numpy() # .to(device)
+
+		np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_expanders_ver_1.npz'%name_of_project, x_grids = clusters_l, Ac = Ac, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
+
