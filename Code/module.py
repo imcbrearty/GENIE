@@ -227,8 +227,8 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 		self.activate = nn.PReLU() # can extend to each channel
 		self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
 
-		# self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
-		# self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+		self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
+		self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 
 		self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
 		self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
@@ -257,10 +257,10 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 
 		## Expanded layers
 
-		self.l1_t1_1c = nn.Linear(n_hidden, n_hidden)
+		self.l1_t1_1c = nn.Linear(2*n_hidden, n_hidden)
 		self.l1_t1_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 
-		self.l1_t2_1c = nn.Linear(in_channels, n_hidden)
+		self.l1_t2_1c = nn.Linear(2*n_hidden, n_hidden)
 		self.l1_t2_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 		self.activate11c = nn.PReLU() # can extend to each channel
 		self.activate12c = nn.PReLU() # can extend to each channel
@@ -700,10 +700,10 @@ class DataAggregationAssociationPhaseExpanded(MessagePassing): # make equivelent
 
 		## Make expanded layers
 
-		self.l1_t1_1c = nn.Linear(n_hidden, n_hidden)
+		self.l1_t1_1c = nn.Linear(2*n_hidden, n_hidden)
 		self.l1_t1_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 
-		self.l1_t2_1c = nn.Linear(n_hidden, n_hidden)
+		self.l1_t2_1c = nn.Linear(2*n_hidden, n_hidden)
 		self.l1_t2_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 		self.activate11c = nn.PReLU() # can extend to each channel
 		self.activate12c = nn.PReLU() # can extend to each channel
