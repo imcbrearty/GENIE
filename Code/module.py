@@ -1195,13 +1195,14 @@ if use_updated_model_definition == False:
 
 			if self.use_gradient_loss == True:
 
-				torch_one_vec = torch.ones(len(x_temp_cuda_cart)).to(x_temp_cuda_cart.device)
-				grad_grid = torch.autograd.grad(inputs = x_temp_cuda, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
+				torch_one_vec = torch.ones(len(x_temp_cuda_cart),1).to(x_temp_cuda_cart.device)
+				grad_grid = torch.autograd.grad(inputs = x_temp_cuda, outputs = y, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
 				# grad_grid_t = torch.autograd.grad(inputs = t_query, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
-				grad_grid_src, grad_grid_t = grad_grid[:,0:3], grad_grid[:,3]/(1000.0*self.scale_time)
+				# grad_grid_src, grad_grid_t = grad_grid[:,0:3], grad_grid[:,3]/(1000.0*self.scale_time)
+				grad_grid_src, grad_grid_t = grad_grid[:,0:3], (1000.0*self.scale_time)*grad_grid[:,3]
 
-				torch_one_vec = torch.ones(len(x_query_src_cart)).to(x_query_src_cart.device)
-				grad_query_src = torch.autograd.grad(inputs = x_query_src_cart, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
+				torch_one_vec = torch.ones(len(x_query_cart),1).to(x_query_cart.device)
+				grad_query_src = torch.autograd.grad(inputs = x_query_cart, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
 				grad_query_t = torch.autograd.grad(inputs = t_query, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
 
 
@@ -1228,7 +1229,7 @@ if use_updated_model_definition == False:
 
 			else:
 
-				return y, x, arv_p, arv_s, [grad_grid_src, grad_grid_t, grad_query_src, grad_query_t]
+				return [y, x, arv_p, arv_s], [grad_grid_src, grad_grid_t, grad_query_src, grad_query_t]
 	
 		def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, pos_loc, pos_src):
 
