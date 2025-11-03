@@ -237,10 +237,10 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 		self.activate1 = nn.PReLU() # can extend to each channel
 
 		self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 
 		self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 		self.activate21 = nn.PReLU() # can extend to each channel
 		self.activate22 = nn.PReLU() # can extend to each channel
 		self.activate2 = nn.PReLU() # can extend to each channel
@@ -258,19 +258,20 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 		## Expanded layers
 
 		self.l1_t1_1c = nn.Linear(2*n_hidden, n_hidden)
-		self.l1_t1_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+		self.l1_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+		# self.l1_t1_2c = nn.Linear(2*n_hidden, n_hidden)
 
 		self.l1_t2_1c = nn.Linear(2*n_hidden, n_hidden)
-		self.l1_t2_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+		self.l1_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 		self.activate11c = nn.PReLU() # can extend to each channel
 		self.activate12c = nn.PReLU() # can extend to each channel
 		self.activate1c = nn.PReLU() # can extend to each channel
 
 		self.l2_t1_1c = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.l2_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 
 		self.l2_t2_1c = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.l2_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 		self.activate21c = nn.PReLU() # can extend to each channel
 		self.activate22c = nn.PReLU() # can extend to each channel
 		self.activate2c = nn.PReLU() # can extend to each channel
@@ -286,7 +287,7 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
 
 		tr1 = self.l1_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11c(self.l1_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
-		tr2 = self.l1_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate12c(self.l1_t1_2c(tr))), mask), dim = 1))
+		tr2 = self.l1_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate12c(self.l1_t2_1c(tr))), mask), dim = 1))
 		tr = self.activate1c(torch.cat((tr1, tr2), dim = 1))
 
 		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
@@ -680,10 +681,10 @@ class DataAggregationAssociationPhaseExpanded(MessagePassing): # make equivelent
 		self.activate1 = nn.PReLU() # can extend to each channel
 
 		self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 
 		self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 		self.activate21 = nn.PReLU() # can extend to each channel
 		self.activate22 = nn.PReLU() # can extend to each channel
 		self.activate2 = nn.PReLU() # can extend to each channel
@@ -701,19 +702,21 @@ class DataAggregationAssociationPhaseExpanded(MessagePassing): # make equivelent
 		## Make expanded layers
 
 		self.l1_t1_1c = nn.Linear(2*n_hidden, n_hidden)
-		self.l1_t1_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+		self.l1_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+
+		# self.l1_t1_2c = nn.Linear(2*n_hidden, n_hidden)
 
 		self.l1_t2_1c = nn.Linear(2*n_hidden, n_hidden)
-		self.l1_t2_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+		self.l1_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 		self.activate11c = nn.PReLU() # can extend to each channel
 		self.activate12c = nn.PReLU() # can extend to each channel
 		self.activate1c = nn.PReLU() # can extend to each channel
 
 		self.l2_t1_1c = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.l2_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 
 		self.l2_t2_1c = nn.Linear(2*n_hidden, n_hidden)
-		self.l2_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.l2_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 		self.activate21c = nn.PReLU() # can extend to each channel
 		self.activate22c = nn.PReLU() # can extend to each channel
 		self.activate2c = nn.PReLU() # can extend to each channel
