@@ -700,7 +700,7 @@ def extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, m
 
 	return [lp_times, lp_stations, lp_phases, lp_meta]
 
-def build_src_src_product(Ac_src_src, A_src_in_sta, locs, x_grid, device = device):
+def build_src_src_product(Ac_src_src, A_src_in_sta, locs, x_grid, device = 'cpu'):
 
 	n_sta = len(locs)
 
@@ -1719,6 +1719,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
