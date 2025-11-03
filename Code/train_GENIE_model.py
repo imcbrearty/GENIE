@@ -78,6 +78,9 @@ graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
 ## Load time shift variables
 use_time_shift = config['use_time_shift']
+use_expanded = config['use_expanded']
+
+
 # time_shift_range = config['time_shift_range'] # 30.0
 # time_shift_scale = config['time_shift_scale'] # 8.0
 # time_shift_scale = 0 if use_time_shift == False else time_shift_scale
@@ -160,6 +163,7 @@ if use_topography == True:
 	tree_surface = cKDTree(surface_profile[:,0:2])
 
 use_consistency_loss = True
+use_gradient_loss = True
 
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
@@ -238,6 +242,12 @@ offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_rang
 
 rbest_cuda = torch.Tensor(rbest).to(device)
 mn_cuda = torch.Tensor(mn).to(device)
+
+if use_expanded == True:
+	Ac = np.load(path_to_file + 'Grids/%s_seismic_network_expanders_ver_%d.npz'%(name_of_project, template_ver))['Ac']
+else:
+	Ac = False
+
 
 if use_time_shift == True:
 	z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
@@ -499,7 +509,7 @@ def sample_correlated_travel_time_noise(cholesky_matrix_trv, mean_vec, bias_fact
 
 		return simulated_times, scaled_mean_vec, scale_val, log_likelihood_obs, log_likelihood_sim
 
-def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, use_time_shift = use_time_shift, return_only_data = False):
+def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, use_time_shift = use_time_shift, use_expanded = use_expanded, Ac = Ac, return_only_data = False):
 
 	if verbose == True:
 		st = time.time()
@@ -584,11 +594,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		src_positions[:,2] = sample_random_depths
 
 	use_aftershocks = True
-	if (use_aftershocks == True)*(len(src_positions) > 0):
+	if (use_aftershocks == True)*(len(src_positions) > 1):
 			n_iterations = 1
 			for i in range(n_iterations):
 				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.1, float(src_x_kernel/0.5), float(src_t_kernel/0.5)
-				if int(np.ceil(aftershock_rate*len(src_positions))) > 0:
+				if (int(np.ceil(aftershock_rate*len(src_positions))) > 0):
 					ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(aftershock_rate*len(src_positions))), replace = False)
 					rand_vec = np.random.randn(len(ichoose),3)
 					rand_vec = rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True)
@@ -1121,6 +1131,10 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	A_edges_time_s_l = []
 	A_edges_ref_l = []
 
+	# if use_expanded_graphs == True:
+	Ac_src_src_l = []
+	Ac_prod_src_src_l = []
+
 	lp_times = []
 	lp_stations = []
 	lp_phases = []
@@ -1201,14 +1215,75 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			# A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
 
 			A_src_src = remove_self_loops(knn(torch.cat((torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), scale_time*torch.Tensor(x_grids[grid_select][:,3].reshape(-1,1)).to(device)), dim = 1), torch.cat((torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), scale_time*torch.Tensor(x_grids[grid_select][:,3].reshape(-1,1)).to(device)), dim = 1), k = k_spc_edges + 1).flip(0).contiguous())[0]
-
-
 			## Cross-product graph is: source node x station node. Order as, for each source node, all station nodes.
 	
 			# Cross-product graph, nodes connected by: same source node, connected stations
 			A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1).to(device)).contiguous()
 			A_prod_src_src = (n_sta_slice*A_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1).to(device)).contiguous()	
 	
+
+			if use_expanded == True:
+
+				use_perm_expand = True
+				if use_perm_expand == True:
+					perm_vec_expand = np.random.permutation(np.arange(x_grids[grid_select].shape[0])).astype('int')
+					Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
+				else:
+					perm_vec_expand = np.arange(x_grids[grid_select].shape[0]).astype('int')
+					Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
+
+				A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(locs[sta_select].shape[0]), len(x_grids[grid_select])).reshape(1,-1), np.arange(len(x_grids[grid_select])).repeat(len(locs[sta_select]), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
+
+				# Ac_prod_src_src = (n_sta_slice*Ac_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1).to(device)).contiguous()	
+				## Must use "irregular" version of Cartesian product 
+
+				# def build_src_src_product(Ac_src_src, locs, x_grid):
+
+				# 	n_sta = len(locs)
+
+				# 	A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(locs.shape[0]), len(x_grid)).reshape(1,-1), np.arange(len(x_grid)).repeat(len(locs), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
+				# 	tree_src_in_sta = cKDTree(A_src_in_sta[0].reshape(-1,1).cpu().detach().numpy())
+				# 	lp_fixed_stas = tree_src_in_sta.query_ball_point(np.arange(locs.shape[0]).reshape(-1,1), r = 0)
+
+				# 	degree_of_src_nodes = degree(A_src_in_sta[1])
+				# 	cum_count_degree_of_src_nodes = np.concatenate((np.array([0]), np.cumsum(degree_of_src_nodes.cpu().detach().numpy())), axis = 0).astype('int')
+
+				# 	sta_ind_lists = []
+				# 	for i in range(x_grid.shape[0]):
+				# 		ind_list = -1*np.ones(locs.shape[0])
+				# 		ind_list[A_src_in_sta[0,cum_count_degree_of_src_nodes[i]:cum_count_degree_of_src_nodes[i+1]].cpu().detach().numpy()] = np.arange(degree_of_src_nodes[i].item())
+				# 		sta_ind_lists.append(ind_list)
+				# 	sta_ind_lists = np.hstack(sta_ind_lists).astype('int')
+
+				# 	Ac_prod_src_src = []
+				# 	for i in range(locs.shape[0]):
+					
+				# 		slice_edges = subgraph(A_src_in_sta[1,np.array(lp_fixed_stas[i])], Ac_src_src, relabel_nodes = False)[0].cpu().detach().numpy()
+
+				# 		## This can happen when a station is only linked to one source
+				# 		if slice_edges.shape[1] == 0:
+				# 			continue
+
+				# 		shift_ind = sta_ind_lists[slice_edges*n_sta + i]
+				# 		assert(shift_ind.min() >= 0)
+				# 		## For each source, need to find where that station index is in the "order" of the subgraph Cartesian product
+				# 		Ac_prod_src_src.append(torch.Tensor(cum_count_degree_of_src_nodes[slice_edges] + shift_ind).to(device))
+
+				# 	Ac_prod_src_src = torch.Tensor(np.hstack(Ac_prod_src_src)).long().to(device)
+
+				# 	return Ac_prod_src_src
+
+				Ac_prod_src_src = build_src_src_product(Ac_src_src, A_src_in_sta, locs[sta_select], x_grids[grid_select], device = device)
+
+				Ac_src_src_l.append(Ac_src_src.cpu().detach().numpy())
+				Ac_prod_src_src_l.append(Ac_prod_src_src.cpu().detach().numpy())
+
+			# else:
+
+			# 	Ac_src_src_l.append([])
+			# 	Ac_prod_src_src_l.append([])				
+
+
 			# For each unique spatial point, sum in all edges.
 			A_src_in_prod = torch.cat((torch.arange(n_sta_slice*n_spc).view(1,-1), torch.arange(n_spc).repeat_interleave(n_sta_slice).view(1,-1)), dim = 0).to(device).contiguous()
 	
@@ -1237,6 +1312,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			A_edges_time_p_l.append(A_edges_time_p)
 			A_edges_time_s_l.append(A_edges_time_s)
 			A_edges_ref_l.append(x_grids_trv_refs[grid_select])
+
 		else:
 			
 			A_sta_sta_l.append([])
@@ -1246,7 +1322,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			A_src_in_prod_l.append([])
 			A_edges_time_p_l.append([])
 			A_edges_time_s_l.append([])
-			A_edges_ref_l.append([])			
+			A_edges_ref_l.append([])
+
+			Ac_src_src_l.append([])
+			Ac_prod_src_src_l.append([])
+
 		
 		x_query = np.random.rand(n_spc_query, 3)*scale_x + offset_x # Check if scale_x and offset_x are correct.
 		x_query_t = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(x_query))
@@ -1299,8 +1379,17 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			# lbls_grid = (np.expand_dims(spatial_exp_term.sum(2), axis=1) * temporal_exp_term).max(2)
 			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 
-			lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
-			lbls_query = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_query_t).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+			if use_gradient_loss == False:
+
+				lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+				lbls_query = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_query_t).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+
+			else:
+
+				lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+				lbls_query = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_query_t).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+				
+
 
 			# lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
@@ -1318,7 +1407,14 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
 
-	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+	if (use_expanded == False) or (skip_graphs == True):
+
+		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+
+	else:
+
+		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, [A_src_src_l, Ac_src_src_l], A_prod_sta_sta_l, A_prod_src_src_l, [A_src_in_prod_l, Ac_src_in_prod_l], A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+
 
 def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
 
@@ -1534,8 +1630,16 @@ if build_training_data == True:
 
 		if use_subgraph == True:
 			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
+			if use_expanded == True:
+				Ac_src_src_l = [[] for j in range(len(A_src_src_l))]
+				Ac_prod_src_src_l = [[] for j in range(len(A_prod_src_src_l))]
+
 		else:
 			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = False)
+			if use_expanded == True:
+				A_src_src_l, Ac_src_src_l = A_src_src_l
+				A_prod_src_src_l, Ac_prod_src_src_l = A_prod_src_src_l
+
 			Inpts = [Inpts[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Inpts))]
 			Masks = [Masks[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Masks))]
 			A_sta_sta_l = [torch.Tensor(A_sta_sta_l[j]).long().to(device) for j in range(len(A_sta_sta_l))]
@@ -1543,6 +1647,10 @@ if build_training_data == True:
 			A_prod_sta_sta_l = [torch.Tensor(A_prod_sta_sta_l[j]).long().to(device) for j in range(len(A_prod_sta_sta_l))]
 			A_prod_src_src_l = [torch.Tensor(A_prod_src_src_l[j]).long().to(device) for j in range(len(A_prod_src_src_l))]
 			A_src_in_prod_l = [torch.Tensor(A_src_in_prod_l[j]).long().to(device) for j in range(len(A_src_in_prod_l))]
+			if use_expanded == True:
+				Ac_src_src_l = [torch.Tensor(Ac_src_src_l[j]).long().to(device) for j in range(len(Ac_src_src_l))]
+				Ac_prod_src_src_l = [torch.Tensor(Ac_prod_src_src_l[j]).long().to(device) for j in range(len(Ac_prod_src_src_l))]
+
 
 		h = h5py.File(path_to_data + 'training_data_slice_%d_ver_%d.hdf5'%(file_index, n_ver_training_data), 'w')
 		h['data'] = data[0]
@@ -1552,8 +1660,12 @@ if build_training_data == True:
 		for i in range(n_batch):
 
 			if use_subgraph == True:
-				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, device = device)
+				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac, device = device)
 				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[i], X_fixed[i], A_src_in_sta, max_t, min_t = min_t, time_shift = X_fixed[i][:,3], dt_res = kernel_sig_t/5.0, t_win = kernel_sig_t*2.0, device = device)
+				if use_expanded == True:
+					A_src_src, Ac_src_src = A_src_src
+					A_prod_src_src, Ac_prod_src_src = A_prod_src_src
+
 				A_sta_sta_l[i] = A_sta_sta ## These should be equal
 				A_src_src_l[i] = A_src_src ## These should be equal
 				A_prod_sta_sta_l[i] = A_prod_sta_sta
@@ -1564,7 +1676,10 @@ if build_training_data == True:
 				A_edges_ref_l[i] = dt_partition
 				Inpts[i] = np.copy(np.ascontiguousarray(Inpts[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
 				Masks[i] = np.copy(np.ascontiguousarray(Masks[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))			
-				
+				if use_expanded == True:
+					Ac_src_src_l[i] = Ac_src_src
+					Ac_prod_src_src_l[i] = Ac_prod_src_src
+
 			h['Inpts_%d'%i] = Inpts[i]
 			h['Masks_%d'%i] = Masks[i]
 			h['X_fixed_%d'%i] = X_fixed[i]
@@ -1595,6 +1710,10 @@ if build_training_data == True:
 			h['A_edges_time_s_%d'%i] = A_edges_time_s_l[i]
 			h['A_edges_ref_%d'%i] = A_edges_ref_l[i]
 			h['dt_partition_%d'%i] = dt_partition # _l[i]
+
+			if use_expanded == True:
+				h['Ac_src_src_%d'%i] = Ac_src_src_l[i].cpu().detach().numpy()
+				h['Ac_prod_src_src_%d'%i] = Ac_prod_src_src_l[i].cpu().detach().numpy()
 
 		h.close()
 
@@ -1639,6 +1758,9 @@ for i in range(n_restart_step, n_epochs):
 		## Build a training batch on the fly
 		if use_subgraph == False:
 			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
+			if use_expanded == True:
+				A_src_src_l, Ac_src_src_l = A_src_src_l
+				A_src_in_prod_l, Ac_src_in_prod_l = A_src_in_prod_l			
 			Inpts = [Inpts[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Inpts))]
 			Masks = [Masks[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Masks))]
 			A_sta_sta_l = [torch.Tensor(A_sta_sta_l[j]).long().to(device) for j in range(len(A_sta_sta_l))]
@@ -1647,14 +1769,24 @@ for i in range(n_restart_step, n_epochs):
 			A_prod_src_src_l = [torch.Tensor(A_prod_src_src_l[j]).long().to(device) for j in range(len(A_prod_src_src_l))]
 			A_src_in_prod_l = [torch.Tensor(A_src_in_prod_l[j]).long().to(device) for j in range(len(A_src_in_prod_l))]
 			A_src_in_sta_l = [torch.Tensor(np.concatenate((np.tile(np.arange(Locs[j].shape[0]), len(X_fixed[j])).reshape(1,-1), np.arange(len(X_fixed[j])).repeat(len(Locs[j]), axis = 0).reshape(1,-1)), axis = 0)).long().to(device) for j in range(len(Inpts))]
+			if use_expanded == True:
+				Ac_src_src_l = [torch.Tensor(Ac_src_src_l[j]).long().to(device) for j in range(len(Ac_src_src_l))]
+				Ac_prod_src_src_l = [torch.Tensor(Ac_prod_src_src_l[j]).long().to(device) for j in range(len(Ac_prod_src_src_l))]
+
 
 		if use_subgraph == True:
 			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
 			A_src_in_sta_l = [[] for j in range(len(Inpts))]
+			if use_expanded == True:
+				Ac_src_src_l = [[] for j in range(len(A_src_src_l))]
+				Ac_prod_src_src_l = [[] for j in range(len(A_prod_src_src_l))]				
 			
 			for n in range(len(Inpts)):
-				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[n], X_fixed[n], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, device = device)
+				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[n], X_fixed[n], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac, device = device)
 				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[n], X_fixed[n], A_src_in_sta, max_t, min_t = min_t, time_shift = X_fixed[n][:,3], dt_res = kernel_sig_t/5.0, t_win = kernel_sig_t*2.0, device = device)
+				if use_expanded == True:
+					A_src_src, Ac_src_src = A_src_src
+					A_prod_src_src, Ac_prod_src_src = A_prod_src_src
 				A_sta_sta_l[n] = A_sta_sta ## These should be equal
 				A_src_src_l[n] = A_src_src ## These should be equal
 				A_prod_sta_sta_l[n] = A_prod_sta_sta
@@ -1666,7 +1798,11 @@ for i in range(n_restart_step, n_epochs):
 				A_edges_ref_l[n] = dt_partition
 				Inpts[n] = np.copy(np.ascontiguousarray(Inpts[n][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
 				Masks[n] = np.copy(np.ascontiguousarray(Masks[n][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
-	
+				if use_expanded == True:
+					Ac_src_src_l[n] = Ac_src_src ## These should be equal
+					Ac_prod_src_src_l[n] = Ac_prod_src_src
+
+
 	
 	loss_val = 0
 	loss_regularize_val, loss_regularize_cnt = 0, 0
@@ -1710,6 +1846,11 @@ for i in range(n_restart_step, n_epochs):
 			A_edges_ref_l = []
 			A_src_in_sta_l = []
 
+			if use_expanded == True:
+				Ac_src_src_l = []
+				Ac_prod_src_src_l = []
+
+
 			## Note: it would be more efficient (speed and memory) to pass 
 			## in each sample one at time, rather than appending batch to a list
 			
@@ -1741,6 +1882,11 @@ for i in range(n_restart_step, n_epochs):
 			A_edges_time_p_l.append(h['A_edges_time_p_%d'%i0][:])
 			A_edges_time_s_l.append(h['A_edges_time_s_%d'%i0][:])
 			A_edges_ref_l.append(h['A_edges_ref_%d'%i0][:])
+
+			if use_expanded == True:
+				Ac_src_src_l.append(torch.Tensor(h['Ac_src_src_%d'%i0][:]).long().to(device))
+				Ac_prod_src_src_l.append(torch.Tensor(h['Ac_prod_src_src_%d'%i0][:]).long().to(device))
+
 
 			i0 = 0 ## Over-write, so below indexing 
 
@@ -1877,26 +2023,51 @@ for i in range(n_restart_step, n_epochs):
 			lp_phases[i0] = lp_phases[i0][isample_picks]
 			lp_meta[i0] = lp_meta[i0][isample_picks]
 		
-		# Continue processing the rest of the inputs
-		input_tensors = [
-			input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor,
-			data_1, data_2,
-			A_src_in_sta_l[i0],
-			A_src_src_l[i0],
-			torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
-			torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
-			torch.Tensor(A_edges_ref_l[i0]).to(device),
-			trv_out,
-			torch.Tensor(lp_times[i0]).to(device),
-			torch.Tensor(lp_stations[i0]).long().to(device),
-			torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
-			torch.Tensor(ftrns1(Locs[i0])).to(device),
-			torch.Tensor(ftrns1(X_fixed[i0])).to(device),
-			torch.Tensor(X_fixed[i0][:,3]).to(device),
-			torch.Tensor(ftrns1(X_query[i0])).to(device),
-			torch.Tensor(x_src_query_cart).to(device),
-			torch.Tensor(X_query[i0][:,3]).to(device), tq_sample, trv_out_src
-		]
+		if use_expanded == False:
+
+			# Continue processing the rest of the inputs
+			input_tensors = [
+				input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor,
+				data_1, data_2,
+				A_src_in_sta_l[i0],
+				A_src_src_l[i0],
+				torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
+				torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
+				torch.Tensor(A_edges_ref_l[i0]).to(device),
+				trv_out,
+				torch.Tensor(lp_times[i0]).to(device),
+				torch.Tensor(lp_stations[i0]).long().to(device),
+				torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
+				torch.Tensor(ftrns1(Locs[i0])).to(device),
+				torch.Tensor(ftrns1(X_fixed[i0])).to(device),
+				torch.Tensor(X_fixed[i0][:,3]).to(device),
+				torch.Tensor(ftrns1(X_query[i0])).to(device),
+				torch.Tensor(x_src_query_cart).to(device),
+				torch.Tensor(X_query[i0][:,3]).to(device), tq_sample, trv_out_src
+			]
+
+		else:
+
+			# Continue processing the rest of the inputs
+			input_tensors = [
+				input_tensor_1, input_tensor_2, A_prod_sta_tensor, [A_prod_src_tensor, Ac_prod_src_src_l[i0]],
+				data_1, data_2,
+				A_src_in_sta_l[i0],
+				A_src_src_l[i0],
+				torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
+				torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
+				torch.Tensor(A_edges_ref_l[i0]).to(device),
+				trv_out,
+				torch.Tensor(lp_times[i0]).to(device),
+				torch.Tensor(lp_stations[i0]).long().to(device),
+				torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
+				torch.Tensor(ftrns1(Locs[i0])).to(device),
+				torch.Tensor(ftrns1(X_fixed[i0])).to(device),
+				torch.Tensor(X_fixed[i0][:,3]).to(device),
+				torch.Tensor(ftrns1(X_query[i0])).to(device),
+				torch.Tensor(x_src_query_cart).to(device),
+				torch.Tensor(X_query[i0][:,3]).to(device), tq_sample, trv_out_src
+			]			
 
 		# Call the model with pre-processed tensors
 		out = mz(*input_tensors)
@@ -1966,7 +2137,8 @@ for i in range(n_restart_step, n_epochs):
 					# weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
 					mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::] - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
 					# loss_consistency = (weight1*weights[0]*loss_func(out_save[0], out[0]) + weight2*weights[1]*loss_func(out_save[1], out[1]))/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-					loss_consistency = loss_func(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+					# loss_consistency = loss_func(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+					loss_consistency = loss_func1(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
 					loss = loss + 0.25*loss_consistency
 
 			out_save = [out[1]]
