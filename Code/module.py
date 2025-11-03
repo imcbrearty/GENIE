@@ -212,6 +212,97 @@ else:
 		# 		return torch.cat((x_j, mask_j*self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 				
 
+class DataAggregationExpanded(MessagePassing): # make equivelent version with sum operations.
+	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, use_absolute_pos = use_absolute_pos):
+		super(DataAggregationExpanded, self).__init__('mean') # node dim
+
+		if use_absolute_pos == True:
+			in_channels = in_channels + 3*2
+		
+		## Use two layers of SageConv.
+		self.in_channels = in_channels
+		self.out_channels = out_channels
+		self.n_hidden = n_hidden
+
+		self.activate = nn.PReLU() # can extend to each channel
+		self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
+
+		# self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
+		# self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+
+		self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
+		self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+		self.activate11 = nn.PReLU() # can extend to each channel
+		self.activate12 = nn.PReLU() # can extend to each channel
+		self.activate1 = nn.PReLU() # can extend to each channel
+
+		self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
+		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+
+		self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
+		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.activate21 = nn.PReLU() # can extend to each channel
+		self.activate22 = nn.PReLU() # can extend to each channel
+		self.activate2 = nn.PReLU() # can extend to each channel
+
+		## Add third layer
+		self.l3_t1_1 = nn.Linear(2*n_hidden, n_hidden)
+		self.l3_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+
+		self.l3_t2_1 = nn.Linear(2*n_hidden, n_hidden)
+		self.l3_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.activate31 = nn.PReLU() # can extend to each channel
+		self.activate32 = nn.PReLU() # can extend to each channel
+		self.activate3 = nn.PReLU() # can extend to each channel
+
+		## Expanded layers
+
+		self.l1_t1_1c = nn.Linear(n_hidden, n_hidden)
+		self.l1_t1_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+
+		self.l1_t2_1c = nn.Linear(in_channels, n_hidden)
+		self.l1_t2_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+		self.activate11c = nn.PReLU() # can extend to each channel
+		self.activate12c = nn.PReLU() # can extend to each channel
+		self.activate1c = nn.PReLU() # can extend to each channel
+
+		self.l2_t1_1c = nn.Linear(2*n_hidden, n_hidden)
+		self.l2_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+
+		self.l2_t2_1c = nn.Linear(2*n_hidden, n_hidden)
+		self.l2_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.activate21c = nn.PReLU() # can extend to each channel
+		self.activate22c = nn.PReLU() # can extend to each channel
+		self.activate2c = nn.PReLU() # can extend to each channel
+
+
+	def forward(self, tr, mask, A_in_sta, A_in_src):
+
+		tr = torch.cat((tr, mask), dim = -1)
+		tr = self.activate(self.init_trns(tr))
+
+		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr)), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate12(tr)), mask), dim = 1))
+		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
+
+		tr1 = self.l1_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11c(self.l1_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l1_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate12c(self.l1_t1_2c(tr))), mask), dim = 1))
+		tr = self.activate1c(torch.cat((tr1, tr2), dim = 1))
+
+		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate22(self.l2_t2_1(tr))), mask), dim = 1))
+		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
+
+		tr1 = self.l2_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21c(self.l2_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l2_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate22c(self.l2_t2_1c(tr))), mask), dim = 1))
+		tr = self.activate2c(torch.cat((tr1, tr2), dim = 1))
+
+		tr1 = self.l3_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate31(self.l3_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l3_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate32(self.l3_t2_1(tr))), mask), dim = 1))
+		tr = self.activate3(torch.cat((tr1, tr2), dim = 1))
+
+		return tr # the new embedding.
+
 
 class BipartiteGraphOperator(MessagePassing):
 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4):
@@ -563,7 +654,99 @@ else:
 		# 	elif message_type == 2:
 
 		# 		return torch.cat((x_j, mask_j*self.pos_rel_src), dim = 1) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
-				
+
+class DataAggregationAssociationPhaseExpanded(MessagePassing): # make equivelent version with sum operations.
+	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_latent = 30, n_dim_mask = 5, use_absolute_pos = use_absolute_pos):
+		super(DataAggregationAssociationPhaseExpanded, self).__init__('mean') # node dim
+		## Use two layers of SageConv. Explictly or implicitly?
+
+		if use_absolute_pos == True:
+			in_channels = in_channels + 2*3
+		
+		self.in_channels = in_channels
+		self.out_channels = out_channels
+		self.n_hidden = n_hidden
+
+		self.activate = nn.PReLU() # can extend to each channel
+		self.init_trns = nn.Linear(in_channels + n_dim_latent + n_dim_mask, n_hidden)
+
+		self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
+		self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+
+		self.l1_t2_1 = nn.Linear(n_hidden, n_hidden)
+		self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+		self.activate11 = nn.PReLU() # can extend to each channel
+		self.activate12 = nn.PReLU() # can extend to each channel
+		self.activate1 = nn.PReLU() # can extend to each channel
+
+		self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
+		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+
+		self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
+		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.activate21 = nn.PReLU() # can extend to each channel
+		self.activate22 = nn.PReLU() # can extend to each channel
+		self.activate2 = nn.PReLU() # can extend to each channel
+
+		## Add third layer
+		self.l3_t1_1 = nn.Linear(2*n_hidden, n_hidden)
+		self.l3_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+
+		self.l3_t2_1 = nn.Linear(2*n_hidden, n_hidden)
+		self.l3_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.activate31 = nn.PReLU() # can extend to each channel
+		self.activate32 = nn.PReLU() # can extend to each channel
+		self.activate3 = nn.PReLU() # can extend to each channel
+
+		## Make expanded layers
+
+		self.l1_t1_1c = nn.Linear(n_hidden, n_hidden)
+		self.l1_t1_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+
+		self.l1_t2_1c = nn.Linear(n_hidden, n_hidden)
+		self.l1_t2_2c = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+		self.activate11c = nn.PReLU() # can extend to each channel
+		self.activate12c = nn.PReLU() # can extend to each channel
+		self.activate1c = nn.PReLU() # can extend to each channel
+
+		self.l2_t1_1c = nn.Linear(2*n_hidden, n_hidden)
+		self.l2_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+
+		self.l2_t2_1c = nn.Linear(2*n_hidden, n_hidden)
+		self.l2_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+		self.activate21c = nn.PReLU() # can extend to each channel
+		self.activate22c = nn.PReLU() # can extend to each channel
+		self.activate2c = nn.PReLU() # can extend to each channel
+
+
+	def forward(self, tr, latent, mask1, mask2, A_in_sta, A_in_src):
+
+		mask = torch.cat((mask1, mask2), dim = - 1)
+		tr = torch.cat((tr, latent, mask), dim = -1)
+		tr = self.activate(self.init_trns(tr)) # should tlatent appear here too? Not on first go..
+
+		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(self.l1_t1_1(tr))), mask), dim = 1)) # Supposed to use this layer. Now, using correct layer.
+		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate12(self.l1_t2_1(tr))), mask), dim = 1))
+		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
+
+		tr1 = self.l1_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11c(self.l1_t1_1c(tr))), mask), dim = 1)) # Supposed to use this layer. Now, using correct layer.
+		tr2 = self.l1_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate12c(self.l1_t2_1c(tr))), mask), dim = 1))
+		tr = self.activate1c(torch.cat((tr1, tr2), dim = 1))
+
+		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate22(self.l2_t2_1(tr))), mask), dim = 1))
+		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
+
+		tr1 = self.l2_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21c(self.l2_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l2_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate22c(self.l2_t2_1c(tr))), mask), dim = 1))
+		tr = self.activate2c(torch.cat((tr1, tr2), dim = 1))
+
+		tr1 = self.l3_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate31(self.l3_t1_1(tr))), mask), dim = 1)) # Supposed to use this layer. Now, using correct layer.
+		tr2 = self.l3_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate32(self.l3_t2_1(tr))), mask), dim = 1))
+		tr = self.activate3(torch.cat((tr1, tr2), dim = 1))
+
+		return tr # the new embedding.
+			
 
 # class LocalSliceLgCollapse(MessagePassing):
 # 	def __init__(self, ndim_in, ndim_out, n_edge = 2, n_hidden = 30, eps = 15.0, device = 'cuda'):
@@ -927,11 +1110,15 @@ class StationSourceAttentionMergedPhases(MessagePassing):
 if use_updated_model_definition == False:
 
 	class GCN_Detection_Network_extended(nn.Module):
-		def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, device = 'cuda'):
+		def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, use_expanded = use_expanded, device = 'cuda'):
 			super(GCN_Detection_Network_extended, self).__init__()
 			# Define modules and other relavent fixed objects (scaling coefficients.)
 			# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
-			self.DataAggregation = DataAggregation(4, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
+
+			if use_expanded == False:
+				self.DataAggregation = DataAggregation(4, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
+			else:
+				self.DataAggregation = DataAggregationExpanded(4, 15).to(device) # output size is latent size for (half of) bipartite code # , 15				
 			self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 4).to(device) # 30, 15
 			self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
 			self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
@@ -942,7 +1129,10 @@ if use_updated_model_definition == False:
 			# self.TemporalAttention = TemporalAttention(30, 1, 15).to(device)
 	
 			self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
-			self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
+			if use_expanded == False:
+				self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
+			else:
+				self.DataAggregationAssociationPhase = DataAggregationAssociationPhaseExpanded(15, 15).to(device) # need to add concatenation
 			self.LocalSliceLgCollapseP = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.LocalSliceLgCollapseS = LocalSliceLgCollapse(30, 15, device = device).to(device) # need to add concatenation. Should it really shrink dimension? Probably not..
 			self.Arrivals = StationSourceAttentionMergedPhases(30, 15, 2, 15, n_heads = 3, device = device).to(device)
@@ -950,7 +1140,8 @@ if use_updated_model_definition == False:
 			self.use_absolute_pos = use_absolute_pos
 			self.scale_rel = scale_rel
 			self.scale_time = scale_time
-			
+			self.use_expanded = use_expanded
+
 			self.ftrns1 = ftrns1
 			self.ftrns2 = ftrns2
 	
