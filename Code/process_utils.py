@@ -732,7 +732,7 @@ def build_src_src_product(Ac_src_src, A_src_in_sta, locs, x_grid, device = 'cpu'
 		## For each source, need to find where that station index is in the "order" of the subgraph Cartesian product
 		Ac_prod_src_src.append(torch.Tensor(cum_count_degree_of_src_nodes[slice_edges] + shift_ind).to(device))
 
-	Ac_prod_src_src = torch.Tensor(np.hstack(Ac_prod_src_src)).long().to(device)
+	Ac_prod_src_src = torch.Tensor(torch.hstack(Ac_prod_src_src)).long().to(device)
 
 	return Ac_prod_src_src
 
@@ -1719,6 +1719,7 @@ class NNInterp(nn.Module):
 		vals_pred = scatter(iunique_vals*(vals_per_slice/vals_query[query_ind]), torch.Tensor(query_ind).long().to(self.device), dim = 0, dim_size = len(x_query), reduce = 'sum')
 
 		return vals_pred
+
 
 
 
