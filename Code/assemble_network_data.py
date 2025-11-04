@@ -172,6 +172,7 @@ with_density = config['with_density']
 use_spherical = config['use_spherical']
 depth_importance_weighting_value_for_spatial_graphs = config['depth_importance_weighting_value_for_spatial_graphs']
 fix_nominal_depth = config['fix_nominal_depth']
+use_time_shift = config['use_time_shift']
 
 EPS_EXTRA = 0.0 # 0.1
 EPS_EXTRA_DEPTH = 0.0 # 0.02
@@ -475,18 +476,16 @@ if load_initial_files == True:
 	if os.path.exists('Grids/%s_seismic_network_templates_ver_%d.npz'%(config["name_of_project"], ver_load)) == True:
 		skip_making_grid = True
 
-if skip_making_grid == False:
+if (skip_making_grid == False)*(use_time_shift == False):
   
 	x_grids = assemble_grids(scale_x_extend, offset_x_extend, num_grids, n_spatial_nodes, n_steps = num_steps, with_density = with_density)
 
 	np.savez_compressed(path_to_file + 'Grids/%s_seismic_network_templates_ver_1.npz'%config["name_of_project"], x_grids = [x_grids[i] for i in range(len(x_grids))], corr1 = corr1, corr2 = corr2)
 
 
-print("All files saved successfully!")
-print("✔ Script execution: Done")
 
 create_dense_graphs = True
-if create_dense_graphs == True:
+if (create_dense_graphs == True)*(use_time_shift == True):
 
 	import os
 	os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -1026,7 +1025,7 @@ if create_dense_graphs == True:
 			return edges
 
 		## Choose type of expander graph (or none)
-		use_gabber = False
+		use_gabber = True
 		if number_of_spatial_nodes > 2500: use_gabber = True
 
 		if use_gabber == False: ## Then use cayley graphs
@@ -1049,3 +1048,6 @@ if create_dense_graphs == True:
 
 		np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_expanders_ver_1.npz'%name_of_project, x_grids = clusters_l, Ac = Ac, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
 
+
+print("All files saved successfully!")
+print("✔ Script execution: Done")
