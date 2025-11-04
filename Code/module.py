@@ -264,6 +264,7 @@ class SpatialAttention(MessagePassing):
 		super(SpatialAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
 		# notice node_dim = 0.
 		self.param_vector = nn.Parameter(nn.init.xavier_uniform_(torch.Tensor(1, n_heads, n_latent)))
+		self.f_queries = nn.Linear(n_dim, n_heads*n_latent) # add second layer transformation.
 		self.f_context = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
 		self.f_values = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
 		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
@@ -284,10 +285,12 @@ class SpatialAttention(MessagePassing):
 		return self.activate2(self.proj(self.propagate(edge_index, x = inpts, edge_attr = edge_attr, size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
 
 	def message(self, x_j, index, edge_attr):
-
+		
+		query_embed = self.f_queries(edge_attr).view(-1, self.n_heads, self.n_latent)
 		context_embed = self.f_context(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
 		value_embed = self.f_values(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
-		alpha = self.activate1((self.param_vector*context_embed).sum(-1)/self.scale)
+		# alpha = self.activate1((self.param_vector*context_embed).sum(-1)/self.scale)
+		alpha = self.activate1((query_embed*context_embed).sum(-1)/self.scale)
 
 		alpha = softmax(alpha, index)
 
@@ -1687,6 +1690,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
