@@ -543,7 +543,7 @@ class SpaceTimeAttention(MessagePassing):
 
 		## Why are there no queries in this layer
 
-		query_embed = self.f_query(edge_attr).view(-1, self.n_heads, self.n_latent)
+		query_embed = self.f_queries(edge_attr).view(-1, self.n_heads, self.n_latent)
 		context_embed = self.f_context(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
 		value_embed = self.f_values(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
 		alpha = self.activate1((query_embed*context_embed).sum(-1)/self.scale)
@@ -2139,6 +2139,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
