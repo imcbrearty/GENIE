@@ -424,73 +424,73 @@ class SpaceTimeDirect(nn.Module):
 
 		return self.activate(self.f_direct(inpts))
 
-class SpatialAttention(MessagePassing):
-	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, n_hidden = 30, n_heads = 5, scale_rel = scale_rel):
-		super(SpatialAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
-		# notice node_dim = 0.
-		self.param_vector = nn.Parameter(nn.init.xavier_uniform_(torch.Tensor(1, n_heads, n_latent)))
-		self.f_context = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
-		self.f_values = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
-		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
-		self.proj = nn.Linear(n_latent, out_channels) # can remove this layer possibly.
-		self.scale = np.sqrt(n_latent)
-		self.n_heads = n_heads
-		self.n_latent = n_latent
-		self.scale_rel = scale_rel
-		self.activate1 = nn.PReLU()
-		self.activate2 = nn.PReLU()
-		# self.activate3 = nn.PReLU()
+# class SpatialAttention(MessagePassing):
+# 	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, n_hidden = 30, n_heads = 5, scale_rel = scale_rel):
+# 		super(SpatialAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
+# 		# notice node_dim = 0.
+# 		self.param_vector = nn.Parameter(nn.init.xavier_uniform_(torch.Tensor(1, n_heads, n_latent)))
+# 		self.f_context = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
+# 		self.f_values = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
+# 		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
+# 		self.proj = nn.Linear(n_latent, out_channels) # can remove this layer possibly.
+# 		self.scale = np.sqrt(n_latent)
+# 		self.n_heads = n_heads
+# 		self.n_latent = n_latent
+# 		self.scale_rel = scale_rel
+# 		self.activate1 = nn.PReLU()
+# 		self.activate2 = nn.PReLU()
+# 		# self.activate3 = nn.PReLU()
 
-	def forward(self, inpts, x_query, x_context, k = 10): # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
+# 	def forward(self, inpts, x_query, x_context, k = 10): # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
 
-		edge_index = knn(x_context/1000.0, x_query/1000.0, k = k).flip(0)
-		edge_attr = (x_query[edge_index[1]] - x_context[edge_index[0]])/self.scale_rel # /scale_x
+# 		edge_index = knn(x_context/1000.0, x_query/1000.0, k = k).flip(0)
+# 		edge_attr = (x_query[edge_index[1]] - x_context[edge_index[0]])/self.scale_rel # /scale_x
 
-		return self.activate2(self.proj(self.propagate(edge_index, x = inpts, edge_attr = edge_attr, size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
+# 		return self.activate2(self.proj(self.propagate(edge_index, x = inpts, edge_attr = edge_attr, size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
 
-	def message(self, x_j, index, edge_attr):
+# 	def message(self, x_j, index, edge_attr):
 
-		context_embed = self.f_context(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
-		value_embed = self.f_values(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
-		alpha = self.activate1((self.param_vector*context_embed).sum(-1)/self.scale)
+# 		context_embed = self.f_context(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
+# 		value_embed = self.f_values(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
+# 		alpha = self.activate1((self.param_vector*context_embed).sum(-1)/self.scale)
 
-		alpha = softmax(alpha, index)
+# 		alpha = softmax(alpha, index)
 
-		return alpha.unsqueeze(-1)*value_embed
+# 		return alpha.unsqueeze(-1)*value_embed
 
-class TemporalAttention(MessagePassing): ## Hopefully replace this.
-	def __init__(self, inpt_dim, out_channels, n_latent, n_hidden = 30, n_heads = 5, scale_t = scale_t):
-		super(TemporalAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
+# class TemporalAttention(MessagePassing): ## Hopefully replace this.
+# 	def __init__(self, inpt_dim, out_channels, n_latent, n_hidden = 30, n_heads = 5, scale_t = scale_t):
+# 		super(TemporalAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
 
-		self.temporal_query_1 = nn.Linear(1, n_hidden)
-		self.temporal_query_2 = nn.Linear(n_hidden, n_heads*n_latent)
-		self.f_context_1 = nn.Linear(inpt_dim, n_hidden) # add second layer transformation.
-		self.f_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
+# 		self.temporal_query_1 = nn.Linear(1, n_hidden)
+# 		self.temporal_query_2 = nn.Linear(n_hidden, n_heads*n_latent)
+# 		self.f_context_1 = nn.Linear(inpt_dim, n_hidden) # add second layer transformation.
+# 		self.f_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
 
-		self.f_values_1 = nn.Linear(inpt_dim, n_hidden) # add second layer transformation.
-		self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
+# 		self.f_values_1 = nn.Linear(inpt_dim, n_hidden) # add second layer transformation.
+# 		self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
 
-		self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
-		self.proj_2 = nn.Linear(n_hidden, out_channels) # can remove this layer possibly.
+# 		self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
+# 		self.proj_2 = nn.Linear(n_hidden, out_channels) # can remove this layer possibly.
 
-		self.scale = np.sqrt(n_latent)
-		self.n_heads = n_heads
-		self.n_latent = n_latent
-		self.scale_t = scale_t
+# 		self.scale = np.sqrt(n_latent)
+# 		self.n_heads = n_heads
+# 		self.n_latent = n_latent
+# 		self.scale_t = scale_t
 
-		self.activate1 = nn.PReLU()
-		self.activate2 = nn.PReLU()
-		self.activate3 = nn.PReLU()
-		self.activate4 = nn.PReLU()
-		self.activate5 = nn.PReLU()
+# 		self.activate1 = nn.PReLU()
+# 		self.activate2 = nn.PReLU()
+# 		self.activate3 = nn.PReLU()
+# 		self.activate4 = nn.PReLU()
+# 		self.activate5 = nn.PReLU()
 
-	def forward(self, inpts, t_query):
+# 	def forward(self, inpts, t_query):
 
-		context = self.f_context_2(self.activate1(self.f_context_1(inpts))).view(-1, self.n_heads, self.n_latent) # add more non-linear transform here?
-		values = self.f_values_2(self.activate2(self.f_values_1(inpts))).view(-1, self.n_heads, self.n_latent) # add more non-linear transform here?
-		query = self.temporal_query_2(self.activate3(self.temporal_query_1(t_query/self.scale_t))).view(-1, self.n_heads, self.n_latent) # must repeat t output for all spatial coordinates.
+# 		context = self.f_context_2(self.activate1(self.f_context_1(inpts))).view(-1, self.n_heads, self.n_latent) # add more non-linear transform here?
+# 		values = self.f_values_2(self.activate2(self.f_values_1(inpts))).view(-1, self.n_heads, self.n_latent) # add more non-linear transform here?
+# 		query = self.temporal_query_2(self.activate3(self.temporal_query_1(t_query/self.scale_t))).view(-1, self.n_heads, self.n_latent) # must repeat t output for all spatial coordinates.
 
-		return self.proj_2(self.activate5(self.proj_1(self.activate4((((context.unsqueeze(1)*query.unsqueeze(0)).sum(-1, keepdims = True)/self.scale)*values.unsqueeze(1)).mean(2))))) # linear.
+# 		return self.proj_2(self.activate5(self.proj_1(self.activate4((((context.unsqueeze(1)*query.unsqueeze(0)).sum(-1, keepdims = True)/self.scale)*values.unsqueeze(1)).mean(2))))) # linear.
 
 class SpaceTimeAttention(MessagePassing):
 	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, n_hidden = 30, n_heads = 5, scale_rel = scale_rel, scale_time = scale_time):
@@ -2144,6 +2144,7 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
 
 
