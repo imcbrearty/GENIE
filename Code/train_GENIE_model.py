@@ -152,6 +152,9 @@ if torch.cuda.is_available() == False:
 	device = torch.device('cpu')
 	if config['device'] == 'cuda':
 		print('Overwritting cuda to cpu since no gpu available')
+else:
+	torch.cuda.set_device(0)
+	torch.ones(1).cuda()  # warms up GPU
 
 ## Setup training folder parameters
 if (load_training_data == True) or (build_training_data == True):
@@ -165,7 +168,7 @@ if use_topography == True:
 	tree_surface = cKDTree(surface_profile[:,0:2])
 
 use_consistency_loss = True
-use_gradient_loss = True
+use_gradient_loss = train_config['use_gradient_loss']
 
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
@@ -1357,7 +1360,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 			x_query_focused_t = 2.0*np.random.randn(n_focused_queries)*src_t_kernel			
 			x_query_focused_t = lp_srcs[-1][ind_source_focused,3] + x_query_focused_t
-			ioutside = np.where(((x_query_focused_t < min_t) + (x_query_focused_t > max_t)) > 0)[0]
+			# ioutside = np.where(((x_query_focused_t < min_t) + (x_query_focused_t > max_t)) > 0)[0]
+			ioutside = np.where(((x_query_focused_t < (-time_shift_range/2.0)) + (x_query_focused_t > (time_shift_range/2.0))) > 0)[0]
 			x_query_focused_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
 			x_query_t[ind_overwrite_focused_queries] = x_query_focused_t
 
@@ -1366,7 +1370,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			ind_consistency = int(np.floor(len(X_query[i - 1])/2))
 			x_query[ind_consistency::] = X_query[i - 1][ind_consistency::,0:3]
 			x_query_t[ind_consistency::] = X_query[i - 1][ind_consistency::,3] - irandt_shift[int((i - (n_batch - 2*ilen))/2)]
-			ioutside = np.where(((x_query_t < min_t) + (x_query_t > max_t)) > 0)[0]
+			# ioutside = np.where(((x_query_t < min_t) + (x_query_t > max_t)) > 0)[0]
+			ioutside = np.where(((x_query_t < (-time_shift_range/2.0)) + (x_query_t > (time_shift_range/2.0))) > 0)[0]
 			x_query_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
 
 
@@ -1868,6 +1873,12 @@ for i in range(n_restart_step, n_epochs):
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
 	mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4 = 0.0, 0.0, 0.0, 0.0
 
+	loss_src_val = 0.0
+	loss_asc_val = 0.0
+	loss_grad_val = 0.0
+	loss_dice_val = 0.0
+	loss_consistency_val = 0.0
+
 	if ((np.mod(i, 1000) == 0) or (i == (n_epochs - 1)))*(i != n_restart_step):
 		torch.save(mz.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(i, n_ver))
 		torch.save(optimizer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(i, n_ver))
@@ -1993,7 +2004,9 @@ for i in range(n_restart_step, n_epochs):
 
 			x_query_focused_t = 2.0*np.random.randn(n_focused_queries)*src_t_kernel			
 			x_query_focused_t = lp_srcs[i0][ind_source_focused,3] + x_query_focused_t
-			ioutside = np.where(((x_query_focused_t < min_t) + (x_query_focused_t > max_t)) > 0)[0]
+			# ioutside = np.where(((x_query_focused_t < min_t) + (x_query_focused_t > max_t)) > 0)[0]
+			ioutside = np.where(((x_query_focused_t < (-time_shift_range/2.0)) + (x_query_focused_t > (time_shift_range/2.0))) > 0)[0]
+
 			x_query_focused_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
 			tq_sample[ind_overwrite_focused_queries] = torch.Tensor(x_query_focused_t).to(device)
 
@@ -2176,7 +2189,13 @@ for i in range(n_restart_step, n_epochs):
 		
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
-		loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+		loss1 = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device))) 
+		loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+		loss = loss1 + loss2
+
+		loss_src_val += loss1.item()/n_batch
+		loss_asc_val += loss2.item()/n_batch
 
 
 		if (use_gradient_loss == True)*(i > int(n_epochs/5)):
@@ -2186,6 +2205,7 @@ for i in range(n_restart_step, n_epochs):
 			loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
 
 			loss = 0.5*loss + 0.5*loss_grad
+			loss_grad_val += 0.5*loss_grad.item()/n_batch
 
 
 		use_dice_loss = True
@@ -2210,7 +2230,8 @@ for i in range(n_restart_step, n_epochs):
 
 			loss_dice = 1.0 - (0.5*loss_dice1 + 0.5*loss_dice2)
 
-			loss = 0.5*loss + 2*(0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
+			loss = 0.5*loss + 2.0*(0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
+			loss_dice_val += 2*(0.5*loss_dice.item())/500.0/n_batch
 
 
 		if (use_consistency_loss == True)*(i > int(n_epochs/5)):
@@ -2226,6 +2247,7 @@ for i in range(n_restart_step, n_epochs):
 					# loss_consistency = loss_func(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
 					loss_consistency = loss_func1(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
 					loss = loss + 0.25*loss_consistency
+					loss_consistency_val += 0.25*loss_consistency.item()/n_batch
 
 			out_save = [out[1]]
 			Lbls_save = [Lbls_query[i0]]
@@ -2323,14 +2345,14 @@ for i in range(n_restart_step, n_epochs):
 	mx_pred_4[i] = mx_pred_val_4/n_batch
 	loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
-	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, (10e4)*loss_regularize_val))
+	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_grad_val, loss_dice_val, loss_consistency_val, (10e4)*loss_regularize_val))
 
 	# Log losses
 	if use_wandb_logging == True:
 		wandb.log({"loss": loss_val})
 
 	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
-		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, (10e4)*loss_regularize_val))
+		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_grad_val, loss_dice_val, loss_consistency_val, (10e4)*loss_regularize_val))
 
 
 
