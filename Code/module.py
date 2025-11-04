@@ -543,7 +543,7 @@ class SpaceTimeAttention(MessagePassing):
 
 		## Why are there no queries in this layer
 
-		query_embed = self.f_queries(edge_attr).view(-1, self.n_heads, self.n_latent)
+		query_embed = self.f_query(edge_attr).view(-1, self.n_heads, self.n_latent)
 		context_embed = self.f_context(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
 		value_embed = self.f_values(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
 		alpha = self.activate1((query_embed*context_embed).sum(-1)/self.scale)
@@ -1352,7 +1352,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.A_src_in_edges = A_src_in_edges
 		self.A_Lg_in_src = A_Lg_in_src
 		self.A_src_in_sta = A_src_in_sta
-		self.A_src = A_src
+		self.A_src = A_src[0] if self.use_expanded == True else A_src
 		self.A_edges_p = A_edges_p
 		self.A_edges_s = A_edges_s
 		self.dt_partition = dt_partition
@@ -1373,9 +1373,14 @@ class GCN_Detection_Network_extended(nn.Module):
 			Slice = torch.cat((Slice, x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1)
 
 
+		# if self.use_embedding == True:
+		# 	inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
+		# 	embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) # tr, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src, pos_src_t
+		# 	Slice = torch.cat((Slice, embedding), dim = 1)
+
 		if self.use_embedding == True:
 			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
-			embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) # tr, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src, pos_src_t
+			embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
 			Slice = torch.cat((Slice, embedding), dim = 1)
 
 
@@ -1436,9 +1441,9 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		if self.use_embedding == True:
 			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
-			embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) # tr, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src, pos_src_t
+			embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
 			Slice = torch.cat((Slice, embedding), dim = 1)
-
+			
 
 		## Now, t_query are the pointwise query times of all x_query_cart queries
 		## And there's a new input of the template node times as well, x_temp_cuda_t
@@ -2139,7 +2144,6 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
-
 
 
 
