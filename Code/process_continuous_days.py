@@ -181,6 +181,7 @@ use_phase_types = config['use_phase_types']
 use_subgraph = config['use_subgraph']
 use_sign_input = config.get('use_sign_input', False)
 use_station_corrections = config.get('use_station_corrections', False)
+use_expanded = config['use_expanded']
 if use_subgraph == True:
     max_deg_offset = config['max_deg_offset']
     k_nearest_pairs = config['k_nearest_pairs']
@@ -236,6 +237,7 @@ rbest_cuda = torch.Tensor(rbest).to(device)
 mn_cuda = torch.Tensor(mn).to(device)
 
 
+
 if use_time_shift == True:
 	z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
 	time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
@@ -243,6 +245,11 @@ if use_time_shift == True:
 else:
 	time_shifts = None # np.zeros((x_grids.shape[0], x_grids.shape[1]))
 
+
+if use_expanded == True:
+	Ac = np.load(path_to_file + 'Grids/%s_seismic_network_expanders_ver_%d.npz'%(name_of_project, template_ver))['Ac']
+else:
+	Ac = False
 
 
 # use_spherical = False
@@ -670,7 +677,7 @@ for cnt, strs in enumerate([0]):
 		if use_subgraph == False:
 		
 			# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
-			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref = extract_inputs_adjacencies(trv, locs, ind_use, x_grids[i], x_grids_trv[i], x_grids_trv_refs[i], x_grids_trv_pointers_p[i], x_grids_trv_pointers_s[i], ftrns1, graph_params, scale_time = scale_time, device = device)
+			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref = extract_inputs_adjacencies(trv, locs, ind_use, x_grids[i], x_grids_trv[i], x_grids_trv_refs[i], x_grids_trv_pointers_p[i], x_grids_trv_pointers_s[i], ftrns1, graph_params, scale_time = scale_time, Ac = Ac, device = device)
 
 			A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(len(ind_use)), len(x_grids[i])).reshape(1,-1), np.arange(len(x_grids[i])).repeat(len(ind_use), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
 			if use_time_shift == False:
@@ -689,7 +696,7 @@ for cnt, strs in enumerate([0]):
 		else:
 
 			# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
-			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(locs_use, x_grids[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, scale_time = scale_time, device = device)
+			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(locs_use, x_grids[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, scale_time = scale_time, Ac = Ac, device = device)
 			A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, locs_use, x_grids[i], A_src_in_sta, max_t, dt_res = pred_params[1]/5.0, t_win = pred_params[1]*2.0, min_t = min_t, time_shift = time_shifts[i], device = device)
 			
 			if use_time_shift == False:
@@ -819,6 +826,16 @@ for cnt, strs in enumerate([0]):
 	tq_repeat = tq.repeat(len(X_query_cart),1)
 	X_query_cart_repeat = X_query_cart.repeat_interleave(len(tq), dim = 0)
 
+	use_fixed_edges = True
+	if use_fixed_edges == True:
+		assert(len(x_grid_ind_list) == 1)
+		x_grid_ind = x_grid_ind_list[0]
+		# mz.SpaceTimeAttention.set_edges(x_query, x_context, x_query_t, x_context_t)
+		mz_list[x_grid_ind].SpaceTimeAttention.set_edges(X_query_cart_repeat, torch.Tensor(ftrns1(x_grids[x_grid_ind])).to(device), tq_repeat, torch.Tensor(x_grids[x_grid_ind][:,3]).to(device))
+		assert(mz_list[x_grid_ind].SpaceTimeAttention.use_fixed_edges == True)
+
+	st_process = time.time()
+
 	for n in range(len(times_need)):
 
 		tsteps_slice = times_need[n]
@@ -875,9 +892,16 @@ for cnt, strs in enumerate([0]):
 	iz1, iz2 = np.where(Out_2 > 0.01) # Zeros out all values less than this
 	Out_2_sparse = np.concatenate((iz1.reshape(-1,1), iz2.reshape(-1,1), Out_2[iz1,iz2].reshape(-1,1)), axis = 1)
 
+	print('Continuous processing time %0.4f'%(time.time() - st_process))
+
 	xq = np.copy(X_query)
 	ts = np.copy(tsteps_abs)
-	assert(np.diff(ts)[0] == dt_win)
+	assert(np.allclose(np.diff(ts)[0] - dt_win, 0.0))
+
+	if use_fixed_edges == True:
+		assert(len(x_grid_ind_list) == 1)
+		mz_list[x_grid_ind_list[0]].SpaceTimeAttention.use_fixed_edges = False
+		# x_grid_ind = x_grid_ind_list[0]
 
 	print('Begin peak finding')
 	use_sparse_peak_finding = False
