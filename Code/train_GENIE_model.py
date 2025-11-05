@@ -603,7 +603,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if (use_aftershocks == True)*(len(src_positions) > 1):
 			n_iterations = 1
 			for i in range(n_iterations):
-				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.1, float(src_x_kernel/0.5), float(src_t_kernel/0.5)
+				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.1, float(src_x_kernel/0.35), float(src_t_kernel/0.35)
 				if (int(np.ceil(aftershock_rate*len(src_positions))) > 0):
 					ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(aftershock_rate*len(src_positions))), replace = False)
 					rand_vec = np.random.randn(len(ichoose),3)
@@ -2200,7 +2200,8 @@ for i in range(n_restart_step, n_epochs):
 		loss_asc_val += loss2.item()/n_batch
 
 
-		if (use_gradient_loss == True)*(i > int(n_epochs/5)):
+		# if (use_gradient_loss == True)*(i > int(n_epochs/5)):
+		if (use_gradient_loss == True)*(i > int(n_epochs*4/5)):
 
 			if init_gradient_loss == False:
 				init_gradient_loss, mz.activate_gradient_loss = True, True
