@@ -424,73 +424,73 @@ class SpaceTimeDirect(nn.Module):
 
 		return self.activate(self.f_direct(inpts))
 
-# class SpatialAttention(MessagePassing):
-# 	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, n_hidden = 30, n_heads = 5, scale_rel = scale_rel):
-# 		super(SpatialAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
-# 		# notice node_dim = 0.
-# 		self.param_vector = nn.Parameter(nn.init.xavier_uniform_(torch.Tensor(1, n_heads, n_latent)))
-# 		self.f_context = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
-# 		self.f_values = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
-# 		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
-# 		self.proj = nn.Linear(n_latent, out_channels) # can remove this layer possibly.
-# 		self.scale = np.sqrt(n_latent)
-# 		self.n_heads = n_heads
-# 		self.n_latent = n_latent
-# 		self.scale_rel = scale_rel
-# 		self.activate1 = nn.PReLU()
-# 		self.activate2 = nn.PReLU()
-# 		# self.activate3 = nn.PReLU()
+class SpatialAttention(MessagePassing):
+	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, n_hidden = 30, n_heads = 5, scale_rel = scale_rel):
+		super(SpatialAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
+		# notice node_dim = 0.
+		self.param_vector = nn.Parameter(nn.init.xavier_uniform_(torch.Tensor(1, n_heads, n_latent)))
+		self.f_context = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
+		self.f_values = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
+		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
+		self.proj = nn.Linear(n_latent, out_channels) # can remove this layer possibly.
+		self.scale = np.sqrt(n_latent)
+		self.n_heads = n_heads
+		self.n_latent = n_latent
+		self.scale_rel = scale_rel
+		self.activate1 = nn.PReLU()
+		self.activate2 = nn.PReLU()
+		# self.activate3 = nn.PReLU()
 
-# 	def forward(self, inpts, x_query, x_context, k = 10): # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
+	def forward(self, inpts, x_query, x_context, k = 10): # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
 
-# 		edge_index = knn(x_context/1000.0, x_query/1000.0, k = k).flip(0)
-# 		edge_attr = (x_query[edge_index[1]] - x_context[edge_index[0]])/self.scale_rel # /scale_x
+		edge_index = knn(x_context/1000.0, x_query/1000.0, k = k).flip(0)
+		edge_attr = (x_query[edge_index[1]] - x_context[edge_index[0]])/self.scale_rel # /scale_x
 
-# 		return self.activate2(self.proj(self.propagate(edge_index, x = inpts, edge_attr = edge_attr, size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
+		return self.activate2(self.proj(self.propagate(edge_index, x = inpts, edge_attr = edge_attr, size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
 
-# 	def message(self, x_j, index, edge_attr):
+	def message(self, x_j, index, edge_attr):
 
-# 		context_embed = self.f_context(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
-# 		value_embed = self.f_values(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
-# 		alpha = self.activate1((self.param_vector*context_embed).sum(-1)/self.scale)
+		context_embed = self.f_context(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
+		value_embed = self.f_values(torch.cat((x_j, edge_attr), dim = -1)).view(-1, self.n_heads, self.n_latent)
+		alpha = self.activate1((self.param_vector*context_embed).sum(-1)/self.scale)
 
-# 		alpha = softmax(alpha, index)
+		alpha = softmax(alpha, index)
 
-# 		return alpha.unsqueeze(-1)*value_embed
+		return alpha.unsqueeze(-1)*value_embed
 
-# class TemporalAttention(MessagePassing): ## Hopefully replace this.
-# 	def __init__(self, inpt_dim, out_channels, n_latent, n_hidden = 30, n_heads = 5, scale_t = scale_t):
-# 		super(TemporalAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
+class TemporalAttention(MessagePassing): ## Hopefully replace this.
+	def __init__(self, inpt_dim, out_channels, n_latent, n_hidden = 30, n_heads = 5, scale_t = scale_t):
+		super(TemporalAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
 
-# 		self.temporal_query_1 = nn.Linear(1, n_hidden)
-# 		self.temporal_query_2 = nn.Linear(n_hidden, n_heads*n_latent)
-# 		self.f_context_1 = nn.Linear(inpt_dim, n_hidden) # add second layer transformation.
-# 		self.f_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
+		self.temporal_query_1 = nn.Linear(1, n_hidden)
+		self.temporal_query_2 = nn.Linear(n_hidden, n_heads*n_latent)
+		self.f_context_1 = nn.Linear(inpt_dim, n_hidden) # add second layer transformation.
+		self.f_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
 
-# 		self.f_values_1 = nn.Linear(inpt_dim, n_hidden) # add second layer transformation.
-# 		self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
+		self.f_values_1 = nn.Linear(inpt_dim, n_hidden) # add second layer transformation.
+		self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
 
-# 		self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
-# 		self.proj_2 = nn.Linear(n_hidden, out_channels) # can remove this layer possibly.
+		self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
+		self.proj_2 = nn.Linear(n_hidden, out_channels) # can remove this layer possibly.
 
-# 		self.scale = np.sqrt(n_latent)
-# 		self.n_heads = n_heads
-# 		self.n_latent = n_latent
-# 		self.scale_t = scale_t
+		self.scale = np.sqrt(n_latent)
+		self.n_heads = n_heads
+		self.n_latent = n_latent
+		self.scale_t = scale_t
 
-# 		self.activate1 = nn.PReLU()
-# 		self.activate2 = nn.PReLU()
-# 		self.activate3 = nn.PReLU()
-# 		self.activate4 = nn.PReLU()
-# 		self.activate5 = nn.PReLU()
+		self.activate1 = nn.PReLU()
+		self.activate2 = nn.PReLU()
+		self.activate3 = nn.PReLU()
+		self.activate4 = nn.PReLU()
+		self.activate5 = nn.PReLU()
 
-# 	def forward(self, inpts, t_query):
+	def forward(self, inpts, t_query):
 
-# 		context = self.f_context_2(self.activate1(self.f_context_1(inpts))).view(-1, self.n_heads, self.n_latent) # add more non-linear transform here?
-# 		values = self.f_values_2(self.activate2(self.f_values_1(inpts))).view(-1, self.n_heads, self.n_latent) # add more non-linear transform here?
-# 		query = self.temporal_query_2(self.activate3(self.temporal_query_1(t_query/self.scale_t))).view(-1, self.n_heads, self.n_latent) # must repeat t output for all spatial coordinates.
+		context = self.f_context_2(self.activate1(self.f_context_1(inpts))).view(-1, self.n_heads, self.n_latent) # add more non-linear transform here?
+		values = self.f_values_2(self.activate2(self.f_values_1(inpts))).view(-1, self.n_heads, self.n_latent) # add more non-linear transform here?
+		query = self.temporal_query_2(self.activate3(self.temporal_query_1(t_query/self.scale_t))).view(-1, self.n_heads, self.n_latent) # must repeat t output for all spatial coordinates.
 
-# 		return self.proj_2(self.activate5(self.proj_1(self.activate4((((context.unsqueeze(1)*query.unsqueeze(0)).sum(-1, keepdims = True)/self.scale)*values.unsqueeze(1)).mean(2))))) # linear.
+		return self.proj_2(self.activate5(self.proj_1(self.activate4((((context.unsqueeze(1)*query.unsqueeze(0)).sum(-1, keepdims = True)/self.scale)*values.unsqueeze(1)).mean(2))))) # linear.
 
 class SpaceTimeAttention(MessagePassing):
 	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, n_hidden = 30, n_heads = 5, scale_rel = scale_rel, scale_time = scale_time):
@@ -1242,6 +1242,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.scale_time = scale_time
 		self.use_expanded = use_expanded
 		self.use_gradient_loss = use_gradient_loss
+		self.activate_gradient_loss = False
 		self.attach_time = attach_time
 		self.use_embedding = use_embedding
 		self.device = device
@@ -1274,7 +1275,7 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
 
-		if self.use_gradient_loss == True:
+		if (self.use_gradient_loss == True)*(self.activate_gradient_loss == True):
 			x_temp_cuda = Variable(x_temp_cuda, requires_grad = True)
 			x_query_cart = Variable(x_query_cart, requires_grad = True)
 			t_query = Variable(t_query, requires_grad = True)
@@ -1285,34 +1286,24 @@ class GCN_Detection_Network_extended(nn.Module):
 		x = self.SpatialAggregation2(x, A_src, x_temp_cuda)
 		x_spatial = self.SpatialAggregation3(x, A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
-		# if self.use_gradient_loss == True:
-		#	x_spatial = Variable(x_spatial, requires_grad = True)
 
 		y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 		y = self.proj_soln(y_latent)
 
-		# y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
-
-		# if self
 
 		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
 		x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
 		x = self.proj_soln(x)
 
 
-		if self.use_gradient_loss == True:
-
+		grad_grid_src, grad_grid_t, grad_query_src, grad_query_t = [], [], [], []
+		if (self.use_gradient_loss == True)*(self.activate_gradient_loss == True):
 			torch_one_vec = torch.ones(len(x_temp_cuda_cart),1).to(x_temp_cuda_cart.device)
 			grad_grid = torch.autograd.grad(inputs = x_temp_cuda, outputs = y, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
-			# grad_grid_t = torch.autograd.grad(inputs = t_query, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
-			# grad_grid_src, grad_grid_t = grad_grid[:,0:3], grad_grid[:,3]/(1000.0*self.scale_time)
 			grad_grid_src, grad_grid_t = grad_grid[:,0:3], (1000.0*self.scale_time)*grad_grid[:,3]
-
 			torch_one_vec = torch.ones(len(x_query_cart),1).to(x_query_cart.device)
 			grad_query_src = torch.autograd.grad(inputs = x_query_cart, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
 			grad_query_t = torch.autograd.grad(inputs = t_query, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
-
-
 
 		# x = self.TemporalAttention(x, t_query) # on random queries
 		## In LocalSliceLg Collapse should use relative node time information between arrivals and moveouts
@@ -1443,7 +1434,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
 			embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
 			Slice = torch.cat((Slice, embedding), dim = 1)
-			
+
 
 		## Now, t_query are the pointwise query times of all x_query_cart queries
 		## And there's a new input of the template node times as well, x_temp_cuda_t
@@ -2144,8 +2135,6 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
-
-
 
 
 
