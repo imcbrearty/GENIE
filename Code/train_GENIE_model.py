@@ -169,6 +169,7 @@ if use_topography == True:
 
 use_consistency_loss = True
 use_gradient_loss = train_config['use_gradient_loss']
+init_gradient_loss = False
 
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
@@ -1239,45 +1240,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 				A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(locs[sta_select].shape[0]), len(x_grids[grid_select])).reshape(1,-1), np.arange(len(x_grids[grid_select])).repeat(len(locs[sta_select]), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
 
-				# Ac_prod_src_src = (n_sta_slice*Ac_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1).to(device)).contiguous()	
-				## Must use "irregular" version of Cartesian product 
-
-				# def build_src_src_product(Ac_src_src, locs, x_grid):
-
-				# 	n_sta = len(locs)
-
-				# 	A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(locs.shape[0]), len(x_grid)).reshape(1,-1), np.arange(len(x_grid)).repeat(len(locs), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
-				# 	tree_src_in_sta = cKDTree(A_src_in_sta[0].reshape(-1,1).cpu().detach().numpy())
-				# 	lp_fixed_stas = tree_src_in_sta.query_ball_point(np.arange(locs.shape[0]).reshape(-1,1), r = 0)
-
-				# 	degree_of_src_nodes = degree(A_src_in_sta[1])
-				# 	cum_count_degree_of_src_nodes = np.concatenate((np.array([0]), np.cumsum(degree_of_src_nodes.cpu().detach().numpy())), axis = 0).astype('int')
-
-				# 	sta_ind_lists = []
-				# 	for i in range(x_grid.shape[0]):
-				# 		ind_list = -1*np.ones(locs.shape[0])
-				# 		ind_list[A_src_in_sta[0,cum_count_degree_of_src_nodes[i]:cum_count_degree_of_src_nodes[i+1]].cpu().detach().numpy()] = np.arange(degree_of_src_nodes[i].item())
-				# 		sta_ind_lists.append(ind_list)
-				# 	sta_ind_lists = np.hstack(sta_ind_lists).astype('int')
-
-				# 	Ac_prod_src_src = []
-				# 	for i in range(locs.shape[0]):
-					
-				# 		slice_edges = subgraph(A_src_in_sta[1,np.array(lp_fixed_stas[i])], Ac_src_src, relabel_nodes = False)[0].cpu().detach().numpy()
-
-				# 		## This can happen when a station is only linked to one source
-				# 		if slice_edges.shape[1] == 0:
-				# 			continue
-
-				# 		shift_ind = sta_ind_lists[slice_edges*n_sta + i]
-				# 		assert(shift_ind.min() >= 0)
-				# 		## For each source, need to find where that station index is in the "order" of the subgraph Cartesian product
-				# 		Ac_prod_src_src.append(torch.Tensor(cum_count_degree_of_src_nodes[slice_edges] + shift_ind).to(device))
-
-				# 	Ac_prod_src_src = torch.Tensor(np.hstack(Ac_prod_src_src)).long().to(device)
-
-				# 	return Ac_prod_src_src
-
 				Ac_prod_src_src = build_src_src_product(Ac_src_src, A_src_in_sta, locs[sta_select], x_grids[grid_select], device = device)
 
 				Ac_src_src_l.append(Ac_src_src.cpu().detach().numpy())
@@ -2162,6 +2124,11 @@ for i in range(n_restart_step, n_epochs):
 			out, grads = mz(*input_tensors)
 			grad_grid_src, grad_grid_t, grad_query_src, grad_query_t = grads
 
+
+		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
+
+
+
 		make_plot = False
 		if make_plot == True:
 			fig, ax = plt.subplots(4, 1, sharex = True)
@@ -2182,12 +2149,47 @@ for i in range(n_restart_step, n_epochs):
 			ax[0].scatter(X_query[0][:,3], Lbls_query[0][:,0], c = X_query[0][:,0])
 			ax[1].scatter(X_query[0][:,3], out[1][:,0].cpu().detach().numpy(), c = X_query[0][:,0])
 			fig.savefig(path_to_file + 'Plots/example_sources_in_time_%d.png'%cnt_plot)
+
+
+
+			fig, ax = plt.subplots(2,2, figsize = [12,8])
+			iarg = np.argmax((pick_lbls[:,:,0] + pick_lbls[:,:,1]).sum(1).cpu().detach().numpy())
+			min_thresh_val = 0.15
+
+
+			ifindp = np.where(pick_lbls[iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
+			ifinds = np.where(pick_lbls[iarg,:,1].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
+			ax[0,0].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
+			ax[0,0].scatter(Locs[i0][lp_stations[i0].astype('int')[ifindp],1], Locs[i0][lp_stations[i0].astype('int')[ifindp],0], c = pick_lbls[iarg,ifindp,0].cpu().detach().numpy(), marker = '^')
+			ax[0,1].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
+			ax[0,1].scatter(Locs[i0][lp_stations[i0].astype('int')[ifinds],1], Locs[i0][lp_stations[i0].astype('int')[ifinds],0], c = pick_lbls[iarg,ifinds,1].cpu().detach().numpy(), marker = '^')
+			ax[0,0].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
+			ax[0,1].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
+			src_plot = ftrns2(x_src_query_cart[iarg].reshape(1,-1))
+			ax[0,0].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
+			ax[0,1].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
+
+
+			ifindp = np.where(out[2][iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
+			ifinds = np.where(out[3][iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
+			ax[1,0].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
+			ax[1,0].scatter(Locs[i0][lp_stations[i0].astype('int')[ifindp],1], Locs[i0][lp_stations[i0].astype('int')[ifindp],0], c = out[2][iarg,ifindp,0].cpu().detach().numpy(), marker = '^')
+			ax[1,1].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
+			ax[1,1].scatter(Locs[i0][lp_stations[i0].astype('int')[ifinds],1], Locs[i0][lp_stations[i0].astype('int')[ifinds],0], c = out[3][iarg,ifinds,0].cpu().detach().numpy(), marker = '^')
+			ax[1,0].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
+			ax[1,1].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
+			src_plot = ftrns2(x_src_query_cart[iarg].reshape(1,-1))
+			ax[1,0].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
+			ax[1,1].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
+			fig.savefig(path_to_file + 'Plots/example_stations_%d.png'%cnt_plot)
+
+
 			print('Saved figures %d'%cnt_plot)
 			cnt_plot += 1
 			plt.close('all')
 
+
 		
-		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 		loss1 = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device))) 
@@ -2200,12 +2202,15 @@ for i in range(n_restart_step, n_epochs):
 
 		if (use_gradient_loss == True)*(i > int(n_epochs/5)):
 
-			loss_grad1 = 0.5*weights[0]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
-			loss_grad2 = 0.5*weights[1]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
-			loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
+			if init_gradient_loss == False:
+				init_gradient_loss, mz.activate_gradient_loss = True, True
+			else:
+				loss_grad1 = 0.5*weights[0]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
+				loss_grad2 = 0.5*weights[1]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
+				loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
 
-			loss = 0.5*loss + 0.5*loss_grad
-			loss_grad_val += 0.5*loss_grad.item()/n_batch
+				loss = 0.5*loss + 0.5*loss_grad
+				loss_grad_val += 0.5*loss_grad.item()/n_batch
 
 
 		use_dice_loss = True
@@ -2356,6 +2361,44 @@ for i in range(n_restart_step, n_epochs):
 
 
 
+# Ac_prod_src_src = (n_sta_slice*Ac_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1).to(device)).contiguous()	
+## Must use "irregular" version of Cartesian product 
+
+# def build_src_src_product(Ac_src_src, locs, x_grid):
+
+# 	n_sta = len(locs)
+
+# 	A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(locs.shape[0]), len(x_grid)).reshape(1,-1), np.arange(len(x_grid)).repeat(len(locs), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
+# 	tree_src_in_sta = cKDTree(A_src_in_sta[0].reshape(-1,1).cpu().detach().numpy())
+# 	lp_fixed_stas = tree_src_in_sta.query_ball_point(np.arange(locs.shape[0]).reshape(-1,1), r = 0)
+
+# 	degree_of_src_nodes = degree(A_src_in_sta[1])
+# 	cum_count_degree_of_src_nodes = np.concatenate((np.array([0]), np.cumsum(degree_of_src_nodes.cpu().detach().numpy())), axis = 0).astype('int')
+
+# 	sta_ind_lists = []
+# 	for i in range(x_grid.shape[0]):
+# 		ind_list = -1*np.ones(locs.shape[0])
+# 		ind_list[A_src_in_sta[0,cum_count_degree_of_src_nodes[i]:cum_count_degree_of_src_nodes[i+1]].cpu().detach().numpy()] = np.arange(degree_of_src_nodes[i].item())
+# 		sta_ind_lists.append(ind_list)
+# 	sta_ind_lists = np.hstack(sta_ind_lists).astype('int')
+
+# 	Ac_prod_src_src = []
+# 	for i in range(locs.shape[0]):
+	
+# 		slice_edges = subgraph(A_src_in_sta[1,np.array(lp_fixed_stas[i])], Ac_src_src, relabel_nodes = False)[0].cpu().detach().numpy()
+
+# 		## This can happen when a station is only linked to one source
+# 		if slice_edges.shape[1] == 0:
+# 			continue
+
+# 		shift_ind = sta_ind_lists[slice_edges*n_sta + i]
+# 		assert(shift_ind.min() >= 0)
+# 		## For each source, need to find where that station index is in the "order" of the subgraph Cartesian product
+# 		Ac_prod_src_src.append(torch.Tensor(cum_count_degree_of_src_nodes[slice_edges] + shift_ind).to(device))
+
+# 	Ac_prod_src_src = torch.Tensor(np.hstack(Ac_prod_src_src)).long().to(device)
+
+# 	return Ac_prod_src_src
 
 
 # if optimize_training_data == True:
