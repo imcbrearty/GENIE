@@ -155,6 +155,9 @@ def rotation_matrix_full_precision(a, b, c):
 
 	return rot
 
+def hash_rows(val):
+	return val[:,0].to(torch.int64) << 32 | val[:,1].to(torch.int64)
+
 ### K-means scripts
 
 def kmeans_packing(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1, lr = 0.01):
@@ -1231,6 +1234,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
