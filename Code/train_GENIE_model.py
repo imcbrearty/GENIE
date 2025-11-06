@@ -1580,7 +1580,7 @@ for i in range(len(x_grids)):
 # min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0 # + 10.0
 
 ## Implement training.
-mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, device = device).to(device)
+mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device = device).to(device)
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
 loss_func = torch.nn.MSELoss()
 loss_func1 = torch.nn.L1Loss()
