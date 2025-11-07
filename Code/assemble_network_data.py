@@ -580,9 +580,9 @@ if (create_dense_graphs == True)*(use_time_shift == True):
 	z.close()
 
 	# Load templates
-	z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-	x_grids = z['x_grids']
-	z.close()
+	# z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
+	# x_grids = z['x_grids']
+	# z.close()
 
 	# Load stations
 	z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
@@ -1051,3 +1051,4 @@ if (create_dense_graphs == True)*(use_time_shift == True):
 
 print("All files saved successfully!")
 print("✔ Script execution: Done")
+
