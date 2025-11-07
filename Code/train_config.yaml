@@ -20,6 +20,7 @@ src_t_arv_kernel: 3.0 # Kernel for arrival association time label (s)
 src_x_kernel: 15000. # Kernel for source label, horizontal distance (m)
 src_x_arv_kernel: 15000. # Kernel for arrival-source association label, horizontal distance (m)
 src_depth_kernel: 15000. # Kernel of source label in Cartesian projection, vertical distance (m)
+scale_time: 10.0
 
 ## Training params list 2
 spc_random : 7500 # Spatial scale to randomly remove true picks from stations ontop of threshold distance per event
