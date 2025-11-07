@@ -384,7 +384,7 @@ if load_model == True:
 
 	mz_list = []
 	for i in range(len(x_grids)):
-		mz_slice = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, device = device).to(device)
+		mz_slice = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device = device).to(device)
 		mz_slice.load_state_dict(torch.load(path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(name_of_project, n_step_load, n_ver_load), map_location = device))
 		mz_slice.eval()
 		mz_list.append(mz_slice)
@@ -408,10 +408,16 @@ day_len = 3600*24
 
 use_adaptive_window = True
 if use_adaptive_window == True:
-	n_resolution = 9 ## The discretization of the source time function output
-	t_win = np.round(np.copy(np.array([2*pred_params[2]]))[0], 2) ## Set window size to the source kernel width (i.e., prediction window is of length +/- src_t_kernel, or [-src_t_kernel + t0, t0 + src_t_kernel])
+
+	# n_resolution = 9
+	frac_time_range = (2.0/3.0)
+	t_win = np.round(frac_time_range*time_shift_range, 2) ## Set window size to the source kernel width (i.e., prediction window is of length +/- src_t_kernel, or [-src_t_kernel + t0, t0 + src_t_kernel])	
+	n_resolution = int(5*(frac_time_range*time_shift_range)/(2*pred_params[2]))
+	## Target: 5 points per +/- src_t_kernel
+
+	# t_win = np.round(np.copy(np.array([2*pred_params[2]]))[0], 2) ## Set window size to the source kernel width (i.e., prediction window is of length +/- src_t_kernel, or [-src_t_kernel + t0, t0 + src_t_kernel])
 	dt_win = np.diff(np.linspace(-t_win/2.0, t_win/2.0, n_resolution))[0]
-	assert(t_win == pred_params[0])
+	# assert(t_win == pred_params[0])
 else:
 	dt_win = 1.0 ## Default version
 	t_win = 10.0
