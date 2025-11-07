@@ -1508,35 +1508,21 @@ class GCN_Detection_Network_extended(nn.Module):
 	
 	def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 
+		# t1 = time.time()
+
 		n_line_nodes = Slice.shape[0]
 		mask_p_thresh = 0.01
 		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 		if self.use_absolute_pos == True:
 			Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
-
 		if self.attach_time == True:
 			Slice = torch.cat((Slice, x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1)
-
-
-		# if self.use_embedding == True:
-		# 	inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
-		# 	embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) # tr, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src, pos_src_t
-		# 	Slice = torch.cat((Slice, embedding), dim = 1)
 
 		if self.use_embedding == True:
 			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
 			embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
 			Slice = torch.cat((Slice, embedding), dim = 1)
-
-
-		## Now, t_query are the pointwise query times of all x_query_cart queries
-		## And there's a new input of the template node times as well, x_temp_cuda_t
-
-		## Should adapt Bipartite Read in to use space-time informtion
-		## Should add time information to node features of Cartesian product
-		## Or implement as relative time information on edges
-
 
 		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
 
@@ -1545,58 +1531,55 @@ class GCN_Detection_Network_extended(nn.Module):
 		x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda) # x_temp_cuda_cart
 		x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
 		x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		
+
 		y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 		y = self.proj_soln(y_latent)
 
-		# y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
+
 		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
 		x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
 		x = self.proj_soln(x)
 
-		# x = self.TemporalAttention(x, t_query) # on random queries
-		## In LocalSliceLg Collapse should use relative node time information between arrivals and moveouts
-		## (it may already be included in relative travel time vectors (e.g., tlatent?))
 
 		## Note below: why detach x_latent?
 		mask_out = 1.0*(y.detach() > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
 		if self.use_absolute_pos == True:
 			s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
+		# s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
 		s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
-		arv_p = self.LocalSliceLgCollapseP(self.A_edges_p, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,0].reshape(-1,1), n_temp, n_sta) ## arv_p and arv_s will be same size # locs_use_cart, x_temp_cuda_cart, A_src_in_sta
-		arv_s = self.LocalSliceLgCollapseS(self.A_edges_s, self.dt_partition, tpick, ipick, phase_label, s, self.tlatent[:,1].reshape(-1,1), n_temp, n_sta)
-		arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, locs_use_cart, arv_p, arv_s, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
-		
+
+
+		arv_embed, mask_arv = self.SourceArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, self.tlatent, trv_out = trv_out_q)
+
+
+		arv = self.Arrivals(x_query_src_cart, tq_sample, x_src, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+
+
 		arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
 
 
 		return y, x, arv_p, arv_s
 
+
 	def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, t_query, n_reshape = 1):
 	
+		# t1 = time.time()
+
 		n_line_nodes = Slice.shape[0]
 		mask_p_thresh = 0.01
 		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 		if self.use_absolute_pos == True:
 			Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
-
 		if self.attach_time == True:
 			Slice = torch.cat((Slice, x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1)
-
 
 		if self.use_embedding == True:
 			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
 			embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
 			Slice = torch.cat((Slice, embedding), dim = 1)
-
-
-		## Now, t_query are the pointwise query times of all x_query_cart queries
-		## And there's a new input of the template node times as well, x_temp_cuda_t
-
-		## Should adapt Bipartite Read in to use space-time informtion
-		## Should add time information to node features of Cartesian product
-		## Or implement as relative time information on edges
 
 		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
 
@@ -1605,13 +1588,16 @@ class GCN_Detection_Network_extended(nn.Module):
 		x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda) # x_temp_cuda_cart
 		x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
 		x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		
+
 		y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 		y = self.proj_soln(y_latent)
 
-		# y = self.TemporalAttention(y_latent, t_query) # prediction on fixed grid
+
 		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
 		# x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
 		x = self.proj_soln(x)
+
 
 		if n_reshape > 1: ## Use this to map (n_reshape) repeated spatial queries (x_temp_cuda_cart) at different origin times, to predictions for fixed coordinates and across time
 			# y = y.reshape(-1,n_reshape,1) ## Assumed feature dimension output is 1
