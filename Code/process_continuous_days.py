@@ -404,6 +404,7 @@ plot_on = False
 # 	t_mask = np.ones((1,11))
 
 day_len = 3600*24
+n_remove = 0
 # t_win = config['t_win']
 
 use_adaptive_window = True
@@ -1583,9 +1584,36 @@ for cnt, strs in enumerate([0]):
 				wp_slice[wp_slice > 0] = wp_slice[wp_slice > 0]*scale_weights + 1.0
 				ws_slice[ws_slice > 0] = ws_slice[ws_slice > 0]*scale_weights + 1.0
 				cost_value = 1.0*min_required_picks
+
+
+			restrict = []
+			if len(wp_slice) > 1:
+				thresh_restrict = 0.5
+				for jj in range(len(wp_slice)):
+					ifind_p = np.where(wp_slice[jj,:] > 0)[0]
+					ifind_s = np.where(ws_slice[jj,:] > 0)[0]
+					vec_w = np.concatenate((wp_slice[jj,ifind_p], ws_slice[jj,ifind_s]), axis = 0)
+					norm_vec_w = np.linalg.norm(vec_w)
+					for kk in range(len(wp_slice)):
+						if (jj == kk) or (norm_vec_w == 0): continue
+						vec_w1 = np.concatenate((wp_slice[kk,ifind_p], ws_slice[kk,ifind_s]), axis = 0)
+						norm_vec_w1 = np.linalg.norm(vec_w1)
+						if norm_vec_w1 == 0: continue
+						pairwise_similarity = np.dot(vec_w, vec_w1)/(norm_vec_w*norm_vec_w1)
+						if pairwise_similarity > thresh_restrict:
+							restrict.append(np.array([jj, kk]))
+			if len(restrict) == 0: restrict = None
 			
+
 			# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
 			assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
+			assignments1, srcs_active1 = competitive_assignment([wp_slice, ws_slice], ipick, cost_value, restrict = restrict) ## force 1 source?
+			n_remove += len(srcs_active1) - len(srcs_active)
+
+
+			
+			# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
+			# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
 
 			if len(srcs_active) > 0:
 
@@ -2451,6 +2479,7 @@ for cnt, strs in enumerate([0]):
 		file_save['trv_out2_all'] = trv_out2_all
 		file_save['trv_srcs_init1'] = trv_out_srcs_init1
 		file_save['trv_srcs_init2'] = trv_out_srcs_init2
+		file_save['n_remove'] = n_remove
 		
 		
 		if (process_known_events == True):
