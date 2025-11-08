@@ -1635,7 +1635,7 @@ def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_e
 
 		if randomize == True:
 			ind_fixed = np.delete(np.arange(n_spc_query), ind_overwrite_focused_queries, axis = 0)
-			x_rand_uniform = np.hstack([np.random.uniform(u[0], u[1], size = len(ind_fixed)).reshape(-1,1) for u in [lat_range_extend, lon_range_extend, depth_range_extend]])
+			x_rand_uniform = np.hstack([np.random.uniform(u[0], u[1], size = len(ind_fixed)).reshape(-1,1) for u in [lat_range_extend, lon_range_extend, depth_range]])
 			x_rand_t = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ind_fixed))
 			x_query_sample[ind_fixed] = x_rand_uniform
 			x_query_sample_t[ind_fixed] = x_rand_t
