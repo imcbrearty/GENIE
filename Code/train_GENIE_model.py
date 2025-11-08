@@ -117,6 +117,7 @@ src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source 
 src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
 # t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
 src_kernel_mean = np.mean([src_x_kernel, src_x_kernel, src_depth_kernel])
+src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
 
 scale_time = train_config['scale_time']
 
@@ -170,6 +171,14 @@ if use_topography == True:
 use_consistency_loss = True
 use_gradient_loss = train_config['use_gradient_loss']
 init_gradient_loss = False
+use_negative_loss = True ## If True, up-sample the false positive predictions 
+use_negative_loss_step = 1
+
+
+if use_negative_loss == True:
+	assert(use_gradient_loss == False) ## Right now might not be compatible with gradient loss due to the query layer not re-computing gradients
+
+
 
 ## Load specific subsets of stations to train on in addition to random
 ## subnetworks from the total set of possible stations
@@ -658,11 +667,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			ireplace = np.random.choice(len(dist_thresh), size = int(0.15*len(dist_thresh)), replace = False)
 			dist_thresh[ireplace] = beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
 
+
 	
 	use_large_distances = True
 	if use_large_distances == True:
-		ireplace = np.random.choice(len(dist_thresh), size = int(0.15*len(dist_thresh)), replace = False)
-		dist_thresh[ireplace] = 3.0*beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]	
+		ireplace = np.random.choice(len(dist_thresh), size = int(0.2*len(dist_thresh)), replace = False)
+		dist_thresh[ireplace] = 5.0*beta(1,5).rvs(size = len(ireplace)).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]	
 
 	
 	# create different distance dependent thresholds.
@@ -1188,6 +1198,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		phase_vals = phase_vals[ineed]
 		meta = meta[ineed]
 
+		# pdb.set_trace()
+
 		active_sources_per_slice = np.array(lp_src_times_all[i])[np.array(active_sources_per_slice_l[i])]
 		ind_inside = np.where(inside_interior[active_sources_per_slice.astype('int')] > 0)[0]
 		active_sources_per_slice = active_sources_per_slice[ind_inside]
@@ -1352,6 +1364,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			# lbls_grid = (np.expand_dims(spatial_exp_term.sum(2), axis=1) * temporal_exp_term).max(2)
 			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
 
+			## Note for consistency with above, should be using ind_src_unique for the indices of sources, though it looks like ind_src_unique == active_sources_per_slice
+
 			if use_gradient_loss == False:
 
 				lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
@@ -1424,7 +1438,23 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, [A_src_src_l, Ac_src_src_l], A_prod_sta_sta_l, A_prod_src_src_l, [A_src_in_prod_l, Ac_src_in_prod_l], A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 
-def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
+# def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
+
+# 	iz = np.where(source_pick[:,1] > -1.0)[0]
+# 	lbl_trgt = torch.zeros((xq_src_cart.shape[0], source_pick.shape[0], 2)).to(device)
+# 	src_pick_indices = source_pick[iz,1].astype('int')
+
+# 	inside_interior = ((src_slice[src_pick_indices,0] <= lat_range_interior[1])*(src_slice[src_pick_indices,0] >= lat_range_interior[0])*(src_slice[src_pick_indices,1] <= lon_range_interior[1])*(src_slice[src_pick_indices,1] >= lon_range_interior[0]))
+
+# 	if len(iz) > 0:
+# 		d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)
+# 		lbl_trgt[:,iz,0] = d*torch.Tensor((source_pick[iz,0] == 0)).to(device).float()
+# 		lbl_trgt[:,iz,1] = d*torch.Tensor((source_pick[iz,0] == 1)).to(device).float()
+
+# 	return lbl_trgt
+
+
+def pick_labels_extract_interior_region_flattened(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, radius_frac = 1.0, sig_x = 15e3, sig_t = 6.5, use_flattening = True): # can expand kernel widths to other size if prefered
 
 	iz = np.where(source_pick[:,1] > -1.0)[0]
 	lbl_trgt = torch.zeros((xq_src_cart.shape[0], source_pick.shape[0], 2)).to(device)
@@ -1433,11 +1463,68 @@ def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_
 	inside_interior = ((src_slice[src_pick_indices,0] <= lat_range_interior[1])*(src_slice[src_pick_indices,0] >= lat_range_interior[0])*(src_slice[src_pick_indices,1] <= lon_range_interior[1])*(src_slice[src_pick_indices,1] >= lon_range_interior[0]))
 
 	if len(iz) > 0:
-		d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)
+
+		if use_flattening == False: ## Use Gaussian labels
+			d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)
+
+		else: ## Use Box-cars embedded in Gaussians
+
+			dist_val = pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))
+			mask_dist = dist_val > radius_frac*sig_x
+			val_dist = mask_dist*(dist_val - mask_dist*(radius_frac*sig_x)) ## If within radius, this maps to zero; else
+
+			dist_t = pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))
+			mask_t = dist_t > radius_frac*sig_t
+			val_t = mask_t*(dist_t - mask_t*(radius_frac*sig_t))
+
+			d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(val_dist**2)/(sig_x**2))*np.exp(-0.5*(val_t**2)/(sig_t**2))).to(device)
+
 		lbl_trgt[:,iz,0] = d*torch.Tensor((source_pick[iz,0] == 0)).to(device).float()
 		lbl_trgt[:,iz,1] = d*torch.Tensor((source_pick[iz,0] == 1)).to(device).float()
 
 	return lbl_trgt
+
+def compute_source_labels(x_query, x_query_t, src_x, src_t, src_spatial_kernel, src_t_kernel, ftrns1):
+
+	# lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+	
+	return (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_x), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*((x_query_t.reshape(-1,1) - src_t.reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+
+
+def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2):
+
+	# n_frac_focused_queries = 0.2
+	# n_concentration_focused_queries = 0.05 # 5% of scale of domain
+
+	x_query_sample = np.copy(x_query)
+	x_query_sample_t = np.copy(x_query_t)
+	n_spc_query = len(x_query)
+
+	if (len(prob) > 0)*(n_frac_focused_queries > 0):
+
+		n_focused_queries = int(n_frac_focused_queries*n_spc_query)
+		ind_overwrite_focused_queries = np.sort(np.random.choice(n_spc_query, size = n_focused_queries, replace = False))
+		ind_source_focused = np.random.choice(n_spc_query, p = prob, replace = True)
+
+		# x_query_focused = np.random.randn(n_focused_queries, 3)*scale_x*n_concentration_focused_queries
+		# x_query_focused = x_query_focused + lp_srcs[-1][ind_source_focused,0:3]
+		x_query_focused = 2.0*np.random.randn(n_focused_queries, 3)*np.mean([src_x_kernel, src_depth_kernel])			
+		x_query_focused = ftrns2(x_query_focused + ftrns1(x_query[ind_source_focused,0:3]))
+
+		ioutside = np.where(((x_query_focused[:,2] < depth_range[0]) + (x_query_focused[:,2] > depth_range[1])) > 0)[0]
+		x_query_focused[ioutside,2] = np.random.rand(len(ioutside))*(depth_range[1] - depth_range[0]) + depth_range[0]			
+		x_query_focused = np.maximum(np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), x_query_focused)
+		x_query_focused = np.minimum(np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1), x_query_focused)
+		x_query_sample[ind_overwrite_focused_queries] = x_query_focused
+
+		x_query_focused_t = 2.0*np.random.randn(n_focused_queries)*src_t_kernel			
+		x_query_focused_t = x_query_t[ind_source_focused,3] + x_query_focused_t
+		# ioutside = np.where(((x_query_focused_t < min_t) + (x_query_focused_t > max_t)) > 0)[0]
+		ioutside = np.where(((x_query_focused_t < (-time_shift_range/2.0)) + (x_query_focused_t > (time_shift_range/2.0))) > 0)[0]
+		x_query_focused_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
+		x_query_sample_t[ind_overwrite_focused_queries] = x_query_focused_t
+
+	return x_query_sample, x_query_sample_t
 
 
 if use_station_corrections == True:
@@ -2114,20 +2201,48 @@ for i in range(n_restart_step, n_epochs):
 			]			
 
 		# Call the model with pre-processed tensors
+		## To integrate negative_loss, must replace out[1] (which can't be overwritten, or can it?)
+		## If not, can replace with a variable name that is overwritten
 
 		if use_gradient_loss == False:
 
-			out = mz(*input_tensors)
+			out = mz(*input_tensors, save_state = True) if (use_negative_loss == True)*(np.mod(i, use_negative_loss_step) == 0) else mz(*input_tensors)
 
 		else:
 
-			out, grads = mz(*input_tensors)
+			# out, grads = mz(*input_tensors)
+			out, grads = mz(*input_tensors, save_state = True) if (use_negative_loss == True)*(np.mod(i, use_negative_loss_step) == 0) else mz(*input_tensors)
 			grad_grid_src, grad_grid_t, grad_query_src, grad_query_t = grads
 
 
-		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
+
+		## Note, negative loss could be used on x_src_query_cart, but it is more essential for constraining the false positives in out[1]
+		pick_lbls = pick_labels_extract_interior_region_flattened(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 
 
+		if use_negative_loss == True:
+
+			min_up_sample = 0.1
+			## Up-sample queries for regions of high prediction but low labels. Or alternatively, essentially run a peak finder on the output.
+			prob_up_sample = out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0] < min_up_sample)
+			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
+			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
+			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2)
+			out_query = mz.forward_queries(x_query_sample, x_query_sample_t) # x_query_cart, t_query
+			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3], lp_srcs[i0][:,3], src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
+
+			# moi
+
+			## Can check if prediction is consistent at un-changed points
+			out[1] = out_query ## Can we overwrite; and also overwrite the query points?
+			X_query[i0] = np.concatenate((x_query_sample, x_query_sample_t.reshape(-1,1)), axis = 1)
+			Lbls_query[i0] = lbls_query
+
+			## Also need to overwrite labels. Note: does this break for using gradient loss? Yes
+
+
+		# if pick_lbls.max() > 0.3:
+			# np.savez_compressed('example_picks_%d.npz'%i, pick_lbls = pick_lbls.cpu().detach().numpy(), x_query = ftrns2(x_src_query_cart), x_cart = x_src_query_cart, srcs = lp_srcs[i0], srcs_cart = ftrns1(lp_srcs[i0]), times = lp_times[i0], inds = lp_stations[i0], meta = lp_meta[i0][:,-2::], tq_sample = tq_sample, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 
 		make_plot = False
 		if make_plot == True:
@@ -3176,7 +3291,6 @@ for i in range(n_restart_step, n_epochs):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
-
 
 
 
