@@ -168,11 +168,34 @@ if use_topography == True:
 	surface_profile = np.load(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project)['surface_profile'] # (os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == True)
 	tree_surface = cKDTree(surface_profile[:,0:2])
 
+
 use_consistency_loss = True
 use_gradient_loss = train_config['use_gradient_loss']
 init_gradient_loss = False
 use_negative_loss = True ## If True, up-sample the false positive predictions 
 use_negative_loss_step = 1
+
+
+use_teleseisim_noise = True
+if use_teleseisim_noise == True:
+	z = np.load(path_to_file + 'Grids' + seperator + 'teleseismic_travel_time_grid_ver_1.npz')
+	xx_teleseism, trv_teleseism, phase_types = z['xx_teleseism'], z['trv_teleseism'], z['phase_types']
+	z.close()
+	ipos = np.where(xx_teleseism[:,0] > 0)[0]
+	# inot_nan1, inot_nan2 = np.where(np.isnan(trv_teleseism) == 0)
+	xx_teleseism = xx_teleseism[ipos]
+	trv_teleseism = trv_teleseism[ipos]
+
+	# unique_depths = np.unique(xx_teleseism[:,1])
+	# ip_depths = [np.array(v) for v in cKDTree(xx_teleseism[:,1].reshape(-1,1)).query_ball_point(unique_depths.reshape(-1,1), r = 0)]
+	# iarg = [np.argsort(xx_teleseism[ip_depths[j],0]) for j in range(len(ip_depths))]
+	# ip_depths = [np.ascontiguousarray(ip_depths[j][iarg[j]]) for j in range(len(ip_depths))]
+
+	# deg_vals = [np.ascontiguousarray(xx_teleseism[ip_depths[j],0]) for j in range(len(ip_depths))]
+	# trv_vals = [np.ascontiguousarray(trv_teleseism[ip_depths[j],:]) for j in range(len(ip_depths))]
+	# inot_nan = [[np.where(np.isnan(trv_vals[j][:,k]) == 0)[0] for j in range(len(ip_depths))] for k in range(len(phase_types))]
+	# f_teleseisims = [[lambda x: np.interp(x, deg_vals[j], trv_vals[j][inot_nan,k], left = np.nan, right = np.nan) for j in range(len(ip_depths))] for k in range(len(phase_types))]
+
 
 
 if use_negative_loss == True:
@@ -823,6 +846,68 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			sta_time_spikes = np.hstack([time_spikes[j] + np.random.randn(n_spikes_extent[j])*spike_time_spread for j in range(n_spikes)])
 			false_arrivals_spikes = np.concatenate((sta_time_spikes.reshape(-1,1), sta_ind_spikes.reshape(-1,1), -1.0*np.ones((len(sta_ind_spikes),1)), np.zeros((len(sta_ind_spikes),1)), -1.0*np.ones((len(sta_ind_spikes),1))), axis = 1)
 			arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) ## Concatenate on spikes
+
+
+	if use_teleseisim_noise == True:
+		max_num_teleseisms = 30
+
+		n_teleseisms = np.random.randint(0, high = int(max_num_spikes*T/(3600*24)))
+		n_teleseisms_extent = np.random.randint(int(np.floor(n_sta*0.35)), high = n_sta, size = n_teleseisms)
+		sta_ind_teleseisms = [np.random.choice(n_sta, size = n_teleseisms_extent[j], replace = False) for j in range(n_teleseisms)]
+
+		picks_teleseism = []
+		if n_teleseisms > 0:
+
+			n_trial_point = int(100*n_teleseisms)
+			ichoose = np.random.choice(len(xx_teleseism), size = n_trial_point)
+			x_base = np.hstack([np.random.uniform(lat_range_extend[0], lat_range_extend[1], size = n_trial_point).reshape(-1,1), np.random.uniform(lon_range_extend[0], lon_range_extend[1], size = n_trial_point).reshape(-1,1)]) 
+			rand_vec = np.random.randn(n_trial_point, 2)
+			deg_dist = 0.75*np.random.uniform(xx_teleseism[:,0].min(), xx_teleseism[:,0].max(), size = n_trial_point)
+
+			x_base = x_base + deg_dist.reshape(-1,1)*(rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True))
+			ifind = np.where((x_base[:,0] > lat_range_extend[0])*(x_base[:,0] < lat_range_extend[1])*(x_base[:,1] > lon_range_extend[0])*(x_base[:,1] < lon_range_extend[1]))[0]
+			x_base = x_base[np.random.choice(np.delete(np.arange(len(x_base)), ifind, axis = 0), size = n_teleseisms)]
+			x_depth = np.random.choice(np.unique(xx_teleseism[:,1]), size = len(x_base))
+			x_time = np.random.rand(len(x_base))*T
+
+			for j in range(n_teleseisms):
+				k_use = np.random.choice(trv_teleseism.shape[1])
+				isubset = np.where(xx_teleseism[:,1] == x_depth[j])[0]
+				dist_deg = np.linalg.norm(locs[sta_ind_teleseisms[j],0:2] - x_base[j,0:2].reshape(1,-1), axis = 1)
+				inearest = cKDTree(xx_teleseism[isubset,0].reshape(-1,1)).query(dist_deg.reshape(-1,1))[1]
+				trv_estimate = trv_teleseism[isubset[inearest],k_use]
+				inot_nan = np.where(np.isnan(trv_estimate) == 0)[0]
+				trv_noise = np.random.randn(len(inot_nan))*sig_t*trv_estimate[inot_nan]
+
+				if len(inot_nan) > 0:
+					picks_teleseism.append(np.concatenate((x_time[j] + trv_estimate[inot_nan].reshape(-1,1) + trv_noise.reshape(-1,1), sta_ind_teleseisms[j][inot_nan].reshape(-1,1), np.array([-1, 0, -1]).reshape(1,-1).repeat(len(inot_nan), axis = 0)), axis = 1))
+				print(trv_estimate[inot_nan])
+
+		picks_teleseism = np.vstack(picks_teleseism)
+		arrivals = np.concatenate((arrivals, picks_teleseism), axis = 0)
+
+		# pdb.set_trace()
+
+
+		# ip_nearest = []
+
+
+
+		# pdb.set_trace()
+
+		# deg_vals = 
+
+		# trv_times = [trv_teleseism[cKDTree(np.array([100e3, 1.0]).reshape(1,-1)*(xx_teleseism)]]
+
+		## From these source coordinates must estimate travel times to stations (should use interpolation)
+
+
+
+		# src_teleseism = x_base[ifind]
+		# times_teleseism = 
+
+
+
 
 
 	# use_stable_association_labels = True
@@ -2356,17 +2441,17 @@ for i in range(n_restart_step, n_epochs):
 			# prob_up_sample = 
 			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
 			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
-			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2) # replace = False
+			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, replace = True, randomize = True) # replace = False
 			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device)) # x_query_cart, t_query
 			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3], lp_srcs[i0][:,3], src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
 
-			ifind = np.where((np.abs(X_query[i0][:,0:3] - x_query_sample).max(1) == 0)*(X_query[i0][:,3] == x_query_sample_t.reshape(-1)))[0]
+			# ifind = np.where((np.abs(X_query[i0][:,0:3] - x_query_sample).max(1) == 0)*(X_query[i0][:,3] == x_query_sample_t.reshape(-1)))[0]
 			# print('Max val %0.4f, %0.4f, %0.4f'%(np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max(), Lbls_query[i0][ifind].max(), lbls_query[ifind].max()))
 			# print('Len [2] %d'%len(lp_srcs[i0]))
-			if np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max() > 0.01:
-				# pass
-				moi
-				pass
+			# if np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max() > 0.01:
+			# 	# pass
+			# 	moi
+			# 	pass
 
 
 			loss_negative = loss_func(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
