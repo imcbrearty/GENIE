@@ -330,7 +330,7 @@ class SpaceTimeAttention(MessagePassing):
 		self.use_fixed_edges = False
 		# self.activate3 = nn.PReLU()
 
-	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, k = 30): # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
+	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, k = 30, fixed_type = 0): # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
 
 		if self.use_fixed_edges == False:
 
@@ -346,6 +346,7 @@ class SpaceTimeAttention(MessagePassing):
 			# edge_attr = self.edge_features
 
 			# return self.activate2(self.proj(self.propagate(self.fixed_edges, x = inpts, edge_attr = self.edge_features, size = (x_context.shape[0], x_query.shape[0])).reshape(len(x_query), -1))) # mean over different heads
+			# return self.activate2(self.proj(self.propagate(self.fixed_edges[fixed_type], x = inpts, edge_attr = self.edge_features[fixed_type], size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
 			return self.activate2(self.proj(self.propagate(self.fixed_edges, x = inpts, edge_attr = self.edge_features, size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
 
 
@@ -1709,6 +1710,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 
 		else:
+			# y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, fixed_type = 1) # contains data on spatial and temporal solution at fixed nodes
 			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t) # contains data on spatial and temporal solution at fixed nodes
 
 		# y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
@@ -1769,17 +1771,17 @@ class GCN_Detection_Network_extended(nn.Module):
 		x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
 
-		if self.use_direct_output == True:
-			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
+		# if self.use_direct_output == True:
+		# 	y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 
-		else:
-			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t) # contains data on spatial and temporal solution at fixed nodes
+		# else:
+		# 	y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t) # contains data on spatial and temporal solution at fixed nodes
 
 
-		# y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
-		y = self.proj_soln(y_latent)
-		# y = self.proj_soln1(y_latent)
-		
+		# # y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
+		# y = self.proj_soln(y_latent)
+		# # y = self.proj_soln1(y_latent)
+
 
 		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
 		# x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
@@ -1790,7 +1792,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			# y = y.reshape(-1,n_reshape,1) ## Assumed feature dimension output is 1
 			x = x.reshape(-1,n_reshape,1)
 
-		return y, x
+		return [], x
 
   
 #### EXTRA
