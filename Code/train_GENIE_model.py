@@ -1349,6 +1349,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			x_query_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
 
 
+
+		# print('Len [3] %d'%len(active_sources_per_slice))
+
 		if len(active_sources_per_slice) == 0:
 			lbls_grid = np.zeros((x_grids[grid_select].shape[0], 1))
 			lbls_query = np.zeros((n_spc_query, 1))
@@ -1359,7 +1362,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 		else:
 			active_sources_per_slice = active_sources_per_slice.astype('int')
-			
+			# print('Len [1] %d'%len(active_sources_per_slice))
+
 			# Combine components
 			# lbls_grid = (np.expand_dims(spatial_exp_term.sum(2), axis=1) * temporal_exp_term).max(2)
 			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
@@ -1368,8 +1372,15 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 			if use_gradient_loss == False:
 
-				lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
-				lbls_query = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_query_t).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+				# lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+				# lbls_query = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_query_t).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+				lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*((x_grids[grid_select][:,3].reshape(-1,1) - (src_times[active_sources_per_slice].reshape(1,-1) - time_samples[i]))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+				lbls_query = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*((x_query_t.reshape(-1,1) - (src_times[active_sources_per_slice].reshape(1,-1) - time_samples[i]))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+
+				# if len(active_sources_per_slice) > 1:
+				# 	pass
+					# print('Pdb')
+					#  pdb.set_trace()
 
 			else:
 
@@ -1488,10 +1499,17 @@ def compute_source_labels(x_query, x_query_t, src_x, src_t, src_spatial_kernel, 
 
 	# lbls_grid = (np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*(((time_samples[i] + x_grids[grid_select][:,3]).reshape(-1,1) - src_times[active_sources_per_slice].reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
 	
-	return (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_x), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*((x_query_t.reshape(-1,1) - src_t.reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
+	if len(src_x) == 0:
+
+		return np.zeros((len(x_query),1))
+
+	else:
+
+		return (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_x), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*((x_query_t.reshape(-1,1) - src_t.reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
 
 
-def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2):
+# def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2, replace = True, randomize = True, baseline = 0.2):
+def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2, replace = False, randomize = False, baseline = 0.2):
 
 	# n_frac_focused_queries = 0.2
 	# n_concentration_focused_queries = 0.05 # 5% of scale of domain
@@ -1500,11 +1518,17 @@ def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_e
 	x_query_sample_t = np.copy(x_query_t)
 	n_spc_query = len(x_query)
 
+	if (baseline is not None)*(prob.sum() > 0):
+		prob1 = np.copy(prob)
+		prob1[(prob <= np.quantile(prob[prob > 0], baseline))*(prob > 0)] = np.quantile(prob[prob > 0], baseline)
+		prob1[(prob >= np.quantile(prob[prob > 0], 1.0 - baseline))*(prob > 0)] = np.quantile(prob[prob > 0], 1.0 - baseline)
+		prob = np.copy(prob)
+
 	if (len(prob) > 0)*(n_frac_focused_queries > 0):
 
 		n_focused_queries = int(n_frac_focused_queries*n_spc_query)
 		ind_overwrite_focused_queries = np.sort(np.random.choice(n_spc_query, size = n_focused_queries, replace = False))
-		ind_source_focused = np.random.choice(n_spc_query, p = prob, replace = True)
+		ind_source_focused = np.random.choice(n_spc_query, p = prob, size = n_focused_queries, replace = True)
 
 		# x_query_focused = np.random.randn(n_focused_queries, 3)*scale_x*n_concentration_focused_queries
 		# x_query_focused = x_query_focused + lp_srcs[-1][ind_source_focused,0:3]
@@ -1518,13 +1542,28 @@ def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_e
 		x_query_sample[ind_overwrite_focused_queries] = x_query_focused
 
 		x_query_focused_t = 2.0*np.random.randn(n_focused_queries)*src_t_kernel			
-		x_query_focused_t = x_query_t[ind_source_focused,3] + x_query_focused_t
+		x_query_focused_t = x_query_t[ind_source_focused] + x_query_focused_t
 		# ioutside = np.where(((x_query_focused_t < min_t) + (x_query_focused_t > max_t)) > 0)[0]
 		ioutside = np.where(((x_query_focused_t < (-time_shift_range/2.0)) + (x_query_focused_t > (time_shift_range/2.0))) > 0)[0]
 		x_query_focused_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
 		x_query_sample_t[ind_overwrite_focused_queries] = x_query_focused_t
 
-	return x_query_sample, x_query_sample_t
+		if randomize == True:
+			ind_fixed = np.delete(np.arange(n_spc_query), ind_overwrite_focused_queries, axis = 0)
+			x_rand_uniform = np.hstack([np.random.uniform(u[0], u[1], size = len(ind_fixed)).reshape(-1,1) for u in [lat_range_extend, lon_range_extend, depth_range_extend]])
+			x_rand_t = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ind_fixed))
+			x_query_sample[ind_fixed] = x_rand_uniform
+			x_query_sample_t[ind_fixed] = x_rand_t
+
+
+	if replace == True:
+
+		return x_query_sample, x_query_sample_t
+
+	else:
+
+		return x_query_sample[ind_overwrite_focused_queries], x_query_sample_t[ind_overwrite_focused_queries]
+
 
 
 if use_station_corrections == True:
@@ -2220,25 +2259,16 @@ for i in range(n_restart_step, n_epochs):
 		pick_lbls = pick_labels_extract_interior_region_flattened(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 
 
-		if use_negative_loss == True:
+		# moi
 
-			min_up_sample = 0.1
-			## Up-sample queries for regions of high prediction but low labels. Or alternatively, essentially run a peak finder on the output.
-			prob_up_sample = out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0] < min_up_sample)
-			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
-			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
-			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2)
-			out_query = mz.forward_queries(x_query_sample, x_query_sample_t) # x_query_cart, t_query
-			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3], lp_srcs[i0][:,3], src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
+		## Can check if prediction is consistent at un-changed points
+		# out[1] = out_query ## Can we overwrite; and also overwrite the query points?
+		# X_query[i0] = np.concatenate((x_query_sample, x_query_sample_t.reshape(-1,1)), axis = 1)
+		# Lbls_query[i0] = lbls_query
 
-			# moi
+		# pdb.set_trace()
 
-			## Can check if prediction is consistent at un-changed points
-			out[1] = out_query ## Can we overwrite; and also overwrite the query points?
-			X_query[i0] = np.concatenate((x_query_sample, x_query_sample_t.reshape(-1,1)), axis = 1)
-			Lbls_query[i0] = lbls_query
-
-			## Also need to overwrite labels. Note: does this break for using gradient loss? Yes
+		## Also need to overwrite labels. Note: does this break for using gradient loss? Yes
 
 
 		# if pick_lbls.max() > 0.3:
@@ -2313,6 +2343,55 @@ for i in range(n_restart_step, n_epochs):
 
 		loss_src_val += loss1.item()/n_batch
 		loss_asc_val += loss2.item()/n_batch
+
+
+
+		if use_negative_loss == True:
+
+			min_up_sample = 0.1
+			## Up-sample queries for regions of high prediction but low labels. Or alternatively, essentially run a peak finder on the output.
+			prob_up_sample = out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0] < min_up_sample)
+			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
+			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
+			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, replace = False)
+			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device)) # x_query_cart, t_query
+			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3], lp_srcs[i0][:,3], src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
+
+			ifind = np.where((np.abs(X_query[i0][:,0:3] - x_query_sample).max(1) == 0)*(X_query[i0][:,3] == x_query_sample_t.reshape(-1)))[0]
+			# print('Max val %0.4f, %0.4f, %0.4f'%(np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max(), Lbls_query[i0][ifind].max(), lbls_query[ifind].max()))
+			# print('Len [2] %d'%len(lp_srcs[i0]))
+			if np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max() > 0.01:
+				# pass
+				moi
+				pass
+
+
+			loss_negative = loss_func(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+			# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+			loss = 0,75*loss + 0.25*loss_negative
+			print('loss negative %0.8f'%loss_negative)
+
+
+		use_global_loss = True
+		if use_global_loss == True:
+
+			## Find all points far away from true sources
+			if len(lp_srcs[i0]) > 0:
+				imask_query = np.where(Lbls_query[i0][:,0] < 0.001)[0]
+				total_sum = out[1][imask_query].clamp(min = 0.0).mean()
+				loss_sum = loss_func1(total_sum, torch.zeros(total_sum.shape).to(device))
+				loss = 0.9*loss + 0.1*loss_sum
+				print('loss negative %0.8f'%loss_sum)
+
+
+				# imask_query = np.where(Lbls_query[i0][:,0] > 0.01)[0]
+				# imask_query1 = np.delete(np.arange(len(Lbls_query[i0]), imask_query), axis = 0)
+				# idistant_from_sources = np.where(cKDTree(ftrns1(X_query[i0][imask_query])).query(ftrns1(X_query[i0][imask_query])) ) # np.where([len(ind_slice) for ind_slice in cKDTree(X_query[i0][imask_query]) ])
+
+
+				# inearest = knn(torch.Tensor(ftrns1(lp_srcs[i0]) ))
+
+
 
 
 		# if (use_gradient_loss == True)*(i > int(n_epochs/5)):
