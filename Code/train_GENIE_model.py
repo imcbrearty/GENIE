@@ -1509,7 +1509,7 @@ def compute_source_labels(x_query, x_query_t, src_x, src_t, src_spatial_kernel, 
 
 
 # def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2, replace = True, randomize = True, baseline = 0.2):
-def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2, replace = False, randomize = False, baseline = 0.2):
+def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2, replace = True, randomize = False, baseline = 0.2):
 
 	# n_frac_focused_queries = 0.2
 	# n_concentration_focused_queries = 0.05 # 5% of scale of domain
@@ -2334,10 +2334,11 @@ for i in range(n_restart_step, n_epochs):
 			plt.close('all')
 
 
+
 		
 		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-		loss1 = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device))) 
+		loss1 = weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device))
 		loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 		loss = loss1 + loss2
 
@@ -2346,14 +2347,16 @@ for i in range(n_restart_step, n_epochs):
 
 
 
+
 		if use_negative_loss == True:
 
 			min_up_sample = 0.1
 			## Up-sample queries for regions of high prediction but low labels. Or alternatively, essentially run a peak finder on the output.
-			prob_up_sample = out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0] < min_up_sample)
+			prob_up_sample = np.maximum(out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0] < min_up_sample), 0.0)
+			# prob_up_sample = 
 			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
 			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
-			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, replace = False)
+			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2) # replace = False
 			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device)) # x_query_cart, t_query
 			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3], lp_srcs[i0][:,3], src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
 
@@ -2368,8 +2371,10 @@ for i in range(n_restart_step, n_epochs):
 
 			loss_negative = loss_func(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
 			# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-			loss = 0,75*loss + 0.25*loss_negative
-			print('loss negative %0.8f'%loss_negative)
+			loss = 0.75*loss + 0.25*loss_negative
+			# print('loss negative %0.8f'%loss_negative)
+
+
 
 
 		use_global_loss = True
@@ -2381,7 +2386,7 @@ for i in range(n_restart_step, n_epochs):
 				total_sum = out[1][imask_query].clamp(min = 0.0).mean()
 				loss_sum = loss_func1(total_sum, torch.zeros(total_sum.shape).to(device))
 				loss = 0.9*loss + 0.1*loss_sum
-				print('loss negative %0.8f'%loss_sum)
+				# print('loss global %0.8f'%loss_sum)
 
 
 				# imask_query = np.where(Lbls_query[i0][:,0] > 0.01)[0]
@@ -2432,6 +2437,7 @@ for i in range(n_restart_step, n_epochs):
 
 			loss = 0.5*loss + 2.0*(0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
 			loss_dice_val += 2*(0.5*loss_dice.item())/500.0/n_batch
+
 
 
 		if (use_consistency_loss == True)*(i > int(n_epochs/5)):
