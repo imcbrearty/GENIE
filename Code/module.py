@@ -1505,7 +1505,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.activate_gradient_loss = False
 		self.attach_time = attach_time
 		self.use_embedding = use_embedding
-		self.use_direct_output = False
+		self.use_direct_output = True
 		self.device = device
 
 		self.ftrns1 = ftrns1
