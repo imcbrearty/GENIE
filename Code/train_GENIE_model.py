@@ -1550,7 +1550,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 # 	return lbl_trgt
 
 
-def pick_labels_extract_interior_region_flattened(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, radius_frac = 1.0, sig_x = 15e3, sig_t = 6.5, use_flattening = True): # can expand kernel widths to other size if prefered
+def pick_labels_extract_interior_region_flattened(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, radius_frac = 0.5, sig_x = 15e3, sig_t = 6.5, use_flattening = True): # can expand kernel widths to other size if prefered
 
 	iz = np.where(source_pick[:,1] > -1.0)[0]
 	lbl_trgt = torch.zeros((xq_src_cart.shape[0], source_pick.shape[0], 2)).to(device)
@@ -2433,7 +2433,7 @@ for i in range(n_restart_step, n_epochs):
 
 
 
-		if use_negative_loss == True:
+		if (use_negative_loss == True)*(i > int(n_epochs/5)):
 
 			min_up_sample = 0.1
 			## Up-sample queries for regions of high prediction but low labels. Or alternatively, essentially run a peak finder on the output.
@@ -2441,7 +2441,7 @@ for i in range(n_restart_step, n_epochs):
 			# prob_up_sample = 
 			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
 			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
-			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, replace = True, randomize = True) # replace = False
+			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, replace = False, randomize = False) # replace = False
 			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device)) # x_query_cart, t_query
 			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3], lp_srcs[i0][:,3], src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
 
@@ -2456,14 +2456,14 @@ for i in range(n_restart_step, n_epochs):
 
 			loss_negative = loss_func(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
 			# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-			loss = 0.75*loss + 0.25*loss_negative
+			loss = 0.85*loss + 0.15*loss_negative
 			# print('loss negative %0.8f'%loss_negative)
 
 
 
 
 		use_global_loss = True
-		if use_global_loss == True:
+		if (use_global_loss == True)*(i > int(n_epochs/5)):
 
 			## Find all points far away from true sources
 			if len(lp_srcs[i0]) > 0:
@@ -2539,6 +2539,7 @@ for i in range(n_restart_step, n_epochs):
 					loss_consistency = loss_func1(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
 					loss = loss + 0.25*loss_consistency
 					loss_consistency_val += 0.25*loss_consistency.item()/n_batch
+
 
 			out_save = [out[1]]
 			Lbls_save = [Lbls_query[i0]]
