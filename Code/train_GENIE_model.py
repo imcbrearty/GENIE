@@ -849,7 +849,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 
 	if use_teleseisim_noise == True:
-		max_num_teleseisms = 30
+		max_num_teleseisms = 10
 
 		n_teleseisms = np.random.randint(0, high = int(max_num_spikes*T/(3600*24)))
 		n_teleseisms_extent = np.random.randint(int(np.floor(n_sta*0.35)), high = n_sta, size = n_teleseisms)
@@ -881,10 +881,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 				if len(inot_nan) > 0:
 					picks_teleseism.append(np.concatenate((x_time[j] + trv_estimate[inot_nan].reshape(-1,1) + trv_noise.reshape(-1,1), sta_ind_teleseisms[j][inot_nan].reshape(-1,1), np.array([-1, 0, -1]).reshape(1,-1).repeat(len(inot_nan), axis = 0)), axis = 1))
-				print(trv_estimate[inot_nan])
 
-		picks_teleseism = np.vstack(picks_teleseism)
-		arrivals = np.concatenate((arrivals, picks_teleseism), axis = 0)
+				# print(trv_estimate[inot_nan])
+
+		if len(picks_teleseism) > 0:
+			picks_teleseism = np.vstack(picks_teleseism)
+			arrivals = np.concatenate((arrivals, picks_teleseism), axis = 0)
 
 		# pdb.set_trace()
 
@@ -1550,7 +1552,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 # 	return lbl_trgt
 
 
-def pick_labels_extract_interior_region_flattened(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, radius_frac = 0.5, sig_x = 15e3, sig_t = 6.5, use_flattening = True): # can expand kernel widths to other size if prefered
+def pick_labels_extract_interior_region_flattened(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, radius_frac = 0.5, mix_ratio = 0.3, sig_x = 15e3, sig_t = 6.5, use_flattening = False): # can expand kernel widths to other size if prefered
 
 	iz = np.where(source_pick[:,1] > -1.0)[0]
 	lbl_trgt = torch.zeros((xq_src_cart.shape[0], source_pick.shape[0], 2)).to(device)
@@ -1575,6 +1577,14 @@ def pick_labels_extract_interior_region_flattened(xq_src_cart, xq_src_t, source_
 
 			d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(val_dist**2)/(sig_x**2))*np.exp(-0.5*(val_t**2)/(sig_t**2))).to(device)
 
+			if mix_ratio > 0:
+				## Mix the Gaussian and box car inside the region
+				# d[(1 - mask_dist)*(1 - mask_t)] = ((1.0 - mix_ratio)*d + mix_ratio*torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device))[(1 - mask_dist)*(1 - mask_t)]
+				d[(1 - mask_dist)*(1 - mask_t)] = d[(1 - mask_dist)*(1 - mask_t)] + mix_ratio*torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)[(1 - mask_dist)*(1 - mask_t)]
+				d = d/(1.0 + mix_ratio)
+				assert(d.amax() <= 1.0)
+
+
 		lbl_trgt[:,iz,0] = d*torch.Tensor((source_pick[iz,0] == 0)).to(device).float()
 		lbl_trgt[:,iz,1] = d*torch.Tensor((source_pick[iz,0] == 1)).to(device).float()
 
@@ -1594,7 +1604,7 @@ def compute_source_labels(x_query, x_query_t, src_x, src_t, src_spatial_kernel, 
 
 
 # def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2, replace = True, randomize = True, baseline = 0.2):
-def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2, replace = True, randomize = False, baseline = 0.2):
+def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2, replace = False, randomize = False, baseline = 0.2):
 
 	# n_frac_focused_queries = 0.2
 	# n_concentration_focused_queries = 0.05 # 5% of scale of domain
@@ -2456,7 +2466,7 @@ for i in range(n_restart_step, n_epochs):
 
 			loss_negative = loss_func(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
 			# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-			loss = 0.85*loss + 0.15*loss_negative
+			loss = 0.98*loss + 0.02*loss_negative
 			# print('loss negative %0.8f'%loss_negative)
 
 
@@ -2470,7 +2480,9 @@ for i in range(n_restart_step, n_epochs):
 				imask_query = np.where(Lbls_query[i0][:,0] < 0.001)[0]
 				total_sum = out[1][imask_query].clamp(min = 0.0).mean()
 				loss_sum = loss_func1(total_sum, torch.zeros(total_sum.shape).to(device))
-				loss = 0.9*loss + 0.1*loss_sum
+				# loss = 0.9*loss + 0.1*loss_sum
+				loss = 0.98*loss + 0.02*loss_sum
+
 				# print('loss global %0.8f'%loss_sum)
 
 
