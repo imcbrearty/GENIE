@@ -973,7 +973,7 @@ class ArrivalEmbedding(MessagePassing):
 
 
 class SourceStationAttention(MessagePassing):
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_dual_attention = False, use_phase_types = use_phase_types, device = device):
+	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_dual_attention = True, use_phase_types = use_phase_types, device = device):
 		super(SourceStationAttention, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
 		# self.f_arrival_query_1 = nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden) # add edge data (observed arrival - theoretical arrival)
@@ -986,12 +986,12 @@ class SourceStationAttention(MessagePassing):
 		self.f_pick_values = nn.Sequential(nn.Linear(ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
 
 		if use_dual_attention == True:
-			self.f_source_query = nn.Sequential(nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.f_source_context = nn.Sequential(nn.Linear(ndim_arv_in + 5, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.merge_attention = nn.Linear(2*n_hidden, n_hidden)
+			self.f_source_query = nn.Sequential(nn.Linear(ndim_src_in + 5, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.f_source_context = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 5, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 5, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.merge_attn = nn.Sequential(nn.Linear(2*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_latent))
 			# self.alpha_source = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
-			self.alpha_source = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
+			self.alpha_src = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
 
 
 		# self.f_values_1 = nn.Linear(ndim_arv_in + 5, n_hidden) # add second layer transformation.
@@ -1098,6 +1098,7 @@ class SourceStationAttention(MessagePassing):
 		queries = self.f_pick_query(torch.cat((x_i, rel_t1, sembed[sindex], self_link), dim = 1)).view(-1, self.n_heads, self.n_latent)
 		contexts = self.f_pick_context(torch.cat((x_j, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
 		values = self.f_pick_values(torch.cat((x_j, rel_t, self_link), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+		# values = self.f_pick_values(torch.cat((x_j, rel_t, self_link), dim = 1)) ## Note self_link optional here
 
 		## Compute attention
 		scores = (queries*contexts).sum(-1)/self.scale
@@ -1115,22 +1116,28 @@ class SourceStationAttention(MessagePassing):
 		else:
 
 			## Note: as two seperate steps can implement with aggregation of the obtained features from previous step
+			# attn_picks = alpha.unsqueeze(-1)*values
+
+			# pdb.set_trace()
 			attn_picks = alpha.unsqueeze(-1)*values
 
 			## Note: in this form the attention is being taken over the "edges" of the other module; not explictly just over picks for a fixed source.
 			## Apply aggregation over the sources
 			queries_src = self.f_source_query(torch.cat((rel_t1, sembed[sindex]), dim = 1)).view(-1, self.n_heads, self.n_latent)
-			contexts_src = self.f_source_context(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
-			values_src = self.f_source_values(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+			contexts_src = self.f_source_context(torch.cat((x_j, attn_picks.view(-1, self.n_heads*self.n_latent), rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+			# values_src = self.f_source_values(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+			values_src = self.f_source_values(torch.cat((x_j, attn_picks.view(-1, self.n_heads*self.n_latent), rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
 			scores_src = (queries_src*contexts_src).sum(-1)/self.scale
 			# temp_src = torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1).pow(torch.clamp(torch.sigmoid(self.alpha_src), min = 0.25))[edge_index[1]].reshape(-1,1)
-			temp_src = torch.log1p(torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1)).pow(torch.clamp(self.alpha_src, min = 0.25, max = 2.0))[sindex] # [edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
+			temp_src = torch.log1p(torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1)).pow(torch.clamp(self.alpha_src, min = 0.25, max = 2.0))[sindex].reshape(-1,1) # [edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
 			scores_src = scores_src / temp_src.sqrt()
 			alpha_src = softmax(scores_src, sindex)
 			attn_src = alpha_src.unsqueeze(-1)*values_src
 
 			## Now merge with the messages of the previous attention layer and aggregate
-			merge_attn = self.merge_attn(torch.cat((attn_picks, attn_src), dim = 1))
+			merge_attn = self.merge_attn(torch.cat((attn_picks, attn_src), dim = 2))
+
+			return merge_attn
 
 
 # class SourceStationAttention(MessagePassing):
