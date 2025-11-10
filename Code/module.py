@@ -765,6 +765,8 @@ class ArrivalEmbedding(MessagePassing):
 		self.fc1 = nn.Sequential(nn.Linear(n_hidden + n_dim_embed + 12 + 1, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
 		self.fc2 = nn.Sequential(nn.Linear(8 + n_dim_embed - 2, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
 		self.fc3 = nn.Sequential(nn.Linear(2*n_hidden, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Can consider changing this merging layer
+		self.embed_trns = nn.Sequential(nn.Linear(ndim_src_in, ndim_src_in), nn.PReLU())
+
 		## Note making the projection/mergeing layer slightly more deep (also removing the activation on output embeddings; though this might be helpful for essentialy sparse embeddings)
 
 
@@ -797,6 +799,7 @@ class ArrivalEmbedding(MessagePassing):
 		i1 = torch.where(phase_label == 0)[0]
 		i2 = torch.where(phase_label == 1)[0]
 
+		x_embed_trns = self.embed_trns(x_embed)
 		## Note: computing misfit times but not even using them other than for mask
 		misfit_time = torch.zeros((len(x_query_cart), len(tpick), 4)).to(self.device) ## Question: is it necessary to produce these pairwise misfits? Can we focus on the pairs that "likely" have arrival times within threshold (e.g., bound min and max times based on distances between src reciever first, before computing travel times)
 		misfit_time[:,i1,0] = torch.exp(-0.5*(trv_out[:,ipick[i1],0] - torch.Tensor(tpick[i1]).to(self.device))**2/((self.dilate_scale*self.kernel_sig_t)**2))
@@ -916,7 +919,7 @@ class ArrivalEmbedding(MessagePassing):
 		## Perhaps since the source - receiever offsets and norm is already encoded in the source reiever, it's not necesary to do this distances also for all the reference nodes.
 		## Also, right not the time offsets are not included (e.g., the time coordinate of these nodes)
 
-		inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], x_embed[query_vals[iwhere_query,1]], misfit_rel_time, misfit_query_time, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel, offset_ref_src_norm_kernel_t, phase_label[iarv[inds_queries_to_picks]].reshape(-1,1)), dim = 1)
+		inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], x_embed_trns[query_vals[iwhere_query,1]], misfit_rel_time, misfit_query_time, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel, offset_ref_src_norm_kernel_t, phase_label[iarv[inds_queries_to_picks]].reshape(-1,1)), dim = 1)
 
 		## Note: could first transfrom the features: misfit_rel_time, misfit_query_time, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel seperately from embed
 		## For increased stability of merging with the embeddings
@@ -946,7 +949,7 @@ class ArrivalEmbedding(MessagePassing):
 		offset_src_sta_norm_direct_kernel = torch.exp(-1.0*torch.abs(offset_src_sta_norm_direct)/(5.0))
 
 		# inpt_direct = torch.cat((x_embed[pick_vals[:,1]], misfit_query_time_direct, offset_src_sta_direct/offset_src_sta_norm_direct, offset_src_sta_norm_direct_kernel), dim = 1)
-		inpt_direct = torch.cat((x_embed[pick_vals[:,1]], misfit_query_time_direct, offset_src_sta_norm_direct_kernel, phase_label[iarv].reshape(-1,1)), dim = 1)
+		inpt_direct = torch.cat((x_embed_trns[pick_vals[:,1]], misfit_query_time_direct, offset_src_sta_norm_direct_kernel, phase_label[iarv].reshape(-1,1)), dim = 1)
 
 		## inpt_direct = torch.cat((misfit_query_time_direct, offset_src_sta_direct/offset_src_sta_norm_direct, offset_src_sta_norm_direct), dim = 1)
 		## Note here dividing offsets by norm unlike in aggregation layer
@@ -990,6 +993,8 @@ class SourceStationAttention(MessagePassing):
 		self.proj_2 = nn.Linear(n_hidden, ndim_out) # can remove this layer possibly.
 
 		self.embed_src = nn.Sequential(nn.Linear(ndim_src_in, n_hidden), nn.PReLU())
+		self.embed_trns = nn.Sequential(nn.Linear(ndim_src_in, ndim_src_in), nn.PReLU())
+
 
 		self.scale = np.sqrt(n_latent)
 		self.n_heads = n_heads
@@ -1049,8 +1054,12 @@ class SourceStationAttention(MessagePassing):
 		if len(src_index) == 0:
 			return torch.zeros(n_src, n_arv, self.n_phases).to(self.device)
 
-		out = self.proj_2(self.embed_src(src_embed) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
-	
+
+		src_embed_trns = self.embed_trns(src_embed)
+		src_ind_repeat = torch.arange(n_src).repeat_interleave(n_arv).contiguous().long().to(self.device)
+		# out = self.proj_2(self.embed_src(src_embed[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+		out = self.proj_2(self.embed_src(src_embed_trns[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+
 		## Could do concatenation and summation of the source embedding
 		# out = self.proj_2(torch.cat((src_embed, self.embed_src(src_embed) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))))) # M is output. Taking mean over heads
 
