@@ -973,7 +973,7 @@ class ArrivalEmbedding(MessagePassing):
 
 
 class SourceStationAttention(MessagePassing):
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_phase_types = use_phase_types, device = device):
+	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_dual_attention = False, use_phase_types = use_phase_types, device = device):
 		super(SourceStationAttention, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
 		# self.f_arrival_query_1 = nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden) # add edge data (observed arrival - theoretical arrival)
@@ -984,6 +984,15 @@ class SourceStationAttention(MessagePassing):
 		self.f_pick_query = nn.Sequential(nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
 		self.f_pick_context = nn.Sequential(nn.Linear(ndim_arv_in + 5, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
 		self.f_pick_values = nn.Sequential(nn.Linear(ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+
+		if use_dual_attention == True:
+			self.f_source_query = nn.Sequential(nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.f_source_context = nn.Sequential(nn.Linear(ndim_arv_in + 5, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.merge_attention = nn.Linear(2*n_hidden, n_hidden)
+			# self.alpha_source = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
+			self.alpha_source = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
+
 
 		# self.f_values_1 = nn.Linear(ndim_arv_in + 5, n_hidden) # add second layer transformation.
 		# self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
@@ -1003,7 +1012,9 @@ class SourceStationAttention(MessagePassing):
 		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
 
 
-		self.alpha = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
+		# self.alpha = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
+		self.alpha = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
+		self.use_dual_attention = use_dual_attention
 
 
 		self.ndim_feat = ndim_arv_in + ndim_extra
@@ -1016,6 +1027,7 @@ class SourceStationAttention(MessagePassing):
 		self.activate4 = nn.PReLU()
 		# self.activate5 = nn.PReLU()
 		self.device = device
+
 
 	def forward(self, stime, src_embed, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label): # reference k nearest spatial points
 
@@ -1089,13 +1101,192 @@ class SourceStationAttention(MessagePassing):
 
 		## Compute attention
 		scores = (queries*contexts).sum(-1)/self.scale
-		temp = torch.clamp(degree(edge_index[1], num_nodes = len(atime)).detach(), min = 1).pow(torch.clamp(torch.sigmoid(self.alpha), min = 0.25))[edge_index[1]].reshape(-1,1)
+		# temp = torch.log1p(torch.clamp(degree(edge_index[1], num_nodes = len(atime)).detach(), min = 1)).pow(torch.clamp(torch.sigmoid(self.alpha), min = 0.25))[edge_index[1]].reshape(-1,1)
+		temp = torch.log1p(torch.clamp(degree(edge_index[1], num_nodes = len(atime)).detach(), min = 1)).pow(torch.clamp(self.alpha, min = 0.25, max = 2.0))[edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
 		scores = scores / temp.sqrt()
 
 		## Add dual attention aggregation
 		alpha = softmax(scores, index)
 
-		return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
+		if self.use_dual_attention == False:
+
+			return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
+
+		else:
+
+			## Note: as two seperate steps can implement with aggregation of the obtained features from previous step
+			attn_picks = alpha.unsqueeze(-1)*values
+
+			## Note: in this form the attention is being taken over the "edges" of the other module; not explictly just over picks for a fixed source.
+			## Apply aggregation over the sources
+			queries_src = self.f_source_query(torch.cat((rel_t1, sembed[sindex]), dim = 1)).view(-1, self.n_heads, self.n_latent)
+			contexts_src = self.f_source_context(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+			values_src = self.f_source_values(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+			scores_src = (queries_src*contexts_src).sum(-1)/self.scale
+			# temp_src = torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1).pow(torch.clamp(torch.sigmoid(self.alpha_src), min = 0.25))[edge_index[1]].reshape(-1,1)
+			temp_src = torch.log1p(torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1)).pow(torch.clamp(self.alpha_src, min = 0.25, max = 2.0))[sindex] # [edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
+			scores_src = scores_src / temp_src.sqrt()
+			alpha_src = softmax(scores_src, sindex)
+			attn_src = alpha_src.unsqueeze(-1)*values_src
+
+			## Now merge with the messages of the previous attention layer and aggregate
+			merge_attn = self.merge_attn(torch.cat((attn_picks, attn_src), dim = 1))
+
+
+# class SourceStationAttention(MessagePassing):
+# 	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_heads = 5, n_hidden = 30, eps = eps, use_dual_attention = False, use_phase_types = use_phase_types, device = device):
+# 		super(SourceStationAttention, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
+
+# 		# self.f_arrival_query_1 = nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden) # add edge data (observed arrival - theoretical arrival)
+# 		# self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
+# 		# self.f_src_context_1 = nn.Linear(ndim_arv_in + 5, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
+# 		# self.f_src_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # only use single tranform layer for source embdding (which already has sufficient information)
+
+# 		self.f_pick_query = nn.Sequential(nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+# 		self.f_pick_context = nn.Sequential(nn.Linear(ndim_arv_in + 5, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+# 		self.f_pick_values = nn.Sequential(nn.Linear(ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+
+# 		if use_dual_attention == True:
+# 			self.f_source_query = nn.Sequential(nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+# 			self.f_source_context = nn.Sequential(nn.Linear(ndim_arv_in + 5, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+# 			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+# 			self.merge_attention = nn.Linear(2*n_hidden, n_hidden)
+# 			self.alpha_source = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
+
+
+# 		# self.f_values_1 = nn.Linear(ndim_arv_in + 5, n_hidden) # add second layer transformation.
+# 		# self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
+
+# 		# self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
+# 		self.proj_1 = nn.Linear(n_latent*n_heads, n_hidden) # can remove this layer possibly.
+# 		self.proj_2 = nn.Linear(n_hidden, ndim_out) # can remove this layer possibly.
+
+# 		self.embed_src = nn.Sequential(nn.Linear(ndim_src_in, n_hidden), nn.PReLU())
+# 		self.embed_trns = nn.Sequential(nn.Linear(ndim_src_in, ndim_src_in), nn.PReLU())
+
+
+# 		self.scale = np.sqrt(n_latent)
+# 		self.n_heads = n_heads
+# 		self.n_latent = n_latent
+# 		self.eps = eps
+# 		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
+
+
+# 		self.alpha = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
+# 		self.use_dual_attention = use_dual_attention
+
+
+# 		self.ndim_feat = ndim_arv_in + ndim_extra
+# 		self.use_phase_types = use_phase_types
+# 		self.n_phases = ndim_out
+
+# 		self.activate1 = nn.PReLU()
+# 		self.activate2 = nn.PReLU()
+# 		self.activate3 = nn.PReLU()
+# 		self.activate4 = nn.PReLU()
+# 		# self.activate5 = nn.PReLU()
+# 		self.device = device
+
+# 	def forward(self, stime, src_embed, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label): # reference k nearest spatial points
+
+# 		# src isn't used. Only trv_src is needed.
+# 		n_src, n_sta, n_arv = len(src_embed), trv_src.shape[1], len(tpick) # + 1 ## Note: adding 1 to size of arrivals!
+# 		if self.use_phase_types == False:
+# 			phase_label = phase_label*0.0
+
+# 		# edges = remove_self_loops(radius(ipick.reshape(-1,1).float(), ipick.reshape(-1,1).float(), max_num_neighbors = len(ipick), r = 0.5))[0]
+# 		edges = add_self_loops(remove_self_loops(radius(ipick.reshape(-1,1).float(), ipick.reshape(-1,1).float(), max_num_neighbors = len(ipick), r = 0.2))[0])[0].flip(0).contiguous()
+# 		n_edge = edges.shape[1]
+
+# 		## Now must duplicate edges, for each unique source. (different accumulation points)
+# 		edges = (edges.repeat(1, n_src) + torch.cat(((torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device), (torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device)), dim = 0)).long().contiguous()
+# 		src_index = torch.arange(n_src).repeat_interleave(n_edge).contiguous().long().to(self.device)
+# 		self_link = (edges[0] == edges[1]).reshape(-1,1).detach() # Each accumulation index (an entry from src cross arrivals). The number of arrivals is edge_index.max() exactly (since tensor is composed of number arrivals + 1)
+
+# 		use_sparse = True
+# 		if use_sparse == True:
+
+# 			## Note: let's add one more level of sparsity : only include pick pairs within a radius? Because e.g., some high pick rate stations
+# 			## will have many useless picks to attent too.. (however this is problematic to base it on time offsets, as either phase type)
+# 			## might be viable (.e.g, comparing between P and S can be useful). So could in theory use "time adjacenecy" allowing swaps of phase type
+# 			## to create these neighborhoods. This might help prevent explosions in memory during this layer for high pick rates or noisy stations.
+
+# 			ikeep = torch.where((mask_arv[src_index, torch.remainder(edges[0], n_arv).long()] > 0) + (edges[0] == edges[1]))[0]
+# 			edges = edges[:,ikeep].contiguous()
+# 			# edges = torch.cat((edges[0][ikeep].reshape(1,-1), edges[1][ikeep].reshape(1,-1)), dim = 0).contiguous()
+# 			src_index = src_index[ikeep]
+# 			self_link = self_link[ikeep]	
+
+
+# 		N = n_arv*n_src # still correct?
+# 		M = n_arv*n_src
+
+# 		if len(src_index) == 0:
+# 			return torch.zeros(n_src, n_arv, self.n_phases).to(self.device)
+
+
+# 		src_embed_trns = self.embed_trns(src_embed)
+# 		src_ind_repeat = torch.arange(n_src).repeat_interleave(n_arv).contiguous().long().to(self.device)
+# 		# out = self.proj_2(self.embed_src(src_embed[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+# 		out = self.proj_2(self.embed_src(src_embed_trns[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+
+# 		## Could do concatenation and summation of the source embedding
+# 		# out = self.proj_2(torch.cat((src_embed, self.embed_src(src_embed) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))))) # M is output. Taking mean over heads
+
+# 		return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
+
+
+# 	def message(self, x_j, x_i, edge_index, index, tsrc_p, tsrc_s, sembed, sindex, stindex, stime, atime, self_link, phase_j, phase_i): # Can use phase_j, or directly call edge_index, like done for atime, stindex, etc.
+
+# 		# assert(abs(edge_index[1] - index).max().item() == 0)
+# 		rel_t_p = (atime[edge_index[0]] - (tsrc_p[sindex, stindex[edge_index[0]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
+# 		rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p)), dim = 1) # phase[edge_index[0]]
+# 		rel_t_s = (atime[edge_index[0]] - (tsrc_s[sindex, stindex[edge_index[0]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
+# 		rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s)), dim = 1) # phase[edge_index[0]]
+# 		rel_t = torch.cat((rel_t_p, rel_t_s, phase_j), dim = 1)
+
+# 		rel_t_p1 = (atime[edge_index[1]] - (tsrc_p[sindex, stindex[edge_index[1]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
+# 		rel_t_p1 = torch.cat((torch.exp(-0.5*(rel_t_p1**2)/self.t_kernel_sq), torch.sign(rel_t_p1)), dim = 1) # phase[edge_index[0]]
+# 		rel_t_s1 = (atime[edge_index[1]] - (tsrc_s[sindex, stindex[edge_index[1]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
+# 		rel_t_s1 = torch.cat((torch.exp(-0.5*(rel_t_s1**2)/self.t_kernel_sq), torch.sign(rel_t_s1)), dim = 1) # phase[edge_index[0]]
+# 		rel_t1 = torch.cat((rel_t_p1, rel_t_s1, phase_i), dim = 1)
+
+# 		## Queries using reciever nodes (i) because each reciever is trying to decide which of neighboring picks is "relevant", and it also uses source embedding because this is dependant on the source
+# 		## Contexts (actually keys) and values use the sender nodes as these are the ones the queries are attending over
+# 		queries = self.f_pick_query(torch.cat((x_i, rel_t1, sembed[sindex], self_link), dim = 1)).view(-1, self.n_heads, self.n_latent)
+# 		contexts = self.f_pick_context(torch.cat((x_j, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+# 		values = self.f_pick_values(torch.cat((x_j, rel_t, self_link), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+
+# 		## Compute attention
+# 		scores = (queries*contexts).sum(-1)/self.scale
+# 		temp = torch.clamp(degree(edge_index[1], num_nodes = len(atime)).detach(), min = 1).pow(torch.clamp(torch.sigmoid(self.alpha), min = 0.25))[edge_index[1]].reshape(-1,1)
+# 		scores = scores / temp.sqrt()
+
+# 		## Add dual attention aggregation
+# 		alpha = softmax(scores, index)
+
+# 		if self.use_dual_attention == False:
+
+# 			return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
+
+# 		else:
+
+# 			## Note: as two seperate steps can implement with aggregation of the obtained features from previous step
+# 			attn_picks = alpha.unsqueeze(-1)*values
+
+# 			## Note: in this form the attention is being taken over the "edges" of the other module; not explictly just over picks for a fixed source.
+# 			## Apply aggregation over the sources
+# 			queries_src = self.f_source_query(torch.cat((rel_t1, sembed[sindex]), dim = 1)).view(-1, self.n_heads, self.n_latent)
+# 			contexts_src = self.f_source_context(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+# 			values_src = self.f_source_values(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+# 			scores_src = (queries_src*contexts_src).sum(-1)/self.scale
+# 			temp_src = torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1).pow(torch.clamp(torch.sigmoid(self.alpha_src), min = 0.25))[edge_index[1]].reshape(-1,1)
+# 			scores_src = scores_src / temp_src.sqrt()
+
+
+
+
+		# return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
 
 
 class GCN_Detection_Network_extended(nn.Module):
@@ -1229,6 +1420,8 @@ class GCN_Detection_Network_extended(nn.Module):
 		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
 		x_src = self.SpaceTimeAttention(x_spatial, x_query_src_cart, x_temp_cuda_cart, tq_sample, x_temp_cuda_t) # obtain spatial embeddings, source want to query associations for.
 		x = self.proj_soln2(x)
+
+		## Should perhaps also predict source queries at the used x_src (e.g., elf.proj_soln2(x_src) for x_query_src_cart for better training)
 
 		# print('Time [3] %0.4f'%(time.time() - t1))
 
