@@ -19,6 +19,7 @@ from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from torch_geometric.utils import degree
+from torch.nn import BCEWithLogitsLoss
 from torch.autograd import Variable
 from torch.nn import Softplus
 from torch_scatter import scatter
@@ -1577,13 +1578,12 @@ def pick_labels_extract_interior_region_flattened(xq_src_cart, xq_src_t, source_
 
 			d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(val_dist**2)/(sig_x**2))*np.exp(-0.5*(val_t**2)/(sig_t**2))).to(device)
 
-			if mix_ratio > 0:
-				## Mix the Gaussian and box car inside the region
-				# d[(1 - mask_dist)*(1 - mask_t)] = ((1.0 - mix_ratio)*d + mix_ratio*torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device))[(1 - mask_dist)*(1 - mask_t)]
-				d[(1 - mask_dist)*(1 - mask_t)] = d[(1 - mask_dist)*(1 - mask_t)] + mix_ratio*torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)[(1 - mask_dist)*(1 - mask_t)]
-				d = d/(1.0 + mix_ratio)
-				assert(d.amax() <= 1.0)
-
+			# if mix_ratio > 0:
+			# 	## Mix the Gaussian and box car inside the region
+			# 	# d[(1 - mask_dist)*(1 - mask_t)] = ((1.0 - mix_ratio)*d + mix_ratio*torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device))[(1 - mask_dist)*(1 - mask_t)]
+			# 	d[(1 - mask_dist)*(1 - mask_t)] = d[(1 - mask_dist)*(1 - mask_t)] + mix_ratio*torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)[(1 - mask_dist)*(1 - mask_t)]
+			# 	d = d/(1.0 + mix_ratio)
+			# 	assert(d.amax() <= 1.0)
 
 		lbl_trgt[:,iz,0] = d*torch.Tensor((source_pick[iz,0] == 0)).to(device).float()
 		lbl_trgt[:,iz,1] = d*torch.Tensor((source_pick[iz,0] == 1)).to(device).float()
@@ -1658,6 +1658,52 @@ def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_e
 	else:
 
 		return x_query_sample[ind_overwrite_focused_queries], x_query_sample_t[ind_overwrite_focused_queries]
+
+
+## Alpha : upweight positive samples (alpha near 1)
+## Gamma : downweight negatives (gamma large)
+
+class SoftFocalLoss(nn.Module):
+	# def __init__(self, alpha=0.25, gamma=2.0, reduction='mean'):
+	def __init__(self, alpha=0.25, gamma=1.0, reduction='mean'):
+		super().__init__()
+		self.alpha = alpha
+		self.gamma = gamma
+		self.reduction = reduction
+
+	def forward(self, logits, targets, mask = None):
+		"""
+		logits: (N, ...) raw model outputs (no sigmoid)
+		targets: same shape, floats in [0,1]
+		"""
+
+		targets_clamp = targets.clamp(min = 1e-4, max = 1 - 1e-4)
+
+
+		probs = torch.sigmoid(logits)
+		eps = 1e-8
+
+		# Clip for numerical safety
+		probs = torch.clamp(probs, eps, 1. - eps)
+
+		# Focal weighting
+		pt = probs * targets_clamp + (1 - probs) * (1 - targets_clamp)
+		focal_weight = (self.alpha * targets_clamp + (1 - self.alpha) * (1 - targets_clamp)) \
+						* (1 - pt) ** self.gamma
+
+		# Standard BCE using probs
+		bce = -(targets_clamp * torch.log(probs) + (1 - targets_clamp) * torch.log(1 - probs))
+
+		loss = focal_weight * bce
+
+		if mask is None:
+			mask = torch.ones(loss.shape).to(logits.device)
+
+		if self.reduction == 'mean':
+			return (mask*loss).mean()
+		elif self.reduction == 'sum':
+			return (mask*loss).sum()
+		return mask*loss
 
 
 
@@ -1803,8 +1849,13 @@ for i in range(len(x_grids)):
 ## Implement training.
 mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device = device).to(device)
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
-loss_func = torch.nn.MSELoss()
-loss_func1 = torch.nn.L1Loss()
+
+
+focal_loss = SoftFocalLoss() ## Try using this on main loss targets
+loss_func_mse = torch.nn.MSELoss()
+loss_func_l1 = torch.nn.L1Loss()
+
+
 np.random.seed() ## randomize seed
 
 losses = np.zeros(n_epochs)
@@ -2374,9 +2425,9 @@ for i in range(n_restart_step, n_epochs):
 			fig, ax = plt.subplots(4, 1, sharex = True)
 			for j in range(2):
 				i1 = np.where(Lbls_query[0][:,0] > 0.1)[0]
-				i2 = np.where(out[1][:,0].cpu().detach().numpy() > 0.1)[0]
+				i2 = np.where(torch.sigmoig(out[1])[:,0].cpu().detach().numpy() > 0.1)[0]
 				ax[2*j].scatter(X_query[0][i1,3], X_query[0][i1,j], c = Lbls_query[0][i1,0])
-				ax[2*j + 1].scatter(X_query[0][i2,3], X_query[0][i2,j], c = out[1][i2,0].cpu().detach().numpy())
+				ax[2*j + 1].scatter(X_query[0][i2,3], X_query[0][i2,j], c = torch.sigmoig(out[1])[i2,0].cpu().detach().numpy())
 				ax[2*j].set_xlim(X_query[0][:,3].min(), X_query[0][:,3].max())
 				ax[2*j + 1].set_xlim(X_query[0][:,3].min(), X_query[0][:,3].max())
 				ax[2*j].set_ylim(X_query[0][:,j].min(), X_query[0][:,j].max())
@@ -2387,7 +2438,7 @@ for i in range(n_restart_step, n_epochs):
 
 			fig, ax = plt.subplots(2, 1, sharex = True, sharey = True)
 			ax[0].scatter(X_query[0][:,3], Lbls_query[0][:,0], c = X_query[0][:,0])
-			ax[1].scatter(X_query[0][:,3], out[1][:,0].cpu().detach().numpy(), c = X_query[0][:,0])
+			ax[1].scatter(X_query[0][:,3], torch.sigmoid(out[1])[:,0].cpu().detach().numpy(), c = X_query[0][:,0])
 			fig.savefig(path_to_file + 'Plots/example_sources_in_time_%d.png'%cnt_plot)
 
 
@@ -2410,12 +2461,12 @@ for i in range(n_restart_step, n_epochs):
 			ax[0,1].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
 
 
-			ifindp = np.where(out[2][iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
-			ifinds = np.where(out[3][iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
+			ifindp = np.where(torch.sigmoid(out[2])[iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
+			ifinds = np.where(torch.sigmoid(out[3])[iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
 			ax[1,0].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
-			ax[1,0].scatter(Locs[i0][lp_stations[i0].astype('int')[ifindp],1], Locs[i0][lp_stations[i0].astype('int')[ifindp],0], c = out[2][iarg,ifindp,0].cpu().detach().numpy(), marker = '^')
+			ax[1,0].scatter(Locs[i0][lp_stations[i0].astype('int')[ifindp],1], Locs[i0][lp_stations[i0].astype('int')[ifindp],0], c = torch.sigmoid(out[2])[iarg,ifindp,0].cpu().detach().numpy(), marker = '^')
 			ax[1,1].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
-			ax[1,1].scatter(Locs[i0][lp_stations[i0].astype('int')[ifinds],1], Locs[i0][lp_stations[i0].astype('int')[ifinds],0], c = out[3][iarg,ifinds,0].cpu().detach().numpy(), marker = '^')
+			ax[1,1].scatter(Locs[i0][lp_stations[i0].astype('int')[ifinds],1], Locs[i0][lp_stations[i0].astype('int')[ifinds],0], c = torch.sigmoid(out[3])[iarg,ifinds,0].cpu().detach().numpy(), marker = '^')
 			ax[1,0].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
 			ax[1,1].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
 			src_plot = ftrns2(x_src_query_cart[iarg].reshape(1,-1))
@@ -2433,8 +2484,8 @@ for i in range(n_restart_step, n_epochs):
 		
 		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-		loss1 = weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-		loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+		loss1 = weights[0]*focal_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*focal_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+		loss2 = (weights[2]*focal_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*focal_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 		loss = loss1 + loss2
 
 		loss_src_val += loss1.item()/n_batch
@@ -2464,7 +2515,7 @@ for i in range(n_restart_step, n_epochs):
 			# 	pass
 
 
-			loss_negative = loss_func(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+			loss_negative = focal_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
 			# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 			loss = 0.98*loss + 0.02*loss_negative
 			# print('loss negative %0.8f'%loss_negative)
@@ -2479,7 +2530,7 @@ for i in range(n_restart_step, n_epochs):
 			if len(lp_srcs[i0]) > 0:
 				imask_query = np.where(Lbls_query[i0][:,0] < 0.001)[0]
 				total_sum = out[1][imask_query].clamp(min = 0.0).mean()
-				loss_sum = loss_func1(total_sum, torch.zeros(total_sum.shape).to(device))
+				loss_sum = loss_func_mse(total_sum, torch.zeros(total_sum.shape).to(device))
 				# loss = 0.9*loss + 0.1*loss_sum
 				loss = 0.98*loss + 0.02*loss_sum
 
@@ -2502,15 +2553,16 @@ for i in range(n_restart_step, n_epochs):
 			if init_gradient_loss == False:
 				init_gradient_loss, mz.activate_gradient_loss = True, True
 			else:
-				loss_grad1 = 0.5*weights[0]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
-				loss_grad2 = 0.5*weights[1]*loss_func(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*loss_func(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
+				loss_grad1 = 0.5*weights[0]*loss_func_mse(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*loss_func_mse(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
+				loss_grad2 = 0.5*weights[1]*loss_func_mse(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*loss_func_mse(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
 				loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
 
 				loss = 0.5*loss + 0.5*loss_grad
 				loss_grad_val += 0.5*loss_grad.item()/n_batch
 
 
-		use_dice_loss = True
+
+		use_dice_loss = False
 		if (use_dice_loss == True)*(i > int(n_epochs/5)):
 			def dice_loss(p, t, epsilon = 1e-6):
 				return (2.0*((p.clamp(min = 0.0, max = 1.0)*t.clamp(min = 0.0, max = 1.0)).sum()) + epsilon)/(p.clamp(min = 0.0, max = 1.0).pow(2).sum() + t.clamp(min = 0.0, max = 1.0).pow(2).sum() + epsilon)
@@ -2524,6 +2576,8 @@ for i in range(n_restart_step, n_epochs):
 			dice2 = z_vec if (Lbls_query[i0].max() < min_val_trgt)*(out[1].max().item() < min_val_trgt) else dice_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
 			loss_dice1 = (weights[0]*dice1 + weights[1]*dice2)/(weights[0] + weights[1])
 
+			## This may not be correct for picks since the max operation tends to mean many of the 
+			## values will not satsify the mask. Might have to estimate the mask per source and pick
 			mask_dice3 = ((pick_lbls[:,:,0].max(1).values < min_val_trgt)*(out[2][:,:,0].max(1).values < min_val_trgt)).float()
 			mask_dice4 = ((pick_lbls[:,:,1].max(1).values < min_val_trgt)*(out[3][:,:,0].max(1).values < min_val_trgt)).float()
 			dice3 = mask_dice3 + (1.0 - mask_dice3)*dice_loss1(out[2][:,:,0], pick_lbls[:,:,0])
@@ -2534,6 +2588,7 @@ for i in range(n_restart_step, n_epochs):
 
 			loss = 0.5*loss + 2.0*(0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
 			loss_dice_val += 2*(0.5*loss_dice.item())/500.0/n_batch
+
 
 
 
@@ -2548,12 +2603,13 @@ for i in range(n_restart_step, n_epochs):
 					mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::] - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
 					# loss_consistency = (weight1*weights[0]*loss_func(out_save[0], out[0]) + weight2*weights[1]*loss_func(out_save[1], out[1]))/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
 					# loss_consistency = loss_func(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-					loss_consistency = loss_func1(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-					loss = loss + 0.25*loss_consistency
-					loss_consistency_val += 0.25*loss_consistency.item()/n_batch
+					# loss_consistency = loss_func1(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+					loss_consistency = focal_loss(out[1][ind_consistency::], out_save[0][ind_consistency::], mask = mask_loss) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+					loss = loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
+					loss_consistency_val += 0.1*loss_consistency.item()/n_batch
 
 
-			out_save = [out[1]]
+			out_save = [torch.sigmoid(out[1])]
 			Lbls_save = [Lbls_query[i0]]
 			iter_loss = [i, inc]
 			X_query_save = [X_query[i0]]
@@ -2611,7 +2667,8 @@ for i in range(n_restart_step, n_epochs):
 		make_visualize_predictions = False
 		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0)*(inc == 0): # (i0 < n_visualize_fraction*n_batch)
 			save_plots_path = path_to_file + seperator + 'Plots' + seperator
-			visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
+			out_plot = [torch.sigmoid(out[0]), torch.sigmoid(out[1]), torch.sigmoid(out[2]), torch.sigmoid(out[3])]
+			visualize_predictions(out_plot, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
 
 			# if Lbls_query[i0][:,5].max() > 0.2: # Plot all true sources
 			# 	visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
@@ -2628,10 +2685,10 @@ for i in range(n_restart_step, n_epochs):
 		mx_trgt_val_2 += Lbls_query[i0].max()
 		mx_trgt_val_3 += pick_lbls[:,:,0].max().item()
 		mx_trgt_val_4 += pick_lbls[:,:,1].max().item()
-		mx_pred_val_1 += out[0].max().item()
-		mx_pred_val_2 += out[1].max().item()
-		mx_pred_val_3 += out[2].max().item()
-		mx_pred_val_4 += out[3].max().item()
+		mx_pred_val_1 += torch.sigmoid(out[0]).max().item()
+		mx_pred_val_2 += torch.sigmoid(out[1]).max().item()
+		mx_pred_val_3 += torch.sigmoid(out[2]).max().item()
+		mx_pred_val_4 += torch.sigmoid(out[3]).max().item()
 
 	if load_training_data == True:
 		h.close() ## Close training file
