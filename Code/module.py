@@ -1006,7 +1006,6 @@ class SourceStationAttention(MessagePassing):
 		self.proj_1 = nn.Linear(n_latent*n_heads, n_hidden) # can remove this layer possibly.
 		self.proj_2 = nn.Linear(n_hidden, ndim_out) # can remove this layer possibly.
 
-		self.embed_src = nn.Sequential(nn.Linear(ndim_src_in, n_hidden), nn.PReLU())
 		self.embed_trns = nn.Sequential(nn.Linear(ndim_src_in, ndim_src_in), nn.PReLU())
 
 
@@ -1030,7 +1029,12 @@ class SourceStationAttention(MessagePassing):
 		self.use_phase_types = use_phase_types
 		self.ndim_arv_in = ndim_arv_in
 		self.n_phases = ndim_out
+
 		self.use_src_context = True
+		if self.use_src_context == True:
+			self.embed_src = nn.Sequential(nn.Linear(ndim_src_in, n_hidden), nn.PReLU())
+			self.gate_src = nn.Sequential(nn.Linear(ndim_src_in + n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, 1))
+			self.downscale = torch.Tensor([0.1]).to(device)
 
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
@@ -1126,9 +1130,23 @@ class SourceStationAttention(MessagePassing):
 		# out = self.proj_2(self.embed_src(src_embed[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
 
 
+		## Use gate to merge the two branches
+		# gate = torch.sigmoid(self.gate_linear(src_embed_trns[src_ind_repeat]))
+		# out = self.proj_2(
+		#     gate * self.embed_src(src_embed_trns[src_ind_repeat]) +
+		#     (1 - gate) * self.activate4(self.proj_1(...))
+		# )
+
+
 		if self.use_src_context == True:
-			out = self.proj_2(self.embed_src(src_embed_trns[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+
+			aggregate = self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))
+			gate = torch.sigmoid(self.gate_src(torch.cat((src_embed_trns[src_ind_repeat], aggregate), dim = 1)))
+			out = self.proj_2(self.downscale*gate*self.embed_src(src_embed_trns[src_ind_repeat]) + aggregate)
+			# out = self.proj_2(self.embed_src(src_embed_trns[src_ind_repeat]) + ) # M is output. Taking mean over heads
+
 		else:
+
 			out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
 
 
