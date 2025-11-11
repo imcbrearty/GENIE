@@ -12,6 +12,7 @@ from scipy.spatial import cKDTree
 from scipy.stats import gamma, beta
 import time
 from torch_cluster import knn
+from torch.nn import functional as F
 from torch_geometric.utils import remove_self_loops, subgraph
 from torch_geometric.utils import add_self_loops, subgraph
 from torch_geometric.nn.pool import radius
@@ -1141,7 +1142,8 @@ class SourceStationAttention(MessagePassing):
 		if self.use_src_context == True:
 
 			aggregate = self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))
-			gate = torch.sigmoid(self.gate_src(torch.cat((src_embed_trns[src_ind_repeat], aggregate), dim = 1)))
+			# gate = torch.sigmoid(self.gate_src(torch.cat((src_embed_trns[src_ind_repeat], aggregate), dim = 1)))
+			gate = torch.sigmoid(self.gate_src(torch.cat((F.layer_norm(src_embed_trns[src_ind_repeat], src_embed_trns[src_ind_repeat].shape[-1:]), F.layer_norm(aggregate, aggregate.shape[-1:])), dim = 1)))
 			out = self.proj_2(self.downscale*gate*self.embed_src(src_embed_trns[src_ind_repeat]) + aggregate)
 			# out = self.proj_2(self.embed_src(src_embed_trns[src_ind_repeat]) + ) # M is output. Taking mean over heads
 
