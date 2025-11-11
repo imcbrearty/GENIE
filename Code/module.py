@@ -895,7 +895,7 @@ class ArrivalEmbedding(MessagePassing):
 
 		## Distances between reference nodes and query (including time offsets)
 		offset_ref_src = (x_query_cart[query_vals[iwhere_query,1]] - x_context_cart[A_src_in_sta[1,nodes_of_product[iwhere_query]]])/(1.0*self.scale_rel)
-		offset_ref_src_t = (x_query_t[query_vals[iwhere_query,1]] - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]])/(1.0*self.scale_time)
+		offset_ref_src_t = (x_query_t[query_vals[iwhere_query,1]].reshape(-1,1) - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]].reshape(-1,1))/(1.0*self.scale_time)
 
 		## Can also add distances between queries and reference nodes
 		# offset_
@@ -993,6 +993,11 @@ class SourceStationAttention(MessagePassing):
 			# self.alpha_source = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
 			self.alpha_src = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
 
+			self.self_dummy_src = nn.Parameter(torch.zeros(1, n_heads)).to(device)
+			self.dummy_keys_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01).to(device)
+			self.dummy_queries_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01).to(device)
+			self.dummy_values_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01).to(device)
+
 
 		# self.f_values_1 = nn.Linear(ndim_arv_in + 5, n_hidden) # add second layer transformation.
 		# self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
@@ -1011,6 +1016,10 @@ class SourceStationAttention(MessagePassing):
 		self.eps = eps
 		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
 
+		self.self_bias = nn.Parameter(torch.zeros(1, n_heads)).to(device)
+		self.self_dummy = nn.Parameter(torch.zeros(1, n_heads)).to(device)
+		self.dummy_keys = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01).to(device)
+		self.dummy_values = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01).to(device)
 
 		# self.alpha = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
 		self.alpha = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
@@ -1019,7 +1028,9 @@ class SourceStationAttention(MessagePassing):
 
 		self.ndim_feat = ndim_arv_in + ndim_extra
 		self.use_phase_types = use_phase_types
+		self.ndim_arv_in = ndim_arv_in
 		self.n_phases = ndim_out
+		self.use_src_context = True
 
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
@@ -1045,6 +1056,8 @@ class SourceStationAttention(MessagePassing):
 		src_index = torch.arange(n_src).repeat_interleave(n_edge).contiguous().long().to(self.device)
 		self_link = (edges[0] == edges[1]).reshape(-1,1).detach() # Each accumulation index (an entry from src cross arrivals). The number of arrivals is edge_index.max() exactly (since tensor is composed of number arrivals + 1)
 
+
+
 		use_sparse = True
 		if use_sparse == True:
 
@@ -1060,17 +1073,64 @@ class SourceStationAttention(MessagePassing):
 			self_link = self_link[ikeep]	
 
 
-		N = n_arv*n_src # still correct?
-		M = n_arv*n_src
+		## Append
 
 		if len(src_index) == 0:
 			return torch.zeros(n_src, n_arv, self.n_phases).to(self.device)
 
 
+		## Append dummy edge
+		# edges = torch.cat((edges, edge_dummy), dim = 1)
+		# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src,1)), dim = 0) ## The dummy "source index"
+		# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src,1)).to(device), dim = 0) ## The dummy "source index"
+		# self_link = torch.cat((self_link, torch.zeros(n_arv*n_src,1)).to(device), dim = 0)
+		## Could use search sorted to insert into edge list (sorted)
+
+		## Append dummy edges (new sending nodes from index n_arv*n_src (e.g., > all real picks) to all real nodes)
+		edge_dummy = torch.cat(((n_arv*n_src)*torch.ones(1,n_arv*n_src), torch.arange(n_arv*n_src).reshape(1,-1)), dim = 0).long().to(self.device)
+
+		## Create n_src dummy "arrivals" to link to each source.
+		if self.use_dual_attention == True: ## Is this arrival reshape correct?
+
+			arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1 + n_src, self.ndim_arv_in, device = self.device)), dim = 0)
+			phase_inpt = torch.cat((phase_label.repeat(n_src, 1), -1.0*torch.ones(1 + n_src,1).to(self.device)), dim = 0)
+
+			## The dummy source indices should be the "correct" ones for those specific source-arrival pairs
+			# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
+			src_index = torch.cat((src_index, torch.arange(n_src).repeat_interleave(n_arv, dim = 0).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
+
+			# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
+			self_link = torch.cat((self_link, torch.zeros(n_arv*n_src + n_src,1).to(device)), dim = 0).float()
+			edge_dummy_src = torch.cat(( (torch.arange(n_src).reshape(1,-1) + n_src*n_arv + 1), torch.arange(n_src).reshape(1,-1) ), dim = 0).long().to(device) ## Reciever nodes can be arbitrarily listed here (the features aren't used at torch.arange(n_src).reshape(1,-1))
+			edges = torch.cat((edges, edge_dummy, edge_dummy_src), dim = 1).contiguous()
+
+			N = n_arv*n_src + 1 + n_src # still correct?
+			M = n_arv*n_src
+
+		else:
+
+			arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1, self.ndim_arv_in, device = self.device)), dim = 0)
+			phase_inpt = torch.cat((phase_label.repeat(n_src, 1), torch.Tensor([-1.0]).reshape(1,1).to(self.device)), dim = 0)
+
+			# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src).to(device)), dim = 0).long().contiguous() ## The dummy "source index"
+			src_index = torch.cat((src_index, torch.arange(n_src).repeat_interleave(n_arv, dim = 0).to(device)), dim = 0).long().contiguous() ## The dummy "source index"
+			self_link = torch.cat((self_link, torch.zeros(n_arv*n_src,1).to(device)), dim = 0).float()
+			edges = torch.cat((edges, edge_dummy), dim = 1).contiguous()
+
+			N = n_arv*n_src + 1 # still correct?
+			M = n_arv*n_src
+
+
 		src_embed_trns = self.embed_trns(src_embed)
 		src_ind_repeat = torch.arange(n_src).repeat_interleave(n_arv).contiguous().long().to(self.device)
 		# out = self.proj_2(self.embed_src(src_embed[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
-		out = self.proj_2(self.embed_src(src_embed_trns[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+
+
+		if self.use_src_context == True:
+			out = self.proj_2(self.embed_src(src_embed_trns[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+		else:
+			out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+
 
 		## Could do concatenation and summation of the source embedding
 		# out = self.proj_2(torch.cat((src_embed, self.embed_src(src_embed) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))))) # M is output. Taking mean over heads
@@ -1078,36 +1138,86 @@ class SourceStationAttention(MessagePassing):
 		return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
 
 
-	def message(self, x_j, x_i, edge_index, index, tsrc_p, tsrc_s, sembed, sindex, stindex, stime, atime, self_link, phase_j, phase_i): # Can use phase_j, or directly call edge_index, like done for atime, stindex, etc.
+	def message(self, x_j, x_i, edge_index, index, tsrc_p, tsrc_s, sembed, sindex, stindex, stime, atime, self_link, num_queries, phase_j, phase_i): # Can use phase_j, or directly call edge_index, like done for atime, stindex, etc.
+
+
+		## Does this converge on standard behavior if not using dual_attention
+
+		ifake_edge_src = (edge_index[0] > num_queries)
+		inot_fake_src = ~ifake_edge_src ## Can only compute the travel time misfits for these (to avoid source overload)
+
+		ifake_edge = (edge_index[0] == num_queries)*(inot_fake_src == 1) ## Null node
+		inot_fake = ~ifake_edge
+
+		real_edge = (~ifake_edge)*(inot_fake_src == 1) ## Real edges for pick queries are not fake edges of both types
 
 		# assert(abs(edge_index[1] - index).max().item() == 0)
-		rel_t_p = (atime[edge_index[0]] - (tsrc_p[sindex, stindex[edge_index[0]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p)), dim = 1) # phase[edge_index[0]]
-		rel_t_s = (atime[edge_index[0]] - (tsrc_s[sindex, stindex[edge_index[0]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s)), dim = 1) # phase[edge_index[0]]
-		rel_t = torch.cat((rel_t_p, rel_t_s, phase_j), dim = 1)
+		# rel_t_p = (atime[edge_index[0][inot_fake_src]] - (tsrc_p[sindex[inot_fake_src], stindex[edge_index[0][inot_fake_src]]] + stime[sindex[inot_fake_src]])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
+		# rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p)), dim = 1) # phase[edge_index[0]]
+		# rel_t_s = (atime[edge_index[0][inot_fake_src]] - (tsrc_s[sindex[inot_fake_src], stindex[edge_index[0][inot_fake_src]]] + stime[sindex[inot_fake_src]])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
+		# rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s)), dim = 1) # phase[edge_index[0]]
+		# rel_t = torch.cat((rel_t_p, rel_t_s, phase_j[inot_fake_src]), dim = 1) ## only indexed for not fake source
 
-		rel_t_p1 = (atime[edge_index[1]] - (tsrc_p[sindex, stindex[edge_index[1]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_p1 = torch.cat((torch.exp(-0.5*(rel_t_p1**2)/self.t_kernel_sq), torch.sign(rel_t_p1)), dim = 1) # phase[edge_index[0]]
-		rel_t_s1 = (atime[edge_index[1]] - (tsrc_s[sindex, stindex[edge_index[1]]] + stime[sindex])).reshape(-1,1).detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_s1 = torch.cat((torch.exp(-0.5*(rel_t_s1**2)/self.t_kernel_sq), torch.sign(rel_t_s1)), dim = 1) # phase[edge_index[0]]
-		rel_t1 = torch.cat((rel_t_p1, rel_t_s1, phase_i), dim = 1)
+		rel_t_p = (atime[edge_index[0][real_edge]] - (tsrc_p[sindex[real_edge], stindex[edge_index[0][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+		rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p).detach()), dim = 1) # phase[edge_index[0]]
+		rel_t_s = (atime[edge_index[0][real_edge]] - (tsrc_s[sindex[real_edge], stindex[edge_index[0][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+		rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s).detach()), dim = 1) # phase[edge_index[0]]
+		rel_t = torch.cat((rel_t_p, rel_t_s, phase_j[real_edge]), dim = 1) ## only indexed for not fake source
+
+		rel_t_p1 = (atime[edge_index[1][inot_fake_src]] - (tsrc_p[sindex[inot_fake_src], stindex[edge_index[1][inot_fake_src]]] + stime[sindex[inot_fake_src]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+		rel_t_p1 = torch.cat((torch.exp(-0.5*(rel_t_p1**2)/self.t_kernel_sq), torch.sign(rel_t_p1).detach()), dim = 1) # phase[edge_index[0]]
+		rel_t_s1 = (atime[edge_index[1][inot_fake_src]] - (tsrc_s[sindex[inot_fake_src], stindex[edge_index[1][inot_fake_src]]] + stime[sindex[inot_fake_src]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+		rel_t_s1 = torch.cat((torch.exp(-0.5*(rel_t_s1**2)/self.t_kernel_sq), torch.sign(rel_t_s1).detach()), dim = 1) # phase[edge_index[0]]
+		rel_t1 = torch.cat((rel_t_p1, rel_t_s1, phase_i[inot_fake_src]), dim = 1)
 
 		## Queries using reciever nodes (i) because each reciever is trying to decide which of neighboring picks is "relevant", and it also uses source embedding because this is dependant on the source
 		## Contexts (actually keys) and values use the sender nodes as these are the ones the queries are attending over
-		queries = self.f_pick_query(torch.cat((x_i, rel_t1, sembed[sindex], self_link), dim = 1)).view(-1, self.n_heads, self.n_latent)
-		contexts = self.f_pick_context(torch.cat((x_j, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
-		values = self.f_pick_values(torch.cat((x_j, rel_t, self_link), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+		queries_real_and_null = self.f_pick_query(torch.cat((x_i[inot_fake_src], rel_t1, sembed[sindex[inot_fake_src]], self_link[inot_fake_src]), dim = 1)).view(-1, self.n_heads, self.n_latent)
+		# contexts_real = self.f_pick_context(torch.cat((x_j[real_edge], rel_t[real_edge]), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+		contexts_real = self.f_pick_context(torch.cat((x_j[real_edge], rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+		values_real = self.f_pick_values(torch.cat((x_j[real_edge], rel_t, self_link[real_edge]), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
 		# values = self.f_pick_values(torch.cat((x_j, rel_t, self_link), dim = 1)) ## Note self_link optional here
+		## Need to identify dummy edges and then mask the pathway via contexts and values for these
+		# queries = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+		# queries[real_edge,:,:] = queries_real
+		# queries[real_edge,:,:] = queries_real
+		## What happens if a source has zero incoming edges, especially after sparsity?
+
+		queries = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+		contexts = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+		values = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+
+		queries[inot_fake_src,:,:] = queries_real_and_null
+		contexts[real_edge,:,:] = contexts_real
+		values[real_edge,:,:] = values_real
+
+		n_fake = int(ifake_edge.sum())
+		contexts[ifake_edge,:,:] = self.dummy_keys.repeat(n_fake, 1, 1)
+		values[ifake_edge,:,:] = self.dummy_values.repeat(n_fake, 1, 1)
+
+		## Note: when dual attention is used, that will leave some of these entries empty	
+
 
 		## Compute attention
 		scores = (queries*contexts).sum(-1)/self.scale
 		# temp = torch.log1p(torch.clamp(degree(edge_index[1], num_nodes = len(atime)).detach(), min = 1)).pow(torch.clamp(torch.sigmoid(self.alpha), min = 0.25))[edge_index[1]].reshape(-1,1)
-		temp = torch.log1p(torch.clamp(degree(edge_index[1], num_nodes = len(atime)).detach(), min = 1)).pow(torch.clamp(self.alpha, min = 0.25, max = 2.0))[edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
+
+		## Clip degrees
+		deg = torch.clamp(degree(edge_index[1][inot_fake_src], num_nodes = len(atime)).detach(), min = 1)
+		temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min = 0.25, max = 2.0))[edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
+		## Learned temperature scaling
+
+		## Stabalize temperature
+		temp[deg[edge_index[1]] <= 2] = 1.0 ## Stabalize temperature for low degree cases
+		## Add bias terms
+		scores[self_link[:,0] == 1] = scores[self_link[:,0] == 1] + self.self_bias
+		scores[ifake_edge] = scores[ifake_edge] + self.self_dummy
+
 		scores = scores / temp.sqrt()
 
 		## Add dual attention aggregation
-		alpha = softmax(scores, index)
+		# alpha = softmax(scores, index, num_nodes = ) # 
+		alpha = softmax(scores, index) # 
 
 		if self.use_dual_attention == False:
 
@@ -1120,16 +1230,54 @@ class SourceStationAttention(MessagePassing):
 
 			# pdb.set_trace()
 			attn_picks = alpha.unsqueeze(-1)*values
+			# attn_slice = attn_picks.view(-1, self.n_heads*self.n_latent)[real_edge]
 
 			## Note: in this form the attention is being taken over the "edges" of the other module; not explictly just over picks for a fixed source.
 			## Apply aggregation over the sources
-			queries_src = self.f_source_query(torch.cat((rel_t1, sembed[sindex]), dim = 1)).view(-1, self.n_heads, self.n_latent)
-			contexts_src = self.f_source_context(torch.cat((x_j, attn_picks.view(-1, self.n_heads*self.n_latent), rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+
+			## Need to compute the local copy of rel_t1 and sembed[sindex] for queries. Note: now here we use all edges other than fake_edges of standard attention module
+
+			# real_edge_src = (~ifake_edge)*(inot_fake_src == 1) ## Real edges for pick queries are not fake edges of both types
+
+			rel_t_p2 = (atime[edge_index[1][real_edge]] - (tsrc_p[sindex[real_edge], stindex[edge_index[1][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+			rel_t_p2 = torch.cat((torch.exp(-0.5*(rel_t_p2**2)/self.t_kernel_sq), torch.sign(rel_t_p2).detach()), dim = 1) # phase[edge_index[0]]
+			rel_t_s2 = (atime[edge_index[1][real_edge]] - (tsrc_s[sindex[real_edge], stindex[edge_index[1][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+			rel_t_s2 = torch.cat((torch.exp(-0.5*(rel_t_s2**2)/self.t_kernel_sq), torch.sign(rel_t_s2).detach()), dim = 1) # phase[edge_index[0]]
+			rel_t2 = torch.cat((rel_t_p2, rel_t_s2, phase_i[real_edge]), dim = 1)
+
+
+			queries_src_real = self.f_source_query(torch.cat((rel_t2, sembed[sindex[real_edge]]), dim = 1)).view(-1, self.n_heads, self.n_latent)
+			contexts_src_real = self.f_source_context(torch.cat((x_j[real_edge], attn_picks.view(-1, self.n_heads*self.n_latent)[real_edge], rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+			values_src_real = self.f_source_values(torch.cat((x_j[real_edge], attn_picks.view(-1, self.n_heads*self.n_latent)[real_edge], rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
 			# values_src = self.f_source_values(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
-			values_src = self.f_source_values(torch.cat((x_j, attn_picks.view(-1, self.n_heads*self.n_latent), rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+
+
+			queries_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+			contexts_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+			values_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+
+
+			queries_src[real_edge,:,:] = queries_src_real
+			contexts_src[real_edge,:,:] = contexts_src_real
+			values_src[real_edge,:,:] = values_src_real
+
+
+			n_fake_src = int(ifake_edge_src.sum())
+			queries_src[ifake_edge_src,:,:] = self.dummy_queries_src.repeat(n_fake_src, 1, 1)
+			contexts_src[ifake_edge_src,:,:] = self.dummy_keys_src.repeat(n_fake_src, 1, 1)
+			values_src[ifake_edge_src,:,:] = self.dummy_values_src.repeat(n_fake_src, 1, 1)
+
+
 			scores_src = (queries_src*contexts_src).sum(-1)/self.scale
+			deg = torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1)
+
 			# temp_src = torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1).pow(torch.clamp(torch.sigmoid(self.alpha_src), min = 0.25))[edge_index[1]].reshape(-1,1)
-			temp_src = torch.log1p(torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1)).pow(torch.clamp(self.alpha_src, min = 0.25, max = 2.0))[sindex].reshape(-1,1) # [edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
+			temp_src = torch.log1p(deg).pow(torch.clamp(self.alpha_src, min = 0.25, max = 2.0))[sindex].reshape(-1,1) # [edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
+			temp_src[deg[sindex] <= 2.0] = 1.0
+
+			# scores_src[self_link[:,0] == 1] = scores_src[self_link[:,0] == 1] + self.self_bias
+			scores_src[ifake_edge_src] = scores_src[ifake_edge_src] + self.self_dummy_src
+
 			scores_src = scores_src / temp_src.sqrt()
 			alpha_src = softmax(scores_src, sindex)
 			attn_src = alpha_src.unsqueeze(-1)*values_src
@@ -1345,6 +1493,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.attach_time = attach_time
 		self.use_embedding = use_embedding
 		self.use_direct_output = True
+		# self.use_sigmoid = use_sigmoid
 		self.device = device
 
 		self.ftrns1 = ftrns1
@@ -1521,7 +1670,7 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		## Use this to obtain query predictions. Note, can modify to also return the spatial embeddings (prior to proj_soln)
 
-		return self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t))
+		return torch.sigmoid(self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t)))
 
 
 	def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
@@ -1594,7 +1743,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
 
 
-		return y, x, arv_p, arv_s
+		return torch.sigmoid(y), torch.sigmoid(x), torch.sigmoid(arv_p), torch.sigmoid(arv_s)
 
 
 	def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, t_query, n_reshape = 1):
@@ -1645,7 +1794,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			# y = y.reshape(-1,n_reshape,1) ## Assumed feature dimension output is 1
 			x = x.reshape(-1,n_reshape,1)
 
-		return [], x
+		return [], torch.sigmoid(x)
 
   
 #### EXTRA
