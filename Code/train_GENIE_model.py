@@ -17,6 +17,7 @@ from torch_geometric.utils import remove_self_loops, subgraph
 from sklearn.neighbors import KernelDensity
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
+from torch.nn import BCEWithLogitsLoss
 from torch_geometric.utils import softmax
 from torch_geometric.utils import degree
 from torch.nn import BCEWithLogitsLoss
@@ -81,6 +82,7 @@ graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 ## Load time shift variables
 use_time_shift = config['use_time_shift']
 use_expanded = config['use_expanded']
+use_sigmoid = config['use_sigmoid']
 
 
 # time_shift_range = config['time_shift_range'] # 30.0
@@ -1537,21 +1539,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, [A_src_src_l, Ac_src_src_l], A_prod_sta_sta_l, A_prod_src_src_l, [A_src_in_prod_l, Ac_src_in_prod_l], A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 
-# def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
-
-# 	iz = np.where(source_pick[:,1] > -1.0)[0]
-# 	lbl_trgt = torch.zeros((xq_src_cart.shape[0], source_pick.shape[0], 2)).to(device)
-# 	src_pick_indices = source_pick[iz,1].astype('int')
-
-# 	inside_interior = ((src_slice[src_pick_indices,0] <= lat_range_interior[1])*(src_slice[src_pick_indices,0] >= lat_range_interior[0])*(src_slice[src_pick_indices,1] <= lon_range_interior[1])*(src_slice[src_pick_indices,1] >= lon_range_interior[0]))
-
-# 	if len(iz) > 0:
-# 		d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)
-# 		lbl_trgt[:,iz,0] = d*torch.Tensor((source_pick[iz,0] == 0)).to(device).float()
-# 		lbl_trgt[:,iz,1] = d*torch.Tensor((source_pick[iz,0] == 1)).to(device).float()
-
-# 	return lbl_trgt
-
 
 def pick_labels_extract_interior_region_flattened(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, radius_frac = 0.5, mix_ratio = 0.3, sig_x = 15e3, sig_t = 6.5, use_flattening = False): # can expand kernel widths to other size if prefered
 
@@ -1677,7 +1664,8 @@ class SoftFocalLoss(nn.Module):
 		targets: same shape, floats in [0,1]
 		"""
 
-		targets_clamp = targets.clamp(min = 1e-4, max = 1 - 1e-4)
+		# targets_clamp = targets.clamp(min = 1e-4, max = 1 - 1e-4)
+		targets_clamp = targets.clamp(min = 1e-3, max = 1 - 1e-4)
 
 
 		probs = torch.sigmoid(logits)
@@ -1696,15 +1684,679 @@ class SoftFocalLoss(nn.Module):
 
 		loss = focal_weight * bce
 
-		if mask is None:
-			mask = torch.ones(loss.shape).to(logits.device)
+		if mask is not None:
+			# mask = torch.ones(loss.shape).to(logits.device)
+			loss = loss*mask
 
 		if self.reduction == 'mean':
-			return (mask*loss).mean()
+			return loss.mean()
 		elif self.reduction == 'sum':
-			return (mask*loss).sum()
-		return mask*loss
+			return loss.sum()
+		return loss
 
+# class GaussianDiceLoss(nn.Module):
+
+# 	# Start with bg_weight = 1.0
+# 	# If too many false positives → increase bg_weight to 1.5–3.0
+# 	# If missing weak Gaussians → decrease bg_weight to 0.5–0.8
+
+# 	def __init__(self, smooth=1e-5, bg_weight=1.0):
+# 		super().__init__()
+# 		self.smooth = smooth
+# 		self.bg_weight = bg_weight   # usually 1.0, sometimes 0.5–2.0
+
+# 	def forward(self, pred, target):
+# 		# No sigmoid! pred is raw linear output
+# 		pred = pred.float()
+# 		target = target.float()
+
+# 		# intersection = (pred * target).sum(dim=(-2,-1))  # sum over spatial + channel if multi-channel
+# 		# pred_sum = (pred ** 2).sum(dim=(-2,-1))
+# 		# target_sum = (target ** 2).sum(dim=(-2,-1))
+
+# 		intersection = (pred * target).sum(dim=(-1))  # sum over spatial + channel if multi-channel
+# 		pred_sum = (pred ** 2).sum(dim=(-1))
+# 		target_sum = (target ** 2).sum(dim=(-1))
+
+# 		dice = 1 - ((2.0 * intersection + self.smooth) /
+#                     (pred_sum + self.bg_weight * target_sum + self.smooth))
+
+# 		return dice.mean()
+
+## Replacing row wise sum with mean
+# class GaussianDiceLoss(nn.Module):
+
+# 	# Start with bg_weight = 1.0
+# 	# If too many false positives → increase bg_weight to 1.5–3.0
+# 	# If missing weak Gaussians → decrease bg_weight to 0.5–0.8
+
+# 	def __init__(self, smooth=1e-5, bg_weight=1.0):
+# 		super().__init__()
+# 		self.smooth = smooth
+# 		self.bg_weight = bg_weight   # usually 1.0, sometimes 0.5–2.0
+
+# 	def forward(self, pred, target):
+# 		# No sigmoid! pred is raw linear output
+# 		pred = pred.float()
+# 		target = target.float()
+
+# 		# intersection = (pred * target).sum(dim=(-2,-1))  # sum over spatial + channel if multi-channel
+# 		# pred_sum = (pred ** 2).sum(dim=(-2,-1))
+# 		# target_sum = (target ** 2).sum(dim=(-2,-1))
+
+# 		## Assume shape is n_srcs x n_associations (avg. over association axis)
+# 		if pred.shape[1] > 1:
+
+# 			intersection = (pred * target).mean(dim=(-1))  # sum over spatial + channel if multi-channel
+# 			pred_sum = (pred ** 2).mean(dim=(-1))
+# 			target_sum = (target ** 2).mean(dim=(-1))
+
+# 			dice = 1 - ((2.0 * intersection + self.smooth) /
+# 	                    (pred_sum + self.bg_weight * target_sum + self.smooth))
+
+# 			return dice.mean()
+
+# 		## Assume shape is n_src_queries
+# 		else:
+
+# 			intersection = (pred * target).sum()  # sum over spatial + channel if multi-channel
+# 			pred_sum = (pred ** 2).sum()
+# 			target_sum = (target ** 2).sum()
+
+# 			dice = 1 - ((2.0 * intersection + self.smooth) /
+# 	                    (pred_sum + self.bg_weight * target_sum + self.smooth))
+
+# 			return dice # .mean()			
+
+## Replacing row wise sum with mean
+class GaussianDiceLoss(nn.Module):
+
+	# Start with bg_weight = 1.0
+	# If too many false positives → increase bg_weight to 1.5–3.0
+	# If missing weak Gaussians → decrease bg_weight to 0.5–0.8
+
+	def __init__(self, smooth=1e-5, bg_weight=1.0):
+		super().__init__()
+		self.smooth = smooth
+		self.bg_weight = bg_weight   # usually 1.0, sometimes 0.5–2.0
+
+	def forward(self, pred, target):
+		# No sigmoid! pred is raw linear output
+		pred = pred.float()
+		target = target.float()
+
+		# intersection = (pred * target).sum(dim=(-2,-1))  # sum over spatial + channel if multi-channel
+		# pred_sum = (pred ** 2).sum(dim=(-2,-1))
+		# target_sum = (target ** 2).sum(dim=(-2,-1))
+
+		# ## Assume shape is n_srcs x n_associations (avg. over association axis)
+		# if pred.shape[1] > 1:
+
+		# 	intersection = (pred * target).mean(dim=(-1))  # sum over spatial + channel if multi-channel
+		# 	pred_sum = (pred ** 2).mean(dim=(-1))
+		# 	target_sum = (target ** 2).mean(dim=(-1))
+
+		# 	dice = 1 - ((2.0 * intersection + self.smooth) /
+	    #                 (pred_sum + self.bg_weight * target_sum + self.smooth))
+
+		# 	return dice.mean()
+
+		## Assume shape is n_src_queries
+		# else:
+
+		intersection = (pred * target).sum()/pred.shape[1]  # sum over spatial + channel if multi-channel
+		pred_sum = (pred ** 2).sum()/pred.shape[1]
+		target_sum = (target ** 2).sum()/pred.shape[1]
+
+		dice = 1 - ((2.0 * intersection + self.smooth) /
+                    (pred_sum + self.bg_weight * target_sum + self.smooth))
+
+		return dice # .mean()
+
+
+class GaussianDiceLoss1(nn.Module):
+	def __init__(self, smooth=1e-5, bg_weight=1.0):
+		super().__init__()
+		self.smooth = smooth
+		self.bg_weight = bg_weight
+
+	def forward(self, pred, target):
+		# pred, target: (L, K) or (L, 1)
+		# Squeeze the dummy channel if present
+		if pred.ndim == 3 and pred.shape[-1] == 1:
+			pred = pred.squeeze(-1)      # (L,)
+			target = target.squeeze(-1)  # (L,)
+
+		# Now shape is either (L,) → treat as (L,1) or (L,K)
+		if pred.ndim == 1:
+			pred = pred.unsqueeze(-1)    # (L,1)
+			target = target.unsqueeze(-1)
+
+		# Critical: mean/sum over spatial dimension only (dim=0)
+		# This makes it invariant to different grid resolutions L
+		intersection = (pred * target).mean(dim=0)   # (K,)
+		pred_sum     = (pred ** 2).mean(dim=0)       # (K,)
+		target_sum   = (target ** 2).mean(dim=0)     # (K,)
+
+		numerator   = 2.0 * intersection + self.smooth
+		denominator = pred_sum + self.bg_weight * target_sum + self.smooth
+
+		per_station_dice = 1.0 - numerator / denominator    # (K,)
+		return per_station_dice.mean()
+
+
+class GradientNormBalancer:
+	def __init__(self, losses_names, initial_loss=None, target_norm=1.0):
+		self.names = losses_names
+		self.target_norm = target_norm
+		self.scales = {name: 1.0 for name in losses_names}       # will auto-update
+		self.initial_loss = initial_loss or {}                   # optional warm-up values
+        	
+	def update_scales(self, loss_dict):
+		for name in self.names:
+			loss = loss_dict[name]
+			if loss.requires_grad:
+				grad_norm = torch.norm(torch.mean(torch.abs(loss.grad)), p=2) if loss.grad is not None else 0
+				# Or simpler and more common:
+				grad_norm = torch.norm(loss * torch.ones_like(loss), p=2).detach()
+
+				target = self.target_norm
+				if name in self.initial_loss:
+					target *= self.initial_loss[name] / loss.item()   # optional homoscedastic boost
+                
+				self.scales[name] = self.scales[name] * (target / (grad_norm + 1e-8)).detach()
+				self.scales[name] = torch.clamp(self.scales[name], 0.01, 100.0)  # stability
+
+	def __call__(self, loss_dict):
+		balanced = 0.0
+		for name, loss in loss_dict.items():
+			balanced += loss * self.scales[name]
+		return balanced
+
+
+class LossMagnitudeBalancer:
+	def __init__(self, anchor='dice', alpha = 0.98):
+		self.anchor = anchor
+		self.values = {}
+		self.scales = {}
+		self.alpha = alpha
+
+	def update(self, losses_dict):
+		for k, v in losses_dict.items():
+			v = v.detach().mean()
+			if k not in self.values:
+				self.values[k] = v
+				self.scales[k] = 1.0
+			else:
+				# EMA of loss magnitude
+				self.values[k] = self.alpha * self.values[k] + (1.0 - self.alpha) * v
+
+		anchor_val = self.values[self.anchor]
+		for k in losses_dict:
+			self.scales[k] = (anchor_val / (self.values[k] + 1e-8)).clamp(0.1, 10.0)
+
+	def __call__(self, losses_dict):
+		self.update(losses_dict)
+		total = sum(losses_dict[k] * self.scales[k] for k in losses_dict)
+		return total
+
+
+# class LossAccumulationBalancer:
+
+#     def __init__(self, accum_steps, anchor_head = 'dice', alpha=0.98):
+#         self.accum_steps = accum_steps
+#         self.alpha = alpha
+#         self.values = {}
+#         self.anchor = anchor_head
+
+#     def __call__(self, losses_dict):
+
+#         total = 0.0
+#         anchor_val = None
+
+#         for name, loss in losses_dict.items():
+#             val = loss.detach().mean().item()
+#             if name not in self.values:
+#                 self.values[name] = val * self.accum_steps   # bootstrap
+#             else:
+#                 self.values[name] = (self.alpha * self.values[name] + 
+#                                    (1 - self.alpha) * val * self.accum_steps)
+#             if name == self.anchor:
+#                 anchor_val = self.values[name]
+
+#         if anchor_val is None:
+#             anchor_val = next(iter(self.values.values()))
+
+#         for name, loss in losses_dict.items():
+#             scale = anchor_val / (self.values[name] + 1e-8)
+#             total += loss * scale.clamp(0.1, 100.0)
+
+#         return total
+
+# class LossAccumulationTwoTierBalancer:
+# 	def __init__(self, accum_steps=8, alpha=0.99):
+# 		self.accum_steps = accum_steps
+# 		self.alpha = alpha
+        
+# 		self.primary_ema = {}    # only the 4 dice_* losses
+# 		self.aux_ema     = {}    # consistency, hardneg, temporal, etc.
+        
+# 		self.primary_target = 0.15   # what one primary head should contribute
+# 		self.aux_target     = 0.018  # ≈ 0.12× primary (tune this once: 0.01–0.03 range)
+
+# 	def __call__(self, losses_dict):
+# 		total = 0.0
+
+# 		# === 1. Update EMAs ===
+# 		for name, loss in losses_dict.items():
+# 			val = loss.detach().mean().item() * self.accum_steps   # full-batch equivalent
+
+# 			if name.startswith('dice_'):
+# 				if name not in self.primary_ema:
+# 					self.primary_ema[name] = val
+# 				else:
+# 					self.primary_ema[name] = self.alpha * self.primary_ema[name] + (1-self.alpha) * val
+
+# 			else:  # auxiliary
+# 				if name not in self.aux_ema:
+# 					self.aux_ema[name] = val
+# 				else:
+# 					self.aux_ema[name] = self.alpha * self.aux_ema[name] + (1-self.alpha) * val
+
+# 		# === 2. Compute scales ===
+# 		# Primary: balance against each other → rare head gets high scale
+# 		primary_anchor = max(self.primary_ema.values())  # or your known hardest head
+# 		for name, loss in losses_dict.items():
+# 			if name.startswith('dice_'):
+# 				ema_val = self.primary_ema[name]
+# 				scale = self.primary_target * len(self.primary_ema) / (ema_val + 1e-8)
+# 				# equivalent to: primary_anchor / ema_val * (primary_target/primary_anchor)*4
+# 			else:
+# 				ema_val = self.aux_ema[name]
+# 				scale = self.aux_target / (ema_val + 1e-8)
+
+# 			scale = scale.clamp(0.05, 500.0)
+# 			total += loss * scale
+
+# 		return total
+
+class LossAccumulationBalancer1: # TwoTier
+
+	def __init__(self, anchor = 'loss_dice2', accum_steps = 10, aux_target = 0.018, alpha = 0.98, primary_ext = 'loss_dice', device = device):
+
+		self.accum_steps = accum_steps
+		self.alpha = alpha
+
+		self.primary_ema = {}   # only dice_0, dice_1, dice_2, dice_3
+		self.aux_ema     = {}   # consistency, hardneg_*, etc.
+		self.primary_ext = primary_ext
+
+		self.device = device
+		self.anchor_head = anchor         # ← your rarest / hardest head
+		self.aux_target  = aux_target             # total aux contribution ≈ 0.018
+		                                     # (0.10–0.15× one primary head)
+
+	def __call__(self, losses_dict):
+
+		total = 0.0
+		anchor_val = None
+
+		# 1. Update EMAs (full-batch equivalent)
+		for name, loss in losses_dict.items():
+			val = loss.detach().mean().item() * self.accum_steps
+
+			if name.startswith(self.primary_ext):
+				if name not in self.primary_ema:
+					self.primary_ema[name] = val
+				else:
+					self.primary_ema[name] = self.alpha * self.primary_ema[name] + (1-self.alpha) * val
+				if name == self.anchor_head:
+					anchor_val = self.primary_ema[name]
+				    
+			else:  # auxiliary
+				if name not in self.aux_ema:
+					self.aux_ema[name] = val
+				else:
+					self.aux_ema[name] = self.alpha * self.aux_ema[name] + (1-self.alpha) * val
+
+		# If anchor not seen yet, fall back
+		if anchor_val is None:
+			anchor_val = max(self.primary_ema.values(), default=0.1)
+
+		# 2. Apply scales
+		for name, loss in losses_dict.items():
+
+			if name.startswith(self.primary_ext):
+				# Anchor-based: rarest head gets scale ≈ 1.0
+				ema_val = self.primary_ema[name]
+				scale = torch.tensor(anchor_val / (ema_val + 1e-8), device = self.device)
+				scale = scale.clamp(0.1, 300.0)
+
+			else:
+
+				# Target-based: all aux together contribute ~aux_target
+				ema_val = self.aux_ema[name]
+				scale = torch.tensor(self.aux_target / (len(self.aux_ema) * (ema_val + 1e-8)), device = self.device)
+				# or: scale = self.aux_target / (ema_val + 1e-8) if you have one global aux
+				scale = scale.clamp(0.01, 50.0) # scale = 0.06 * anchor_val / (ema_val + 1e-8)   # aux ≈ 6% of anchor head
+
+			total += loss * scale
+
+		return total
+	
+	def state_dict(self):
+		return {
+			'accum_steps': self.accum_steps,
+			'alpha': self.alpha,
+			'primary_ema': self.primary_ema,
+			'aux_ema': self.aux_ema,
+			'primary_ext': self.primary_ext,
+			'anchor_head': self.anchor_head,
+			'aux_target': self.aux_target,
+			# device is not saved – will be set on load
+		}
+
+	def load_state_dict(self, state_dict, device='cpu'):
+		self.accum_steps = state_dict['accum_steps']
+		self.alpha = state_dict['alpha']
+		self.primary_ema = state_dict['primary_ema']
+		self.aux_ema = state_dict['aux_ema']
+		self.primary_ext = state_dict['primary_ext']
+		self.anchor_head = state_dict['anchor_head']
+		self.aux_target = state_dict['aux_target']
+		self.device = device  # update device on load
+
+
+
+# class LossAccumulationBalancer:
+#     def __init__(
+#         self,
+#         anchor: str = 'loss_dice4',
+#         aux_target: float = 0.018,
+#         alpha: float = 0.98,
+#         primary_ext: str = 'loss_dice',
+#         device: str = 'cuda'
+#     ):
+#         self.anchor = anchor
+#         self.aux_target = aux_target
+#         self.alpha = alpha
+#         self.primary_ext = primary_ext
+#         self.device = device
+
+#         self.primary_ema = {}
+#         self.aux_ema = {}
+
+#         # === Accumulation state ===
+#         self._accum_prim = {}   # temporary sum over accum_steps
+#         self._accum_aux  = {}
+#         self._step_count = 0
+#         self.accum_steps = None   # will be set on first call
+
+#     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
+#         """
+#         Call this on every microbatch.
+#         Set is_last_accum_step=True on the final accum step (before optimizer.step()).
+#         """
+#         if accum_steps is not None:
+#             self.accum_steps = accum_steps
+
+#         total_loss = 0.0
+
+#         # --------------------------------------------------
+#         # 1. Accumulate raw loss values (microbatch → full batch)
+#         # --------------------------------------------------
+#         for name, loss in losses_dict.items():
+#             val = loss.detach().mean()   # keep as tensor for now
+
+#             if name.startswith(self.primary_ext):
+#                 if name not in self._accum_prim:
+#                     self._accum_prim[name] = val
+#                 else:
+#                     self._accum_prim[name] = self._accum_prim[name] + val
+#             else:
+#                 if name not in self._accum_aux:
+#                     self._accum_aux[name] = val
+#                 else:
+#                     self._accum_aux[name] = self._accum_aux[name] + val
+
+#         self._step_count += 1
+
+#         # --------------------------------------------------
+#         # 2. On the last accum step → update EMA with full-batch stats
+#         # --------------------------------------------------
+#         if is_last_accum_step or (self._step_count == self.accum_steps):
+#             # Average over accum_steps to get true batch magnitude
+#             anchor_ema = None
+
+#             for name, accum_val in self._accum_prim.items():
+#                 batch_val = (accum_val / self.accum_steps).item()
+
+#                 if name not in self.primary_ema:
+#                     self.primary_ema[name] = batch_val
+#                 else:
+#                     self.primary_ema[name] = (
+#                         self.alpha * self.primary_ema[name] +
+#                         (1 - self.alpha) * batch_val
+#                     )
+#                 if name == self.anchor:
+#                     anchor_ema = self.primary_ema[name]
+
+#             for name, accum_val in self._accum_aux.items():
+#                 batch_val = (accum_val / self.accum_steps).item()
+#                 if name not in self.aux_ema:
+#                     self.aux_ema[name] = batch_val
+#                 else:
+#                     self.aux_ema[name] = (
+#                         self.alpha * self.aux_ema[name] +
+#                         (1 - self.alpha) * batch_val
+#                     )
+
+#             # Reset accumulators
+#             self._accum_prim.clear()
+#             self._accum_aux.clear()
+#             self._step_count = 0
+
+#             # Fallback anchor
+#             if anchor_ema is None:
+#                 anchor_ema = max(self.primary_ema.values(), default=0.1)
+
+#         # --------------------------------------------------
+#         # 3. Apply scaling (using latest EMA, even mid-accumulation)
+#         # --------------------------------------------------
+#         # We still scale every microbatch — that's fine and necessary
+#         for name, loss in losses_dict.items():
+#             if name.startswith(self.primary_ext):
+#                 ema = self.primary_ema.get(name, 1.0)  # fallback early
+#                 scale = anchor_ema / (ema + 1e-8)
+#                 scale = scale.clamp(0.1, 300.0)
+#             else:
+#                 ema = self.aux_ema.get(name, 1.0)
+#                 scale = self.aux_target / (len(self.aux_ema) * (ema + 1e-8) if self.aux_ema else 1.0)
+#                 scale = scale.clamp(0.01, 50.0)
+
+#             total_loss += scale * loss
+
+#         return total_loss
+
+
+class LossAccumulationBalancer:
+    def __init__(
+        self,
+        anchor: str = 'loss_dice4',
+        aux_target: float = 0.018,
+        alpha: float = 0.98,
+        primary_ext: str = 'loss_dice',
+        device: str = 'cuda'
+    ):
+
+        self.anchor = anchor
+        self.aux_target = aux_target
+        self.alpha = alpha
+        self.primary_ext = primary_ext
+        self.device = device
+
+        self.primary_ema = {}
+        self.aux_ema = {}
+
+        # self.register_buffer('_anchor_ema_current', torch.tensor(0.0))
+
+        # === Persistent state ===
+        self._anchor_ema_current = None      # ← this holds the latest known value
+        self._accum_prim = {}
+        self._accum_aux  = {}
+        self._step_count = 0
+        self.accum_steps = None
+
+    def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
+        if accum_steps is not None:
+            self.accum_steps = accum_steps
+
+        total_loss = 0.0
+
+        # --------------------------------------------------
+        # 1. Accumulate microbatch statistics
+        # --------------------------------------------------
+        for name, loss in losses_dict.items():
+            val = loss.detach().mean()
+
+            if name.startswith(self.primary_ext):
+                self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
+            else:
+                self._accum_aux[name] = self._accum_aux.get(name, 0.0) + val
+
+        self._step_count += 1
+
+        # --------------------------------------------------
+        # 2. On last accum step → update EMA with full-batch stats
+        # --------------------------------------------------
+        updated = False
+        if is_last_accum_step or (self.accum_steps is not None and self._step_count >= self.accum_steps):
+            updated = True
+
+            # Compute full-batch averages
+            denom = self.accum_steps or self._step_count
+            anchor_ema_new = None
+
+            for name, accum_val in self._accum_prim.items():
+                batch_val = (accum_val / denom).item()
+
+                if name not in self.primary_ema:
+                    self.primary_ema[name] = batch_val
+                else:
+                    self.primary_ema[name] = (
+                        self.alpha * self.primary_ema[name] +
+                        (1 - self.alpha) * batch_val
+                    )
+                if name == self.anchor:
+                    anchor_ema_new = self.primary_ema[name]
+
+            for name, accum_val in self._accum_aux.items():
+                batch_val = (accum_val / denom).item()
+                if name not in self.aux_ema:
+                    self.aux_ema[name] = batch_val
+                else:
+                    self.aux_ema[name] = (
+                        self.alpha * self.aux_ema[name] +
+                        (1 - self.alpha) * batch_val
+                    )
+
+            # Update the persistent anchor value
+            if anchor_ema_new is not None:
+                self._anchor_ema_current = anchor_ema_new
+            elif self._anchor_ema_current is None and self.primary_ema:
+                # Fallback: use max of existing primary EMAs
+                self._anchor_ema_current = max(self.primary_ema.values())
+
+            # Reset accumulators
+            self._accum_prim.clear()
+            self._accum_aux.clear()
+            self._step_count = 0
+
+        # --------------------------------------------------
+        # 3. Scale losses using the latest known anchor_ema
+        # --------------------------------------------------
+        # Safe fallback chain:
+        if self._anchor_ema_current is None:
+            # First forward pass ever → assume reasonable default
+            anchor_val = 0.5
+        else:
+            anchor_val = self._anchor_ema_current
+
+        for name, loss in losses_dict.items():
+            if name.startswith(self.primary_ext):
+                ema = self.primary_ema.get(name, 1.0)
+                scale = torch.tensor(anchor_val / (ema + 1e-8), device = self.device)
+                scale = scale.clamp(0.1, 300.0)
+            else:
+                ema = self.aux_ema.get(name, 1.0)
+                n_aux = max(len(self.aux_ema), 1)
+                scale = torch.tensor(self.aux_target / (n_aux * (ema + 1e-8)), device = self.device)
+                scale = scale.clamp(0.01, 50.0)
+
+            total_loss += scale * loss
+
+        return total_loss
+
+    def state_dict(self):
+        return {
+            'anchor': self.anchor,
+            'aux_target': self.aux_target,
+            'alpha': self.alpha,
+            'primary_ext': self.primary_ext,
+            'accum_steps': self.accum_steps,
+            'primary_ema': self.primary_ema,
+            'aux_ema': self.aux_ema,
+            '_anchor_ema_current': self._anchor_ema_current,
+        }
+
+    def load_state_dict(self, state_dict, device=None):
+        self.anchor = state_dict['anchor']
+        self.aux_target = state_dict['aux_target']
+        self.alpha = state_dict['alpha']
+        self.primary_ext = state_dict['primary_ext']
+        self.accum_steps = state_dict.get('accum_steps', None)
+
+        self.primary_ema = state_dict['primary_ema']
+        self.aux_ema = state_dict['aux_ema']
+        self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
+
+        if device is not None:
+            self.device = device
+
+        # Reset transient accumulators (always!)
+        self._accum_prim = {}
+        self._accum_aux = {}
+        self._step_count = 0
+
+        # self.anchor = anchor
+        # self.aux_target = aux_target
+        # self.alpha = alpha
+        # self.primary_ext = primary_ext
+        # self.device = device
+
+        # self.primary_ema = {}
+        # self.aux_ema = {}
+
+        # # === Persistent state ===
+        # self._anchor_ema_current = None      # ← this holds the latest known value
+        # self._accum_prim = {}
+        # self._accum_aux  = {}
+        # self._step_count = 0
+        # self.accum_steps = None
+
+
+class UncertaintyBalancer(nn.Module):
+	def __init__(self, num_tasks):
+		super().__init__()
+		self.log_vars = nn.Parameter(torch.zeros(num_tasks))  # log σ_i²
+
+	def forward(self, losses):  # losses: dict of task losses
+		total = 0
+		for i, (k, loss) in enumerate(losses.items()):
+			precision = torch.exp(-self.log_vars[i])
+			total += precision * loss + self.log_vars[i]
+		return total / len(losses)
+# Usage: balancer = UncertaintyBalancer(4); total = balancer(losses)
 
 
 if use_station_corrections == True:
@@ -1851,9 +2503,15 @@ mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device 
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
 
 
-focal_loss = SoftFocalLoss() ## Try using this on main loss targets
+# bce_loss = BCEWithLogitsLoss()
+# focal_loss = SoftFocalLoss() ## Try using this on main lmse_lossoss targets
+mse_loss = torch.nn.MSELoss()
 loss_func_mse = torch.nn.MSELoss()
 loss_func_l1 = torch.nn.L1Loss()
+DiceLoss = GaussianDiceLoss(bg_weight = 1.0)
+
+
+# loss_names = ['loss_dice1', 'loss_dice2', 'loss_dice3', 'loss_dice4', 'loss_negative', 'loss_consistency', 'loss_gradient', 'loss_global']
 
 
 np.random.seed() ## randomize seed
@@ -1882,7 +2540,25 @@ if load_training_data == True:
 		assert(len(files_load) > 0)
 
 
+use_dice_loss = True
+use_mse_loss = False
+use_negative_loss = True
+# use_global_loss = False
+use_consistency_loss = True
+use_gradient_loss = False
 
+
+n_burn_in = int(1*n_epochs/5)
+loss_names = ['loss_dice1', 'loss_dice2', 'loss_dice3', 'loss_dice4', 'loss_negative', 'loss_consistency']
+
+# LossBalancer = LossMagnitudeBalancer(anchor = 'loss_dice4') ## Use sparsest target as the anchor (could also use loss_dice2)
+# LossBalancer = LossMagnitudeBalancer(anchor = 'loss_dice2') ## Use sparsest target as the anchor (could also use loss_dice2)
+# LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice2', accum_steps = n_batch, primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
+# balancer = LossAccumulationBalancer(anchor = 'loss_dice2', accum_steps = n_batch, primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
+LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice4', primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
+
+## May need to up-sample positive associations more (or broaden the label)
+## and can add hard negatives to association labels
 
 if build_training_data == True:
 
@@ -2012,12 +2688,14 @@ if build_training_data == True:
 	print('Data set built; call the training script again once all data has been built')
 	sys.exit()
 
+
 for i in range(n_restart_step, n_epochs):
 
 	if (i == n_restart_step)*(n_restart == True):
 		## Load model and optimizer.
 		mz.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
 		optimizer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(n_restart_step, n_ver), map_location = device))
+		LossBalancer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(n_restart_step, n_ver), map_location = device))
 		zlosses = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_restart_step, n_ver))
 		losses[0:n_restart_step] = zlosses['losses'][0:n_restart_step]
 		mx_trgt_1[0:n_restart_step] = zlosses['mx_trgt_1'][0:n_restart_step]; mx_trgt_2[0:n_restart_step] = zlosses['mx_trgt_2'][0:n_restart_step]
@@ -2104,6 +2782,7 @@ for i in range(n_restart_step, n_epochs):
 	
 	loss_val = 0
 	loss_regularize_val, loss_regularize_cnt = 0, 0
+	loss_negative_val, loss_global_val = 0, 0
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
 	mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4 = 0.0, 0.0, 0.0, 0.0
 
@@ -2112,14 +2791,37 @@ for i in range(n_restart_step, n_epochs):
 	loss_grad_val = 0.0
 	loss_dice_val = 0.0
 	loss_consistency_val = 0.0
+	loss_negative_val = 0.0
+	loss_global_val = 0.0
+	loss_bce_val = 0.0
 
 	if ((np.mod(i, 1000) == 0) or (i == (n_epochs - 1)))*(i != n_restart_step):
+
+		## Add save state of loss balancer so can re load
 		torch.save(mz.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(i, n_ver))
 		torch.save(optimizer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(i, n_ver))
+		torch.save(LossBalancer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(i, n_ver))
+		# torch.save(balancer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(i, n_ver))
 		np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
 		print('saved model %s %d'%(n_ver, i))
 		print('saved model at step %d'%i)
 	
+		# torch.save({
+		#     'model': model.state_dict(),
+		#     'optimizer': optimizer.state_dict(),
+		#     'balancer': balancer.state_dict(),   # ← this is all you need
+		#     'epoch': epoch,
+		# }, 'checkpoint_epoch50.pth')
+
+		# checkpoint = torch.load('checkpoint_epoch50.pth', map_location=device)
+
+		# model.load_state_dict(checkpoint['model'])
+		# optimizer.load_state_dict(checkpoint['optimizer'])
+
+		# balancer = LossAccumulationBalancer(device=device)  # recreate empty
+		# balancer.load_state_dict(checkpoint['balancer'], device=device)  # restore EMAs
+
+
 	for inc, i0 in enumerate(range(n_batch)):
 
 		if load_training_data == True:
@@ -2400,34 +3102,22 @@ for i in range(n_restart_step, n_epochs):
 			grad_grid_src, grad_grid_t, grad_query_src, grad_query_t = grads
 
 
+		# moi
+
 
 		## Note, negative loss could be used on x_src_query_cart, but it is more essential for constraining the false positives in out[1]
 		pick_lbls = pick_labels_extract_interior_region_flattened(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 
 
-		# moi
-
-		## Can check if prediction is consistent at un-changed points
-		# out[1] = out_query ## Can we overwrite; and also overwrite the query points?
-		# X_query[i0] = np.concatenate((x_query_sample, x_query_sample_t.reshape(-1,1)), axis = 1)
-		# Lbls_query[i0] = lbls_query
-
-		# pdb.set_trace()
-
-		## Also need to overwrite labels. Note: does this break for using gradient loss? Yes
-
-
-		# if pick_lbls.max() > 0.3:
-			# np.savez_compressed('example_picks_%d.npz'%i, pick_lbls = pick_lbls.cpu().detach().numpy(), x_query = ftrns2(x_src_query_cart), x_cart = x_src_query_cart, srcs = lp_srcs[i0], srcs_cart = ftrns1(lp_srcs[i0]), times = lp_times[i0], inds = lp_stations[i0], meta = lp_meta[i0][:,-2::], tq_sample = tq_sample, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
-
+		## Make plots
 		make_plot = False
 		if make_plot == True:
 			fig, ax = plt.subplots(4, 1, sharex = True)
 			for j in range(2):
 				i1 = np.where(Lbls_query[0][:,0] > 0.1)[0]
-				i2 = np.where(torch.sigmoig(out[1])[:,0].cpu().detach().numpy() > 0.1)[0]
+				i2 = np.where(out[1][:,0].cpu().detach().numpy() > 0.1)[0]
 				ax[2*j].scatter(X_query[0][i1,3], X_query[0][i1,j], c = Lbls_query[0][i1,0])
-				ax[2*j + 1].scatter(X_query[0][i2,3], X_query[0][i2,j], c = torch.sigmoig(out[1])[i2,0].cpu().detach().numpy())
+				ax[2*j + 1].scatter(X_query[0][i2,3], X_query[0][i2,j], c = out[1][i2,0].cpu().detach().numpy())
 				ax[2*j].set_xlim(X_query[0][:,3].min(), X_query[0][:,3].max())
 				ax[2*j + 1].set_xlim(X_query[0][:,3].min(), X_query[0][:,3].max())
 				ax[2*j].set_ylim(X_query[0][:,j].min(), X_query[0][:,j].max())
@@ -2438,7 +3128,7 @@ for i in range(n_restart_step, n_epochs):
 
 			fig, ax = plt.subplots(2, 1, sharex = True, sharey = True)
 			ax[0].scatter(X_query[0][:,3], Lbls_query[0][:,0], c = X_query[0][:,0])
-			ax[1].scatter(X_query[0][:,3], torch.sigmoid(out[1])[:,0].cpu().detach().numpy(), c = X_query[0][:,0])
+			ax[1].scatter(X_query[0][:,3], out[1][:,0].cpu().detach().numpy(), c = X_query[0][:,0])
 			fig.savefig(path_to_file + 'Plots/example_sources_in_time_%d.png'%cnt_plot)
 
 
@@ -2461,12 +3151,12 @@ for i in range(n_restart_step, n_epochs):
 			ax[0,1].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
 
 
-			ifindp = np.where(torch.sigmoid(out[2])[iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
-			ifinds = np.where(torch.sigmoid(out[3])[iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
+			ifindp = np.where(out[2][iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
+			ifinds = np.where(out[3][iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
 			ax[1,0].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
-			ax[1,0].scatter(Locs[i0][lp_stations[i0].astype('int')[ifindp],1], Locs[i0][lp_stations[i0].astype('int')[ifindp],0], c = torch.sigmoid(out[2])[iarg,ifindp,0].cpu().detach().numpy(), marker = '^')
+			ax[1,0].scatter(Locs[i0][lp_stations[i0].astype('int')[ifindp],1], Locs[i0][lp_stations[i0].astype('int')[ifindp],0], c = out[2][iarg,ifindp,0].cpu().detach().numpy(), marker = '^')
 			ax[1,1].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
-			ax[1,1].scatter(Locs[i0][lp_stations[i0].astype('int')[ifinds],1], Locs[i0][lp_stations[i0].astype('int')[ifinds],0], c = torch.sigmoid(out[3])[iarg,ifinds,0].cpu().detach().numpy(), marker = '^')
+			ax[1,1].scatter(Locs[i0][lp_stations[i0].astype('int')[ifinds],1], Locs[i0][lp_stations[i0].astype('int')[ifinds],0], c = out[3][iarg,ifinds,0].cpu().detach().numpy(), marker = '^')
 			ax[1,0].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
 			ax[1,1].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
 			src_plot = ftrns2(x_src_query_cart[iarg].reshape(1,-1))
@@ -2481,20 +3171,55 @@ for i in range(n_restart_step, n_epochs):
 
 
 
-		
-		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
-		# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-		loss1 = weights[0]*focal_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*focal_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-		loss2 = (weights[2]*focal_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*focal_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-		loss = loss1 + loss2
-
-		loss_src_val += loss1.item()/n_batch
-		loss_asc_val += loss2.item()/n_batch
+		# use_dice_loss = True
+		if use_dice_loss == True:
 
 
+			loss_base1 = DiceLoss(out[0], torch.Tensor(Lbls[i0]).to(device))
+			loss_dice2 = DiceLoss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+			loss_dice3 = DiceLoss(out[2][:,:,0], pick_lbls[:,:,0])
+			loss_dice4 = DiceLoss(out[3][:,:,0], pick_lbls[:,:,1])
+			# loss_dice = (loss_dice1 + loss_dice2 + loss_dice3 + loss_dice4)/4.0
+
+			# loss_src_val += (loss_dice1.item() + loss_dice2.item())/n_batch
+			loss_src_val += (loss_base1.item() + loss_dice2.item())/n_batch
+			loss_asc_val += (loss_dice3.item() + loss_dice4.item())/n_batch
+
+			# loss = 0.8*loss + 0.2*loss_dice
+			# print('Dice %0.5f %0.5f'%(n_batch*loss_src_val, n_batch*loss_asc_val)) # loss.item(), 
 
 
-		if (use_negative_loss == True)*(i > int(n_epochs/5)):
+		use_mse_loss = True
+		if use_mse_loss == True:
+
+			if use_sigmoid == False:
+
+				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				loss_mse1 = weights[0]*mse_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*mse_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+				loss_mse2 = (weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				# loss = loss_mse1 + 2.0*loss_mse2
+
+			else:
+
+				min_val_lbl = 0.05
+				ifind_mask1 = torch.Tensor(Lbls[i0][:,0] > min_val_lbl).long().to(device)
+				ifind_mask2 = torch.Tensor(Lbls_query[i0][:,0] > min_val_lbl).long().to(device)
+
+				loss_bce = weights[0]*bce_loss(out[0][:,1], ifind_mask1.float()) + weights[1]*bce_loss(out[1][:,1], ifind_mask2.float())
+				loss_mse1 = weights[0]*mse_loss(out[0][ifind_mask1,0].reshape(-1,1), torch.Tensor(Lbls[i0]).to(device)[ifind_mask1]) + weights[1]*mse_loss(out[1][ifind_mask2,0].reshape(-1,1), torch.Tensor(Lbls_query[i0]).to(device)[ifind_mask2])
+				loss_mse2 = (weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+
+				# loss = loss_mse1 + loss_mse2 + (1/100.0)*loss_bce
+				# loss_bce_val += 0.1*loss_bce.item()
+
+
+			# loss_src_val += loss_mse1.item()/n_batch
+			# loss_asc_val += loss_mse2.item()/n_batch
+
+
+		if (use_negative_loss == True)*(i > n_burn_in):
+
 
 			min_up_sample = 0.1
 			## Up-sample queries for regions of high prediction but low labels. Or alternatively, essentially run a peak finder on the output.
@@ -2503,195 +3228,155 @@ for i in range(n_restart_step, n_epochs):
 			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
 			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
 			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, replace = False, randomize = False) # replace = False
-			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device)) # x_query_cart, t_query
+			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device), train = True) # x_query_cart, t_query
 			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3], lp_srcs[i0][:,3], src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
 
-			# ifind = np.where((np.abs(X_query[i0][:,0:3] - x_query_sample).max(1) == 0)*(X_query[i0][:,3] == x_query_sample_t.reshape(-1)))[0]
-			# print('Max val %0.4f, %0.4f, %0.4f'%(np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max(), Lbls_query[i0][ifind].max(), lbls_query[ifind].max()))
-			# print('Len [2] %d'%len(lp_srcs[i0]))
-			# if np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max() > 0.01:
-			# 	# pass
-			# 	moi
-			# 	pass
+			if use_sigmoid == False:
 
+				loss_negative = mse_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+				# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				# loss = 0.975*loss + 0.025*loss_negative
 
-			loss_negative = focal_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
-			# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-			loss = 0.98*loss + 0.02*loss_negative
+			else:
+
+				ifind_mask = torch.Tensor(lbls_query[:,0] > min_val_lbl).long().to(device)
+				loss_negative = (1/100.0)*bce_loss(out_query[:,1], ifind_mask.float()) + mse_loss(out_query[ifind_mask,0], torch.Tensor(lbls_query).to(device)[ifind_mask,0]) # weights[1]*
+				# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				# loss = 0.9*loss + 0.1*loss_negative				
+
+			loss_negative_val += loss_negative.item() # /n_batch
 			# print('loss negative %0.8f'%loss_negative)
 
 
+		loss_consistency_flag = False
+		if (use_consistency_loss == True)*(i > n_burn_in):
 
-
-		use_global_loss = True
-		if (use_global_loss == True)*(i > int(n_epochs/5)):
-
-			## Find all points far away from true sources
-			if len(lp_srcs[i0]) > 0:
-				imask_query = np.where(Lbls_query[i0][:,0] < 0.001)[0]
-				total_sum = out[1][imask_query].clamp(min = 0.0).mean()
-				loss_sum = loss_func_mse(total_sum, torch.zeros(total_sum.shape).to(device))
-				# loss = 0.9*loss + 0.1*loss_sum
-				loss = 0.98*loss + 0.02*loss_sum
-
-				# print('loss global %0.8f'%loss_sum)
-
-
-				# imask_query = np.where(Lbls_query[i0][:,0] > 0.01)[0]
-				# imask_query1 = np.delete(np.arange(len(Lbls_query[i0]), imask_query), axis = 0)
-				# idistant_from_sources = np.where(cKDTree(ftrns1(X_query[i0][imask_query])).query(ftrns1(X_query[i0][imask_query])) ) # np.where([len(ind_slice) for ind_slice in cKDTree(X_query[i0][imask_query]) ])
-
-
-				# inearest = knn(torch.Tensor(ftrns1(lp_srcs[i0]) ))
-
-
-
-
-		# if (use_gradient_loss == True)*(i > int(n_epochs/5)):
-		if (use_gradient_loss == True)*(i > int(n_epochs*4/5)):
-
-			if init_gradient_loss == False:
-				init_gradient_loss, mz.activate_gradient_loss = True, True
-			else:
-				loss_grad1 = 0.5*weights[0]*loss_func_mse(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*loss_func_mse(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
-				loss_grad2 = 0.5*weights[1]*loss_func_mse(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*loss_func_mse(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
-				loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
-
-				loss = 0.5*loss + 0.5*loss_grad
-				loss_grad_val += 0.5*loss_grad.item()/n_batch
-
-
-
-		use_dice_loss = False
-		if (use_dice_loss == True)*(i > int(n_epochs/5)):
-			def dice_loss(p, t, epsilon = 1e-6):
-				return (2.0*((p.clamp(min = 0.0, max = 1.0)*t.clamp(min = 0.0, max = 1.0)).sum()) + epsilon)/(p.clamp(min = 0.0, max = 1.0).pow(2).sum() + t.clamp(min = 0.0, max = 1.0).pow(2).sum() + epsilon)
-
-			def dice_loss1(p, t, epsilon = 1e-6):
-				return (2.0*((p.clamp(min = 0.0, max = 1.0)*t.clamp(min = 0.0, max = 1.0)).sum(1)) + epsilon)/(p.clamp(min = 0.0, max = 1.0).pow(2).sum(1) + t.clamp(min = 0.0, max = 1.0).pow(2).sum(1) + epsilon)
-
-			min_val_trgt = 0.1
-			z_vec = torch.Tensor([1.0]).to(device)
-			dice1 = z_vec if (Lbls[i0].max() < min_val_trgt)*(out[0].max().item() < min_val_trgt) else dice_loss(out[0], torch.Tensor(Lbls[i0]).to(device))
-			dice2 = z_vec if (Lbls_query[i0].max() < min_val_trgt)*(out[1].max().item() < min_val_trgt) else dice_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-			loss_dice1 = (weights[0]*dice1 + weights[1]*dice2)/(weights[0] + weights[1])
-
-			## This may not be correct for picks since the max operation tends to mean many of the 
-			## values will not satsify the mask. Might have to estimate the mask per source and pick
-			mask_dice3 = ((pick_lbls[:,:,0].max(1).values < min_val_trgt)*(out[2][:,:,0].max(1).values < min_val_trgt)).float()
-			mask_dice4 = ((pick_lbls[:,:,1].max(1).values < min_val_trgt)*(out[3][:,:,0].max(1).values < min_val_trgt)).float()
-			dice3 = mask_dice3 + (1.0 - mask_dice3)*dice_loss1(out[2][:,:,0], pick_lbls[:,:,0])
-			dice4 = mask_dice4 + (1.0 - mask_dice4)*dice_loss1(out[3][:,:,0], pick_lbls[:,:,1])
-			loss_dice2 = (weights[2]*dice3.mean() + weights[3]*dice4.mean())/(weights[2] + weights[3])
-
-			loss_dice = 1.0 - (0.5*loss_dice1 + 0.5*loss_dice2)
-
-			loss = 0.5*loss + 2.0*(0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
-			loss_dice_val += 2*(0.5*loss_dice.item())/500.0/n_batch
-
-
-
-
-		if (use_consistency_loss == True)*(i > int(n_epochs/5)):
 			ilen = int(np.floor(n_batch/2/2))
 
 			if (np.mod(inc, 2) == 1)*(inc >= (n_batch - 2*ilen)):
 				if (i == iter_loss[0])*(inc == (iter_loss[1] + 1)):
 					ind_consistency = int(np.floor(len(Lbls_save[0])/2))
 					# pdb.set_trace()
-					# weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
-					mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::] - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
-					# loss_consistency = (weight1*weights[0]*loss_func(out_save[0], out[0]) + weight2*weights[1]*loss_func(out_save[1], out[1]))/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-					# loss_consistency = loss_func(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-					# loss_consistency = loss_func1(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-					loss_consistency = focal_loss(out[1][ind_consistency::], out_save[0][ind_consistency::], mask = mask_loss) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-					loss = loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
-					loss_consistency_val += 0.1*loss_consistency.item()/n_batch
+
+					if use_sigmoid == False:
+
+						# weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
+						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::] - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
+						loss_consistency = mse_loss(out[1][ind_consistency::][mask_loss.long()], out_save[0][ind_consistency::][mask_loss.long()]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+						# loss = 0.9*loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
+						# loss_consistency_val += 0.1*loss_consistency.item()/n_batch
+
+					else:
+
+						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::] - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
+						loss_consistency = mse_loss(out[1][ind_consistency::][mask_loss.long()][:,0], out_save[0][ind_consistency::][mask_loss.long()][:,0]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+						# loss = 0.9*loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
+						# loss_consistency_val += 0.1*loss_consistency.item()/n_batch					
+
+					loss_consistency_val += loss_consistency.item() # /n_batch
+					loss_consistency_flag = True
 
 
-			out_save = [torch.sigmoid(out[1])]
+			out_save = [out[1]]
 			Lbls_save = [Lbls_query[i0]]
 			iter_loss = [i, inc]
 			X_query_save = [X_query[i0]]
 
 
-		## Normalize with respect to batch size (note this changes relative scaling bewteen L2 loss and dice loss)
+		# if (use_gradient_loss == True)*(i > int(n_epochs/5)):
+		if (use_gradient_loss == True)*(i > n_burn_in):
+
+			if init_gradient_loss == False:
+				init_gradient_loss, mz.activate_gradient_loss = True, True
+			else:
+				loss_grad1 = 0.5*weights[0]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*loss_func_mse(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
+				loss_grad2 = 0.5*weights[1]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*loss_func_mse(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
+				loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
+
+				# loss = 0.5*loss + 0.5*loss_grad
+				loss_grad_val += 0.5*loss_grad.item()/n_batch
+
+
+
+		## Merge loss values in the Scalar (normalize with respect to batch size)
+
+		pre_scale_weights1 = [10.0, 10.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
+		pre_scale_weights2 = [1e4, 1e4]
+
+		if i > n_burn_in:
+
+			if loss_consistency_flag == True:
+
+				loss_dict = {
+				'loss_dice1': loss_base1, ## loss_dice1 ## Possibly move loss_dice1 to auxilary loss
+				'loss_dice2': loss_dice2,
+				'loss_dice3': loss_dice3,
+				'loss_dice4': loss_dice4,
+				'loss_negative': loss_negative*pre_scale_weights2[0],
+				'loss_consistency': loss_consistency*pre_scale_weights2[1],
+				'loss_mse1': loss_mse1*pre_scale_weights1[0],
+				'loss_mse2': loss_mse2*pre_scale_weights1[1]
+				}
+
+			else:
+
+				loss_dict = {
+				'loss_dice1': loss_base1, ## loss_dice1 ## Possibly move loss_dice1 to auxilary loss
+				'loss_dice2': loss_dice2,
+				'loss_dice3': loss_dice3,
+				'loss_dice4': loss_dice4,
+				'loss_negative': loss_negative*pre_scale_weights2[0],
+				'loss_mse1': loss_mse1*pre_scale_weights1[0],
+				'loss_mse2': loss_mse2*pre_scale_weights1[1]
+				}				
+
+		else:
+
+			loss_dict = {
+			'loss_dice1': loss_base1, # loss_dice1
+			'loss_dice2': loss_dice2,
+			'loss_dice3': loss_dice3,
+			'loss_dice4': loss_dice4,
+			'loss_mse1': loss_mse1*pre_scale_weights1[0],
+			'loss_mse2': loss_mse2*pre_scale_weights1[1]
+			}
+
+		# moi
+		loss = LossBalancer(loss_dict, accum_steps = n_batch, is_last_accum_step = (inc == (n_batch - 1))) # losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False
 		loss = loss/n_batch
 
+		# loss = loss/n_batch
 
 
-		# min_val_use = 0.1
-		# use_sensitivity_loss = False
-		# loss_regularize = torch.Tensor([0.0]).to(device)
-		# if (use_sensitivity_loss == True)*(((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)) == False):
-
-		# 	# if ((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)):
-		# 	# 	continue
-			
-		# 	sig_d = 0.15 ## Assumed pick uncertainty (seconds)
-		# 	chi_pdf = chi2(df = 3).pdf(0.99)
-	
-		# 	scale_val1 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
-		# 	scale_val2 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
-		# 	scale_val = 0.5*(scale_val1 + scale_val2)
-	
-		# 	scale_partials = torch.Tensor((1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)).to(device)
-		# 	src_input_p = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
-		# 	src_input_s = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
-		# 	trv_out_p = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_p, method = 'direct')[:,0]
-		# 	trv_out_s = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_s, method = 'direct')[:,1]
-		# 	# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
-		# 	d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
-		# 	d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
-		# 	d_p = d_p.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
-		# 	d_s = d_s.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
-		# 	d_grad = torch.Tensor([1000.0]).to(device)*(1.0/scale_partials)*torch.cat((torch.clip(out[2], min = 0.0)*d_p, torch.clip(out[3], min = 0.0)*d_s), dim = 0)/torch.Tensor([scale_val1, scale_val2, 1.0]).to(device).reshape(1,-1)
-		# 	var_cart = torch.bmm(d_grad.transpose(1,2), d_grad)
-		# 	# try:
-		# 	scale_loss = 10000.0
-		# 	tol_cond = 1000.0
-		# 	icond = torch.where(torch.linalg.cond(var_cart) < tol_cond)[0]
-		# 	if len(icond) == 3: icond = torch.cat((icond, torch.Tensor([icond[-1].item()]).to(device)), dim = 0).long()
-		# 	var_cart_inv = torch.linalg.solve(var_cart[icond], torch.eye(3).to(device))*torch.Tensor([(sig_d**2)*chi_pdf]).to(device)
-		# 	sigma_cart = torch.norm(var_cart_inv[:,torch.arange(3),torch.arange(3)]**(0.5), dim = 1)
-		# 	loss_regularize = (0.000002)*loss_func1(sigma_cart/scale_loss, torch.zeros(sigma_cart.shape).to(device)) # 0.001 # 0.0002
-		# 	if torch.isnan(loss_regularize) == False: 
-		# 		loss = loss + loss_regularize
-		# 	# losses_regularize[i] = loss_regularize.item()
-		# 	loss_regularize_val += loss_regularize.item()
-		# 	loss_regularize_cnt += 1
-		
-		
 		n_visualize_step = 1000
 		n_visualize_fraction = 0.2
 		make_visualize_predictions = False
 		if (make_visualize_predictions == True)*(np.mod(i, n_visualize_step) == 0)*(inc == 0): # (i0 < n_visualize_fraction*n_batch)
 			save_plots_path = path_to_file + seperator + 'Plots' + seperator
-			out_plot = [torch.sigmoid(out[0]), torch.sigmoid(out[1]), torch.sigmoid(out[2]), torch.sigmoid(out[3])]
+			out_plot = [out[0], out[1], out[2], out[3]]
 			visualize_predictions(out_plot, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
 
-			# if Lbls_query[i0][:,5].max() > 0.2: # Plot all true sources
-			# 	visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
-			# elif np.random.rand() > 0.8: # Plot a fraction of false sources
-			# 	visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
 
 		if inc != (n_batch - 1):
 			loss.backward(retain_graph = True)
 		else:
 			loss.backward(retain_graph = False)
 
+
 		loss_val += loss.item()
 		mx_trgt_val_1 += Lbls[i0].max()
 		mx_trgt_val_2 += Lbls_query[i0].max()
 		mx_trgt_val_3 += pick_lbls[:,:,0].max().item()
 		mx_trgt_val_4 += pick_lbls[:,:,1].max().item()
-		mx_pred_val_1 += torch.sigmoid(out[0]).max().item()
-		mx_pred_val_2 += torch.sigmoid(out[1]).max().item()
-		mx_pred_val_3 += torch.sigmoid(out[2]).max().item()
-		mx_pred_val_4 += torch.sigmoid(out[3]).max().item()
+		mx_pred_val_1 += out[0].max().item()
+		mx_pred_val_2 += out[1].max().item()
+		mx_pred_val_3 += out[2].max().item()
+		mx_pred_val_4 += out[3].max().item()
+
 
 	if load_training_data == True:
 		h.close() ## Close training file
+
 
 	optimizer.step()
 	losses[i] = loss_val
@@ -2706,14 +3391,288 @@ for i in range(n_restart_step, n_epochs):
 	mx_pred_4[i] = mx_pred_val_4/n_batch
 	loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
-	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_grad_val, loss_dice_val, loss_consistency_val, (10e4)*loss_regularize_val))
+	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_negative_val, loss_grad_val, loss_consistency_val, (10e4)*loss_regularize_val))
 
 	# Log losses
 	if use_wandb_logging == True:
 		wandb.log({"loss": loss_val})
 
 	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
-		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_grad_val, loss_dice_val, loss_consistency_val, (10e4)*loss_regularize_val))
+		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_negative_val, loss_grad_val, loss_consistency_val, (10e4)*loss_regularize_val))
+
+
+
+
+
+## Global loss
+# # use_global_loss = False
+# if (use_global_loss == True)*(i > n_burn_in):
+
+# 	## Find all points far away from true sources
+# 	if len(lp_srcs[i0]) > 0:
+# 		imask_query = np.where(Lbls_query[i0][:,0] < 0.001)[0]
+
+# 		if use_sigmoid == False:
+
+# 			total_sum = out[1][imask_query].sum()/100.0 # .clamp(min = 0.0).mean()
+# 			loss_sum = mse_loss(total_sum, torch.zeros(total_sum.shape).to(device))
+# 			# loss = 0.9*loss + 0.1*loss_sum
+# 			loss = 0.95*loss + 0.05*loss_sum
+
+# 		else:
+
+# 			total_sum = (torch.sigmoid(out[1][imask_query,1])*out[1][imask_query,0]).sum()/100.0 # .clamp(min = 0.0).mean()
+# 			loss_sum = mse_loss(total_sum, torch.zeros(total_sum.shape).to(device))
+# 			# loss = 0.9*loss + 0.1*loss_sum
+# 			loss = 0.9*loss + 0.1*loss_sum
+
+# 		loss_global_val += 0.1*loss_sum.item()/n_batch
+
+
+
+# class RobustMagnitudeBalancer:
+#     def __init__(self, anchor_head='dice_3', alpha=0.99):
+#         self.alpha = alpha
+#         self.values = {}      # EMA of each loss magnitude
+#         self.scales = {}
+#         self.anchor = anchor_head
+
+#     def __call__(self, losses_dict):
+#         total = 0.0
+#         anchor_val = None
+
+#         for name, loss in losses_dict.items():
+#             val = loss.detach().mean().item()
+            
+#             if name not in self.values:
+#                 self.values[name] = val
+#             else:
+#                 self.values[name] = (self.alpha * self.values[name] + 
+#                                    (1 - self.alpha) * val)
+            
+#             if name == self.anchor:
+#                 anchor_val = self.values[name]
+
+#             scale = anchor_val / (self.values[name] + 1e-8)
+#             scale = scale.clamp(0.1, 100.0)
+#             self.scales[name] = scale
+            
+#             total += loss * scale
+
+#         return total
+
+
+# def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
+
+# 	iz = np.where(source_pick[:,1] > -1.0)[0]
+# 	lbl_trgt = torch.zeros((xq_src_cart.shape[0], source_pick.shape[0], 2)).to(device)
+# 	src_pick_indices = source_pick[iz,1].astype('int')
+
+# 	inside_interior = ((src_slice[src_pick_indices,0] <= lat_range_interior[1])*(src_slice[src_pick_indices,0] >= lat_range_interior[0])*(src_slice[src_pick_indices,1] <= lon_range_interior[1])*(src_slice[src_pick_indices,1] >= lon_range_interior[0]))
+
+# 	if len(iz) > 0:
+# 		d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)
+# 		lbl_trgt[:,iz,0] = d*torch.Tensor((source_pick[iz,0] == 0)).to(device).float()
+# 		lbl_trgt[:,iz,1] = d*torch.Tensor((source_pick[iz,0] == 1)).to(device).float()
+
+# 	return lbl_trgt
+
+
+# def dice_loss(pred, trgts, thresh = [0.075], eps = 1e-5):
+
+# 	dim, j = trgts.ndim, 0
+# 	if dim == 1:
+# 		# for j in range(len(thresh)):
+# 		i1 = torch.where(trgts > thresh[j])[0]
+# 		i2 = torch.where(trgts <= thresh[j])[0]
+
+# 		dice_pos = 2.0*(pred[i1]*trgts[i1]).sum()/(pred[i1].sum() + trgts[i1].sum() + eps)
+# 		dice_neg = 2.0*((1.0 - pred[i2])*(1 - trgts[i2])).sum()/((1.0 - pred[i2]).sum() + (1.0 - trgts[i2]).sum() + eps)
+# 		dice_out = 0.5*dice_pos + 0.5*dice_neg
+
+# 	elif dim == 2:
+
+# 		i1, i2 = torch.where(trgts > thresh[j])
+# 		i3, i4 = torch.where(trgts <= thresh[j])
+
+# 		dice_pos = 2.0*(pred[i1,i2]*trgts[i1,i2]).sum()/(pred[i1,i2].sum() + trgts[i1,i2].sum() + eps)
+# 		dice_neg = 2.0*((1.0 - pred[i3, i4])*(1 - trgts[i3, i4])).sum()/((1.0 - pred[i3, i4]).sum() + (1.0 - trgts[i3, i4]).sum() + eps)
+# 		dice_out = 0.5*dice_pos + 0.5*dice_neg
+
+# 	return 1.0 - dice_out ## Loss function
+
+# def dice_loss(pred, trgts, thresh = [0.075], lambda_pos = 0.5, eps = 1e-5):
+
+# 	dim, j = trgts.ndim, 0
+# 	if dim == 1:
+# 		# for j in range(len(thresh)):
+# 		# i1 = torch.where(trgts > thresh[j])[0]
+# 		# i2 = torch.where(trgts <= thresh[j])[0]
+
+# 		dice_pos = 2.0*(pred*trgts).sum()/(pred.sum() + trgts.sum() + eps)
+# 		dice_neg = 2.0*((1.0 - pred)*(1 - trgts)).sum()/((1.0 - pred).sum() + (1.0 - trgts).sum() + eps)
+# 		dice_out = lambda_pos*dice_pos + (1.0 - lambda_pos)*dice_neg
+
+# 	elif dim == 2:
+
+# 		# i1, i2 = torch.where(trgts > thresh[j])
+# 		# i3, i4 = torch.where(trgts <= thresh[j])
+
+# 		dice_pos = 2.0*(pred*trgts).sum(1)/(pred.sum(1) + trgts.sum(1) + eps)
+# 		dice_neg = 2.0*((1.0 - pred)*(1 - trgts)).sum(1)/((1.0 - pred).sum(1) + (1.0 - trgts).sum(1) + eps)
+# 		dice_out = lambda_pos*dice_pos + (1.0 - lambda_pos)*dice_neg
+# 		dice_out = dice_out.mean()
+
+# 	return 1.0 - dice_out ## Loss function
+
+
+
+# ifind = np.where((np.abs(X_query[i0][:,0:3] - x_query_sample).max(1) == 0)*(X_query[i0][:,3] == x_query_sample_t.reshape(-1)))[0]
+# print('Max val %0.4f, %0.4f, %0.4f'%(np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max(), Lbls_query[i0][ifind].max(), lbls_query[ifind].max()))
+# print('Len [2] %d'%len(lp_srcs[i0]))
+# if np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max() > 0.01:
+# 	# pass
+# 	moi
+# 	pass
+
+
+# print('loss global %0.8f'%loss_sum)
+
+
+# imask_query = np.where(Lbls_query[i0][:,0] > 0.01)[0]
+# imask_query1 = np.delete(np.arange(len(Lbls_query[i0]), imask_query), axis = 0)
+# idistant_from_sources = np.where(cKDTree(ftrns1(X_query[i0][imask_query])).query(ftrns1(X_query[i0][imask_query])) ) # np.where([len(ind_slice) for ind_slice in cKDTree(X_query[i0][imask_query]) ])
+
+
+# inearest = knn(torch.Tensor(ftrns1(lp_srcs[i0]) ))
+
+
+
+# loss_consistency = (weight1*weights[0]*loss_func(out_save[0], out[0]) + weight2*weights[1]*loss_func(out_save[1], out[1]))/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+# loss_consistency = loss_func(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+# loss_consistency = loss_func1(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+
+
+## Can check if prediction is consistent at un-changed points
+# out[1] = out_query ## Can we overwrite; and also overwrite the query points?
+# X_query[i0] = np.concatenate((x_query_sample, x_query_sample_t.reshape(-1,1)), axis = 1)
+# Lbls_query[i0] = lbls_query
+
+# pdb.set_trace()
+
+## Also need to overwrite labels. Note: does this break for using gradient loss? Yes
+
+
+# if pick_lbls.max() > 0.3:
+	# np.savez_compressed('example_picks_%d.npz'%i, pick_lbls = pick_lbls.cpu().detach().numpy(), x_query = ftrns2(x_src_query_cart), x_cart = x_src_query_cart, srcs = lp_srcs[i0], srcs_cart = ftrns1(lp_srcs[i0]), times = lp_times[i0], inds = lp_stations[i0], meta = lp_meta[i0][:,-2::], tq_sample = tq_sample, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
+
+# n_burn_in = 5000
+# if i < n_burn_in:
+
+	# # loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+	# # loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+	# loss1 = weights[0]*bce_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*bce_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+	# loss2 = (weights[2]*bce_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*bce_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+	# loss = loss1 + loss2
+
+
+
+# if Lbls_query[i0][:,5].max() > 0.2: # Plot all true sources
+# 	visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
+# elif np.random.rand() > 0.8: # Plot a fraction of false sources
+# 	visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
+
+
+# use_dice_loss = False
+# if (use_dice_loss == True)*(i > int(n_epochs/5)):
+
+
+# 	loss_dice1 = dice_loss(out[0], torch.Tensor(Lbls[i0]).to(device))
+# 	loss_dice2 = dice_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+# 	loss_dice3 = dice_loss(out[2][:,:,0], pick_lbls[:,:,0])
+# 	loss_dice4 = dice_loss(out[3][:,:,0], pick_lbls[:,:,1])
+# 	loss_dice = (loss_dice1 + loss_dice2 + loss_dice3 + loss_dice4)/5.0
+
+# 	loss = 0.8*loss + 0.2*loss_dice
+# 	print('Dice %0.5f %0.5f'%(loss.item(), loss_dice.item()))
+
+
+	## Can track the norms of the gradients of dice components
+	## and then balance the positive contribution (can track over a moving window)
+	# ratio = grad_pos / grad_neg
+	# lambda_pos = ratio / (1 + ratio)
+	# lambda_pos = clamp(lambda_pos, 0.6, 0.95)
+
+
+
+	# def dice_loss(p, t, epsilon = 1e-6):
+	# 	return (2.0*((p.clamp(min = 0.0, max = 1.0)*t.clamp(min = 0.0, max = 1.0)).sum()) + epsilon)/(p.clamp(min = 0.0, max = 1.0).pow(2).sum() + t.clamp(min = 0.0, max = 1.0).pow(2).sum() + epsilon)
+
+	# def dice_loss1(p, t, epsilon = 1e-6):
+	# 	return (2.0*((p.clamp(min = 0.0, max = 1.0)*t.clamp(min = 0.0, max = 1.0)).sum(1)) + epsilon)/(p.clamp(min = 0.0, max = 1.0).pow(2).sum(1) + t.clamp(min = 0.0, max = 1.0).pow(2).sum(1) + epsilon)
+
+	# min_val_trgt = 0.1
+	# z_vec = torch.Tensor([1.0]).to(device)
+	# dice1 = z_vec if (Lbls[i0].max() < min_val_trgt)*(out[0].max().item() < min_val_trgt) else dice_loss(out[0], torch.Tensor(Lbls[i0]).to(device))
+	# dice2 = z_vec if (Lbls_query[i0].max() < min_val_trgt)*(out[1].max().item() < min_val_trgt) else dice_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+	# loss_dice1 = (weights[0]*dice1 + weights[1]*dice2)/(weights[0] + weights[1])
+
+	# ## This may not be correct for picks since the max operation tends to mean many of the 
+	# ## values will not satsify the mask. Might have to estimate the mask per source and pick
+	# mask_dice3 = ((pick_lbls[:,:,0].max(1).values < min_val_trgt)*(out[2][:,:,0].max(1).values < min_val_trgt)).float()
+	# mask_dice4 = ((pick_lbls[:,:,1].max(1).values < min_val_trgt)*(out[3][:,:,0].max(1).values < min_val_trgt)).float()
+	# dice3 = mask_dice3 + (1.0 - mask_dice3)*dice_loss1(out[2][:,:,0], pick_lbls[:,:,0])
+	# dice4 = mask_dice4 + (1.0 - mask_dice4)*dice_loss1(out[3][:,:,0], pick_lbls[:,:,1])
+	# loss_dice2 = (weights[2]*dice3.mean() + weights[3]*dice4.mean())/(weights[2] + weights[3])
+
+	# loss_dice = 1.0 - (0.5*loss_dice1 + 0.5*loss_dice2)
+
+	# loss = 0.5*loss + 2.0*(0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
+	# loss_dice_val += 2*(0.5*loss_dice.item())/500.0/n_batch
+
+
+
+# min_val_use = 0.1
+# use_sensitivity_loss = False
+# loss_regularize = torch.Tensor([0.0]).to(device)
+# if (use_sensitivity_loss == True)*(((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)) == False):
+
+# 	# if ((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)):
+# 	# 	continue
+	
+# 	sig_d = 0.15 ## Assumed pick uncertainty (seconds)
+# 	chi_pdf = chi2(df = 3).pdf(0.99)
+
+# 	scale_val1 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
+# 	scale_val2 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
+# 	scale_val = 0.5*(scale_val1 + scale_val2)
+
+# 	scale_partials = torch.Tensor((1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)).to(device)
+# 	src_input_p = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
+# 	src_input_s = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
+# 	trv_out_p = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_p, method = 'direct')[:,0]
+# 	trv_out_s = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_s, method = 'direct')[:,1]
+# 	# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
+# 	d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
+# 	d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
+# 	d_p = d_p.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
+# 	d_s = d_s.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
+# 	d_grad = torch.Tensor([1000.0]).to(device)*(1.0/scale_partials)*torch.cat((torch.clip(out[2], min = 0.0)*d_p, torch.clip(out[3], min = 0.0)*d_s), dim = 0)/torch.Tensor([scale_val1, scale_val2, 1.0]).to(device).reshape(1,-1)
+# 	var_cart = torch.bmm(d_grad.transpose(1,2), d_grad)
+# 	# try:
+# 	scale_loss = 10000.0
+# 	tol_cond = 1000.0
+# 	icond = torch.where(torch.linalg.cond(var_cart) < tol_cond)[0]
+# 	if len(icond) == 3: icond = torch.cat((icond, torch.Tensor([icond[-1].item()]).to(device)), dim = 0).long()
+# 	var_cart_inv = torch.linalg.solve(var_cart[icond], torch.eye(3).to(device))*torch.Tensor([(sig_d**2)*chi_pdf]).to(device)
+# 	sigma_cart = torch.norm(var_cart_inv[:,torch.arange(3),torch.arange(3)]**(0.5), dim = 1)
+# 	loss_regularize = (0.000002)*loss_func1(sigma_cart/scale_loss, torch.zeros(sigma_cart.shape).to(device)) # 0.001 # 0.0002
+# 	if torch.isnan(loss_regularize) == False: 
+# 		loss = loss + loss_regularize
+# 	# losses_regularize[i] = loss_regularize.item()
+# 	loss_regularize_val += loss_regularize.item()
+# 	loss_regularize_cnt += 1
+
 
 
 
