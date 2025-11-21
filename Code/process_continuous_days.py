@@ -123,6 +123,8 @@ spr_picks = process_config['spr_picks'] # Assumed sampling rate of picks
 
 dx_depth = 50.0 ## This is not longer used (unless particle swarm location is used) # process_config['dx_depth'] ## Depth resolution to locate events with travel time based re-location
 
+st_time = time.time()
+
 ## removed
 # step = process_config['step']
 # step_abs = process_config['step_abs']
@@ -660,7 +662,7 @@ min_neighbor_picks = 2
 cnt_inc = 0
 cnt_remove = 0
 cnt_remove_l = [0, 0, 0, 0]
-
+cnt_isolated_picks = 0
 
 
 ## Input settings
@@ -1017,6 +1019,8 @@ for cnt, strs in enumerate([0]):
 	Save_picks = [] # save all picks..
 	lp_meta_l = []
 
+	tq_search = torch.arange(-1.5*src_t_kernel, 1.5*src_t_kernel, 0.25*dt_win).reshape(-1,1).to(device)
+
 	for n in range(len(srcs_list)):
 
 		Out_refined = []
@@ -1037,7 +1041,7 @@ for cnt, strs in enumerate([0]):
 			X_query_1_list.append(X_query_1)
 			X_query_1_cart_list.append(X_query_1_cart)
 
-			Out_refined.append(np.zeros((X_query_1.shape[0], len(tq))))
+			Out_refined.append(np.zeros((X_query_1.shape[0], len(tq_search))))
 
 		# with torch.no_grad(): 
 		
@@ -1062,6 +1066,8 @@ for cnt, strs in enumerate([0]):
 					Inpts[i][:,2::] = 0.0 ## Phase type informed features zeroed out
 					Masks[i][:,2::] = 0.0
 		
+			# tq_search = torch.arange()
+
 			for i in range(srcs_slice.shape[0]):
 
 				if len(lp_times[i]) == 0:
@@ -1069,12 +1075,12 @@ for cnt, strs in enumerate([0]):
 
 				ipick, tpick = lp_stations[i].astype('int'), lp_times[i] ## are these constant across different x_grid_ind?
 				
-				tq_repeat = tq.repeat(len(X_query_1_cart_list[i]),1)
-				X_query_cart_repeat = X_query_1_cart_list[i].repeat_interleave(len(tq), dim = 0)
+				tq_search_repeat = tq_search.repeat(len(X_query_1_cart_list[i]),1)
+				X_query_cart_repeat = X_query_1_cart_list[i].repeat_interleave(len(tq_search), dim = 0)
 
 				# note, trv_out_sources, is already on cuda, may cause memory issue with too many sources
 				# out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind,3].reshape(-1,1)).to(device), X_query_1_cart_list[i], tq)
-				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_query_cart_repeat, tq_repeat, n_reshape = len(tq))
+				out = mz_list[x_grid_ind].forward_fixed_source(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_query_cart_repeat, tq_search_repeat, n_reshape = len(tq_search))
 
 				Out_refined[i] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
 
@@ -1083,7 +1089,7 @@ for cnt, strs in enumerate([0]):
 
 			ip_argmax = np.argmax(Out_refined[i].max(1))
 			ipt_argmax = np.argmax(Out_refined[i][ip_argmax,:])
-			srcs_refined.append(np.concatenate((X_query_1_list[i][ip_argmax].reshape(1,-1), np.array([srcs_slice[i,3] + tq[ipt_argmax,0].item(), Out_refined[i].max()]).reshape(1,-1)), axis = 1)) 
+			srcs_refined.append(np.concatenate((X_query_1_list[i][ip_argmax].reshape(1,-1), np.array([srcs_slice[i,3] + tq_search[ipt_argmax,0].item(), Out_refined[i].max()]).reshape(1,-1)), axis = 1)) 
 
 		srcs_refined = np.vstack(srcs_refined)
 		srcs_refined = srcs_refined[np.argsort(srcs_refined[:,3])] # note, this
@@ -1608,7 +1614,7 @@ for cnt, strs in enumerate([0]):
 			# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
 			assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
 			assignments1, srcs_active1 = competitive_assignment([wp_slice, ws_slice], ipick, cost_value, restrict = restrict) ## force 1 source?
-			n_remove += len(srcs_active1) - len(srcs_active)
+			n_remove += len(srcs_active) - len(srcs_active1)
 
 
 			
@@ -1654,6 +1660,40 @@ for cnt, strs in enumerate([0]):
 		srcs_refined = np.vstack(srcs_retained)
 
 	print('Number sources (after competitive assignment): %d'%len(srcs_refined))
+
+
+
+	count_isolated_picks = True
+	if count_isolated_picks == True:
+
+		# ## For each event, go through and remove the outlier picks
+		# if quantile_val is not None:
+
+		max_dist = np.array([np.quantile(np.linalg.norm(ftrns1(locs_use[np.concatenate((Picks_P_perm[j][:,1], Picks_S_perm[j][:,1]), axis = 0).astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1), quantile_val) for j in range(len(Picks_P_perm))])
+
+		## Find isolated stations (i.e., no neighbors with associations) and remove
+		## Also remove picks far from a multiple of the upper qth quantile upper max source - reciever distance
+		knn_sta_edges = remove_self_loops(knn(torch.Tensor(ftrns1(locs_use)).to(device), torch.Tensor(ftrns1(locs_use)).to(device), k = min_sta_neighbors))[0].flip(0)
+		for j in range(len(Picks_P_perm)):
+
+			cnt_diff_p, cnt_diff_s = 0, 0
+			iunique_sta = np.unique(np.concatenate((Picks_P_perm[j][:,1], Picks_S_perm[j][:,1]), axis = 0).astype('int'))
+			embed_features = torch.zeros(len(locs_use)).to(device)
+			embed_features[iunique_sta] = 1.0
+			out_val = scatter(embed_features.reshape(-1,1)[knn_sta_edges[0]], knn_sta_edges[1], dim = 0, dim_size = locs_use.shape[0], reduce = 'sum').cpu().detach().numpy().reshape(-1)
+			# out_val = embed_features.cpu().detach().numpy() - out_val ## If less than or equal to zero, at least one neighbor has a pick
+			iallowed = np.sort(np.array(list(set(iunique_sta).intersection( np.where(out_val >= min_neighbor_picks)[0] ))))
+			if len(iallowed) == 0: iallowed = np.array([-1]).astype('int') ## This catches an empty iallowed
+			tree_allowed = cKDTree(iallowed.reshape(-1,1))
+			if len(Picks_P_perm[j]) > 0: cnt_diff_p = len(Picks_P_perm[j]) - len(Picks_P_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_P_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_P_perm[j][:,1].astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')])
+			if len(Picks_S_perm[j]) > 0: cnt_diff_s = len(Picks_S_perm[j]) - len(Picks_S_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_S_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_S_perm[j][:,1].astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')])
+
+			cnt_isolated_picks += cnt_diff_p
+			cnt_isolated_picks += cnt_diff_s
+
+
+
+
 
 
 	use_additional_quality_control = False
@@ -2480,6 +2520,8 @@ for cnt, strs in enumerate([0]):
 		file_save['trv_srcs_init1'] = trv_out_srcs_init1
 		file_save['trv_srcs_init2'] = trv_out_srcs_init2
 		file_save['n_remove'] = n_remove
+		file_save['time'] = st_time - time.time()
+		file_save['cnt_isolated_picks'] = cnt_isolated_picks
 		
 		
 		if (process_known_events == True):
