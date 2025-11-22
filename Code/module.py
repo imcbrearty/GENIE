@@ -80,10 +80,10 @@ class DataAggregation(MessagePassing): # make equivelent version with sum operat
 		self.activate = nn.PReLU() # can extend to each channel
 		self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
 
-		self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
+		# self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
 		self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 
-		self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
+		# self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
 		self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 		self.activate11 = nn.PReLU() # can extend to each channel
 		self.activate12 = nn.PReLU() # can extend to each channel
@@ -129,10 +129,10 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 		self.activate = nn.PReLU() # can extend to each channel
 		self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
 
-		self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
+		# self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
 		self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 
-		self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
+		# self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
 		self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
 		self.activate11 = nn.PReLU() # can extend to each channel
 		self.activate12 = nn.PReLU() # can extend to each channel
@@ -320,7 +320,7 @@ class SpaceTimeAttention(MessagePassing):
 		self.f_queries = nn.Linear(n_dim, n_heads*n_latent) # add second layer transformation.
 		self.f_context = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
 		self.f_values = nn.Linear(inpt_dim + n_dim, n_heads*n_latent) # add second layer transformation.
-		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
+		# self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
 		# self.proj = nn.Linear(n_latent*n_heads, out_channels) # can remove this layer possibly.
 		# self.proj = nn.Linear(n_latent*n_heads, out_channels) # can remove this layer possibly.
 		self.proj = nn.Linear(n_latent, out_channels) # can remove this layer possibly.
@@ -331,7 +331,8 @@ class SpaceTimeAttention(MessagePassing):
 		# self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
 		# self.alpha = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
-		self.log_temp = nn.Parameter(torch.Tensor([0.0])).to(device)
+		# self.log_temp = nn.Parameter(torch.Tensor([0.5]).to(device))
+		self.log_temp = nn.Parameter(torch.Tensor([0.5]))
 
 		self.fixed_degree = torch.Tensor([30.0]).to(device)
 
@@ -759,7 +760,9 @@ class ArrivalEmbedding(MessagePassing):
 		self.device = device
 		self.dilate_scale = 3.0
 		self.scale_misfit = 3.0
-		self.null_embed = nn.Parameter(torch.randn(1, 1, n_hidden) * 0.01).to(device)
+		# self.null_embed = nn.Parameter(torch.randn(1, 1, n_hidden).to(device) * 0.01) # .to(device)
+		# self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden).to(device)) # .to(device)
+		self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden)) # .to(device)
 
 		n_phase_types = 2
 		n_phase_embed = 5
@@ -1501,12 +1504,13 @@ class SourceStationAttention(MessagePassing):
 			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
 			self.merge_attn = nn.Sequential(nn.Linear(2*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_latent))
 			# self.alpha_source = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
-			self.alpha_src = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
+			# self.alpha_src = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
+			self.alpha_src = nn.Parameter(torch.Tensor([0.5])) ## Initilizes as 0.5
 
-			self.self_dummy_src = nn.Parameter(torch.zeros(1, n_heads)).to(device)
-			self.dummy_keys_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01).to(device)
-			self.dummy_queries_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01).to(device)
-			self.dummy_values_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01).to(device)
+			self.self_dummy_src = nn.Parameter(torch.zeros(1, n_heads))
+			self.dummy_keys_src = nn.Parameter(torch.zeros(1, n_heads, n_latent)) # .to(device)
+			self.dummy_queries_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+			self.dummy_values_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
 
 
 		# self.f_values_1 = nn.Linear(ndim_arv_in + 5, n_hidden) # add second layer transformation.
@@ -1525,19 +1529,20 @@ class SourceStationAttention(MessagePassing):
 		self.eps = eps
 		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
 
-		self.self_bias = nn.Parameter(torch.zeros(1, n_heads)).to(device)
-		self.self_dummy = nn.Parameter(torch.zeros(1, n_heads)).to(device)
-		self.dummy_keys = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01).to(device)
-		self.dummy_values = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01).to(device)
+		self.self_bias = nn.Parameter(torch.zeros(1, n_heads)) # .to(device) # zeros
+		self.self_dummy = nn.Parameter(torch.zeros(1, n_heads)) # .to(device) # zeros
+		self.dummy_keys = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+		self.dummy_values = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
 
 		n_dim_phase = 5
 		self.embed_phase = nn.Embedding(2 + 1, n_dim_phase)
 
 		# self.alpha = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
-		self.alpha = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
+		# self.alpha = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5 # self.log_temp = nn.Parameter(torch.Tensor([0.5])).to(device)
+		self.alpha = nn.Parameter(torch.Tensor([0.5])) ## Initilizes as 0.5 # self.log_temp = nn.Parameter(torch.Tensor([0.5])).to(device)
+
 		self.use_dual_attention = use_dual_attention
-
-
+		
 		self.ndim_feat = ndim_arv_in + ndim_extra
 		self.use_phase_types = use_phase_types
 		self.ndim_arv_in = ndim_arv_in
@@ -1549,9 +1554,9 @@ class SourceStationAttention(MessagePassing):
 			self.gate_src = nn.Sequential(nn.Linear(ndim_src_in + n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, 1))
 			self.downscale = torch.Tensor([0.1]).to(device)
 
-		self.activate1 = nn.PReLU()
-		self.activate2 = nn.PReLU()
-		self.activate3 = nn.PReLU()
+		# self.activate1 = nn.PReLU()
+		# self.activate2 = nn.PReLU()
+		# self.activate3 = nn.PReLU()
 		self.activate4 = nn.PReLU()
 		# self.activate5 = nn.PReLU()
 		self.device = device
@@ -2954,10 +2959,10 @@ class GCN_Detection_Network_extended(nn.Module):
 		# s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
 
 		if self.use_expanded == False:
-			s = self.DataAggregationAssociationPhase(s, x_latent, mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
 
 		else: ## This assumes that DataAggregationAssociationPhase does not use expanded version
-			s = self.DataAggregationAssociationPhase(s, x_latent, mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src) # detach x_latent. Just a "reference"
 			# s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, A_in_sta, A_in_src[0]) # detach x_latent. Just a "reference"
 			# arv_embed, mask_arv = self.ArrivalEmbedding(s, x_src, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, A_src_in_sta, A_in_src[0], tpick, ipick, phase_label, locs_use_cart, tlatent, trv_out = trv_out_q)
 
@@ -3122,11 +3127,11 @@ class GCN_Detection_Network_extended(nn.Module):
 
 
 		if self.use_expanded == False:
-			s = self.DataAggregationAssociationPhase(s, x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
 			# arv_embed, mask_arv = self.ArrivalEmbedding(s, x_src, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, self.A_in_src, tpick, ipick, phase_label, locs_use_cart, self.tlatent, trv_out = trv_out_q)
 
 		else: ## This assumes that DataAggregationAssociationPhase does not use expanded version
-			s = self.DataAggregationAssociationPhase(s, x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach(), mask_out_1, Mask, self.A_in_sta, self.A_in_src) # detach x_latent. Just a "reference"
 			# arv_embed, mask_arv = self.ArrivalEmbedding(s, x_src, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, self.A_in_src[0], tpick, ipick, phase_label, locs_use_cart, self.tlatent, trv_out = trv_out_q)
 
 
@@ -3309,8 +3314,8 @@ class TravelTimesPN(nn.Module):
 			self.use_corr = False
 		
 		if n_srcs > 0:
-			self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))).to(device)
-			self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))).to(device)
+			self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))) # .to(device)
+			self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))) # .to(device)
 
 		# self.Tp_average
 
