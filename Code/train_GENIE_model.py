@@ -2183,11 +2183,12 @@ class LossAccumulationBalancer:
     def __init__(
         self,
         anchor: str = 'loss_dice4',
-        aux_target: float = 0.018,
+        aux_target: float = 0.05,
         alpha: float = 0.98,
         primary_ext: str = 'loss_dice',
         device: str = 'cuda'
     ):
+        # aux_target: float = 0.018,
 
         self.anchor = anchor
         self.aux_target = aux_target
@@ -2371,7 +2372,15 @@ if use_station_corrections == True:
 		z.close()
 else:
 	locs_corr, corrs = None, None
-	
+
+
+## Replacing mse loss with huber loss (delta 0.3), moving loss_dice1 to auxilary loss
+## masking out all zeros in negative loss. Up weighting auxilary losses to 0.05.
+## Decreasing up scaling factor for negative loss to 1000. Increase pre_scale_weights1
+## to 30 (e.g., why is negative up scaled more than base loss?)
+## Adding cap loss
+
+
 	
 if config['train_travel_time_neural_network'] == False:
 
@@ -2506,9 +2515,10 @@ optimizer = optim.Adam(mz.parameters(), lr = 0.001)
 # bce_loss = BCEWithLogitsLoss()
 # focal_loss = SoftFocalLoss() ## Try using this on main lmse_lossoss targets
 mse_loss = torch.nn.MSELoss()
-loss_func_mse = torch.nn.MSELoss()
-loss_func_l1 = torch.nn.L1Loss()
-DiceLoss = GaussianDiceLoss(bg_weight = 1.0)
+# loss_func_mse = torch.nn.MSELoss()
+huber_loss = torch.nn.HuberLoss(delta = 0.5, reduction = 'mean') ## Beneath delta, L2 loss is applied
+l1_loss = torch.nn.L1Loss()
+DiceLoss = GaussianDiceLoss(bg_weight = 1.0) ## Can change the bg_weight
 
 
 # loss_names = ['loss_dice1', 'loss_dice2', 'loss_dice3', 'loss_dice4', 'loss_negative', 'loss_consistency', 'loss_gradient', 'loss_global']
@@ -2546,7 +2556,11 @@ use_negative_loss = True
 # use_global_loss = False
 use_consistency_loss = True
 use_gradient_loss = False
+use_cap_loss = True
+use_huber_loss = True
 
+
+# n_burn_in = int(0.5*n_epochs/5)
 
 n_burn_in = int(1*n_epochs/5)
 loss_names = ['loss_dice1', 'loss_dice2', 'loss_dice3', 'loss_dice4', 'loss_negative', 'loss_consistency']
@@ -2555,7 +2569,10 @@ loss_names = ['loss_dice1', 'loss_dice2', 'loss_dice3', 'loss_dice4', 'loss_nega
 # LossBalancer = LossMagnitudeBalancer(anchor = 'loss_dice2') ## Use sparsest target as the anchor (could also use loss_dice2)
 # LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice2', accum_steps = n_batch, primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
 # balancer = LossAccumulationBalancer(anchor = 'loss_dice2', accum_steps = n_batch, primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
-LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice4', primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
+# LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice4', primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
+LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice3', primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
+
+## Need to add hard negatives to association outputs
 
 ## May need to up-sample positive associations more (or broaden the label)
 ## and can add hard negatives to association labels
@@ -2794,6 +2811,7 @@ for i in range(n_restart_step, n_epochs):
 	loss_negative_val = 0.0
 	loss_global_val = 0.0
 	loss_bce_val = 0.0
+	loss_cap_val = 0.0
 
 	if ((np.mod(i, 1000) == 0) or (i == (n_epochs - 1)))*(i != n_restart_step):
 
@@ -3189,7 +3207,7 @@ for i in range(n_restart_step, n_epochs):
 			# print('Dice %0.5f %0.5f'%(n_batch*loss_src_val, n_batch*loss_asc_val)) # loss.item(), 
 
 
-		use_mse_loss = True
+		# use_mse_loss = False ## Switching to Huber loss
 		if use_mse_loss == True:
 
 			if use_sigmoid == False:
@@ -3214,8 +3232,58 @@ for i in range(n_restart_step, n_epochs):
 				# loss_bce_val += 0.1*loss_bce.item()
 
 
+		# use_huber_loss = True
+		if use_huber_loss == True:
+
+			if use_sigmoid == False:
+
+				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				loss_huber1 = weights[0]*huber_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*huber_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+				loss_huber2 = (weights[2]*huber_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*huber_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				# loss = loss_mse1 + 2.0*loss_mse2
+
+			else:
+
+				min_val_lbl = 0.05
+				ifind_mask1 = torch.Tensor(Lbls[i0][:,0] > min_val_lbl).long().to(device)
+				ifind_mask2 = torch.Tensor(Lbls_query[i0][:,0] > min_val_lbl).long().to(device)
+
+				loss_bce = weights[0]*bce_loss(out[0][:,1], ifind_mask1.float()) + weights[1]*bce_loss(out[1][:,1], ifind_mask2.float())
+				loss_huber1 = weights[0]*mse_loss(out[0][ifind_mask1,0].reshape(-1,1), torch.Tensor(Lbls[i0]).to(device)[ifind_mask1]) + weights[1]*mse_loss(out[1][ifind_mask2,0].reshape(-1,1), torch.Tensor(Lbls_query[i0]).to(device)[ifind_mask2])
+				loss_huber2 = (weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+
+				# loss = loss_mse1 + loss_mse2 + (1/100.0)*loss_bce
+				# loss_bce_val += 0.1*loss_bce.item()
+
+
 			# loss_src_val += loss_mse1.item()/n_batch
 			# loss_asc_val += loss_mse2.item()/n_batch
+
+
+		# use_cap_loss = True
+		if (use_cap_loss == True)*(i > n_burn_in):
+
+			scale_cap = 1.0
+			cap_limit = 0.7
+
+			ifind_cap1 = np.where(Lbls[i0] > cap_limit)[0]
+			ifind_cap2 = np.where(Lbls_query[i0] > cap_limit)[0]
+			ifind_cap11, ifind_cap12 = np.where(pick_lbls[:,:,0].cpu().detach().numpy() > cap_limit) # [0]
+			ifind_cap21, ifind_cap22 = np.where(pick_lbls[:,:,1].cpu().detach().numpy() > cap_limit) # [0]
+
+			loss_cap1 = torch.tensor(0.0).to(device)
+			loss_cap2 = torch.tensor(0.0).to(device)
+			if len(ifind_cap1) > 0: loss_cap1 += scale_cap*(weights[0]*huber_loss(out[0][ifind_cap1], torch.Tensor(Lbls[i0][ifind_cap1]).to(device)))
+			if len(ifind_cap2) > 0: loss_cap1 += scale_cap*(weights[1]*huber_loss(out[1][ifind_cap2], torch.Tensor(Lbls_query[i0][ifind_cap2]).to(device)))
+
+			if len(ifind_cap11) > 0: loss_cap2 += scale_cap*(weights[2]*huber_loss(out[2][ifind_cap11,ifind_cap12,0], pick_lbls[ifind_cap11,ifind_cap12,0]))
+			if len(ifind_cap21) > 0: loss_cap2 += scale_cap*(weights[3]*huber_loss(out[3][ifind_cap21,ifind_cap22,0], pick_lbls[ifind_cap21,ifind_cap22,1]))
+
+			loss_cap_val += (loss_cap1 + loss_cap2)/n_batch
+
+			# else:
+			# 	loss_cap2 = torch.tensor(0).to(device)
 
 
 		if (use_negative_loss == True)*(i > n_burn_in):
@@ -3223,6 +3291,7 @@ for i in range(n_restart_step, n_epochs):
 
 			min_up_sample = 0.1
 			## Up-sample queries for regions of high prediction but low labels. Or alternatively, essentially run a peak finder on the output.
+			## Do not include points that are < thresh for both labels and predictions
 			prob_up_sample = np.maximum(out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0] < min_up_sample), 0.0)
 			# prob_up_sample = 
 			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
@@ -3231,14 +3300,29 @@ for i in range(n_restart_step, n_epochs):
 			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device), train = True) # x_query_cart, t_query
 			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3], lp_srcs[i0][:,3], src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
 
+
+			# mask_query = (out_query > min_up_sample) + (torch.Tensor(lbls_query).to(device) > min_up_sample) ## At least one field > min_up_sample
+			# mask_query = (out_query > min_up_sample) + (torch.Tensor(lbls_query).to(device) > min_up_sample) ## At least one field > min_up_sample
+
+
 			if use_sigmoid == False:
 
-				loss_negative = mse_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+				# loss_negative = mse_loss(out_query[mask_query], torch.Tensor(lbls_query).to(device)[mask_query]) # weights[1]*
+
+				if mask_query.sum() > 0:
+					# loss_negative = mse_loss(out_query[mask_query], torch.Tensor(lbls_query).to(device)[mask_query]) # weights[1]*
+					# loss_negative = mse_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+					loss_negative = huber_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+				else:
+					loss_negative = torch.tensor(0.0).to(device)
+
+
 				# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 				# loss = 0.975*loss + 0.025*loss_negative
 
 			else:
 
+				## Not completely implemented
 				ifind_mask = torch.Tensor(lbls_query[:,0] > min_val_lbl).long().to(device)
 				loss_negative = (1/100.0)*bce_loss(out_query[:,1], ifind_mask.float()) + mse_loss(out_query[ifind_mask,0], torch.Tensor(lbls_query).to(device)[ifind_mask,0]) # weights[1]*
 				# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
@@ -3252,6 +3336,8 @@ for i in range(n_restart_step, n_epochs):
 		if (use_consistency_loss == True)*(i > n_burn_in):
 
 			ilen = int(np.floor(n_batch/2/2))
+
+			## For consistency loss, compute seperately for positive and negative classes
 
 			if (np.mod(inc, 2) == 1)*(inc >= (n_batch - 2*ilen)):
 				if (i == iter_loss[0])*(inc == (iter_loss[1] + 1)):
@@ -3286,12 +3372,44 @@ for i in range(n_restart_step, n_epochs):
 		# if (use_gradient_loss == True)*(i > int(n_epochs/5)):
 		if (use_gradient_loss == True)*(i > n_burn_in):
 
+			# if init_gradient_loss == False:
+			# 	init_gradient_loss, mz.activate_gradient_loss = True, True
+			# else:
+			# 	loss_grad1 = 0.5*weights[0]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*mse_loss(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
+			# 	loss_grad2 = 0.5*weights[1]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*mse_loss(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
+			# 	loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
+
+			# 	# loss = 0.5*loss + 0.5*loss_grad
+			# 	loss_grad_val += 0.5*loss_grad.item()/n_batch
+
 			if init_gradient_loss == False:
 				init_gradient_loss, mz.activate_gradient_loss = True, True
 			else:
-				loss_grad1 = 0.5*weights[0]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*loss_func_mse(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
-				loss_grad2 = 0.5*weights[1]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*loss_func_mse(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
-				loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
+
+				loss_grad_magnitude_spc1 = l1_loss(torch.norm(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, dim = 1), torch.norm(torch.Tensor(Lbls_grad_spc[i0]).to(device), dim = 1))
+				loss_grad_magnitude_time1 = l1_loss(torch.norm(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, dim = 1), torch.norm(torch.Tensor(Lbls_grad_t[i0]).to(device), dim = 1))
+
+				loss_grad_magnitude_spc2 = l1_loss(torch.norm(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, dim = 1), torch.norm(torch.Tensor(Lbls_query_grad_spc[i0]).to(device), dim = 1))
+				loss_grad_magnitude_time2 = l1_loss(torch.norm(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), dim = 1), torch.norm(torch.Tensor(Lbls_query_grad_t[i0]).to(device), dim = 1))
+
+				## Add (non normalized) cosine distance between vectors
+
+				# def gradient_loss(pred, gt):
+				#     # pred, gt: [B,1,H,W] or [B,3,H,W] etc.
+				#     gy_pred, gx_pred = torch.gradient(pred, spacing=1.0)  # or sobel for isotropic
+				#     gy_gt, gx_gt   = torch.gradient(gt)
+				#     grad_mag_pred = torch.sqrt(gx_pred**2 + gy_pred**2 + 1e-6)
+				#     grad_mag_gt   = torch.sqrt(gx_gt**2 + gy_gt**2 + 1e-6)
+				    
+				#     # L1 on magnitude + cosine similarity on direction
+				#     loss_mag = F.l1_loss(grad_mag_pred, grad_gt_mag)
+				#     loss_dir = 1 - F.cosine_similarity(gx_pred*gt + gy_gt, gx_pred*gt + gy_pred + 1e-6).mean() ## Not normalizing
+				#     return loss_mag + loss_dir
+
+
+				# loss_grad1 = 0.5*weights[0]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*mse_loss(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
+				# loss_grad2 = 0.5*weights[1]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*mse_loss(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
+				# loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
 
 				# loss = 0.5*loss + 0.5*loss_grad
 				loss_grad_val += 0.5*loss_grad.item()/n_batch
@@ -3300,46 +3418,51 @@ for i in range(n_restart_step, n_epochs):
 
 		## Merge loss values in the Scalar (normalize with respect to batch size)
 
-		pre_scale_weights1 = [10.0, 10.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
-		pre_scale_weights2 = [1e4, 1e4]
+		# pre_scale_weights1 = [10.0, 10.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
+		pre_scale_weights1 = [30.0, 30.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
+		pre_scale_weights2 = [1e3, 1e4]
+		# pre_scale_weights2 = [1e4, 1e4]
+
+
+		# ## Compute base losses
+		# loss_dict = {
+		# # 'loss_dice1': loss_base1, # loss_dice1
+		# 'loss_base1': loss_base1, # loss_dice1
+		# 'loss_dice2': loss_dice2,
+		# 'loss_dice3': loss_dice3,
+		# 'loss_dice4': loss_dice4,
+		# 'loss_huber1': loss_huber1*pre_scale_weights1[0],
+		# 'loss_huber2': loss_huber2*pre_scale_weights1[1],
+		# 'loss_cap1': loss_cap1*pre_scale_weights1[0],
+		# 'loss_cap2': loss_cap2*pre_scale_weights1[1],
+		# }
+
+		## Compute base losses
+		loss_dict = {
+		# 'loss_dice1': loss_base1, # loss_dice1
+		'loss_dice1': loss_base1, # loss_dice1
+		'loss_dice2': loss_dice2,
+		'loss_dice3': 0.5*loss_dice3 + 0.5*loss_dice4,
+		# 'loss_dice4': loss_dice4,
+		'loss_huber1': loss_huber1*pre_scale_weights1[0],
+		'loss_huber2': loss_huber2*pre_scale_weights1[1],
+		# 'loss_cap1': loss_cap1*pre_scale_weights1[0],
+		# 'loss_cap2': loss_cap2*pre_scale_weights1[1],
+		}
+
+		# 'loss_mse1': loss_mse1*pre_scale_weights1[0],
+		# 'loss_mse2': loss_mse2*pre_scale_weights1[1]
+
 
 		if i > n_burn_in:
+			loss_dict.update({'loss_negative': loss_negative*pre_scale_weights2[0]})
 
 			if loss_consistency_flag == True:
+				loss_dict.update({'loss_consistency': loss_consistency*pre_scale_weights2[1]})
+			
+			loss_dict.update({'loss_cap1': loss_cap1*pre_scale_weights1[0]})
+			loss_dict.update({'loss_cap2': loss_cap2*pre_scale_weights1[1]})
 
-				loss_dict = {
-				'loss_dice1': loss_base1, ## loss_dice1 ## Possibly move loss_dice1 to auxilary loss
-				'loss_dice2': loss_dice2,
-				'loss_dice3': loss_dice3,
-				'loss_dice4': loss_dice4,
-				'loss_negative': loss_negative*pre_scale_weights2[0],
-				'loss_consistency': loss_consistency*pre_scale_weights2[1],
-				'loss_mse1': loss_mse1*pre_scale_weights1[0],
-				'loss_mse2': loss_mse2*pre_scale_weights1[1]
-				}
-
-			else:
-
-				loss_dict = {
-				'loss_dice1': loss_base1, ## loss_dice1 ## Possibly move loss_dice1 to auxilary loss
-				'loss_dice2': loss_dice2,
-				'loss_dice3': loss_dice3,
-				'loss_dice4': loss_dice4,
-				'loss_negative': loss_negative*pre_scale_weights2[0],
-				'loss_mse1': loss_mse1*pre_scale_weights1[0],
-				'loss_mse2': loss_mse2*pre_scale_weights1[1]
-				}				
-
-		else:
-
-			loss_dict = {
-			'loss_dice1': loss_base1, # loss_dice1
-			'loss_dice2': loss_dice2,
-			'loss_dice3': loss_dice3,
-			'loss_dice4': loss_dice4,
-			'loss_mse1': loss_mse1*pre_scale_weights1[0],
-			'loss_mse2': loss_mse2*pre_scale_weights1[1]
-			}
 
 		# moi
 		loss = LossBalancer(loss_dict, accum_steps = n_batch, is_last_accum_step = (inc == (n_batch - 1))) # losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False
@@ -3391,17 +3514,43 @@ for i in range(n_restart_step, n_epochs):
 	mx_pred_4[i] = mx_pred_val_4/n_batch
 	loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
-	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_negative_val, loss_grad_val, loss_consistency_val, (10e4)*loss_regularize_val))
+	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_negative_val, loss_cap_val, loss_consistency_val, (10e4)*loss_regularize_val))
 
 	# Log losses
 	if use_wandb_logging == True:
 		wandb.log({"loss": loss_val})
 
 	with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
-		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_negative_val, loss_grad_val, loss_consistency_val, (10e4)*loss_regularize_val))
+		text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_negative_val, loss_cap_val, loss_consistency_val, (10e4)*loss_regularize_val))
 
 
 
+# 	loss_dict = {
+# 	'loss_dice1': loss_base1, ## loss_dice1 ## Possibly move loss_dice1 to auxilary loss
+# 	'loss_dice2': loss_dice2,
+# 	'loss_dice3': loss_dice3,
+# 	'loss_dice4': loss_dice4,
+# 	'loss_negative': loss_negative*pre_scale_weights2[0],
+# 	'loss_mse1': loss_mse1*pre_scale_weights1[0],
+# 	'loss_mse2': loss_mse2*pre_scale_weights1[1]
+# 	}		
+
+# 	if loss_consistency_flag == True:
+
+# 		loss_dict = {
+# 		'loss_dice1': loss_base1, ## loss_dice1 ## Possibly move loss_dice1 to auxilary loss
+# 		'loss_dice2': loss_dice2,
+# 		'loss_dice3': loss_dice3,
+# 		'loss_dice4': loss_dice4,
+# 		'loss_negative': loss_negative*pre_scale_weights2[0],
+# 		'loss_consistency': loss_consistency*pre_scale_weights2[1],
+# 		'loss_mse1': loss_mse1*pre_scale_weights1[0],
+# 		'loss_mse2': loss_mse2*pre_scale_weights1[1]
+# 		}
+
+# 	else:		
+
+# else:
 
 
 ## Global loss
