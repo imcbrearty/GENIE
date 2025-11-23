@@ -4264,92 +4264,110 @@ for batch_idx, inputs in enumerate(loader):
 
 
 
-def compute_loss(x, n_repeat = 5, return_metrics = False):
+def compute_loss(x, n_repeat = 10, return_metrics = False):
 
 	## Source threshold x[0]
 	## Association threshold x[1]
 	## Could also estimate thresholds based on a function
 
+	with torch.no_grad():
 
-	n_found = 0
-	n_target = 0
-	n_match = 0
-	Srcs = []
-	Srcs_trgt = []
-	Matches = []
-	Ind, Ind1 = [], []
-	c1, c2 = 0, 0
+		n_found = 0
+		n_target = 0
+		n_match = 0
+		Srcs = []
+		Srcs_trgt = []
+		Matches = []
+		Ind, Ind1 = [], []
+		c1, c2 = 0, 0
 
-	inc = 0
-	for n in n_repeat:
-
-
-		inputs = dataset.getitem__(np.random.choice(len(files_load)))
-		## Need to overwrite the data entries in input_tensors
-		if use_gradient_loss == False:
-			lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l = inputs[1]
-		else:
-			lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t = inputs[1]		
-		input_tensors_l = inputs[0]
-		for j in range(n_batch): input_tensors_l[j][4] = Data(x = spatial_vals_l[j], edge_index = input_tensors_l[j][4]) ## Ideally remove these
-		for j in range(n_batch): input_tensors_l[j][5] = Data(x = spatial_vals_l[j], edge_index = input_tensors_l[j][5])
-		input_tensors_l = to_gpu(inputs[0]) if device.type == 'cuda' else inputs[0]
-		if device.type == 'cuda': pick_lbls_l = to_gpu(pick_lbls_l)
-
-		for i0 in range(len(X_query)):
+		inc = 0
+		for n in range(n_repeat):
 
 
+			inputs = dataset.__getitem__(np.random.choice(len(files_load)))
+			## Need to overwrite the data entries in input_tensors
 			if use_gradient_loss == False:
-				out = mz(*input_tensors_l[i0], save_state = True) if (use_negative_loss == True)*(np.mod(i, use_negative_loss_step) == 0) else mz(*input_tensors_l[i0])
+				lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l = inputs[1]
 			else:
-				# out, grads = mz(*input_tensors)
-				out, grads = mz(*input_tensors_l[i0], save_state = True) if (use_negative_loss == True)*(np.mod(i, use_negative_loss_step) == 0) else mz(*input_tensors_l[i0])
-				grad_grid_src, grad_grid_t, grad_query_src, grad_query_t = grads
+				lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t = inputs[1]		
+			input_tensors_l = inputs[0]
+			for j in range(n_batch): input_tensors_l[j][4] = Data(x = spatial_vals_l[j], edge_index = input_tensors_l[j][4]) ## Ideally remove these
+			for j in range(n_batch): input_tensors_l[j][5] = Data(x = spatial_vals_l[j], edge_index = input_tensors_l[j][5])
+			input_tensors_l = to_float32(to_gpu(inputs[0])) if device.type == 'cuda' else to_float32(inputs[0])
+			if device.type == 'cuda': pick_lbls_l = to_gpu(pick_lbls_l)
+
+			for i0 in range(len(X_query)):
 
 
-			## First detect maxima
-			ifind = torch.where(out[1][:,0] > x[0])[0].cpu().detach().numpy()
-			mp = LocalMarching(device = device)
-			tc_win = pred_params[2]*1.35 ## Note: could learn these clustering windows as well
-			sp_win = pred_params[3]*1.35
-			scale_depth_clustering = 0.2
-			srcs_out = mp(X_query[i0][ifind], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False)
+				if len(lp_times[i0]) > 0:
+
+					if use_gradient_loss == False:
+						out = mz(*input_tensors_l[i0], save_state = True) if (use_negative_loss == True)*(np.mod(i, use_negative_loss_step) == 0) else mz(*input_tensors_l[i0])
+					else:
+						# out, grads = mz(*input_tensors)
+						out, grads = mz(*input_tensors_l[i0], save_state = True) if (use_negative_loss == True)*(np.mod(i, use_negative_loss_step) == 0) else mz(*input_tensors_l[i0])
+						grad_grid_src, grad_grid_t, grad_query_src, grad_query_t = grads
 
 
+					## First detect maxima
+					ifind = torch.where(out[1][:,0] > x[0])[0].cpu().detach().numpy()
+				
+				else:
 
-			## Apply bipartite matching
-			temporal_win_match = src_t_kernel*2.0
-			spatial_win_match = src_x_kernel*2.0
-			if len(lp_srcs[i0]) > 0:
-				matches = maximize_bipartite_assignment(lp_srcs[i0], srcs_out, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
-			else:
-				matches = np.zeros((0,2))
+					ifind = np.array([]).astype('int')
 
 
-			n_found += len(srcs_out)
-			n_target += len(lp_srcs[i0])
-			n_match += len(matches)
+				if len(ifind) > 0:
 
-			Srcs.append(srcs_out)
-			Srcs_trgt.append(lp_srcs[i0])
-			if len(matches) > 0:
-				Matches.append(matches + np.array([c1, c2]).reshape(1,-1))
-			c1 += len(lp_srcs[i0])
-			c2 += len(srcs_out)
-			Ind.append(inc*np.ones(len(srcs_out))) ## These track which sources are in independent groups (note: could also just offset in time)
-			Ind1.append(inc*np.ones(len(lp_srcs[i0])))
-			inc += 1
+					mp = LocalMarching(device = device)
+					tc_win = pred_params[2]*1.35 ## Note: could learn these clustering windows as well
+					sp_win = pred_params[3]*1.35
+					scale_depth_clustering = 0.2
+					srcs_out = mp(np.concatenate((X_query[i0][ifind].cpu().detach().numpy(),out[1][ifind,0].cpu().detach().numpy().reshape(-1,1)), axis = 1), ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False)
 
 
-	## Compute metrics
-	prec = n_match/n_found
-	rec = n_match/(n_match + (n_target - n_match))
-	f1 = 2.0*prec*rec/(prec + rec)
-	if len(Srcs) > 0: Srcs = np.vstack(Srcs); Ind = np.hstack(Ind)
-	if len(Srcs_trgt) > 0: Srcs_trgt = np.vstack(Srcs_trgt); Ind1 = np.hstack(Ind1)
-	if len(Matches) > 0: Matches = np.vstack(Matches)
+					## Apply bipartite matching
+					temporal_win_match = src_t_kernel*2.0
+					spatial_win_match = src_x_kernel*2.0
+					if len(lp_srcs[i0]) > 0:
+						matches = maximize_bipartite_assignment(lp_srcs[i0].cpu().detach().numpy(), srcs_out, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
+					else:
+						matches = np.zeros((0,2))
+
+				else:
+
+					srcs_out = np.zeros((0,5))
+					matches = np.zeros((0,2))
+
+
+				n_found += len(srcs_out)
+				n_target += len(lp_srcs[i0])
+				n_match += len(matches)
+
+				Srcs.append(srcs_out)
+				Srcs_trgt.append(lp_srcs[i0])
+				if len(matches) > 0:
+					Matches.append(matches + np.array([c1, c2]).reshape(1,-1))
+				c1 += len(lp_srcs[i0])
+				c2 += len(srcs_out)
+				Ind.append(inc*np.ones(len(srcs_out))) ## These track which sources are in independent groups (note: could also just offset in time)
+				Ind1.append(inc*np.ones(len(lp_srcs[i0])))
+				inc += 1
+
+
+		## Compute metrics
+		prec = n_match/n_found
+		rec = n_match/(n_match + (n_target - n_match))
+		f1 = 2.0*prec*rec/(prec + rec)
+		if len(Srcs) > 0: Srcs = np.vstack(Srcs); Ind = np.hstack(Ind)
+		if len(Srcs_trgt) > 0: Srcs_trgt = np.vstack(Srcs_trgt); Ind1 = np.hstack(Ind1)
+		if len(Matches) > 0: Matches = np.vstack(Matches)
+
+		print('Obtained %0.4f precision, %0.4f recall, %0.4f f1'%(prec, rec, f1))
 
 	if return_metrics == False:
+
 
 		return -1.0*f1
 
