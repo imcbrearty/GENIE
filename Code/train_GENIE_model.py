@@ -3766,7 +3766,7 @@ for batch_idx, inputs in enumerate(loader):
 			for j in range(2):
 				i1 = np.where(Lbls_query[i0][:,0].cpu().detach().numpy() > 0.1)[0]
 				i2 = np.where(out[1][:,0].cpu().detach().numpy() > 0.1)[0]
-				ax[2*j].scatter(X_query[i0][i1,3].cpu().detach().numpy(), X_query[0][i1,j].cpu().detach().numpy(), c = Lbls_query[i0][i1,0].cpu().detach().numpy())
+				ax[2*j].scatter(X_query[i0][i1,3].cpu().detach().numpy(), X_query[i0][i1,j].cpu().detach().numpy(), c = Lbls_query[i0][i1,0].cpu().detach().numpy())
 				ax[2*j + 1].scatter(X_query[i0][i2,3].cpu().detach().numpy(), X_query[i0][i2,j].cpu().detach().numpy(), c = out[1][i2,0].cpu().detach().numpy())
 				ax[2*j].set_xlim(X_query[i0][:,3].amin(), X_query[i0][:,3].amax())
 				ax[2*j + 1].set_xlim(X_query[i0][:,3].amin(), X_query[i0][:,3].amax())
@@ -5502,6 +5502,7 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
