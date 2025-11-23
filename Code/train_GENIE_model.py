@@ -3899,16 +3899,16 @@ for batch_idx, inputs in enumerate(loader):
 
 			ifind_cap1 = np.where(Lbls[i0] > cap_limit)[0]
 			ifind_cap2 = np.where(Lbls_query[i0] > cap_limit)[0]
-			ifind_cap11, ifind_cap12 = np.where(pick_lbls[:,:,0].cpu().detach().numpy() > cap_limit) # [0]
-			ifind_cap21, ifind_cap22 = np.where(pick_lbls[:,:,1].cpu().detach().numpy() > cap_limit) # [0]
+			# ifind_cap11, ifind_cap12 = np.where(pick_lbls[:,:,0].cpu().detach().numpy() > cap_limit) # [0]
+			# ifind_cap21, ifind_cap22 = np.where(pick_lbls[:,:,1].cpu().detach().numpy() > cap_limit) # [0]
 
 			loss_cap1 = torch.tensor(0.0).to(device)
 			loss_cap2 = torch.tensor(0.0).to(device)
 			if len(ifind_cap1) > 0: loss_cap1 += scale_cap*(weights[0]*huber_loss(out[0][ifind_cap1], torch.Tensor(Lbls[i0][ifind_cap1]).to(device)))
 			if len(ifind_cap2) > 0: loss_cap1 += scale_cap*(weights[1]*huber_loss(out[1][ifind_cap2], torch.Tensor(Lbls_query[i0][ifind_cap2]).to(device)))
 
-			if len(ifind_cap11) > 0: loss_cap2 += scale_cap*(weights[2]*huber_loss(out[2][ifind_cap11,ifind_cap12,0], pick_lbls[ifind_cap11,ifind_cap12,0]))
-			if len(ifind_cap21) > 0: loss_cap2 += scale_cap*(weights[3]*huber_loss(out[3][ifind_cap21,ifind_cap22,0], pick_lbls[ifind_cap21,ifind_cap22,1]))
+			# if len(ifind_cap11) > 0: loss_cap2 += scale_cap*(weights[2]*huber_loss(out[2][ifind_cap11,ifind_cap12,0], pick_lbls[ifind_cap11,ifind_cap12,0]))
+			# if len(ifind_cap21) > 0: loss_cap2 += scale_cap*(weights[3]*huber_loss(out[3][ifind_cap21,ifind_cap22,0], pick_lbls[ifind_cap21,ifind_cap22,1]))
 
 			loss_cap_val += (loss_cap1 + loss_cap2)/n_batch
 
@@ -3922,11 +3922,11 @@ for batch_idx, inputs in enumerate(loader):
 			min_up_sample = 0.1
 			## Up-sample queries for regions of high prediction but low labels. Or alternatively, essentially run a peak finder on the output.
 			## Do not include points that are < thresh for both labels and predictions
-			prob_up_sample = np.maximum(out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0] < min_up_sample), 0.0)
+			prob_up_sample = np.maximum(out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0].cpu().detach().numpy() < min_up_sample), 0.0)
 			# prob_up_sample = 
 			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
 			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
-			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3], X_query[i0][:,3], prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, replace = False, randomize = False) # replace = False
+			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3].cpu().detach().numpy(), X_query[i0][:,3].cpu().detach().numpy(), prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, replace = False, randomize = False) # replace = False
 			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device), train = True) # x_query_cart, t_query
 			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3], lp_srcs[i0][:,3], src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
 
@@ -4091,7 +4091,7 @@ for batch_idx, inputs in enumerate(loader):
 				loss_dict.update({'loss_consistency': loss_consistency*pre_scale_weights2[1]})
 			
 			loss_dict.update({'loss_cap1': loss_cap1*pre_scale_weights1[0]})
-			loss_dict.update({'loss_cap2': loss_cap2*pre_scale_weights1[1]})
+			# loss_dict.update({'loss_cap2': loss_cap2*pre_scale_weights1[1]})
 
 
 		# moi
