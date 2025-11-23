@@ -2974,6 +2974,7 @@ class TrainingDataset(Dataset):
 			lp_phases = []
 			X_query = []
 			Lbls = []
+			Locs = []
 			Lbls_query = []
 			pick_lbls_l = []
 			spatial_vals_l = []
@@ -3004,6 +3005,7 @@ class TrainingDataset(Dataset):
 				Lbls.append(torch.from_numpy(f['Lbls_%d'%i][:]))
 				Lbls_query.append(torch.from_numpy(f['Lbls_query_%d'%i][:]))
 				pick_lbls_l.append(torch.from_numpy(f['pick_lbls_%d'%i][:]))
+				Locs.append(torch.from_numpy(f['Locs_%d'%i][:]))
 				if self.use_gradient_loss == True:
 					Lbls_grad_spc.append(torch.from_numpy(f['Lbls_grad_spc_%d'%i][:]))
 					Lbls_query_grad_spc.append(torch.from_numpy(f['Lbls_query_grad_spc_%d'%i][:]))
@@ -3051,11 +3053,11 @@ class TrainingDataset(Dataset):
 
 		if self.use_gradient_loss == False:
 
-			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, pick_lbls_l, x_src_query_cart_l, spatial_vals_l]
+			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l]
 
 		else:
 
-			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t]
+			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t]
 
 
 
@@ -3480,9 +3482,9 @@ for batch_idx, inputs in enumerate(loader):
 
 	## Need to overwrite the data entries in input_tensors
 	if use_gradient_loss == False:
-		lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, pick_lbls_l, x_src_query_cart_l, spatial_vals_l = inputs[1]
+		lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l = inputs[1]
 	else:
-		lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t = inputs[1]		
+		lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t = inputs[1]		
 
 
 	input_tensors_l = inputs[0]
@@ -3762,21 +3764,21 @@ for batch_idx, inputs in enumerate(loader):
 		if make_plot == True:
 			fig, ax = plt.subplots(4, 1, sharex = True)
 			for j in range(2):
-				i1 = np.where(Lbls_query[i0][:,0] > 0.1)[0]
+				i1 = np.where(Lbls_query[i0][:,0].cpu().detach().numpy() > 0.1)[0]
 				i2 = np.where(out[1][:,0].cpu().detach().numpy() > 0.1)[0]
-				ax[2*j].scatter(X_query[i0][i1,3], X_query[0][i1,j], c = Lbls_query[i0][i1,0])
-				ax[2*j + 1].scatter(X_query[i0][i2,3], X_query[i0][i2,j], c = out[1][i2,0].cpu().detach().numpy())
-				ax[2*j].set_xlim(X_query[i0][:,3].min(), X_query[i0][:,3].max())
-				ax[2*j + 1].set_xlim(X_query[i0][:,3].min(), X_query[i0][:,3].max())
-				ax[2*j].set_ylim(X_query[i0][:,j].min(), X_query[i0][:,j].max())
-				ax[2*j + 1].set_ylim(X_query[i0][:,j].min(), X_query[i0][:,j].max())
+				ax[2*j].scatter(X_query[i0][i1,3].cpu().detach().numpy(), X_query[0][i1,j].cpu().detach().numpy(), c = Lbls_query[i0][i1,0].cpu().detach().numpy())
+				ax[2*j + 1].scatter(X_query[i0][i2,3].cpu().detach().numpy(), X_query[i0][i2,j].cpu().detach().numpy(), c = out[1][i2,0].cpu().detach().numpy())
+				ax[2*j].set_xlim(X_query[i0][:,3].amin(), X_query[i0][:,3].amax())
+				ax[2*j + 1].set_xlim(X_query[i0][:,3].amin(), X_query[i0][:,3].amax())
+				ax[2*j].set_ylim(X_query[i0][:,j].amin(), X_query[i0][:,j].amax())
+				ax[2*j + 1].set_ylim(X_query[i0][:,j].amin(), X_query[i0][:,j].amax())
 
 			fig.set_size_inches(10,8)
 			fig.savefig(path_to_file + 'Plots/example_sources_%d.png'%cnt_plot)
 
 			fig, ax = plt.subplots(2, 1, sharex = True, sharey = True)
-			ax[0].scatter(X_query[i0][:,3], Lbls_query[i0][:,0], c = X_query[i0][:,0])
-			ax[1].scatter(X_query[i0][:,3], out[1][:,0].cpu().detach().numpy(), c = X_query[i0][:,0])
+			ax[0].scatter(X_query[i0][:,3].cpu().detach().numpy(), Lbls_query[i0][:,0].cpu().detach().numpy(), c = X_query[i0][:,0].cpu().detach().numpy())
+			ax[1].scatter(X_query[i0][:,3].cpu().detach().numpy(), out[1][:,0].cpu().detach().numpy(), c = X_query[i0][:,0].cpu().detach().numpy())
 			fig.savefig(path_to_file + 'Plots/example_sources_in_time_%d.png'%cnt_plot)
 
 
@@ -3789,12 +3791,12 @@ for batch_idx, inputs in enumerate(loader):
 			ifindp = np.where(pick_lbls[iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
 			ifinds = np.where(pick_lbls[iarg,:,1].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
 			ax[0,0].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
-			ax[0,0].scatter(Locs[i0][lp_stations[i0].astype('int')[ifindp],1], Locs[i0][lp_stations[i0].astype('int')[ifindp],0], c = pick_lbls[iarg,ifindp,0].cpu().detach().numpy(), marker = '^')
+			ax[0,0].scatter(Locs[i0][lp_stations[i0].cpu().detach().numpy().astype('int')[ifindp],1], Locs[i0][lp_stations[i0].cpu().detach().numpy().astype('int')[ifindp],0], c = pick_lbls[iarg,ifindp,0].cpu().detach().numpy(), marker = '^')
 			ax[0,1].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
-			ax[0,1].scatter(Locs[i0][lp_stations[i0].astype('int')[ifinds],1], Locs[i0][lp_stations[i0].astype('int')[ifinds],0], c = pick_lbls[iarg,ifinds,1].cpu().detach().numpy(), marker = '^')
+			ax[0,1].scatter(Locs[i0][lp_stations[i0].cpu().detach().numpy().astype('int')[ifinds],1], Locs[i0][lp_stations[i0].cpu().detach().numpy().astype('int')[ifinds],0], c = pick_lbls[iarg,ifinds,1].cpu().detach().numpy(), marker = '^')
 			ax[0,0].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
 			ax[0,1].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
-			src_plot = ftrns2(x_src_query_cart[iarg].reshape(1,-1))
+			src_plot = ftrns2(x_src_query_cart_l[i0].cpu().detach().numpy()[iarg].reshape(1,-1))
 			ax[0,0].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
 			ax[0,1].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
 
@@ -3802,12 +3804,12 @@ for batch_idx, inputs in enumerate(loader):
 			ifindp = np.where(out[2][iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
 			ifinds = np.where(out[3][iarg,:,0].cpu().detach().numpy() > min_thresh_val)[0] # ].astype('int')
 			ax[1,0].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
-			ax[1,0].scatter(Locs[i0][lp_stations[i0].astype('int')[ifindp],1], Locs[i0][lp_stations[i0].astype('int')[ifindp],0], c = out[2][iarg,ifindp,0].cpu().detach().numpy(), marker = '^')
+			ax[1,0].scatter(Locs[i0][lp_stations[i0].cpu().detach().numpy().astype('int')[ifindp],1], Locs[i0][lp_stations[i0].cpu().detach().numpy().astype('int')[ifindp],0], c = out[2][iarg,ifindp,0].cpu().detach().numpy(), marker = '^')
 			ax[1,1].scatter(Locs[i0][:,1], Locs[i0][:,0], c = 'grey', marker = '^')
-			ax[1,1].scatter(Locs[i0][lp_stations[i0].astype('int')[ifinds],1], Locs[i0][lp_stations[i0].astype('int')[ifinds],0], c = out[3][iarg,ifinds,0].cpu().detach().numpy(), marker = '^')
+			ax[1,1].scatter(Locs[i0][lp_stations[i0].cpu().detach().numpy().astype('int')[ifinds],1], Locs[i0][lp_stations[i0].cpu().detach().numpy().astype('int')[ifinds],0], c = out[3][iarg,ifinds,0].cpu().detach().numpy(), marker = '^')
 			ax[1,0].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
 			ax[1,1].set_aspect(1.0/np.cos(locs[:,0].mean()*np.pi/180.0))
-			src_plot = ftrns2(x_src_query_cart[iarg].reshape(1,-1))
+			src_plot = ftrns2(x_src_query_cart_l[i0].cpu().detach().numpy()[iarg].reshape(1,-1))
 			ax[1,0].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
 			ax[1,1].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
 			fig.savefig(path_to_file + 'Plots/example_stations_%d.png'%cnt_plot)
@@ -3928,7 +3930,7 @@ for batch_idx, inputs in enumerate(loader):
 			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
 			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3].cpu().detach().numpy(), X_query[i0][:,3].cpu().detach().numpy(), prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, replace = False, randomize = False) # replace = False
 			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device), train = True) # x_query_cart, t_query
-			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3], lp_srcs[i0][:,3], src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
+			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3].cpu().detach().numpy(), lp_srcs[i0][:,3].cpu().detach().numpy(), src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
 
 
 			# mask_query = (out_query > min_up_sample) + (torch.Tensor(lbls_query).to(device) > min_up_sample) ## At least one field > min_up_sample
@@ -3977,14 +3979,14 @@ for batch_idx, inputs in enumerate(loader):
 					if use_sigmoid == False:
 
 						# weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
-						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::] - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
+						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::].cpu().detach().numpy() - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
 						loss_consistency = mse_loss(out[1][ind_consistency::][mask_loss.long()], out_save[0][ind_consistency::][mask_loss.long()]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
 						# loss = 0.9*loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
 						# loss_consistency_val += 0.1*loss_consistency.item()/n_batch
 
 					else:
 
-						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::] - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
+						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::].cpu().detach().numpy() - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
 						loss_consistency = mse_loss(out[1][ind_consistency::][mask_loss.long()][:,0], out_save[0][ind_consistency::][mask_loss.long()][:,0]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
 						# loss = 0.9*loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
 						# loss_consistency_val += 0.1*loss_consistency.item()/n_batch					
@@ -3994,9 +3996,9 @@ for batch_idx, inputs in enumerate(loader):
 
 
 			out_save = [out[1]]
-			Lbls_save = [Lbls_query[i0]]
+			Lbls_save = [Lbls_query[i0].cpu().detach().numpy()]
 			iter_loss = [i, inc]
-			X_query_save = [X_query[i0]]
+			X_query_save = [X_query[i0].cpu().detach().numpy()]
 
 
 		# if (use_gradient_loss == True)*(i > int(n_epochs/5)):
@@ -4285,9 +4287,9 @@ def compute_loss(x, n_repeat = 5, return_metrics = False):
 		inputs = dataset.getitem__(np.random.choice(len(files_load)))
 		## Need to overwrite the data entries in input_tensors
 		if use_gradient_loss == False:
-			lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, pick_lbls_l, x_src_query_cart_l, spatial_vals_l = inputs[1]
+			lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l = inputs[1]
 		else:
-			lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t = inputs[1]		
+			lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t = inputs[1]		
 		input_tensors_l = inputs[0]
 		for j in range(n_batch): input_tensors_l[j][4] = Data(x = spatial_vals_l[j], edge_index = input_tensors_l[j][4]) ## Ideally remove these
 		for j in range(n_batch): input_tensors_l[j][5] = Data(x = spatial_vals_l[j], edge_index = input_tensors_l[j][5])
