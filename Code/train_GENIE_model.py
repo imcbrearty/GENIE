@@ -2761,7 +2761,7 @@ loss_names = ['loss_dice1', 'loss_dice2', 'loss_dice3', 'loss_dice4', 'loss_nega
 
 
 
-balancer = LossAccumulationBalancer(
+LossBalancer = LossAccumulationBalancer(
     anchor='loss_dice3',
     group_targets={
         'primary':    1.0,       # everything starting with loss_dice
@@ -5761,6 +5761,7 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
