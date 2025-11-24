@@ -1614,6 +1614,8 @@ class SourceStationAttention(MessagePassing):
 		## Create n_src dummy "arrivals" to link to each source.
 		if self.use_dual_attention == True: ## Is this arrival reshape correct?
 
+			## Should add phase embedding
+
 			arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1 + n_src, self.ndim_arv_in, device = self.device)), dim = 0)
 			phase_inpt = torch.cat((torch.tile(phase_label, (n_src, 1)), 2.0*torch.ones(1 + n_src,1).to(self.device)), dim = 0)
 			# phase_inpt = torch.cat((phase_label.expand(n_src, -1), -1.0*torch.ones(1 + n_src,1).to(self.device)), dim = 0)
