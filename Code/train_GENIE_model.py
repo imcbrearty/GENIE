@@ -2408,15 +2408,27 @@ class LossAccumulationBalancer:
         self._step_count = 0
         self.accum_steps = None
 
-    def _get_group(self, name: str) -> str:
-        """Map loss name → group. Primary is anything starting with primary_ext."""
-        if name.startswith(self.primary_ext):
-            return 'primary'
-        # Match exact group prefixes you define, longest first
-        for group in sorted(self.group_targets.keys(), key=len, reverse=True):
-            if group != 'primary' and name.startswith(group):   # e.g. 'consistency_', 'mining_'
-                return group
-        return self.default_group  # fallback
+    # def _get_group(self, name: str) -> str:
+    #     """Map loss name → group. Primary is anything starting with primary_ext."""
+    #     if name.startswith(self.primary_ext):
+    #         return 'primary'
+    #     # Match exact group prefixes you define, longest first
+    #     for group in sorted(self.group_targets.keys(), key=len, reverse=True):
+    #         if group != 'primary' and name.startswith(group):   # e.g. 'consistency_', 'mining_'
+    #             return group
+    #     return self.default_group  # fallback
+
+	def _get_group(self, name: str) -> str:
+	    if name.startswith(self.primary_ext):          # e.g. "loss_dice"
+	        return 'primary'
+
+	    # ← tries to match any group key you put in group_targets
+	    for group in sorted(self.group_targets.keys(), key=len, reverse=True):
+	        if group != 'primary' and name.startswith(group):
+	            return group
+
+	    # ← fallback if nothing matched
+	    return 'aux'                                    # ← this is the default catch-all
 
     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
         if accum_steps is not None:
@@ -2766,10 +2778,10 @@ LossBalancer = LossAccumulationBalancer(
     group_targets={
         'primary':    1.0,       # everything starting with loss_dice
         'loss_regression': 0.02,      # smooth l1 loss
-        'loss_consistency': 0.02,    # tiny regularizer
+        'loss_consistency': 0.005,    # tiny regularizer
         'loss_negative':     0.02,      # loss_negative, loss_cap1, etc.
         'loss_cap':     0.01,      # loss_negative, loss_cap1, etc.
-        # 'loss_auxilary': 0.01, ## Base loss
+        'aux': 0.02, ## Base loss
         # add more whenever you want
     },
     primary_ext='loss_dice',
@@ -5761,7 +5773,6 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
-
 
 
 
