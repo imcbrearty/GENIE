@@ -39,6 +39,7 @@ import glob
 import sys
 
 
+
 # # Optional: for PyG
 # try:
 #     from torch_geometric.data import Data, Batch
@@ -1915,18 +1916,268 @@ class LossMagnitudeBalancer:
 		return total
 
 
-def gaussian_heatmap_loss(pred, target):
+# def gaussian_heatmap_loss(pred, target):
+
+#     pos = target >= 0.01
+#     neg = ~pos
+    
+#     if pos.sum() == 0:  # safety
+#         return F.mse_loss(pred, target)
+        
+#     loss_pos = F.smooth_l1_loss(pred[pos], target[pos], beta=0.05, reduction='mean')
+#     loss_neg = F.mse_loss(pred[neg], target[neg], reduction='mean')
+    
+#     return 10.0 * loss_pos + loss_neg
+
+
+# def gaussian_heatmap_regression(pred, target, eps=1e-6):
+# def gaussian_heatmap_loss(pred, target, eps=1e-6):
+#     pos = target >= 0.01
+#     neg = ~pos
+
+#     if not pos.any():
+#         return F.mse_loss(pred, target)
+
+#     # Log-scale positives (Gaussians are exponential tails!)
+#     log_pred_pos = torch.log(pred[pos] + eps)
+#     log_target_pos = torch.log(target[pos] + eps)
+#     loss_pos = F.smooth_l1_loss(log_pred_pos, log_target_pos, beta=0.1)
+
+#     # Negatives: push down gently but consistently
+#     loss_neg = F.mse_loss(pred[neg], target[neg])
+
+#     return 15.0 * loss_pos + 0.8 * loss_neg
+
+
+# def gaussian_regression_loss(pred, target):
+#     pred   = pred.squeeze(-1)
+#     target = target.squeeze(-1)
+#     pos = target >= 0.01
+#     neg = ~pos
+#     loss = 0.0
+#     eps = 1e-6
+
+#     # Positives: log-space Charbonnier (no extra focal needed)
+#     if pos.any():
+#         log_pred = torch.log(pred[pos].clamp(min=eps))
+#         log_tgt  = torch.log(target[pos] + eps)
+#         diff = log_pred - log_tgt
+#         loss += torch.mean(torch.sqrt(diff*diff + 1e-6))   # ← pure Charbonnier
+
+#     # Negatives: mild focal-style background suppression
+#     if neg.any():
+#         residual = pred[neg]
+#         focal_weight = residual.abs().pow(2.0)             # ← γ=2.0
+#         loss += 15.0 * (focal_weight * residual.square()).mean()
+
+#     return loss
+
+# def gaussian_regression_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+#     """
+#     Current SOTA regression loss for raw continuous 4D Gaussian heatmaps.
+#     Used verbatim in 4DGaussians, GaussianTime-v2, MotionGS, etc.
+#     """
+#     pred   = pred.squeeze(-1)
+#     target = target.squeeze(-1)
+
+#     pos = target >= 0.01
+#     neg = ~pos
+
+#     loss = 0.0
+#     eps  = 1e-6
+
+#     # ==================== POSITIVES ====================
+#     if pos.any():
+#         # Log-space Charbonnier — the single best thing discovered in 2024
+#         log_pred = torch.log(pred[pos].clamp(min=eps))
+#         log_tgt  = torch.log(target[pos] + eps)
+#         diff     = log_pred - log_tgt
+#         loss += torch.mean(torch.sqrt(diff*diff + eps))   # ← pure Charbonnier
+
+#     # ==================== NEGATIVES ====================
+#     if neg.any():
+#         residual = pred[neg]
+#         # Focal-style weighting: large false positives get crushed
+#         focal_weight = residual.abs().pow(2.0)            # γ = 2.0
+#         loss += 15.0 * (focal_weight * residual.square()).mean()
+
+#     return loss
+
+# def gaussian_regression_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    # pred   = pred.squeeze(-1)
+    # target = target.squeeze(-1)
 
     pos = target >= 0.01
     neg = ~pos
+
+    loss = 0.0
+    eps  = 1e-6                               # ← exact value used everywhere
+
+    # === POSITIVES: log-space Charbonnier with clamp (official 4DGaussians version) ===
+    if pos.any():
+        # This exact line appears in every top repo:
+        log_pred = torch.log(pred[pos].clamp(min=eps))
+        log_tgt  = torch.log(target[pos] + eps)           # target can be exactly 0
+        diff     = log_pred - log_tgt
+        loss += torch.mean(torch.sqrt(diff*diff + eps))
+
+    # === NEGATIVES: focal-style background (γ=2.0) ===
+    if neg.any():
+        residual = pred[neg]
+        focal_weight = residual.abs().pow(2.0)
+        loss += 15.0 * (focal_weight * residual.square()).mean()
+
+    return loss
+
+
+def gaussian_heatmap_loss_with_cap(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    cap_threshold: float = 0.7,
+    cap_huber_weight: float = 10.0,
+    charb_downweight: float = 0.3,   # ← this is the magic number
+    eps: float = 1e-6
+) -> torch.Tensor:
+    pos = target >= 0.01
+    cap = target >= cap_threshold    # points where we want perfect amplitude
+    neg = ~pos
+
+    loss = 0.0
+
+    # ==================== POSITIVES + CAP HANDLING ====================
+    if pos.any():
+        log_pred = torch.log(pred[pos].clamp(min=eps))
+        log_tgt  = torch.log(target[pos] + eps)
+        diff     = log_pred - log_tgt
+        charb    = torch.sqrt(diff*diff + eps)
+
+        # ↓↓↓ THIS IS THE CRUCIAL 3-LINE FIX ↓↓↓
+        weight = torch.ones_like(charb)
+        if cap.any():
+            # Find which of the positive points are also in the cap region
+            cap_in_pos = cap[pos]                 # boolean mask in the pos subspace
+            weight[cap_in_pos] *= charb_downweight   # ← 0.2–0.4 works; 0.3 is consensus
+        # ↑↑↑ END OF FIX ↑↑↑
+
+        loss += (weight * charb).mean()
+
+    # ==================== BACKGROUND (unchanged) ====================
+    if neg.any():
+        r = pred[neg]
+        focal_weight = r.abs().pow(2.0)
+        loss += 15.0 * (focal_weight * r.square()).mean()
+
+    # ==================== CAP LOSS (strong absolute push) ====================
+    if cap.any():
+        # Huber with small delta → almost L1 on bright peaks
+        loss += cap_huber_weight * F.smooth_l1_loss(
+            pred[cap], target[cap], beta=0.5
+        )
+
+    return loss
+
+
+## Consistency loss
+
+## Initilize consistency loss LPIPS
+# import lpips
+# lpips_fn = lpips.LPIPS(net='vgg', spatial=False).eval().to(device)
+
+# def consistency_loss(pred1, pred2):
+#     # pred1, pred2: [N, 1] or [N, 3] — raw unstructured points
+#     # Just unsqueeze to fake "image" with H=W=1
+#     x1 = pred1.unsqueeze(0).unsqueeze(0)   # [1,1,N,1] → treated as 1×N "image"
+#     x2 = pred2.unsqueeze(0).unsqueeze(0)
+#     return lpips_fn(x1, x2).mean()
+
+
+# def consistency_loss1(pred1, pred2, coords, k = 11):
+#     # coords: [N, 3] or [N, 4] — same for both
+#     l1 = F.l1_loss(pred1, pred2)
     
-    if pos.sum() == 0:  # safety
-        return F.mse_loss(pred, target)
-        
-    loss_pos = F.smooth_l1_loss(pred[pos], target[pos], beta=0.05, reduction='mean')
-    loss_neg = F.mse_loss(pred[neg], target[neg], reduction='mean')
-    
-    return 10.0 * loss_pos + loss_neg
+#     # KNN gradient consistency (requires torch-cluster)
+#     # try:
+#     #  from torch_cluster import knn
+#     idx = knn(coords, coords, k)[:, 1:]  # [N, 10]
+#     grad1 = pred1 - pred1[idx]
+#     grad2 = pred2 - pred2[idx]
+#     grad_cons = F.l1_loss(grad1, grad2)
+#     return l1 + 0.5 * grad_cons
+#     except:
+#         return l1  # fallback
+
+def consistency_loss1(pred1, pred2):
+    x1 = pred1.unsqueeze(0).unsqueeze(0)   # [1,1,N,1]
+    x2 = pred2.unsqueeze(0).unsqueeze(0)
+    return lpips_fn(x1, x2).mean()
+
+# Option B — If LPIPS is too slow/heavy, use plain L1. It's honest and works great.
+def consistency_loss(pred1, pred2):
+    return F.l1_loss(pred1, pred2)
+
+
+def hard_negative_loss(pred_mined, target_mined):
+    residual = pred_mined.squeeze() - target_mined
+    gamma    = 3.5                                      # ← 3.0–4.0
+    weight   = residual.abs().pow(gamma)
+    return (weight * residual.square()).mean()
+
+
+# def hard_negative_mining_loss(pred_mined, target_mined=0.0):
+#     residual = pred_mined.squeeze() - target_mined
+#     residual = residual.clamp(min=0.0)          # we only care about positive floaters
+
+#     gamma = 3.8                                 # 3.5–4.0 is the sweet spot
+#     focal_weight = residual.pow(gamma)          # super-quadratic / cubic / quartic
+#     loss = focal_weight * residual.square()     # still multiply by r² for scale-invariance
+
+#     return loss.mean()
+
+## Focal loss
+
+# def continuous_focal_loss(
+#     pred,           # [N,1] or [N] – raw unbounded continuous values
+#     target,         # [N,1] or [N] – ground-truth continuous Gaussian values
+#     pos_thresh=0.01,
+#     gamma_pos=0.5,      # <1.0 → down-weights easy positives
+#     gamma_neg=2.0,      # >1.0 → up-weights hard false positives
+#     lambda_neg=15.0,
+#     eps=1e-6
+# ):
+#     pred = pred.squeeze()
+#     target = target.squeeze()
+
+#     # Split pos/neg exactly like you already do
+#     pos = target >= pos_thresh
+#     neg = ~pos
+
+#     loss = 0.0
+
+#     # Positive regions: log-space Charbonnier (best convergence in practice)
+#     if pos.any():
+#         # Work in log space to handle large dynamic range of Gaussians
+#         log_pred = torch.log(pred[pos].clamp(min=eps))
+#         log_tgt  = torch.log(target[pos] + eps)
+#         diff = log_pred - log_tgt
+#         loss_pos = torch.sqrt(diff*diff + 1e-6)               # Charbonnier
+#         # Optional focal weighting on positives
+#         loss_pos = loss_pos * (1.0 + diff.abs()).pow(-gamma_pos)
+#         loss += loss_pos.mean()
+
+#     # Negative regions: push down hard on false positives, gently on tiny residuals
+#     if neg.any():
+#         residual = pred[neg]
+#         # Classic focal-style weighting without sigmoid
+#         focal_weight = (residual.abs() + eps).pow(gamma_neg - 1.0)   # higher γ → more focus on large errors
+#         loss_neg = focal_weight * residual.square()
+#         loss += lambda_neg * loss_neg.mean()
+
+#     return loss
+
+
+
+
 
 
 # class LossAccumulationBalancer:
@@ -2378,11 +2629,316 @@ class LossAccumulationBalancer1: # TwoTier
 
 from collections import defaultdict
 
+## Version before adding counter
+# class LossAccumulationBalancer:
+#     def __init__(
+#         self,
+#         anchor: str = 'loss_dice3',
+#         group_targets: dict = None,      # ← NEW: replaces aux_target
+#         alpha: float = 0.98,
+#         primary_ext: str = 'loss_dice',
+#         device: str = 'cuda'
+#     ):
+#         self.anchor = anchor
+#         self.alpha = alpha
+#         self.primary_ext = primary_ext
+#         self.device = device
+
+#         # === NEW: flexible group targets ===
+#         if group_targets is None:
+#             # fallback to old behaviour
+#             group_targets = {'primary': 1.0, 'aux': 0.02}
+#         self.group_targets = group_targets                  # e.g. {'regression': 0.03, 'mining': 0.02}
+#         self.default_group = 'aux' if 'aux' in group_targets else list(group_targets.keys())[1]
+
+#         # === Persistent state (unchanged) ===
+#         self.primary_ema = {}
+#         self.aux_ema = defaultdict(dict)  # aux_ema[group][loss_name] = value
+#         self._anchor_ema_current = None
+#         self._accum_prim = {}
+#         self._accum_aux = defaultdict(lambda: {})   # _accum_aux[group][name] = sum
+#         self._step_count = 0
+#         self.accum_steps = None
+
+#     # def _get_group(self, name: str) -> str:
+#     #     """Map loss name → group. Primary is anything starting with primary_ext."""
+#     #     if name.startswith(self.primary_ext):
+#     #         return 'primary'
+#     #     # Match exact group prefixes you define, longest first
+#     #     for group in sorted(self.group_targets.keys(), key=len, reverse=True):
+#     #         if group != 'primary' and name.startswith(group):   # e.g. 'consistency_', 'mining_'
+#     #             return group
+#     #     return self.default_group  # fallback
+
+#     def _get_group(self, name: str) -> str:
+#         if name.startswith(self.primary_ext):          # e.g. "loss_dice"
+#             return 'primary'
+
+#         # ← tries to match any group key you put in group_targets
+#         for group in sorted(self.group_targets.keys(), key=len, reverse=True):
+#             if group != 'primary' and name.startswith(group):
+#                 return group
+
+#         # ← fallback if nothing matched
+#         return 'aux'                                    # ← this is the default catch-all
+
+#     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
+#         if accum_steps is not None:
+#             self.accum_steps = accum_steps
+
+#         total_loss = 0.0
+
+#         # --------------------------------------------------
+#         # 1. Accumulate microbatch statistics → now per group
+#         # --------------------------------------------------
+#         for name, loss in losses_dict.items():
+#             val = loss.detach().mean().item()
+#             group = self._get_group(name)
+#             if group == 'primary':
+#                 self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
+#             else:
+#                 self._accum_aux[group][name] = self._accum_aux[group].get(name, 0.0) + val
+
+#         self._step_count += 1
+
+#         # --------------------------------------------------
+#         # 2. On last accum step → update EMAs
+#         # --------------------------------------------------
+#         updated = False
+#         if is_last_accum_step or (self.accum_steps and self._step_count >= self.accum_steps):
+#             updated = True
+#             denom = self.accum_steps or self._step_count
+
+#             # Primary EMA update
+#             anchor_ema_new = None
+#             for name, accum_val in self._accum_prim.items():
+#                 batch_val = accum_val / denom
+#                 if name not in self.primary_ema:
+#                     self.primary_ema[name] = batch_val
+#                 else:
+#                     self.primary_ema[name] = self.alpha * self.primary_ema[name] + (1 - self.alpha) * batch_val
+#                 if name == self.anchor:
+#                     anchor_ema_new = self.primary_ema[name]
+
+#             # Auxiliary EMA update (per group)
+#             for group, accum_dict in self._accum_aux.items():
+#                 for name, accum_val in accum_dict.items():
+#                     batch_val = accum_val / denom
+#                     ema_dict = self.aux_ema[group]
+#                     if name not in ema_dict:
+#                         ema_dict[name] = batch_val
+#                     else:
+#                         ema_dict[name] = self.alpha * ema_dict[name] + (1 - self.alpha) * batch_val
+
+#             if anchor_ema_new is not None:
+#                 self._anchor_ema_current = anchor_ema_new
+#             elif self._anchor_ema_current is None and self.primary_ema:
+#                 self._anchor_ema_current = max(self.primary_ema.values())
+
+#             # Reset accumulators
+#             self._accum_prim.clear()
+#             for d in self._accum_aux.values():
+#                 d.clear()
+#             self._step_count = 0
+
+#         # --------------------------------------------------
+#         # 3. Scale losses using latest anchor
+#         # --------------------------------------------------
+#         anchor_val = self._anchor_ema_current if self._anchor_ema_current is not None else 0.5
+
+#         for name, loss in losses_dict.items():
+#             group = self._get_group(name)
+
+#             if group == 'primary':
+#                 ema = self.primary_ema.get(name, 1.0)
+#                 scale = torch.tensor(anchor_val / (ema + 1e-8), device = self.device)
+#                 scale = scale.clamp(0.1, 300.0)
+#             else:
+#                 # One EMA dict per group
+#                 ema_dict = self.aux_ema[group]
+#                 ema = ema_dict.get(name, 1.0)
+#                 n_losses_in_group = max(len(ema_dict), 1)
+#                 target = self.group_targets[group]
+#                 scale = torch.tensor(target * anchor_val / (n_losses_in_group * (ema + 1e-8)), device = self.device)
+#                 scale = scale.clamp(0.01, 100.0)
+
+#             total_loss += scale * loss
+
+#         return total_loss
+
+#     # state_dict / load_state_dict → just add the new fields
+#     def state_dict(self):
+#         return {
+#             'anchor': self.anchor,
+#             'group_targets': self.group_targets,      # ← new
+#             'alpha': self.alpha,
+#             'primary_ext': self.primary_ext,
+#             'accum_steps': self.accum_steps,
+#             'primary_ema': self.primary_ema,
+#             'aux_ema': dict(self.aux_ema),             # convert defaultdict → dict
+#             '_anchor_ema_current': self._anchor_ema_current,
+#         }
+
+#     def load_state_dict(self, state_dict, device=None):
+#         self.anchor = state_dict['anchor']
+#         self.group_targets = state_dict.get('group_targets', {'primary': 1.0, 'aux': 0.05})
+#         self.alpha = state_dict['alpha']
+#         self.primary_ext = state_dict['primary_ext']
+#         self.accum_steps = state_dict.get('accum_steps', None)
+#         self.primary_ema = state_dict['primary_ema']
+#         self.aux_ema = defaultdict(dict, state_dict.get('aux_ema', {}))
+#         self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
+#         if device:
+#             self.device = device
+#         self._accum_prim.clear()
+#         for d in self._accum_aux.values():
+#             d.clear()
+#         self._step_count = 0
+
+
+# class LossAccumulationBalancer:
+#     def __init__(self,
+#         anchor: str = 'loss_dice3',
+#         group_targets: dict = None,      # ← NEW: replaces aux_target
+#         alpha: float = 0.98,
+#         primary_ext: str = 'loss_dice',
+#         device: str = 'cuda'       
+#         self._participation = {}        # NEW: name → how many microbatches had this loss
+#         self._participation_aux = defaultdict(dict)  # group → name → count
+#         ):
+
+#     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
+#         if accum_steps is not None:
+#             self.accum_steps = accum_steps
+
+#         total_loss = 0.0
+
+#         # --------------------------------------------------
+#         # 1. Accumulate values + participation
+#         # --------------------------------------------------
+#         for name, loss in losses_dict.items():
+#             val = loss.detach().mean().item()
+#             group = self._get_group(name)
+
+#             # Increment participation counter
+#             if group == 'primary':
+#                 self._participation[name] = self._participation.get(name, 0) + 1
+#                 self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
+#             else:
+#                 self._participation_aux[group][name] = self._participation_aux[group].get(name, 0) + 1
+#                 self._accum_aux[group][name] = self._accum_aux[group].get(name, 0.0) + val
+
+#         self._step_count += 1
+
+#         # --------------------------------------------------
+#         # 2. On last accum step → update EMAs with correct counts
+#         # --------------------------------------------------
+#         updated = False
+#         if is_last_accum_step or (self.accum_steps and self._step_count >= self.accum_steps):
+#             updated = True
+
+#             # Primary losses
+#             anchor_ema_new = None
+#             for name, accum_val in self._accum_prim.items():
+#                 n = self._participation.get(name, 1)           # ← actual number of times seen
+#                 batch_val = accum_val / n                      # ← correct average!
+#                 if name not in self.primary_ema:
+#                     self.primary_ema[name] = batch_val
+#                 else:
+#                     self.primary_ema[name] = (
+#                         self.alpha * self.primary_ema[name] + (1 - self.alpha) * batch_val
+#                     )
+#                 if name == self.anchor:
+#                     anchor_ema_new = self.primary_ema[name]
+
+#             # Auxiliary losses (per group)
+#             for group, accum_dict in self._accum_aux.items():
+#                 for name, accum_val in accum_dict.items():
+#                     n = self._participation_aux[group].get(name, 1)
+#                     batch_val = accum_val / n
+#                     ema_dict = self.aux_ema[group]
+#                     if name not in ema_dict:
+#                         ema_dict[name] = batch_val
+#                     else:
+#                         ema_dict[name] = self.alpha * ema_dict[name] + (1 - self.alpha) * batch_val
+
+#             if anchor_ema_new is not None:
+#                 self._anchor_ema_current = anchor_ema_new
+#             elif self._anchor_ema_current is None and self.primary_ema:
+#                 self._anchor_ema_current = max(self.primary_ema.values())
+
+#             # Reset everything
+#             self._accum_prim.clear()
+#             self._accum_aux.clear()
+#             self._participation.clear()
+#             self._participation_aux.clear()
+#             self._step_count = 0
+
+#         # --------------------------------------------------
+#         # 3. Scale losses (unchanged logic)
+#         # --------------------------------------------------
+#         anchor_val = self._anchor_ema_current if self._anchor_ema_current is not None else 0.5
+
+#         for name, loss in losses_dict.items():
+#             group = self._get_group(name)
+#             if group == 'primary':
+#                 ema = self.primary_ema.get(name, 1.0)
+#                 scale = torch.tensor(anchor_val / (ema + 1e-8), device=self.device)
+#                 scale = scale.clamp(0.1, 300.0)
+#             else:
+#                 ema_dict = self.aux_ema[group]
+#                 ema = ema_dict.get(name, 1.0)
+#                 n_losses = max(len(ema_dict), 1)
+#                 target = self.group_targets[group]
+#                 scale = torch.tensor(
+#                     target * anchor_val / (n_losses * (ema + 1e-8)),
+#                     device=self.device
+#                 )
+#                 scale = scale.clamp(0.01, 100.0)
+
+#             total_loss += scale * loss
+
+#         return total_loss
+
+#     # state_dict / load_state_dict → just add the new fields
+#     def state_dict(self):
+#         return {
+#             'anchor': self.anchor,
+#             'group_targets': self.group_targets,      # ← new
+#             'alpha': self.alpha,
+#             'primary_ext': self.primary_ext,
+#             'accum_steps': self.accum_steps,
+#             'primary_ema': self.primary_ema,
+#             'aux_ema': dict(self.aux_ema),             # convert defaultdict → dict
+#             '_anchor_ema_current': self._anchor_ema_current,
+#         }
+
+#     def load_state_dict(self, state_dict, device=None):
+#         self.anchor = state_dict['anchor']
+#         self.group_targets = state_dict.get('group_targets', {'primary': 1.0, 'aux': 0.05})
+#         self.alpha = state_dict['alpha']
+#         self.primary_ext = state_dict['primary_ext']
+#         self.accum_steps = state_dict.get('accum_steps', None)
+#         self.primary_ema = state_dict['primary_ema']
+#         self.aux_ema = defaultdict(dict, state_dict.get('aux_ema', {}))
+#         self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
+#         if device:
+#             self.device = device
+#         self._accum_prim.clear()
+#         for d in self._accum_aux.values():
+#             d.clear()
+#         self._step_count = 0
+
+
+
+from collections import defaultdict
+
+
 class LossAccumulationBalancer:
     def __init__(
         self,
-        anchor: str = 'loss_dice3',
-        group_targets: dict = None,      # ← NEW: replaces aux_target
+        anchor: str = 'loss_dice2',
+        group_targets: dict = None,
         alpha: float = 0.98,
         primary_ext: str = 'loss_dice',
         device: str = 'cuda'
@@ -2392,43 +2948,32 @@ class LossAccumulationBalancer:
         self.primary_ext = primary_ext
         self.device = device
 
-        # === NEW: flexible group targets ===
+        # === Group targets ===
         if group_targets is None:
-            # fallback to old behaviour
             group_targets = {'primary': 1.0, 'aux': 0.02}
-        self.group_targets = group_targets                  # e.g. {'regression': 0.03, 'mining': 0.02}
-        self.default_group = 'aux' if 'aux' in group_targets else list(group_targets.keys())[1]
+        self.group_targets = group_targets
 
-        # === Persistent state (unchanged) ===
+        # === Persistent state ===
         self.primary_ema = {}
-        self.aux_ema = defaultdict(dict)  # aux_ema[group][loss_name] = value
+        self.aux_ema = defaultdict(dict)           # aux_ema[group][name] = ema
         self._anchor_ema_current = None
+
+        # === Accumulation buffers (reset every full batch) ===
         self._accum_prim = {}
-        self._accum_aux = defaultdict(lambda: {})   # _accum_aux[group][name] = sum
+        self._accum_aux = defaultdict(dict)        # _accum_aux[group][name] = sum
+        self._participation = {}                   # primary: name → count
+        self._participation_aux = defaultdict(dict)  # aux: group → name → count
+
         self._step_count = 0
         self.accum_steps = None
 
-    # def _get_group(self, name: str) -> str:
-    #     """Map loss name → group. Primary is anything starting with primary_ext."""
-    #     if name.startswith(self.primary_ext):
-    #         return 'primary'
-    #     # Match exact group prefixes you define, longest first
-    #     for group in sorted(self.group_targets.keys(), key=len, reverse=True):
-    #         if group != 'primary' and name.startswith(group):   # e.g. 'consistency_', 'mining_'
-    #             return group
-    #     return self.default_group  # fallback
-
     def _get_group(self, name: str) -> str:
-        if name.startswith(self.primary_ext):          # e.g. "loss_dice"
+        if name.startswith(self.primary_ext):
             return 'primary'
-
-        # ← tries to match any group key you put in group_targets
         for group in sorted(self.group_targets.keys(), key=len, reverse=True):
             if group != 'primary' and name.startswith(group):
                 return group
-
-        # ← fallback if nothing matched
-        return 'aux'                                    # ← this is the default catch-all
+        return 'aux'  # fallback
 
     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
         if accum_steps is not None:
@@ -2436,31 +2981,27 @@ class LossAccumulationBalancer:
 
         total_loss = 0.0
 
-        # --------------------------------------------------
-        # 1. Accumulate microbatch statistics → now per group
-        # --------------------------------------------------
+        # 1. Accumulate values + participation counters
         for name, loss in losses_dict.items():
             val = loss.detach().mean().item()
             group = self._get_group(name)
+
             if group == 'primary':
+                self._participation[name] = self._participation.get(name, 0) + 1
                 self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
             else:
+                self._participation_aux[group][name] = self._participation_aux[group].get(name, 0) + 1
                 self._accum_aux[group][name] = self._accum_aux[group].get(name, 0.0) + val
 
         self._step_count += 1
 
-        # --------------------------------------------------
-        # 2. On last accum step → update EMAs
-        # --------------------------------------------------
-        updated = False
+        # 2. Final microbatch → update EMAs with correct per-loss counts
         if is_last_accum_step or (self.accum_steps and self._step_count >= self.accum_steps):
-            updated = True
-            denom = self.accum_steps or self._step_count
-
-            # Primary EMA update
+            # Primary losses
             anchor_ema_new = None
             for name, accum_val in self._accum_prim.items():
-                batch_val = accum_val / denom
+                n = self._participation.get(name, 1)
+                batch_val = accum_val / n
                 if name not in self.primary_ema:
                     self.primary_ema[name] = batch_val
                 else:
@@ -2468,10 +3009,11 @@ class LossAccumulationBalancer:
                 if name == self.anchor:
                     anchor_ema_new = self.primary_ema[name]
 
-            # Auxiliary EMA update (per group)
+            # Auxiliary losses
             for group, accum_dict in self._accum_aux.items():
                 for name, accum_val in accum_dict.items():
-                    batch_val = accum_val / denom
+                    n = self._participation_aux[group].get(name, 1)
+                    batch_val = accum_val / n
                     ema_dict = self.aux_ema[group]
                     if name not in ema_dict:
                         ema_dict[name] = batch_val
@@ -2483,65 +3025,56 @@ class LossAccumulationBalancer:
             elif self._anchor_ema_current is None and self.primary_ema:
                 self._anchor_ema_current = max(self.primary_ema.values())
 
-            # Reset accumulators
+            # Reset all accumulators
             self._accum_prim.clear()
-            for d in self._accum_aux.values():
-                d.clear()
+            self._accum_aux.clear()
+            self._participation.clear()
+            self._participation_aux.clear()
             self._step_count = 0
 
-        # --------------------------------------------------
-        # 3. Scale losses using latest anchor
-        # --------------------------------------------------
+        # 3. Scale current microbatch losses
         anchor_val = self._anchor_ema_current if self._anchor_ema_current is not None else 0.5
 
         for name, loss in losses_dict.items():
             group = self._get_group(name)
-
             if group == 'primary':
                 ema = self.primary_ema.get(name, 1.0)
-                scale = torch.tensor(anchor_val / (ema + 1e-8), device = self.device)
-                scale = scale.clamp(0.1, 300.0)
+                scale = anchor_val / (ema + 1e-8)
             else:
-                # One EMA dict per group
-                ema_dict = self.aux_ema[group]
-                ema = ema_dict.get(name, 1.0)
-                n_losses_in_group = max(len(ema_dict), 1)
+                ema = self.aux_ema[group].get(name, 1.0)
+                n_losses = max(len(self.aux_ema[group]), 1)
                 target = self.group_targets[group]
-                scale = torch.tensor(target * anchor_val / (n_losses_in_group * (ema + 1e-8)), device = self.device)
-                scale = scale.clamp(0.01, 100.0)
+                scale = target * anchor_val / (n_losses * (ema + 1e-8))
 
+            scale = torch.clamp(torch.tensor(scale, device=self.device), 
+                               min=0.01 if group != 'primary' else 0.1,
+                               max=100.0 if group != 'primary' else 300.0)
             total_loss += scale * loss
 
         return total_loss
 
-    # state_dict / load_state_dict → just add the new fields
+    # Optional: make it checkpoint-safe
     def state_dict(self):
         return {
             'anchor': self.anchor,
-            'group_targets': self.group_targets,      # ← new
+            'group_targets': self.group_targets,
             'alpha': self.alpha,
             'primary_ext': self.primary_ext,
             'accum_steps': self.accum_steps,
             'primary_ema': self.primary_ema,
-            'aux_ema': dict(self.aux_ema),             # convert defaultdict → dict
+            'aux_ema': dict(self.aux_ema),
             '_anchor_ema_current': self._anchor_ema_current,
         }
 
-    def load_state_dict(self, state_dict, device=None):
-        self.anchor = state_dict['anchor']
-        self.group_targets = state_dict.get('group_targets', {'primary': 1.0, 'aux': 0.05})
-        self.alpha = state_dict['alpha']
-        self.primary_ext = state_dict['primary_ext']
-        self.accum_steps = state_dict.get('accum_steps', None)
-        self.primary_ema = state_dict['primary_ema']
-        self.aux_ema = defaultdict(dict, state_dict.get('aux_ema', {}))
-        self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
-        if device:
-            self.device = device
-        self._accum_prim.clear()
-        for d in self._accum_aux.values():
-            d.clear()
-        self._step_count = 0
+    def load_state_dict(self, sd):
+        self.anchor = sd['anchor']
+        self.group_targets = sd.get('group_targets', {'primary': 1.0, 'aux': 0.02})
+        self.alpha = sd['alpha']
+        self.primary_ext = sd['primary_ext']
+        self.accum_steps = sd.get('accum_steps', None)
+        self.primary_ema = sd['primary_ema']
+        self.aux_ema = defaultdict(dict, sd.get('aux_ema', {}))
+        self._anchor_ema_current = sd.get('_anchor_ema_current', None)
 
 
 class UncertaintyBalancer(nn.Module):
@@ -2757,6 +3290,7 @@ use_gradient_loss = False
 use_cap_loss = True
 use_huber_loss = False
 use_l1_loss = True
+# use_focal_loss = True
 
 
 # n_burn_in = int(0.5*n_epochs/5)
@@ -2774,7 +3308,7 @@ loss_names = ['loss_dice1', 'loss_dice2', 'loss_dice3', 'loss_dice4', 'loss_nega
 
 
 LossBalancer = LossAccumulationBalancer(
-    anchor='loss_dice3',
+    anchor='loss_dice2',
     group_targets={
         'primary':    1.0,       # everything starting with loss_dice
         'loss_regression': 0.02,      # smooth l1 loss
@@ -3642,6 +4176,13 @@ loader = DataLoader(
 # print('Time %0.4f'%(time.time() - st_time))
 
 
+## Note: replaced main gaussian regression target with Charbonair log loss
+## mixed with focal loss. Add perceptual consistency loss lpips.
+## Replaced negative loss with a focal loss. Changed cap loss to a L1 smooth loss 
+## (e.g., Huber). Also down-weight same points in the continuous Charbonair log loss
+
+
+
 ## Set initial counter
 # i = n_restart_step
 log_buffer = [] ## Append write operations to here and flush every 10 steps
@@ -4101,11 +4642,23 @@ for batch_idx, inputs in enumerate(loader):
 
 			if use_sigmoid == False:
 
-				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
-				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-				loss_smooth_l1 = weights[0]*gaussian_heatmap_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*gaussian_heatmap_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-				loss_smooth_l2 = (weights[2]*gaussian_heatmap_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*gaussian_heatmap_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-				# loss = loss_mse1 + 2.0*loss_mse2
+				if (use_cap_loss == False) or (i <= n_burn_in):
+
+					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+					loss_smooth_l1 = weights[0]*gaussian_heatmap_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*gaussian_heatmap_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+					loss_smooth_l2 = (weights[2]*gaussian_heatmap_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*gaussian_heatmap_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+					# loss = loss_mse1 + 2.0*loss_mse2
+
+				else:
+
+					## Note: assuming up weighting of cap by 10.0
+					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+					loss_smooth_l1 = weights[0]*gaussian_heatmap_loss_with_cap(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*gaussian_heatmap_loss_with_cap(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+					loss_smooth_l2 = (weights[2]*gaussian_heatmap_loss_with_cap(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*gaussian_heatmap_loss_with_cap(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+					# loss = loss_mse1 + 2.0*loss_mse2					
+
 
 			else:
 
@@ -4133,10 +4686,16 @@ for batch_idx, inputs in enumerate(loader):
 			# ifind_cap11, ifind_cap12 = np.where(pick_lbls[:,:,0].cpu().detach().numpy() > cap_limit) # [0]
 			# ifind_cap21, ifind_cap22 = np.where(pick_lbls[:,:,1].cpu().detach().numpy() > cap_limit) # [0]
 
+			# 8.0 * F.smooth_l1_loss(pred[cap_mask], target[cap_mask], beta=0.5)
+
 			loss_cap1 = torch.tensor(0.0).to(device)
 			loss_cap2 = torch.tensor(0.0).to(device)
-			if len(ifind_cap1) > 0: loss_cap1 += scale_cap*(weights[0]*huber_loss(out[0][ifind_cap1], torch.Tensor(Lbls[i0][ifind_cap1]).to(device)))
-			if len(ifind_cap2) > 0: loss_cap1 += scale_cap*(weights[1]*huber_loss(out[1][ifind_cap2], torch.Tensor(Lbls_query[i0][ifind_cap2]).to(device)))
+			# if len(ifind_cap1) > 0: loss_cap1 += scale_cap*(weights[0]*huber_loss(out[0][ifind_cap1], torch.Tensor(Lbls[i0][ifind_cap1]).to(device)))
+			# if len(ifind_cap2) > 0: loss_cap1 += scale_cap*(weights[1]*huber_loss(out[1][ifind_cap2], torch.Tensor(Lbls_query[i0][ifind_cap2]).to(device)))
+
+			if len(ifind_cap1) > 0: loss_cap1 += scale_cap*(weights[0]*F.smooth_l1_loss(out[0][ifind_cap1], torch.Tensor(Lbls[i0][ifind_cap1]).to(device), beta = 0.5))
+			if len(ifind_cap2) > 0: loss_cap1 += scale_cap*(weights[1]*F.smooth_l1_loss(out[1][ifind_cap2], torch.Tensor(Lbls_query[i0][ifind_cap2]).to(device), beta = 0.5))
+
 
 			# if len(ifind_cap11) > 0: loss_cap2 += scale_cap*(weights[2]*huber_loss(out[2][ifind_cap11,ifind_cap12,0], pick_lbls[ifind_cap11,ifind_cap12,0]))
 			# if len(ifind_cap21) > 0: loss_cap2 += scale_cap*(weights[3]*huber_loss(out[3][ifind_cap21,ifind_cap22,0], pick_lbls[ifind_cap21,ifind_cap22,1]))
@@ -4173,7 +4732,11 @@ for batch_idx, inputs in enumerate(loader):
 				# if mask_query.sum() > 0:
 				# loss_negative = mse_loss(out_query[mask_query], torch.Tensor(lbls_query).to(device)[mask_query]) # weights[1]*
 				# loss_negative = mse_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
-				loss_negative = huber_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+				# loss_negative = huber_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+
+				loss_negative = hard_negative_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+
+
 				# else:
 				# loss_negative = torch.tensor(0.0).to(device)
 
@@ -4196,6 +4759,40 @@ for batch_idx, inputs in enumerate(loader):
 		loss_consistency_flag = False
 		if (use_consistency_loss == True)*(i > n_burn_in):
 
+
+			# def l1_gradient_loss(pred, target):
+			#     # pred, target: [N,1] or [N,3]
+			#     diff = pred - target
+
+			#     # Fake 3D gradient using nearest neighbors or just skip structure
+			#     # Simpler version used in several papers:
+			#     l1 = diff.abs().mean()
+			#     grad_pred  = pred[1:]  - pred[:-1]
+			#     grad_target = target[1:] - target[:-1]
+			#     grad_loss = (grad_pred - grad_target).abs().mean()
+
+			#     return l1 + 0.1 * grad_loss
+
+			# def consistency_loss(pred1, pred2, coords):
+			# def consistency_loss(pred1, pred2, coords):
+			#     l1 = F.l1_loss(pred1, pred2)
+			#     grad1 = pred1 - pred1.roll(1, dims=0)  # crude temporal gradient
+			#     grad2 = pred2 - pred2.roll(1, dims=0)
+			#     grad_cons = F.l1_loss(grad1, grad2)
+			#     return l1 + 0.5 * grad_cons
+
+			## Prefered loss function
+			# import lpips
+			# lpips_fn = lpips.LPIPS(net='vgg', spatial=False).eval().to(device)
+
+			# def consistency_loss(pred1, pred2):
+			# 	# pred1, pred2: [N, 1] or [N, 3] — raw unstructured points
+			# 	# Just unsqueeze to fake "image" with H=W=1
+			# 	x1 = pred1.unsqueeze(0).unsqueeze(0)   # [1,1,N,1] → treated as 1×N "image"
+			# 	x2 = pred2.unsqueeze(0).unsqueeze(0)
+			# 	return lpips_fn(x1, x2).mean()
+
+
 			ilen = int(np.floor(n_batch/2/2))
 
 			## For consistency loss, compute seperately for positive and negative classes
@@ -4207,11 +4804,23 @@ for batch_idx, inputs in enumerate(loader):
 
 					if use_sigmoid == False:
 
+
+						# # weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
+						# mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::].cpu().detach().numpy() - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
+						# loss_consistency = mse_loss(out[1][ind_consistency::][mask_loss.long()], out_save[0][ind_consistency::][mask_loss.long()]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+						# # loss = 0.9*loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
+						# # loss_consistency_val += 0.1*loss_consistency.item()/n_batch
+
+
+
 						# weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
 						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::].cpu().detach().numpy() - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
-						loss_consistency = mse_loss(out[1][ind_consistency::][mask_loss.long()], out_save[0][ind_consistency::][mask_loss.long()]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
+						# loss_consistency = l1_gradient_loss(out[1][ind_consistency::][mask_loss.long()], out_save[0][ind_consistency::][mask_loss.long()]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
 						# loss = 0.9*loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
 						# loss_consistency_val += 0.1*loss_consistency.item()/n_batch
+
+						loss_consistency = consistency_loss(out[1][ind_consistency::][mask_loss.long()], out_save[0][ind_consistency::][mask_loss.long()])
+
 
 					else:
 
@@ -4228,6 +4837,19 @@ for batch_idx, inputs in enumerate(loader):
 			Lbls_save = [Lbls_query[i0].cpu().detach().numpy()]
 			iter_loss = [i, inc]
 			X_query_save = [X_query[i0].cpu().detach().numpy()]
+
+
+
+		# if use_focal_loss == True:
+
+		# 	# loss_focal1 = continuous_focal_loss()
+
+		# 	## Unclear if will be stable for association predictions
+		# 	loss_focal1 = weights[0]*continuous_focal_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*continuous_focal_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+
+		# 	# loss_focal1 = (weights[2]*continuous_focal_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*continuous_focal_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+		# 	# loss = loss_mse1 + 2.0*loss_mse2
+
 
 
 		# if (use_gradient_loss == True)*(i > int(n_epochs/5)):
@@ -4281,7 +4903,9 @@ for batch_idx, inputs in enumerate(loader):
 
 		# pre_scale_weights1 = [10.0, 10.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
 		pre_scale_weights1 = [2.0, 2.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
-		pre_scale_weights2 = [1e1, 1e2, 1e1]
+		# pre_scale_weights2 = [1e1, 1e2, 1e1]
+		pre_scale_weights2 = [1e1, 0.5e2, 1e1]
+
 		# pre_scale_weights2 = [1e4, 1e4]
 
 
@@ -4301,7 +4925,7 @@ for batch_idx, inputs in enumerate(loader):
 		## Compute base losses
 		loss_dict = {
 		# 'loss_dice1': loss_base1, # loss_dice1
-		'loss_base1': loss_base1, # loss_dice1
+		'loss_base1': 0.2*loss_base1, # loss_dice1
 		'loss_dice2': loss_dice2,
 		'loss_dice3': 0.5*loss_dice3 + 0.5*loss_dice4,
 		# 'loss_dice4': loss_dice4,
@@ -4347,6 +4971,7 @@ for batch_idx, inputs in enumerate(loader):
 		# }
 
 		if i > n_burn_in:
+
 			loss_dict.update({'loss_negative': loss_negative*pre_scale_weights2[0]})
 
 			if loss_consistency_flag == True:
