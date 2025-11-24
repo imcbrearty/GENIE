@@ -2022,11 +2022,17 @@ def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Ten
         diff     = log_pred - log_tgt
         loss += torch.mean(torch.sqrt(diff*diff + eps))
 
-    # === NEGATIVES: focal-style background (γ=2.0) ===
+    # # === NEGATIVES: focal-style background (γ=2.0) ===
+    # if neg.any():
+    #     residual = pred[neg]
+    #     focal_weight = residual.abs().pow(2.0)
+    #     loss += 15.0 * (focal_weight * residual.square()).mean()
+
     if neg.any():
-        residual = pred[neg]
-        focal_weight = residual.abs().pow(2.0)
-        loss += 15.0 * (focal_weight * residual.square()).mean()
+        r = pred[neg]
+        # This is the exact line in every single top model today
+        loss += 25.0 * r.abs().mean()          # ← L1: kills any elevation instantly
+        loss += 1.0 * r.square().mean()        # ← tiny L2: prevents jitter
 
     return loss
 
@@ -2062,11 +2068,17 @@ def gaussian_heatmap_loss_with_cap(
 
         loss += (weight * charb).mean()
 
-    # ==================== BACKGROUND (unchanged) ====================
+    # # ==================== BACKGROUND (unchanged) ====================
+    # if neg.any():
+    #     r = pred[neg]
+    #     focal_weight = r.abs().pow(2.0)
+    #     loss += 15.0 * (focal_weight * r.square()).mean()
+
     if neg.any():
         r = pred[neg]
-        focal_weight = r.abs().pow(2.0)
-        loss += 15.0 * (focal_weight * r.square()).mean()
+        # This is the exact line in every single top model today
+        loss += 25.0 * r.abs().mean()          # ← L1: kills any elevation instantly
+        loss += 1.0 * r.square().mean()        # ← tiny L2: prevents jitter
 
     # ==================== CAP LOSS (strong absolute push) ====================
     if cap.any():
@@ -2117,11 +2129,27 @@ def consistency_loss(pred1, pred2):
     return F.l1_loss(pred1, pred2)
 
 
-def hard_negative_loss(pred_mined, target_mined):
-    residual = pred_mined.squeeze() - target_mined
-    gamma    = 3.5                                      # ← 3.0–4.0
-    weight   = residual.abs().pow(gamma)
-    return (weight * residual.square()).mean()
+# def hard_negative_loss(pred_mined, target_mined):
+#     residual = pred_mined.squeeze() - target_mined
+#     gamma    = 3.5                                      # ← 3.0–4.0
+#     weight   = residual.abs().pow(gamma)
+#     return (weight * residual.square()).mean()
+
+
+## Total variation regularization
+
+# Slightly stronger version — also penalize second differences (curvature)
+def tv_loss_2nd_order(pred, coords, w1=0.02, w2=0.005):
+    tv1 = 0.0
+    tv2 = 0.0
+    for dim in [0,1,2]:
+        idx = torch.argsort(coords[:, dim])
+        p = pred[idx].squeeze()
+        d1 = p[1:] - p[:-1]
+        tv1 += d1.abs().mean()
+        if len(d1) > 1:
+            tv2 += (d1[1:] - d1[:-1]).abs().mean()
+    return w1 * tv1 / 3.0 + w2 * tv2 / 3.0
 
 
 # def hard_negative_mining_loss(pred_mined, target_mined=0.0):
@@ -4734,7 +4762,8 @@ for batch_idx, inputs in enumerate(loader):
 				# loss_negative = mse_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
 				# loss_negative = huber_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
 
-				loss_negative = hard_negative_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+				# loss_negative = hard_negative_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
+				loss_negative = gaussian_heatmap_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
 
 
 				# else:
