@@ -2418,17 +2418,17 @@ class LossAccumulationBalancer:
     #             return group
     #     return self.default_group  # fallback
 
-	def _get_group(self, name: str) -> str:
-	    if name.startswith(self.primary_ext):          # e.g. "loss_dice"
-	        return 'primary'
+    def _get_group(self, name: str) -> str:
+        if name.startswith(self.primary_ext):          # e.g. "loss_dice"
+            return 'primary'
 
-	    # ← tries to match any group key you put in group_targets
-	    for group in sorted(self.group_targets.keys(), key=len, reverse=True):
-	        if group != 'primary' and name.startswith(group):
-	            return group
+        # ← tries to match any group key you put in group_targets
+        for group in sorted(self.group_targets.keys(), key=len, reverse=True):
+            if group != 'primary' and name.startswith(group):
+                return group
 
-	    # ← fallback if nothing matched
-	    return 'aux'                                    # ← this is the default catch-all
+        # ← fallback if nothing matched
+        return 'aux'                                    # ← this is the default catch-all
 
     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
         if accum_steps is not None:
