@@ -2723,8 +2723,8 @@ lon_range_interior = [lon_range[0], lon_range[1]]
 
 cnt_plot = 0
 
-n_restart = True # train_config['restart_training']
-n_restart_step = 4000 # train_config['n_restart_step']
+n_restart = train_config['restart_training']
+n_restart_step = train_config['n_restart_step']
 if n_restart == False:
 	n_restart_step = 0 # overwrite to 0, if restart is off
 
@@ -2757,7 +2757,7 @@ loss_names = ['loss_dice1', 'loss_dice2', 'loss_dice3', 'loss_dice4', 'loss_nega
 # LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice2', accum_steps = n_batch, primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
 # balancer = LossAccumulationBalancer(anchor = 'loss_dice2', accum_steps = n_batch, primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
 # LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice4', primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
-LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice3', primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
+# LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice3', primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
 
 
 
@@ -2769,11 +2769,12 @@ balancer = LossAccumulationBalancer(
         'loss_consistency': 0.02,    # tiny regularizer
         'loss_negative':     0.02,      # loss_negative, loss_cap1, etc.
         'loss_cap':     0.01,      # loss_negative, loss_cap1, etc.
-        'loss_auxilary': 0.01, ## Base loss
+        # 'loss_auxilary': 0.01, ## Base loss
         # add more whenever you want
     },
     primary_ext='loss_dice',
-    alpha=0.98
+    alpha=0.98,
+    device = device
 )
 
 
@@ -3632,14 +3633,14 @@ loader = DataLoader(
 ## Set initial counter
 # i = n_restart_step
 log_buffer = [] ## Append write operations to here and flush every 10 steps
-
+len_loader = len(loader) ## Why not loop over data until n_epochs
 
 # for i in range(n_restart_step, n_epochs):
 for batch_idx, inputs in enumerate(loader):
 
 	## Effective step size
 	i = n_restart_step + batch_idx
-	if i == n_epochs:
+	if i > n_epochs:
 		print('Finished training')
 		sys.exit()
 
@@ -3659,7 +3660,7 @@ for batch_idx, inputs in enumerate(loader):
 		zlosses.close()
 
 	
-	if ((np.mod(i, 1000) == 0) or (i == (n_epochs - 1)))*(i != n_restart_step):
+	if (((np.mod(i, 1000) == 0) or (i == (n_epochs - 1)))*(i != n_restart_step)) or (batch_idx == (len_loader - 1)):
 
 		## Add save state of loss balancer so can re load
 		torch.save(mz.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(i, n_ver))
@@ -4268,7 +4269,7 @@ for batch_idx, inputs in enumerate(loader):
 
 		# pre_scale_weights1 = [10.0, 10.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
 		pre_scale_weights1 = [2.0, 2.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
-		pre_scale_weights2 = [1e1, 5e2, 1e1]
+		pre_scale_weights2 = [1e1, 1e2, 1e1]
 		# pre_scale_weights2 = [1e4, 1e4]
 
 
@@ -4288,7 +4289,7 @@ for batch_idx, inputs in enumerate(loader):
 		## Compute base losses
 		loss_dict = {
 		# 'loss_dice1': loss_base1, # loss_dice1
-		'loss_auxilary1': loss_base1, # loss_dice1
+		'loss_base1': loss_base1, # loss_dice1
 		'loss_dice2': loss_dice2,
 		'loss_dice3': 0.5*loss_dice3 + 0.5*loss_dice4,
 		# 'loss_dice4': loss_dice4,
