@@ -4683,8 +4683,8 @@ for batch_idx, inputs in enumerate(loader):
 
 			ifind_cap1 = np.where(Lbls[i0] > cap_limit)[0]
 			ifind_cap2 = np.where(Lbls_query[i0] > cap_limit)[0]
-			# ifind_cap11, ifind_cap12 = np.where(pick_lbls[:,:,0].cpu().detach().numpy() > cap_limit) # [0]
-			# ifind_cap21, ifind_cap22 = np.where(pick_lbls[:,:,1].cpu().detach().numpy() > cap_limit) # [0]
+			ifind_cap11, ifind_cap12 = torch.where(pick_lbls[:,:,0] > cap_limit) # [0]
+			ifind_cap21, ifind_cap22 = torch.where(pick_lbls[:,:,1] > cap_limit) # [0]
 
 			# 8.0 * F.smooth_l1_loss(pred[cap_mask], target[cap_mask], beta=0.5)
 
@@ -4697,8 +4697,8 @@ for batch_idx, inputs in enumerate(loader):
 			if len(ifind_cap2) > 0: loss_cap1 += scale_cap*(weights[1]*F.smooth_l1_loss(out[1][ifind_cap2], torch.Tensor(Lbls_query[i0][ifind_cap2]).to(device), beta = 0.5))
 
 
-			# if len(ifind_cap11) > 0: loss_cap2 += scale_cap*(weights[2]*huber_loss(out[2][ifind_cap11,ifind_cap12,0], pick_lbls[ifind_cap11,ifind_cap12,0]))
-			# if len(ifind_cap21) > 0: loss_cap2 += scale_cap*(weights[3]*huber_loss(out[3][ifind_cap21,ifind_cap22,0], pick_lbls[ifind_cap21,ifind_cap22,1]))
+			if len(ifind_cap11) > 0: loss_cap2 += scale_cap*(weights[2]*F.smooth_l1_loss(out[2][ifind_cap11,ifind_cap12,0], pick_lbls[ifind_cap11,ifind_cap12,0], beta = 0.4)) # 0.5
+			if len(ifind_cap21) > 0: loss_cap2 += scale_cap*(weights[3]*F.smooth_l1_loss(out[3][ifind_cap21,ifind_cap22,0], pick_lbls[ifind_cap21,ifind_cap22,1], beta = 0.4)) # 0.5
 
 			loss_cap_val += (loss_cap1 + loss_cap2)/n_batch
 
@@ -4904,7 +4904,7 @@ for batch_idx, inputs in enumerate(loader):
 		# pre_scale_weights1 = [10.0, 10.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
 		pre_scale_weights1 = [2.0, 2.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
 		# pre_scale_weights2 = [1e1, 1e2, 1e1]
-		pre_scale_weights2 = [1e1, 0.5e2, 1e1]
+		pre_scale_weights2 = [1e1, 0.5e2, 1e1, 12.0]
 
 		# pre_scale_weights2 = [1e4, 1e4]
 
@@ -4977,7 +4977,8 @@ for batch_idx, inputs in enumerate(loader):
 			if loss_consistency_flag == True:
 				loss_dict.update({'loss_consistency': loss_consistency*pre_scale_weights2[1]})
 			
-			loss_dict.update({'loss_cap': loss_cap1*pre_scale_weights2[2]})
+			loss_dict.update({'loss_cap1': loss_cap1*pre_scale_weights2[2]})
+			loss_dict.update({'loss_cap2': loss_cap2*pre_scale_weights2[3]})
 			# loss_dict.update({'loss_cap2': loss_cap2*pre_scale_weights1[1]})
 
 
