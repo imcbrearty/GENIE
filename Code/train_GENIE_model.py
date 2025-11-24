@@ -3118,6 +3118,48 @@ class UncertaintyBalancer(nn.Module):
 		return total / len(losses)
 # Usage: balancer = UncertaintyBalancer(4); total = balancer(losses)
 
+# class PointUncertainty(nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#         self.embed = nn.Embedding(num_points, 16)   # or use hash grid / triplane
+#         self.mlp   = nn.Sequential(nn.Linear(16+3, 32), nn.ReLU(), nn.Linear(32, 1))
+
+#     def forward(self, coords, point_ids=None):
+#         if point_ids is not None:
+#             e = self.embed(point_ids)
+#         else:
+#             e = spatial_hash_grid(coords)  # or triplane lookup
+#         return self.mlp(torch.cat([e, coords], dim=-1)).squeeze(-1)
+
+# class PerSampleUWT(nn.Module):
+#     def __init__(self, num_samples):
+#         super().__init__()
+#         self.log_vars = nn.Parameter(torch.zeros(num_samples))  # Trainable log(σ_i) per point
+
+#     def forward(self, losses_per_sample):  # losses_per_sample: [N] losses for each point
+#         vars = torch.exp(self.log_vars)  # σ_i²
+#         weights = 1 / (2 * vars)  # Down-weight high-uncertainty (bad) points
+#         weighted_loss = torch.mean(weights * losses_per_sample)
+#         reg_term = torch.mean(self.log_vars)  # Penalize extreme suppression
+#         return weighted_loss + reg_term
+
+# Usage: uw = PerSampleUWT(N); total_loss = uw(per_sample_losses)
+
+# class UWTLoss(nn.Module):
+#     def __init__(self, num_tasks=5, temp=2.0):  # e.g., dice, reg, cons, neg, cap
+#         super().__init__()
+#         self.log_vars = nn.Parameter(torch.zeros(num_tasks))  # Learnable uncertainties
+#         self.temp = temp
+
+#     def forward(self, losses):  # losses: dict of task losses
+#         task_losses = torch.stack([losses[k] for k in sorted(losses.keys())])
+#         precisions = torch.exp(-self.log_vars)  # 1/σ²
+#         weights = precisions / (task_losses * self.temp + 1e-8)  # UW weights
+#         total = torch.sum(weights * task_losses) + torch.sum(self.log_vars)
+#         return total
+
+# # Usage: uw_loss = UWTLoss(); total = uw_loss(losses_dict)
+
 
 if use_station_corrections == True:
 	n_ver_corrections = 1
@@ -4933,7 +4975,8 @@ for batch_idx, inputs in enumerate(loader):
 		# pre_scale_weights1 = [10.0, 10.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
 		pre_scale_weights1 = [2.0, 2.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
 		# pre_scale_weights2 = [1e1, 1e2, 1e1]
-		pre_scale_weights2 = [1e1, 0.5e2, 1e1, 12.0]
+		# pre_scale_weights2 = [1e1, 0.5e2, 1e1, 12.0]
+		pre_scale_weights2 = [0.5e1, 0.5e2, 1e1, 12.0]
 
 		# pre_scale_weights2 = [1e4, 1e4]
 
