@@ -880,7 +880,7 @@ class ArrivalEmbedding(MessagePassing):
 		inc_inds = torch.arange(deg_slice.sum()).long().to(self.device)
 		inc_inds = inc_inds - torch.repeat_interleave(torch.cumsum(deg_slice, dim = 0) - deg_slice, deg_slice)
 		nodes_of_product = cum_degree_srcs[edge_index[0]].repeat_interleave(degree_srcs[edge_index[0]]) + inc_inds
-		ind_query = torch.arange(len(x_query_cart)).long().to(device).repeat_interleave(scatter(deg_slice, edge_index[1], dim = 0, dim_size = len(x_query_cart), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
+		ind_query = torch.arange(len(x_query_cart)).long().to(self.device).repeat_interleave(scatter(deg_slice, edge_index[1], dim = 0, dim_size = len(x_query_cart), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
 
 		# print('T1 %0.4f'%(time.time() - t1))
 
@@ -1021,8 +1021,8 @@ class ArrivalEmbedding(MessagePassing):
 			nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(degree_srcs[edge_index_p[0]]) + inc_inds_p
 			nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(degree_srcs[edge_index_s[0]]) + inc_inds_s
 
-			ind_query_p = torch.arange(len(tpick)).long().to(device).repeat_interleave(scatter(deg_slice_p, edge_index_p[1], dim = 0, dim_size = len(tpick), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
-			ind_query_s = torch.arange(len(tpick)).long().to(device).repeat_interleave(scatter(deg_slice_s, edge_index_s[1], dim = 0, dim_size = len(tpick), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
+			ind_query_p = torch.arange(len(tpick)).long().to(self.device).repeat_interleave(scatter(deg_slice_p, edge_index_p[1], dim = 0, dim_size = len(tpick), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
+			ind_query_s = torch.arange(len(tpick)).long().to(self.device).repeat_interleave(scatter(deg_slice_s, edge_index_s[1], dim = 0, dim_size = len(tpick), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
 
 			# print('T5 %0.4f'%(time.time() - t1))
 			# assert(torch.abs(ipick[ind_query_p] - A_src_in_sta[0, nodes_of_product_p]).max() == 0)
@@ -4985,6 +4985,7 @@ class Magnitude(nn.Module):
 
 
 # 		return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
+
 
 
 
