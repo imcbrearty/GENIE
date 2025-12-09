@@ -1283,7 +1283,6 @@ if init_bias == True:
 		print('Sta: %0.8f, %0.8f'%(m.type_logvar_bias_sta[0].item(), m.type_logvar_bias_sta[1].item()))
 		print('Diff: %0.8f, %0.8f'%(m.type_logvar_bias_diff[0].item(), m.type_logvar_bias_diff[1].item()))
 
-# moi
 
 def initilize_optimizer(m):
 
