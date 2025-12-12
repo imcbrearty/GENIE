@@ -981,22 +981,41 @@ class LossAccumulationBalancer:
 
 
 
+# class UncertaintyWeighting(nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#         # diffs are the soft anchor → fixed precision = 1.0
+#         self.log_weight_abs    = nn.Parameter(torch.tensor(0.0))
+#         self.log_weight_sta = nn.Parameter(torch.tensor(0.0))
+#         # diff weight fixed → no parameter
+
+#     def forward(self, loss_abs, loss_diff, loss_sta):
+#         w_abs    = torch.exp(-self.log_weight_abs)
+#         w_sta = torch.exp(-self.log_weight_sta)
+
+#         total = w_abs * loss_abs    \
+#               + 1.0 * loss_diff   \
+#               + w_sta * loss_sta
+
+#         return total
+
+
 class UncertaintyWeighting(nn.Module):
     def __init__(self):
         super().__init__()
-        # diffs are the soft anchor → fixed precision = 1.0
-        self.log_weight_abs    = nn.Parameter(torch.tensor(0.0))
+        self.log_weight_diff = nn.Parameter(torch.tensor(0.0))
         self.log_weight_sta = nn.Parameter(torch.tensor(0.0))
-        # diff weight fixed → no parameter
 
     def forward(self, loss_abs, loss_diff, loss_sta):
-        w_abs    = torch.exp(-self.log_weight_abs)
+        w_diff = torch.exp(-self.log_weight_diff)
         w_sta = torch.exp(-self.log_weight_sta)
-
-        total = w_abs * loss_abs    \
-              + 1.0 * loss_diff   \
-              + w_sta * loss_sta
-
+        
+        total = 1.0 * loss_abs \
+              + w_diff * loss_diff \
+              + w_sta * loss_sta \
+              + self.log_weight_diff \
+              + self.log_weight_sta
+        
         return total
 
 
@@ -1816,7 +1835,8 @@ for batch_idx, inputs in enumerate(loader):
 			loss = m.UncertaintyWeighting(loss_abs, loss_diff, loss_sta)/n_batch
 
 			if (np.mod(i, 100) == 0)*(j == 0):
-				print('\n Weights (abs, diff, sta): %0.8f, %0.8f, %0.8f \n'%(m.UncertaintyWeighting.log_weight_abs.item(), 0.0, m.UncertaintyWeighting.log_weight_sta.item()))
+				# print('\n Weights (abs, diff, sta): %0.8f, %0.8f, %0.8f \n'%(m.UncertaintyWeighting.log_weight_abs.item(), 0.0, m.UncertaintyWeighting.log_weight_sta.item()))
+				print('\n Weights (abs, diff, sta): %0.8f, %0.8f, %0.8f \n'%(1.0, m.UncertaintyWeighting.log_weight_diff.item(), m.UncertaintyWeighting.log_weight_sta.item()))
 
 
 		loss_val += loss.item()
