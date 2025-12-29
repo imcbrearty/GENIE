@@ -8,10 +8,18 @@ import shutil
 from collections import defaultdict
 from sklearn.metrics import r2_score
 import pathlib
+import pdb
+import scipy
 from math import floor, sqrt
+from torch_cluster import knn
 from itertools import product
 from torch_geometric.utils import from_networkx
+from scipy.optimize import differential_evolution
+from torch_geometric.utils import remove_self_loops
+from torch_geometric.nn import MessagePassing
+from torch_scatter import scatter
 from scipy.stats import pearsonr
+import networkx as nx
 from utils import *
 
 
@@ -91,6 +99,15 @@ else:
 	scale_time = 1.0
 
 
+depth_upscale_factor = 1.0
+time_upscale_factor = 1.0
+
+
+if torch.cuda.is_available():
+	device = torch.device('cuda')
+else:
+	device = torch.device('cpu')
+
 # Station file
 z = np.load(path_to_file + 'stations.npz')
 locs, stas = z['locs'], z['stas']
@@ -116,6 +133,22 @@ z.close()
 shutil.copy(path_to_file + 'region.npz', path_to_file + f'{config["name_of_project"]}_region.npz')
 
 
+
+lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
+lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
+
+scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
+scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
+
+
+## Check if using full Earth, set target sampling bounds ##
+if (lat_range_extend[0] <= -89.98)*(lat_range_extend[1] >= 89.98)*(lon_range_extend[0] <= -179.98)*(lon_range_extend[1] >= 179.98):
+	use_global = True
+else:
+	use_global = False
+
 ## Fit projection coordinates and create spatial grids
 if use_spherical == True:
 
@@ -132,12 +165,17 @@ else:
 ## Unit lat, vertical vectors; point positive y, and outward normal
 ## mean centered stations. Keep the vertical depth, consistent.
 
-print('\n Using domain')
+if use_global == True: 
+	print('\n Using global')
+else:
+	print('\n Using domain')
+
 print('\n Latitude:')
 print(lat_range)
 print('\n Longitude:')
 print(lon_range)
-
+print('\n Depths:')
+print(depth_range)
 
 if fix_nominal_depth == True:
 	nominal_depth = 0.0 ## Can change the target depth projection if prefered
@@ -148,7 +186,7 @@ center_loc = np.array([lat_range[0] + 0.5*np.diff(lat_range)[0], lon_range[0] + 
 # center_loc = locs.mean(0, keepdims = True)
 
 use_differential_evolution = True
-if use_differential_evolution == True:
+if (use_differential_evolution == True)*(use_global == False):
 
 	## This is prefered fitting method
 	
@@ -170,16 +208,26 @@ if use_differential_evolution == True:
 	
 	center_loc = np.array([lat_range[0] + 0.5*np.diff(lat_range)[0], lon_range[0] + 0.5*np.diff(lon_range)[0], nominal_depth]).reshape(1,-1)
 	
-	from scipy.optimize import differential_evolution
+	# from scipy.optimize import differential_evolution
 	
 	# os.rename(ext_dir + 'stations.npz', ext_dir + '%s_stations_backup.npz'%name_of_project)
 	soln = optimize_with_differential_evolution(center_loc)
 	rbest = rotation_matrix_full_precision(soln.x[0], soln.x[1], soln.x[2])
 	mn = soln.x[3::].reshape(1,-1)
 
+else:
+
+	## For global, do not use local corrections
+	mn = np.zeros((1,3))
+	rbest = np.eye(3)
+
+
 ## Save station file with projection functions
 np.savez_compressed(path_to_file + f'{config["name_of_project"]}_stations.npz', locs = locs, stas = stas, rbest = rbest, mn = mn)
 print('Saved station file \n')
+
+mn_cuda = torch.tensor(mn, device = device)
+rbest_cuda = torch.tensor(rbest, device = device)
 
 
 corr1 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
@@ -230,130 +278,64 @@ else:
 	ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
 	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)  # invert ftrns1
 
+	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
+	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device)  # invert ftrns1
+
 	# ftrns1_abs = lambda x: lla2ecef(x, a = earth_radius) # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
 	# ftrns2_abs = lambda x: ecef2lla(x, a = earth_radius)  # invert ftrns1	
 
 	ftrns1_abs = lambda x: lla2ecef(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((lla2ecef(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
 	ftrns2_abs = lambda x: ecef2lla(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((ecef2lla(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # invert ftrns1
 
-
-lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
-lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
-
-scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
-scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
+	ftrns1_diff_abs = lambda x: lla2ecef_diff(x, a = torch.tensor(earth_radius, device = device), device = device) if x.shape[1] == 3 else torch.cat((lla2ecef_diff(x, a = torch.tensor(earth_radius, device = device), device = device), x[:,3].reshape(-1,1)), axis = 1) # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
+	ftrns2_diff_abs = lambda x: ecef2lla_diff(x, a = torch.tensor(earth_radius, device = device), device = device) if x.shape[1] == 3 else torch.cat((ecef2lla_diff(x, a = torch.tensor(earth_radius, device = device), device = device), x[:,3].reshape(-1,1)), axis = 1) # invert ftrns1
 
 
-### Build spatial graphs using Poisson disk sampling and elliptical Earth centric density sampling ###
 
-def optimize_r_min(lat_vals, lon_mean = np.mean(lon_range), h_min = depth_range[0]):
-	r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
-	r_val = r_surface + h_min
-	return r_val
+## Create graph functions
 
+def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global):
 
-def optimize_r_max(lat_vals, lon_mean = np.mean(lon_range), h_max = depth_range[1]):
-	r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
-	r_val = r_surface + h_max
-	return -r_val
+	if use_spherical == False:
+		a = 6378137.0
+		b = 6356752.3142
+	else:
+		a = 6371e3
+		b = 6371e3
 
+	# u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random(N)
+	# longitude = (2*np.pi*u[:,0] - np.pi)*180.0/np.pi
+	# latitude = np.arccos(((a**2)*(1 - u[:,1]) + (b**2)*u[:,1] - a**2 + b**2) / (b**2 - a**2))
 
-def random_rotation_matrix():
-    u1, u2, u3 = np.random.rand(3)
+	# m = int(np.ceil(np.log2(N)))
+	# initial_points = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random_base2(m = m)[0:N]
 
-    q = np.array([
-        np.sqrt(1 - u1) * np.sin(2*np.pi*u2),
-        np.sqrt(1 - u1) * np.cos(2*np.pi*u2),
-        np.sqrt(u1)     * np.sin(2*np.pi*u3),
-        np.sqrt(u1)     * np.cos(2*np.pi*u3)
-    ])
+	u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random(N)  # Sobol 4D
+	if use_global == False:
+		phi = lon_range[0] + u[:,0]*(lon_range[1] - lon_range[0])
+		u_min = (1.0 + np.sin(np.deg2rad(lat_range[0])))/2.0
+		u_max = (1.0 + np.sin(np.deg2rad(lat_range[1])))/2.0
+		theta = u_min + u[:,1]*(u_max - u_min) # *(180.0/np.pi) # np.arcsin(2 * u_lat_rescaled - 1)
+		theta = np.arcsin(2 * theta - 1)*(180.0/np.pi)
 
-    w, x, y, z = q
-    return np.array([
-        [1 - 2*(y*y + z*z), 2*(x*y - z*w),     2*(x*z + y*w)],
-        [2*(x*y + z*w),     1 - 2*(x*x + z*z), 2*(y*z - x*w)],
-        [2*(x*z - y*w),     2*(y*z + x*w),     1 - 2*(x*x + y*y)]
-    ])
+	else:
+		phi = ((2 * np.pi * u[:, 0]) - np.pi)*(180.0/np.pi)                # longitude
+		# theta = np.arcsin(1 - 2 * u[:,1])*(180.0/np.pi)
+		theta = (np.arccos(1 - 2 * u[:, 1]) - np.pi/2.0)*(180.0/np.pi)            # colatitude (equal-area on sphere)
 
-def fibonacci_sphere_latlon(N):
+	r_min_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), depth_range[0]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+	r_max_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), depth_range[1]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+	xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), np.zeros((len(phi),1))), axis = 1))
+	r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+	r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
+	xyz = (r*xyz_surface)/r_surface
+	x_grid = ftrns2_abs(xyz)
 
-    # Golden ratio constants
-    phi = (1 + 5**0.5) / 2
-    alpha = 1 / phi
+	if use_time == True:
+		t = -time_shift_range + 2 * time_shift_range * u[:, [3]]
+		x_grid = np.concatenate((x_grid, t), axis = 1)
 
-    # Random phases
-    delta_phi, delta_z = np.random.rand(2)
-
-    n = np.arange(N)
-
-    # Fibonacci sphere (vectorized)
-    z = 1 - 2 * (n + delta_z) / N
-    theta = 2 * np.pi * (n * alpha + delta_phi)
-    r = np.sqrt(1 - z*z)
-
-    x = r * np.cos(theta)
-    y = r * np.sin(theta)
-
-    P = np.column_stack((x, y, z))
-
-    # Random global rotation
-    R = random_rotation_matrix()
-    P = P @ R.T
-
-    # Cartesian → lat/lon
-    lon = 180.0*np.arctan2(P[:, 1], P[:, 0])/np.pi        # [-pi, pi)
-    lat = 180.0*np.arcsin(np.clip(P[:, 2], -1, 1))/np.pi  # [-pi/2, pi/2]
-
-    return np.concatenate((lat.reshape(-1,1), lon.reshape(-1,1)), axis = 1)
-
-
-def hash_coords(points, cell_size):
-    """Convert points to integer grid coordinates"""
-    return np.floor(points / cell_size).astype(np.int32)
-
-
-def hash_coords_4d(points, cell_size):
-    return np.floor(points / cell_size).astype(np.int32)
-
-
-# def mirror_radial(points, rmin, rmax):
-#     r = np.linalg.norm(points, axis=1)
-#     u = points / r[:, None]
-
-#     p_low = u * (2*rmin - r)[:, None]
-#     p_high = u * (2*rmax - r)[:, None]
-
-#     return np.vstack([points, p_low, p_high])
-
-def mirror_radial(points, rmin, rmax):
-    r = np.linalg.norm(points, axis=1)
-    u = points / r[:, None]
-
-    p_low = u * (2*rmin - r)[:, None]
-    p_high = u * (2*rmax - r)[:, None]
-
-    return np.vstack([p_low, p_high])
-
-def mirror_time(points, tmin, tmax):
-
-	time_vals = points[:,3]
-	points_left = np.copy(points)
-	points_right = np.copy(points)
-	points_left[:,3] = 2*tmin - points_left[:,3]
-	points_right[:,3] = 2*tmax - points_left[:,3]
-
-	return np.vstack([points_left, points_right])
-
-def r_min_func(points):
-    r_min_vals = np.linalg.norm(ftrns1_abs(ftrns2_abs(points[:,0:3])*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) + depth_range[0]
-    return r_min_vals
-
-def r_max_func(points):
-    r_max_vals = np.linalg.norm(ftrns1_abs(ftrns2_abs(points[:,0:3])*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) + depth_range[1]
-    return r_max_vals
-
+	return x_grid
 
 def poisson_disk_filter(
     points,
@@ -524,104 +506,26 @@ def poisson_disk_filter(
 
             rs = np.linalg.norm(samples[:, :3], axis=1)
             inside = (rs >= r_min) & (rs <= r_max)
+            f = inside.mean()
 
-            if np.random.rand() > (inside.mean() ** prob_factor):
+            # --- compute local occupancy ---
+            gamma = 1.0
+            occupancy = 0
+            for offset in product([-1,0,1], repeat=N):
+                nbr_cell = tuple(cell[i]+offset[i] for i in range(N))
+                occupancy += len(grid.get(nbr_cell, []))
+
+            adj_factor = (h**N / (occupancy + 1e-6))**gamma
+            if np.random.rand() > (f * adj_factor)**prob_factor:
                 continue
+                    # if np.random.rand() > (inside.mean() ** prob_factor):
+                    #     continue
 
         # --- accept ---
         grid[cell].append(p)
         accepted.append(p)
 
     return np.array(accepted)
-
-
-
-# def poisson_disk_filter(points, h, use_mirrored = True, use_probablistic_acceptance = True, prob_factor = 1.5):
-#     """
-#     points : (M,3) candidate points
-#     h      : minimum spacing
-#     """
-#     cell_size = h / np.sqrt(3)
-#     # cell_size = h / np.sqrt(2)
-#     grid = defaultdict(list)
-
-#     accepted = []
-#     accepted_pts = []
-
-#     h2 = h * h
-
-#     ## Can add lat lon mirroring as well
-#     if use_mirrored == True:
-
-#         points_lat_lon = ftrns2_abs(points)[:,0:2]
-#         points_lat_lon = np.concatenate((points_lat_lon, np.zeros((len(points_lat_lon),1))), axis = 1)
-#         r_min_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis = 1) + depth_range[0]
-#         r_max_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis = 1) + depth_range[1]
-#         points_mirrored = ftrns1_abs(ftrns2_abs(mirror_radial(ftrns1_abs(points_lat_lon), r_min_vals, r_max_vals)))
-#         # points_mirrored = ftrns1(ftrns2_abs(mirror_radial(ftrns1_abs(points_lat_lon), r_min, r_max)))
-#         mask_mirrored = np.concatenate((np.zeros(len(points)), np.ones(len(points_mirrored))), axis = 0)
-#         points = np.concatenate((points, points_mirrored), axis = 0)
-
-#     else:
-
-#     	mask_mirrored = np.zeros(len(points))
-
-#     # Shuffle candidates (important!)
-#     order = np.random.permutation(len(points))
-
-#     for idx in order:
-
-#         p = points[idx]
-#         cell = tuple(np.floor(p / cell_size).astype(int))
-
-#         ok = True
-#         # Check neighboring cells
-#         for dx in (-1, 0, 1):
-#             for dy in (-1, 0, 1):
-#                 for dz in (-1, 0, 1):
-#                     nbr_cell = (cell[0]+dx, cell[1]+dy, cell[2]+dz)
-#                     if nbr_cell in grid:
-#                         q = np.array(grid[nbr_cell])
-#                         if np.any(np.sum((q - p)**2, axis=1) < h2):
-#                             ok = False
-#                             break
-#                 if not ok: break
-#             if not ok: break
-
-
-#         if (ok == True)*(mask_mirrored[idx] == 0):
-
-#             # use_probablistic_acceptance = True
-#             if use_probablistic_acceptance == True:
-
-#                 # Compute volume fraction f
-#                 r_min_ball = h / 2  # Exclusion radius
-#                 # Monte Carlo approx: Sample N points in ball around p
-#                 N = 300
-#                 offsets = np.random.randn(N, 3)  # Gaussian, scale to uniform ball later
-#                 offsets /= np.linalg.norm(offsets, axis=1)[:, None]
-#                 offsets *= (np.random.rand(N)[:, None] ** (1/3)) * r_min_ball  # Uniform in ball
-#                 samples = p + offsets                
-
-#                 # Check which samples are in domain (need your ftrns funcs for r_min/max)
-#                 samples_lat_lon = ftrns2(samples)[:, 0:2]
-#                 samples_lat_lon = np.concatenate((samples_lat_lon, np.zeros((len(samples_lat_lon), 1))), axis=1)
-#                 r_samples = np.linalg.norm(samples, axis=1)
-#                 r_min_vals = np.linalg.norm(ftrns1_abs(samples_lat_lon), axis=1) + depth_range[0]
-#                 r_max_vals = np.linalg.norm(ftrns1_abs(samples_lat_lon), axis=1) + depth_range[1]
-#                 inside = (r_samples >= r_min_vals) & (r_samples <= r_max_vals)  # Plus any angular constraints if needed
-    
-#                 f = np.sum(inside) / N
-#                 if np.random.rand() < (f**prob_factor):  # Or f**2 for stronger correction
-#                     grid[cell].append(p)
-#                     accepted_pts.append(p)
-
-#             else:
-
-#                 grid[cell].append(p)
-#                 accepted_pts.append(p)
-
-#     return np.array(accepted_pts)
 
 def poisson_exact_count(points, target_N, h0, max_iter = 300, tol_fraction = 0.001, prob_factor = 1.5, use_probablistic_acceptance = True, use_mirrored = True):
     """
@@ -638,13 +542,13 @@ def poisson_exact_count(points, target_N, h0, max_iter = 300, tol_fraction = 0.0
     best_pts = None
 
     for iter_count in range(max_iter):
-    	
+        
         h = 0.5 * (h_low + h_high)
 
         # if use_mirrored == False:
         pts = poisson_disk_filter(points, h, prob_factor = prob_factor, use_probablistic_acceptance = use_probablistic_acceptance, use_mirrored = use_mirrored)
         # else:
-        # 	pts = poisson_disk_filter_mirrored(points, h)
+        #   pts = poisson_disk_filter_mirrored(points, h)
 
         # pts = poisson_disk_filter(points, h)
         n = len(pts)
@@ -668,166 +572,65 @@ def poisson_exact_count(points, target_N, h0, max_iter = 300, tol_fraction = 0.0
 
     return ftrns2_abs(best_pts), h
 
+def farthest_point_sampling(xyz_t_candidates, target_N, scale_time = scale_time, depth_boost = depth_upscale_factor):
 
+    points_scaled = xyz_t_candidates.copy()
+    points_scaled[:, 3] *= scale_time*time_upscale_factor
 
-def relax_poisson(
-    points,
-    h,
-    use_time = use_time_shift,
-    scale_time = scale_time,
-    t_min = -time_shift_range,
-    t_max = time_shift_range,
-    iters = 30,
-    alpha = 0.3,
-    relax_factor = 1.8,
-):
-    """
-    Dimension-agnostic Lloyd-style relaxation for Poisson points.
-    """
+    if depth_boost != 1:
+    	points_scaled = ftrns1_abs(ftrns2_abs(xyz_t_candidates)*np.array([1.0, 1.0, depth_boost, 1.0]))
+        # points_scaled[:, 2] *= depth_boost  # or radial as before
+    
+    M = len(points_scaled)
+    keep_idx = [np.random.randint(M)]  # start with random seed
+    remaining = list(set(range(M)) - set(keep_idx))
+    
+    tree = cKDTree(points_scaled[keep_idx])
+    
+    while len(keep_idx) < target_N and remaining:
+        dists = tree.query(points_scaled[remaining])[0]
+        farthest = np.argmax(dists)
+        next_idx = remaining.pop(farthest)
+        keep_idx.append(next_idx)
+        tree = cKDTree(points_scaled[keep_idx])  # update tree
+    
+    return ftrns2_abs(xyz_t_candidates[keep_idx])
 
-    N, D = points.shape
-    dim = 4 if use_time else 3
-    interact_h = relax_factor * h
-    interact_h2 = interact_h ** 2
+# from scipy.spatial import KDTree
+# import numpy as np
 
-    for _ in range(iters):
+# # Oversampled points
+# xyz_t_over = np.hstack([xyz_over, t_over.reshape(-1,1)])
 
-        disp = np.zeros_like(points)
+# # Scale for emphasis on depth (z is ~depth axis, but use full metric)
+# w_scale = 6371e3 / (2 * time_shift_range)  # as before
+# points_scaled = xyz_t_over.copy()
+# points_scaled[:, 3] *= w_scale  # time
+# # To prioritize depth, artificially scale the depth direction (approximate as radial norm variation)
+# r_over = np.linalg.norm(xyz_over, axis=1)
+# depth_scale = 5.0  # arbitrary factor >1 to make depth "larger" in metric → denser sampling preserved
+# points_scaled[:, :3] *= (r_over[:, np.newaxis] / np.mean(r_over)) * depth_scale  # or just scale z: points_scaled[:,2] *= depth_scale
 
-        # scaled coordinates for distance computation
-        if use_time:
-            P = np.column_stack([points[:, :3], scale_time * points[:, 3]])
-        else:
-            P = points[:, :3]
+# # Thin to N points by greedy farthest-point sampling (approximates higher depth density)
+# keep_idx = []
+# remaining = set(range(N_over))
+# current = np.random.choice(list(remaining))  # start random
+# keep_idx.append(current)
+# remaining.remove(current)
 
-        for i in range(N):
-            d = P - P[i]
-            r2 = np.sum(d * d, axis=1)
+# tree = KDTree(points_scaled[list(remaining)])
 
-            mask = (r2 > 1e-12) & (r2 < interact_h2)
-            if not np.any(mask):
-                continue
+# while len(keep_idx) < N and remaining:
+#     dists = tree.query(points_scaled[keep_idx[-1]])[0]
+#     farthest = np.argmax(dists)
+#     next_idx = list(remaining)[farthest]
+#     keep_idx.append(next_idx)
+#     remaining.remove(next_idx)
+#     # Update tree (inefficient for large N; use batch for speed)
+#     tree = KDTree(points_scaled[list(remaining)])
 
-            r = np.sqrt(r2[mask])
-            w = (1 - r / interact_h)
-            w = np.maximum(0, w) ** 2
-
-            u = d[mask] / r[:, None]
-
-            if use_time:
-                disp[i, :3] += np.sum(w[:, None] * u[:, :3], axis=0)
-                disp[i, 3]  += np.sum(w * u[:, 3]) / scale_time
-            else:
-                disp[i] += np.sum(w[:, None] * u, axis=0)
-
-        # limit step size
-        norm = np.linalg.norm(disp[:, :3], axis=1, keepdims=True)
-        max_step = 0.5 * h
-        scale = np.minimum(1.0, max_step / (norm + 1e-12))
-        disp *= scale
-
-        points += alpha * disp
-
-        # --- project back to admissible domain ---
-        x = points[:, :3]
-        r = np.linalg.norm(x, axis=1)
-        u = x / r[:, None]
-
-        # print(r.shape)
-        # print(u.shape)
-        rmin = np.array([r_min_func(ri*ui.reshape(1,-1)) for ui, ri in zip(u, r)]).reshape(-1)
-        rmax = np.array([r_max_func(ri*ui.reshape(1,-1)) for ui, ri in zip(u, r)]).reshape(-1)
-
-        # pdb.set_trace()
-        r_new = np.clip(r, rmin, rmax)
-        points[:, :3] = u * r_new[:, None]
-
-        if use_time:
-            points[:, 3] = np.clip(points[:, 3], t_min, t_max)
-
-    return ftrns2_abs(points)
-
-
-
-
-bounds = [(lat_range_extend[0], lat_range_extend[1])]
-soln = differential_evolution(optimize_r_min, bounds, popsize = 50, maxiter = 1000, disp = True)
-r_min = optimize_r_min(np.array([soln.x])); print('\n')
-
-bounds = [(lat_range_extend[0], lat_range_extend[1])]
-soln = differential_evolution(optimize_r_max, bounds, popsize = 50, maxiter = 1000, disp = True)
-r_max = -1.0*optimize_r_max(np.array([soln.x])); print('\n')
-assert(r_max >= r_min)
-
-
-### Define Fibonnaci sampling routine ####
-## Check if using full Earth, set target sampling bounds ##
-if (lat_range_extend[0] <= -89.98)*(lat_range_extend[1] >= 89.98)*(lon_range_extend[0] <= -179.98)*(lon_range_extend[1] >= 179.98):
-	use_global = True
-else:
-	use_global = False
-
-if use_global == True:
-	Area = 4*np.pi*(earth_radius**2)
-	Volume = (4.0*np.pi/3.0)*(r_max**3 - r_min**3)
-
-else:
-	Area = (earth_radius**2)*(np.deg2rad(lon_range_extend[1]) - np.deg2rad(lon_range_extend[0]))*(np.sin(np.pi*lat_range_extend[1]/180.0) - np.sin(np.pi*lat_range_extend[0]/180.0))
-	Volume = Area*(r_max**3 - r_min**3)/(3*(earth_radius**2))
-
-
-## Estimate an optimal time scaling for isotropic spacing
-if use_time_shift == True:
-    dx = (Volume/number_of_spatial_nodes)**(1/3)
-    dt = 2*time_shift_range/(number_of_spatial_nodes**(1/4))
-    scale_time_effective = dx/dt
-    print('Isotropic scaling effective time scale: %0.4f m/s'%scale_time_effective) ## For a given spatial and temporal volume
-    ## Could use this to guide how much time window can be increased or decreased
-
-
-if use_time_shift == True:
-	Volume = Volume*(2*scale_time*time_shift_range)
-
-## Determine nominal node spacing
-if use_time_shift == False:
-	nominal_spacing = (Volume/(0.74048*number_of_spatial_nodes))**(1/3) ## Hex-based spacing
-else:
-	nominal_spacing = (Volume/(0.74048*number_of_spatial_nodes))**(1/4) ## Hex-based spacing
-
-
-up_sample_factor = 10 if use_time_shift == False else 20
-number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
-
-
-def collect_trial_points(number_candidate_nodes, use_time_shift = use_time_shift):
-
-	## Collect trial points
-	trial_points = []
-	n_collect_points = 0
-	while n_collect_points < number_candidate_nodes:
-		points = fibonacci_sphere_latlon(number_candidate_nodes)
-		ifind = np.where((points[:,0] < lat_range_extend[1])*(points[:,0] > lat_range_extend[0])*(points[:,1] < lon_range_extend[1])*(points[:,1] > lon_range_extend[0]))[0]
-		trial_points.append(points[ifind])
-		n_collect_points += len(ifind)
-	trial_points = np.vstack(trial_points)
-	trial_points = trial_points[np.random.choice(len(trial_points), size = number_candidate_nodes, replace = False)]
-
-	## Now sample depths for each point
-
-	r_min_vals = np.linalg.norm(ftrns1_abs(np.concatenate((trial_points, np.zeros((len(trial_points),1))), axis = 1)), axis = 1) + depth_range[0]
-	r_max_vals = np.linalg.norm(ftrns1_abs(np.concatenate((trial_points, np.zeros((len(trial_points),1))), axis = 1)), axis = 1) + depth_range[1]
-	radius_vals = (np.random.rand(number_candidate_nodes)*(r_max_vals**3 - r_min_vals**3) + r_min_vals**3)**(1/3)
-	depth_vals = radius_vals - np.linalg.norm(ftrns1_abs(np.concatenate((trial_points, np.zeros((len(trial_points),1))), axis = 1)), axis = 1)
-	trial_points = np.concatenate((trial_points, depth_vals.reshape(-1,1)), axis = 1)
-	# trial_points_abs = np.concatenate((trial_points, radius_vals.reshape(-1,1)), axis = 1)
-
-	if use_time_shift == True:
-		time_samples = np.random.uniform(-time_shift_range, time_shift_range, size = number_candidate_nodes) # scale_time*
-		trial_points = np.concatenate((trial_points, time_samples.reshape(-1,1)), axis = 1)
-
-	return trial_points # , trial_points_abs
-
-
+# xyz = xyz_over[keep_idx]
+# t = t_over[keep_idx]
 
 def loss_metrics(x_grid, grid_ind = 0, use_time_shift = use_time_shift, plot_on = False):
 
@@ -838,7 +641,7 @@ def loss_metrics(x_grid, grid_ind = 0, use_time_shift = use_time_shift, plot_on 
 	h_vals = np.histogram(r**3, bins = int(len(x_grid)/n_bins)) # [0]
 	mean_loss = np.mean(n_bins*np.ones(len(h_vals[0])) - h_vals[0])
 	rms_loss = (np.sqrt(((n_bins*np.ones(len(h_vals[0])) - h_vals[0])**2).sum()/len(h_vals[0]))/n_bins)
-	print('Mean deviation of radius flatness: %0.8f'%mean_loss)
+	print('\nMean deviation of radius flatness: %0.8f'%mean_loss)
 	print('RMS deviation of radius flatness: %0.8f'%rms_loss)
 
 	# [2]. Sorted depths
@@ -884,6 +687,15 @@ def loss_metrics(x_grid, grid_ind = 0, use_time_shift = use_time_shift, plot_on 
 		print('Nearest neighbors: Min: %0.4f, Mean: %0.4f (+/- %0.4f) km \n'%(min_dist, mean_dist, std_dist))
 
 
+	nn_cv = nn_distance_cv(ftrns1_abs(x_grid[:,0:3]), scale_time)
+	knn_cv = knn_volume_cv(ftrns1_abs(x_grid[:,0:3]), k=8, scale_time=scale_time)
+	print(f"Spatial: NN-CV={nn_cv:.3f}, kNN-CV={knn_cv:.3f}")
+
+	if x_grid.shape[1] == 4:
+		nn_cv = nn_distance_cv(ftrns1_abs(x_grid), scale_time)
+		knn_cv = knn_volume_cv(ftrns1_abs(x_grid), k=8, scale_time=scale_time)
+		print(f"Full: NN-CV={nn_cv:.3f}, kNN-CV={knn_cv:.3f}")
+
 	if use_time_shift == True:
 		# [4]. R2 of expected time distribution
 		n = len(x_grid)
@@ -918,79 +730,241 @@ def loss_metrics(x_grid, grid_ind = 0, use_time_shift = use_time_shift, plot_on 
 
 		# [7]. Ratio of small dt
 		ratio_within_time_radius = len(np.where(dist_time*scale_time < 0.005*nominal_spacing)[0])/len(dist_time)
-		print('Ratio of small time offset nearest neighbors: %0.8f'%ratio_within_time_radius)
+		print('Ratio of small time offset nearest neighbors: %0.8f \n'%ratio_within_time_radius)
 
 
 	return mean_loss, rms_loss, r2_loss, mean_dist, std_dist
 
-##### Determine optimal sampling strategy ######
+def nn_distance_stats(xyz_t, w_scale=scale_time):
+    """
+    Compute statistics on nearest-neighbor distances in scaled space-time.
+    
+    Returns:
+    - mean_nn_dist
+    - median_nn_dist  
+    - normalized_mean (higher = better uniformity)
+    """
+    points_scaled = xyz_t.copy()
+    points_scaled[:, 3] *= w_scale  # scale time dimension
+    
+    tree = cKDTree(points_scaled)
+    dists, _ = tree.query(points_scaled, k=2)  # k=2 to get nearest non-self
+    nn_dists = dists[:, 1]  # nearest-neighbor distances for all points
+    
+    mean_nn = np.mean(nn_dists)
+    median_nn = np.median(nn_dists)
+    min_nn = np.min(nn_dists)
+    
+    # Approximate expected mean NN distance for uniform random points in 4D
+    # Using Gamma function approximation: E[NN] ≈ 0.65 * (V / N)^{1/4} in 4D
+    N = len(xyz_t)
+    ranges = np.ptp(xyz_t, axis=0)
+    vol_spatial = np.prod(ranges[:3])
+    vol_time_scaled = ranges[3] * w_scale
+    total_vol = vol_spatial * vol_time_scaled
+    
+    # More accurate constant for 4D unit ball, scaled
+    expected_random_mean = 0.65 * (total_vol / N) ** (1/4)
+    
+    normalized_mean = mean_nn / expected_random_mean
+    
+    stats = {
+        'mean_nn_dist': mean_nn,
+        'median_nn_dist': median_nn,
+        'min_nn_dist': min_nn,
+        'normalized_mean': normalized_mean,   # >1.0 = better than random
+        'nn_distances': nn_dists  # for histograms if desired
+    }
 
-## Sampling options
-perm_option1 = [1.0, True, True]
-perm_option2 = [1.5, True, True]
-perm_option3 = [2.0, True, True]
-perm_option4 = [1.0, False, True]
-perm_option5 = [1.0, False, False]
-perm_options = [perm_option1, perm_option2, perm_option3, perm_option4, perm_option5]
-use_relaxation = True
+    # Usage
+    # stats = nn_distance_stats(xyz_t, w_scale=w_scale)
+    print(f"Mean NN distance: {stats['mean_nn_dist']:.1f} m (spatial+time)")
+    print(f"Normalized mean: {stats['normalized_mean']:.3f}")
+    print(f"Interpretation: 1.0 = random, 1.3–1.6 = good, >1.7 = excellent low-discrepancy")
 
-## Now implement Poisson disk filtering to obtain the target number of nodes
-trial_points = collect_trial_points(number_candidate_nodes)
-R2_losses = [] ## Base decision on depth R2 loss (or use the RMS loss)
+    return stats
 
-for p in perm_options: ## Note the increased tol_fraction for this search
-	x_grid, _ = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, tol_fraction = 0.01, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
-	# print(p)
-	R2_losses.append(loss_metrics(x_grid)[2])
-	assert(x_grid[:,0].min() >= lat_range_extend[0])
-	assert(x_grid[:,0].max() <= lat_range_extend[1])
-	assert(x_grid[:,1].min() >= lon_range_extend[0]) if use_global == False else 1
-	assert(x_grid[:,1].max() <= lon_range_extend[1]) if use_global == False else 1
-	assert(x_grid[:,2].min() >= depth_range[0])
-	assert(x_grid[:,2].max() <= depth_range[1])
-	assert(len(x_grid) == number_of_spatial_nodes)
+def scale_points(points, scale_time = scale_time):
+    if points.shape[1] == 4:
+        P = points.copy()
+        P[:, 3] *= scale_time
+        return P
+    return points
 
-print('R2 losses:')
-print(R2_losses)
-iarg = np.argmax(np.array(R2_losses))
-p = perm_options[iarg]
-print('\nOptimal sampling strategy')
-print(p); print('\n')
+def nn_distance_cv(points, scale_time=scale_time):
+    P = scale_points(points, scale_time)
+    tree = cKDTree(P)
+    d, _ = tree.query(P, k=2)   # d[:,0] = 0 (self)
+    nn = d[:, 1]
+    return np.std(nn) / np.mean(nn)
 
+# CV	Interpretation
+# > 0.25	poor
+# 0.15–0.25	OK (Poisson only)
+# 0.08–0.15	good
+# < 0.08	excellent
+
+def knn_volume_cv(points, k=8, scale_time=scale_time):
+    P = scale_points(points, scale_time)
+    tree = cKDTree(P)
+    d, _ = tree.query(P, k=k+1)  # includes self
+    rk = d[:, -1]
+    dim = P.shape[1]
+    volumes = rk**dim
+    return np.std(volumes) / np.mean(volumes)
+
+
+def r_min_func(points):
+    r_min_vals = np.linalg.norm(ftrns1_abs(ftrns2_abs(points[:,0:3])*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) + depth_range[0]
+    return r_min_vals
+
+def r_max_func(points):
+    r_max_vals = np.linalg.norm(ftrns1_abs(ftrns2_abs(points[:,0:3])*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) + depth_range[1]
+    return r_max_vals
+
+def optimize_r_min(lat_vals, lon_mean = np.mean(lon_range), h_min = depth_range[0]):
+	r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
+	r_val = r_surface + h_min
+	return r_val
+
+
+def optimize_r_max(lat_vals, lon_mean = np.mean(lon_range), h_max = depth_range[1]):
+	r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
+	r_val = r_surface + h_max
+	return -r_val
+
+def scale_points(points, scale_time = scale_time):
+    if points.shape[1] == 4:
+        P = points.copy()
+        P[:, 3] *= scale_time
+        return P
+    return points
+
+
+## Not actually used but useful base statistics
+
+bounds = [(lat_range_extend[0], lat_range_extend[1])]
+soln = differential_evolution(optimize_r_min, bounds, popsize = 50, maxiter = 1000, disp = True)
+r_min = optimize_r_min(np.array([soln.x])); print('\n')
+
+bounds = [(lat_range_extend[0], lat_range_extend[1])]
+soln = differential_evolution(optimize_r_max, bounds, popsize = 50, maxiter = 1000, disp = True)
+r_max = -1.0*optimize_r_max(np.array([soln.x])); print('\n')
+assert(r_max >= r_min)
+
+
+### Define Fibonnaci sampling routine ####
+
+Area_globe = 4*np.pi*(earth_radius**2)
+if use_global == True:
+    Area = 4*np.pi*(earth_radius**2)
+    Volume = (4.0*np.pi/3.0)*(r_max**3 - r_min**3)
+    Volume_space = 1.0*Volume
+
+else:
+    Area = (earth_radius**2)*(np.deg2rad(lon_range_extend[1]) - np.deg2rad(lon_range_extend[0]))*(np.sin(np.pi*lat_range_extend[1]/180.0) - np.sin(np.pi*lat_range_extend[0]/180.0))
+    Volume = Area*(r_max**3 - r_min**3)/(3*(earth_radius**2))
+    Volume_space = 1.0*Volume
+
+
+## Estimate an optimal time scaling for isotropic spacing
+if use_time_shift == True:
+    dx = (Volume/number_of_spatial_nodes)**(1/3)
+    dt = 2*time_shift_range/(number_of_spatial_nodes**(1/4))
+    scale_time_effective = dx/dt
+    print('Isotropic scaling effective time scale: %0.4f m/s'%scale_time_effective) ## For a given spatial and temporal volume
+    ## Could use this to guide how much time window can be increased or decreased
+
+
+if use_time_shift == True:
+    Volume = Volume*(2*scale_time*time_shift_range)
+
+## Determine nominal node spacing
+if use_time_shift == False:
+    nominal_spacing = (Volume/(0.74048*number_of_spatial_nodes))**(1/3) ## Hex-based spacing
+    nominal_spacing_space = (Volume_space/(0.74048*number_of_spatial_nodes))**(1/3) ## Hex-based spacing
+
+else:
+    nominal_spacing = (Volume/(0.74048*number_of_spatial_nodes))**(1/4) ## Hex-based spacing
+    nominal_spacing_space = (Volume_space/(0.74048*number_of_spatial_nodes))**(1/3) ## Hex-based spacing
+
+up_sample_factor = 10 if use_time_shift == False else 20
+number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
+
+
+use_poisson_filtering = False 
+use_farthest_point_filtering = True 
+
+
+# ## Sampling options
+# perm_option1 = [1.0, True, True]
+# perm_option2 = [1.5, True, True]
+# perm_option3 = [2.0, True, True]
+# perm_option4 = [1.0, False, True]
+# perm_option5 = [1.0, False, False]
+# perm_options = [perm_option1, perm_option2, perm_option3, perm_option4, perm_option5]
+# use_relaxation = True
+
+# ## Now implement Poisson disk filtering to obtain the target number of nodes
+# trial_points = collect_trial_points(number_candidate_nodes)
+# R2_losses = [] ## Base decision on depth R2 loss (or use the RMS loss)
+
+# # moi
+
+# for p in perm_options: ## Note the increased tol_fraction for this search
+# 	# x_grid, _ = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, tol_fraction = 0.01, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
+# 	x_grid = regular_sobolov(number_of_spatial_nodes)
 
 
 ## Now build all spatial grids using optimal sampling strategy
 x_grids = []
 for n in range(num_grids):
 
-	trial_points = collect_trial_points(number_candidate_nodes)
-	x_grid, nominal_spacing = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
-	assert(x_grid[:,0].min() >= lat_range_extend[0])
-	assert(x_grid[:,0].max() <= lat_range_extend[1])
-	assert(x_grid[:,1].min() >= lon_range_extend[0]) if use_global == False else 1
-	assert(x_grid[:,1].max() <= lon_range_extend[1]) if use_global == False else 1
-	assert(x_grid[:,2].min() >= depth_range[0])
-	assert(x_grid[:,2].max() <= depth_range[1])
+	# trial_points = collect_trial_points(number_candidate_nodes)
+	# x_grid, nominal_spacing = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
+
+	if use_poisson_filtering == True:
+
+		p = [1.0, False, False] ## Optimize this choice (on the first grid built)
+		trial_points = regular_sobolov(number_candidate_nodes)
+		x_grid, nominal_spacing = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
+
+	elif use_farthest_point_filtering == True:
+
+		## Increase efficiency of this script
+		trial_points = regular_sobolov(number_candidate_nodes)
+		x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes)
+
+	else:
+
+		x_grid = regular_sobolov(number_of_spatial_nodes)
+
+
+	# else:
+	# 	p = [1.0, False, False] ## Optimize this choice (on the first grid built)
+	# 	trial_points = regular_sobolov(number_candidate_nodes)
+	# 	x_grid, nominal_spacing = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
+
+
+	tol_frac = 0.01
+	assert(x_grid[:,0].min() >= (lat_range_extend[0] - tol_frac*np.diff(lat_range_extend)))
+	assert(x_grid[:,0].max() <= (lat_range_extend[1] + tol_frac*np.diff(lat_range_extend)))
+	assert(x_grid[:,1].min() >= (lon_range_extend[0] - tol_frac*np.diff(lon_range_extend))) if use_global == False else 1
+	assert(x_grid[:,1].max() <= (lon_range_extend[1] + tol_frac*np.diff(lon_range_extend))) if use_global == False else 1
+	assert(x_grid[:,2].min() >= (depth_range[0] - tol_frac*np.diff(depth_range)))
+	assert(x_grid[:,2].max() <= (depth_range[1] + tol_frac*np.diff(depth_range)))
 	assert(len(x_grid) == number_of_spatial_nodes)
 
-	if use_relaxation == True:
-		x_grid_init = np.copy(x_grid)
-		x_grid_updated = relax_poisson(ftrns1_abs(x_grid), 1.5*nominal_spacing)
-		x_grid = np.copy(x_grid_updated) # relax_poisson(ftrns1_abs(x_grid), 1.5*nominal_spacing)
-
 	loss_metrics(x_grid, plot_on = True, grid_ind = n)
+	nn_distance_stats(ftrns1_abs(x_grid))
 	x_grids.append(np.expand_dims(x_grid, axis = 0))
 
 x_grids = np.vstack(x_grids)
 np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = x_grids, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
 
-
 ## Now build expander graphs
-
-
 build_expander_graphs = True
 if build_expander_graphs == True:
-
 
 	def make_cayleigh_graph(n):
 
@@ -1111,664 +1085,3 @@ if build_expander_graphs == True:
 
 print("All files saved successfully!")
 print("✔ Script execution: Done")
-
-
-
-
-
-
-
-
-
-
-# def relax_poisson3(points, h, iters=50, alpha=0.55, relax_factor=2.2):
-#     """
-#     points: (N, 3) array from your Poisson disk filter
-#     h: your original nominal minimum spacing
-#     relax_factor: multiplier for interaction range (2.0–2.5 for stronger regularity)
-#     """
-#     interact_h = h * relax_factor  # Longer range for more global ordering
-    
-#     for _ in range(iters):
-#         disp = np.zeros_like(points)
-#         for i, p in enumerate(points):
-#             d = points - p  # vectors to all other points
-#             r2 = np.sum(d * d, axis=1)
-#             mask = (r2 > 1e-8) & (r2 < interact_h**2)  # avoid self, up to interact_h
-            
-#             if np.any(mask):
-#                 r = np.sqrt(r2[mask])
-#                 # Cubic weights for stronger near-repulsion
-#                 weights = np.maximum(0, 1 - r / interact_h) ** 3
-#                 unit_d = d[mask] / r[:, None]
-#                 disp[i] += np.sum(weights[:, None] * unit_d, axis=0)
-        
-#         # Limit max displacement per iter
-#         disp_norm = np.linalg.norm(disp, axis=1, keepdims=True)
-#         max_disp = 0.6 * h
-#         disp = np.where(disp_norm > max_disp, disp * (max_disp / disp_norm), disp)
-        
-#         points += alpha * disp
-        
-#         # Reproject to valid shell (unchanged)
-#         r = np.linalg.norm(points, axis=1)
-#         points_lat_lon = ftrns2_abs(points)[:, 0:2]
-#         points_lat_lon = np.concatenate((points_lat_lon, np.zeros((len(points_lat_lon), 1))), axis=1)
-#         r_min_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis=1) + depth_range[0]
-#         r_max_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis=1) + depth_range[1]
-#         r = np.clip(r, r_min_vals, r_max_vals)
-#         points = points / np.linalg.norm(points, axis=1)[:, None] * r[:, None]
-    
-#     return ftrns2_abs(points)  # or return Cartesian if preferred
-
-
-# def relax_poisson1(points, h, iters = 30, alpha = 0.4, relax_factor = 1.8):
-#     """
-#     points: (N, 3) array from your Poisson disk filter
-#     h: your original nominal minimum spacing
-#     relax_factor: multiplier for interaction range (1.5–2.0 recommended)
-#     """
-#     interact_h = h * relax_factor  # e.g., 1.8 * h → soft long-range push
-    
-#     for _ in range(iters):
-#         disp = np.zeros_like(points)
-#         for i, p in enumerate(points):
-#             d = points - p  # vectors to all other points
-#             r2 = np.sum(d * d, axis=1)
-#             mask = (r2 > 1e-8) & (r2 < interact_h**2)  # avoid self, up to interact_h
-            
-#             if np.any(mask):
-#                 r = np.sqrt(r2[mask])
-#                 # Stronger near, tapering to zero at interact_h
-#                 weights = np.maximum(0, 1 - r / interact_h) ** 2
-#                 unit_d = d[mask] / r[:, None]
-#                 disp[i] += np.sum(weights[:, None] * unit_d, axis=0)
-        
-#         # Optional: limit max displacement per iter to prevent instability
-#         disp_norm = np.linalg.norm(disp, axis=1, keepdims=True)
-#         max_disp = 0.5 * h
-#         disp = np.where(disp_norm > max_disp, disp * (max_disp / disp_norm), disp)
-        
-#         points += alpha * disp
-        
-#         # Your existing reprojection to valid shell (crucial!)
-#         r = np.linalg.norm(points, axis=1)
-#         points_lat_lon = ftrns2_abs(points)[:, 0:2]
-#         points_lat_lon = np.concatenate((points_lat_lon, np.zeros((len(points_lat_lon), 1))), axis=1)
-#         r_min_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis=1) + depth_range[0]
-#         r_max_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis=1) + depth_range[1]
-#         r = np.clip(r, r_min_vals, r_max_vals)
-#         points = points / np.linalg.norm(points, axis=1)[:, None] * r[:, None]
-    
-#     return ftrns2_abs(points)  # or return Cartesian if preferred
-
-
-
-
-
-# def poisson_disk_filter1(points, h, use_time_shift = use_time_shift, use_mirrored = True, use_mirrored_time = True, use_probablistic_acceptance = True, prob_factor = 1.5):
-#     """
-#     points : (M,3) candidate points
-#     h      : minimum spacing
-#     """
-#     cell_size = h / np.sqrt(3)
-#     # cell_size = h / np.sqrt(2)
-#     grid = defaultdict(list)
-
-#     accepted = []
-#     accepted_pts = []
-
-#     h2 = h * h
-
-#     ## Can add lat lon mirroring as well
-#     if use_mirrored == True:
-
-#         points_lat_lon = ftrns2_abs(points)[:,0:2]
-#         points_lat_lon = np.concatenate((points_lat_lon, np.zeros((len(points_lat_lon),1))), axis = 1)
-#         r_min_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis = 1) + depth_range[0]
-#         r_max_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis = 1) + depth_range[1]
-#         points_mirrored = ftrns1_abs(ftrns2_abs(mirror_radial(ftrns1_abs(points_lat_lon), r_min_vals, r_max_vals)))
-#         # points_mirrored = ftrns1(ftrns2_abs(mirror_radial(ftrns1_abs(points_lat_lon), r_min, r_max)))
-#         mask_mirrored = np.concatenate((np.zeros(len(points)), np.ones(len(points_mirrored))), axis = 0)
-#         points = np.concatenate((points, points_mirrored), axis = 0)
-
-#     else:
-
-#     	mask_mirrored = np.zeros(len(points))
-
-
-#     # if (use_time_shift == True)*(use_mirrored_time == True):
-
-#     # 	points_time_mirrored = 
-
-
-#     # Shuffle candidates (important!)
-#     order = np.random.permutation(len(points))
-
-#     for idx in order:
-
-#         p = points[idx]
-#         cell = tuple(np.floor(p / cell_size).astype(int))
-
-#         ok = True
-#         # Check neighboring cells
-#         for dx in (-1, 0, 1):
-#             for dy in (-1, 0, 1):
-#                 for dz in (-1, 0, 1):
-#                     nbr_cell = (cell[0]+dx, cell[1]+dy, cell[2]+dz)
-#                     if nbr_cell in grid:
-#                         q = np.array(grid[nbr_cell])
-#                         if np.any(np.sum((q - p)**2, axis=1) < h2):
-#                             ok = False
-#                             break
-#                 if not ok: break
-#             if not ok: break
-
-
-#         if (ok == True)*(mask_mirrored[idx] == 0):
-
-#             # use_probablistic_acceptance = True
-#             if use_probablistic_acceptance == True:
-
-#                 # Compute volume fraction f
-#                 r_min_ball = h / 2  # Exclusion radius
-#                 # Monte Carlo approx: Sample N points in ball around p
-#                 N = 300
-#                 offsets = np.random.randn(N, 3)  # Gaussian, scale to uniform ball later
-#                 offsets /= np.linalg.norm(offsets, axis=1)[:, None]
-#                 offsets *= (np.random.rand(N)[:, None] ** (1/3)) * r_min_ball  # Uniform in ball
-#                 samples = p + offsets                
-
-#                 # Check which samples are in domain (need your ftrns funcs for r_min/max)
-#                 samples_lat_lon = ftrns2(samples)[:, 0:2]
-#                 samples_lat_lon = np.concatenate((samples_lat_lon, np.zeros((len(samples_lat_lon), 1))), axis=1)
-#                 r_samples = np.linalg.norm(samples, axis=1)
-#                 r_min_vals = np.linalg.norm(ftrns1_abs(samples_lat_lon), axis=1) + depth_range[0]
-#                 r_max_vals = np.linalg.norm(ftrns1_abs(samples_lat_lon), axis=1) + depth_range[1]
-#                 inside = (r_samples >= r_min_vals) & (r_samples <= r_max_vals)  # Plus any angular constraints if needed
-    
-#                 f = np.sum(inside) / N
-#                 if np.random.rand() < (f**prob_factor):  # Or f**2 for stronger correction
-#                     grid[cell].append(p)
-#                     accepted_pts.append(p)
-
-#             else:
-
-#                 grid[cell].append(p)
-#                 accepted_pts.append(p)
-
-#     return np.array(accepted_pts)
-
-
-
-
-
-
-# if (load_initial_files == True)*(use_pretrained_model == False):
-# 	step_load = 20000
-# 	ver_load = 1
-# 	if os.path.exists(path_to_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(step_load, ver_load)):
-# 		shutil.move(path_to_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(step_load, ver_load), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(config["name_of_project"], step_load, ver_load))
-
-# 	ver_load = 1
-# 	if os.path.exists(path_to_file + '1d_travel_time_grid_ver_%d.npz'%ver_load):
-# 		shutil.move(path_to_file + '1d_travel_time_grid_ver_%d.npz'%ver_load, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(config["name_of_project"], ver_load))
-
-# 	ver_load = 1
-# 	if os.path.exists(path_to_file + 'seismic_network_templates_ver_%d.npz'%ver_load):
-# 		shutil.move(path_to_file + 'seismic_network_templates_ver_%d.npz'%ver_load, path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(config["name_of_project"], ver_load))
-
-# ## Make spatial grids
-
-
-
-
-# if use_pretrained_model is not None:
-# 	shutil.move(path_to_file + 'Pretrained/trained_gnn_model_step_%d_ver_%d.h5'%(20000, use_pretrained_model), path_to_file + 'GNN_TrainedModels/%s_trained_gnn_model_step_%d_ver_%d.h5'%(config["name_of_project"], 20000, 1))
-# 	shutil.move(path_to_file + 'Pretrained/1d_travel_time_grid_ver_%d.npz'%use_pretrained_model, path_to_file + '1D_Velocity_Models_Regional/%s_1d_travel_time_grid_ver_%d.npz'%(config["name_of_project"], 1))
-# 	shutil.move(path_to_file + 'Pretrained/seismic_network_templates_ver_%d.npz'%use_pretrained_model, path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(use_pretrained_model, 1))
-
-# 	## Find offset corrections if using one of the pre-trained models
-# 	## Load these and apply offsets for runing "process_continuous_days.py"
-# 	z = np.load(path_to_file + 'Pretrained/stations_ver_%d.npz'%use_pretrained_model)['locs']
-# 	sta_loc, rbest, mn = z['locs'], z['rbest'], z['mn']
-# 	corr1 = locs.mean(0, keepdims = True)
-# 	corr2 = sta_loc.mean(0, keepdims = True)
-# 	z.close()
-
-# 	z = np.load(path_to_file + 'Pretrained/region_ver_%d.npz'%use_pretrained_model)
-# 	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-# 	z.close()
-
-# 	locs = np.copy(locs) - corr1 + corr2
-# 	shutil.copy(path_to_file + 'Pretrained/region_ver_%d.npz'%use_pretrained_model, path_to_file + f'{config["name_of_project"]}_region.npz')
-
-# else:
-# 	corr1 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
-# 	corr2 = np.array([0.0, 0.0, 0.0]).reshape(1,-1)
-
-
-
-
-# else:
-
-# 	## If optimizing projection coefficients with this option, need 
-# 	## ftrns1 and ftrns2 to accept torch Tensors instead of numpy arrays
-# 	if use_spherical == True:
-
-# 		earth_radius = 6371e3
-# 		ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef_diff(x, e = 0.0, a = earth_radius) - mn).T).T # just subtract mean
-# 		ftrns2 = lambda x, rbest, mn: ecef2lla_diff((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius) # just subtract mean
-	
-# 	else:
-	
-# 		earth_radius = 6378137.0
-# 		ftrns1 = lambda x, rbest, mn: (rbest @ (lla2ecef_diff(x) - mn).T).T # just subtract mean
-# 		ftrns2 = lambda x, rbest, mn: ecef2lla_diff((rbest.T @ x.T).T + mn) # just subtract mean
-	
-# 	## Iterative optimization, does not converge as well
-
-# 	n_attempts = 10
-
-# 	unit_lat = np.array([0.01, 0.0, 0.0]).reshape(1,-1) + center_loc
-# 	unit_vert = np.array([0.0, 0.0, 1000.0]).reshape(1,-1) + center_loc
-	
-# 	norm_lat = torch.Tensor(np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_lat), axis = 0)), axis = 0), axis = 1))
-# 	norm_vert = torch.Tensor(np.linalg.norm(np.diff(lla2ecef(np.concatenate((center_loc, unit_vert), axis = 0)), axis = 0), axis = 1))
-	
-# 	trgt_lat = torch.Tensor([0,1.0,0]).reshape(1,-1)
-# 	trgt_vert = torch.Tensor([0,0,1.0]).reshape(1,-1)
-# 	trgt_center = torch.zeros(2)
-	
-# 	loss_func = nn.MSELoss()
-	
-# 	losses = []
-# 	losses1, losses2, losses3, losses4 = [], [], [], []
-# 	loss_coef = [1,1,1,0]
-	
-# 	## Based on initial conditions, sometimes this converges to a projection plane that is flipped polarity.
-# 	## E.g., "up" in the lat-lon domain is "down" in the Cartesian domain, and vice versa.
-# 	## So try a few attempts to make sure it has the correct polarity.
-# 	for attempt in range(n_attempts):
-	
-# 		vec = nn.Parameter(2.0*np.pi*torch.rand(3))
-	
-# 		# mn = nn.Parameter(torch.Tensor(lla2ecef(locs).mean(0, keepdims = True)))
-# 		mn = nn.Parameter(torch.Tensor(lla2ecef(center_loc.reshape(1,-1)).mean(0, keepdims = True)))
-	
-# 		optimizer = optim.Adam([vec, mn], lr = 0.001)
-	
-# 		print('\n Optimize the projection coefficients \n')
-	
-# 		n_steps_optimize = 5000
-# 		for i in range(n_steps_optimize):
-	
-# 			optimizer.zero_grad()
-	
-# 			rbest = rotation_matrix(vec[0], vec[1], vec[2])
-	
-# 			norm_lat = lla2ecef_diff(torch.Tensor(np.concatenate((center_loc, unit_lat), axis = 0)))
-# 			norm_vert = lla2ecef_diff(torch.Tensor(np.concatenate((center_loc, unit_vert), axis = 0)))
-# 			norm_lat = torch.norm(norm_lat[1] - norm_lat[0])
-# 			norm_vert = torch.norm(norm_vert[1] - norm_vert[0])
-	
-# 			center_out = ftrns1(torch.Tensor(center_loc), rbest, mn)
-	
-# 			out_unit_lat = ftrns1(torch.Tensor(unit_lat), rbest, mn)
-# 			out_unit_lat = (out_unit_lat - center_out)/norm_lat
-	
-# 			out_unit_vert = ftrns1(torch.Tensor(unit_vert), rbest, mn)
-# 			out_unit_vert = (out_unit_vert - center_out)/norm_vert
-	
-# 			out_locs = ftrns1(torch.Tensor(locs), rbest, mn)
-	
-# 			loss1 = loss_func(trgt_lat, out_unit_lat)
-# 			loss2 = loss_func(trgt_vert, out_unit_vert)
-# 			loss3 = loss_func(0.1*trgt_center, 0.1*center_out[0,0:2]) ## Scaling loss down
-	
-# 			loss = loss_coef[0]*loss1 + loss_coef[1]*loss2 + loss_coef[2]*loss3 # + loss_coef[3]*loss4
-# 			loss.backward()
-# 			optimizer.step()
-	
-# 			losses.append(loss.item())
-# 			losses1.append(loss1.item())
-# 			losses2.append(loss2.item())
-# 			losses3.append(loss3.item())
-	
-# 			if np.mod(i, 50) == 0:
-# 				print('%d %0.8f'%(i, loss.item()))
-	
-# 		## Save approriate files and make extensions for directory
-# 		print('\n Loss of lat and lon: %0.4f \n'%(loss_coef[0]*loss1 + loss_coef[1]*loss2))
-	
-# 		if (loss_coef[0]*loss1 + loss_coef[1]*loss2) < 1e-1:
-# 			print('\n Finished converging \n')
-# 			break
-# 		else:
-# 			print('\n Did not converge, restarting (%d) \n'%attempt)
-	
-# 	# os.rename(ext_dir + 'stations.npz', ext_dir + '%s_stations_backup.npz'%name_of_project)
-	
-# 	rbest = rbest.cpu().detach().numpy()
-# 	mn = mn.cpu().detach().numpy()
-
-
-# def extend_grid(offset, scale, deg_scale, depth_scale, extend_grids):
-#     """
-#     Extend a spatial grid based on randomized extensions.
-    
-#     Parameters:
-#     - offset (numpy.ndarray): The offset values of the grid.
-#     - scale (numpy.ndarray): The scale values of the grid.
-#     - deg_scale (float): Degree scaling factor.
-#     - depth_scale (float): Depth scaling factor.
-#     - extend_grids (bool, optional): Flag to determine if grid should be extended. Default is True.
-    
-#     Returns:
-#     - offset (numpy.ndarray): Updated offset values.
-#     - scale (numpy.ndarray): Updated scale values.
-#     """
-    
-#     if extend_grids:
-#         extend1, extend2, extend3, extend4 = (np.random.rand(4) - 0.5) * deg_scale
-#         extend5 = (np.random.rand() - 0.5) * depth_scale
-        
-#         offset[0, 0] += extend1
-#         offset[0, 1] += extend2
-#         scale[0, 0] += extend3
-#         scale[0, 1] += extend4
-#         offset[0, 2] += extend5
-#     return offset, scale
-
-# def get_offset_scale_slices(offset_x_extend, scale_x_extend):
-#     """Extract slices from the offset and scale matrices."""
-#     offset_slice = np.array([offset_x_extend[0, 0], offset_x_extend[0, 1], offset_x_extend[0, 2]]).reshape(1, -1)
-#     scale_slice = np.array([scale_x_extend[0, 0], scale_x_extend[0, 1], scale_x_extend[0, 2]]).reshape(1, -1)
-#     return offset_slice, scale_slice
-
-# def get_grid_params(offset_slice, scale_slice, eps_extra, eps_extra_depth, scale_up):
-#     """Calculate parameters for the grid."""
-#     offset_x_grid = scale_up * (offset_slice - eps_extra * scale_slice)
-#     offset_x_grid[0, 2] -= eps_extra_depth * scale_slice[0, 2]
-    
-#     scale_x_grid = scale_up * (scale_slice + 2.0 * eps_extra * scale_slice)
-#     scale_x_grid[0, 2] += 2.0 * eps_extra_depth * scale_slice[0, 2]
-    
-#     return offset_x_grid, scale_x_grid
-
-# def calculate_density(if_density, kernel, bandwidth, data):
-#     """
-#     Calculate and return kernel density if the density flag is set.
-    
-#     Parameters:
-#     - if_density (bool): Flag indicating whether to compute density.
-#     - kernel (str): Type of kernel to use for density estimation.
-#     - bandwidth (float): Bandwidth for the kernel density estimation.
-#     - data (numpy.ndarray): Data to compute the kernel density on.
-    
-#     Returns:
-#     - KernelDensity (object, None): Returns KernelDensity instance if if_density is True, else returns None.
-#     """
-#     if if_density:
-#         from sklearn.neighbors import KernelDensity
-#         return KernelDensity(kernel=kernel, bandwidth=bandwidth).fit(data[:, 0:2])
-#     return None
-
-# def create_grid(using_density, m_density, weight_vector, scale_x_grid, offset_x_grid, n_cluster, ftrns1, n_steps, lr):
-#     """Create a grid based on density or default method."""
-#     if using_density:
-#         return kmeans_packing_weight_vector_with_density(m_density, weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
-#     return kmeans_packing_weight_vector(weight_vector, scale_x_grid, offset_x_grid, 3, n_cluster, ftrns1, n_batch=10000, n_steps=n_steps, n_sim=1, lr=lr)[0] / SCALE_UP
-
-# def assemble_grids(scale_x_extend, offset_x_extend, n_grids, n_cluster, n_steps=5000, extend_grids=False, with_density=None, density_kernel=0.15):
-#     """
-#     Assemble a set of spatial grids based on various parameters.
-    
-#     Parameters:
-#     - scale_x_extend (numpy.ndarray): Extended scale values for the grid.
-#     - offset_x_extend (numpy.ndarray): Extended offset values for the grid.
-#     - n_grids (int): Number of grids to assemble.
-#     - n_cluster (int): Number of clusters to use in the k-means algorithm.
-#     - n_steps (int, optional): Number of steps for the k-means algorithm. Default is 5000.
-#     - extend_grids (bool, optional): Flag to determine if grids should be extended. Default is True.
-#     - with_density (numpy.ndarray, None, optional): Data to use for density calculations. Default is None.
-#     - density_kernel (float, optional): Kernel bandwidth for density estimation. Default is 0.15.
-    
-#     Returns:
-#     - x_grids (list): List of assembled grids.
-#     """
-    
-#     m_density = calculate_density(with_density, 'gaussian', density_kernel, with_density)
-#     x_grids = []
-    
-#     weight_vector = np.array([1.0, 1.0, depth_importance_weighting_value_for_spatial_graphs]).reshape(1, -1)
-#     depth_scale = (np.diff(depth_range) * 0.02)
-#     deg_scale = ((0.5 * np.diff(lat_range) + 0.5 * np.diff(lon_range)) * 0.08)
-
-#     for i in range(n_grids):
-#         offset_slice, scale_slice = get_offset_scale_slices(offset_x_extend, scale_x_extend)
-#         offset_slice, scale_slice = extend_grid(offset_slice, scale_slice, deg_scale, depth_scale, extend_grids)
-        
-#         print(f'\nOptimize for spatial grid ({i + 1} / {n_grids})')
-        
-#         offset_x_grid, scale_x_grid = get_grid_params(offset_slice, scale_slice, EPS_EXTRA, EPS_EXTRA_DEPTH, SCALE_UP)
-        
-#         x_grid = create_grid(with_density, m_density, weight_vector, scale_x_grid, offset_x_grid, n_cluster, ftrns1, n_steps, lr=0.005)
-        
-#         x_grid = x_grid[np.argsort(x_grid[:, 0])]
-#         x_grids.append(x_grid)
-
-#     return x_grids
-
-
-
-
-# def poisson_disk_filter(points, h, use_probablistic_acceptance = True):
-#     """
-#     points : (M,3) candidate points
-#     h      : minimum spacing
-#     """
-#     cell_size = h / np.sqrt(3)
-#     # cell_size = h / np.sqrt(2)
-#     grid = defaultdict(list)
-
-#     accepted = []
-#     accepted_pts = []
-
-#     h2 = h * h
-
-#     # Shuffle candidates (important!)
-#     order = np.random.permutation(len(points))
-
-#     for idx in order:
-#         p = points[idx]
-#         cell = tuple(np.floor(p / cell_size).astype(int))
-
-#         ok = True
-#         # Check neighboring cells
-#         for dx in (-1, 0, 1):
-#             for dy in (-1, 0, 1):
-#                 for dz in (-1, 0, 1):
-#                     nbr_cell = (cell[0]+dx, cell[1]+dy, cell[2]+dz)
-#                     if nbr_cell in grid:
-#                         q = np.array(grid[nbr_cell])
-#                         if np.any(np.sum((q - p)**2, axis=1) < h2):
-#                             ok = False
-#                             break
-#                 if not ok: break
-#             if not ok: break
-
-
-#         if ok == True:
-
-#             # use_probablistic_acceptance = True
-#             if use_probablistic_acceptance == True:
-
-#                 # Compute volume fraction f
-#                 r_min_ball = h / 2  # Exclusion radius
-#                 # Monte Carlo approx: Sample N points in ball around p
-#                 N = 30
-#                 offsets = np.random.randn(N, 3)  # Gaussian, scale to uniform ball later
-#                 offsets /= np.linalg.norm(offsets, axis=1)[:, None]
-#                 offsets *= (np.random.rand(N)[:, None] ** (1/3)) * r_min_ball  # Uniform in ball
-#                 samples = p + offsets                
-
-#                 # Check which samples are in domain (need your ftrns funcs for r_min/max)
-#                 samples_lat_lon = ftrns2_abs(samples)[:, 0:2]
-#                 samples_lat_lon = np.concatenate((samples_lat_lon, np.zeros((len(samples_lat_lon), 1))), axis=1)
-#                 r_samples = np.linalg.norm(samples, axis=1)
-#                 r_min_vals = np.linalg.norm(ftrns1_abs(samples_lat_lon), axis=1) + depth_range[0]
-#                 r_max_vals = np.linalg.norm(ftrns1_abs(samples_lat_lon), axis=1) + depth_range[1]
-#                 inside = (r_samples >= r_min_vals) & (r_samples <= r_max_vals)  # Plus any angular constraints if needed
-    
-#                 f = np.sum(inside) / N
-#                 if np.random.rand() < f**1.5:  # Or f**2 for stronger correction
-#                     grid[cell].append(p)
-#                     accepted_pts.append(p)
-
-#             else:
-
-#                 grid[cell].append(p)
-#                 accepted_pts.append(p)
-
-
-#         # if ok:
-#         #     grid[cell].append(p)
-#         #     accepted_pts.append(p)
-
-#     return np.array(accepted_pts)
-
-
-
-# def poisson_disk_filter_mirrored(points, h):
-#     """
-#     points : (M,3) candidate points
-#     h      : minimum spacing
-#     """
-#     cell_size = h / np.sqrt(3)
-#     grid = defaultdict(list)
-
-#     accepted = []
-#     accepted_pts = []
-
-#     h2 = h * h
-
-#     points_lat_lon = ftrns2(points)[:,0:2]
-#     points_lat_lon = np.concatenate((points_lat_lon, np.zeros((len(points_lat_lon),1))), axis = 1)
-#     r_min_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis = 1) + depth_range[0]
-#     r_max_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis = 1) + depth_range[1]
-#     points_mirrored = ftrns1(ftrns2_abs(mirror_radial(ftrns1_abs(points_lat_lon), r_min_vals, r_max_vals)))
-#     # points_mirrored = ftrns1(ftrns2_abs(mirror_radial(ftrns1_abs(points_lat_lon), r_min, r_max)))
-
-#     mask_mirrored = np.concatenate((np.zeros(len(points)), np.ones(len(points_mirrored))), axis = 0)
-#     points = np.concatenate((points, points_mirrored), axis = 0)
-
-#     # Shuffle candidates (important!)
-#     order = np.random.permutation(len(points))
-
-#     for idx in order:
-#         p = points[idx]
-#         cell = tuple(np.floor(p / cell_size).astype(int))
-
-#         ok = True
-#         # Check neighboring cells
-#         for dx in (-1, 0, 1):
-#             for dy in (-1, 0, 1):
-#                 for dz in (-1, 0, 1):
-#                     nbr_cell = (cell[0]+dx, cell[1]+dy, cell[2]+dz)
-#                     if nbr_cell in grid:
-#                         q = np.array(grid[nbr_cell])
-#                         if np.any(np.sum((q - p)**2, axis=1) < h2):
-#                             ok = False
-#                             break
-#                 if not ok: break
-#             if not ok: break
-
-#         if (ok == True):
-#             grid[cell].append(p)
-#         if (ok == True)*(mask_mirrored[idx] == 0):
-#         	accepted_pts.append(p)
-
-#     return np.array(accepted_pts)
-
-
-
-# def fibonacci_sphere(n):
-
-#     i = np.arange(n)
-# 	theta0 = 2*np.pi*np.random.rand(n)
-# 	theta = i*golden_angle + theta0
-#     theta = np.pi*(1 + 5**0.5)*i
-#     phi = np.arccos(1 - 2*(i+0.5)/n)
-
-#     return phi, theta
-
-
-
-# def relax_poisson1(points, h, iters=5, alpha=0.2):
-
-#     for _ in range(iters):
-#         disp = np.zeros_like(points)
-
-#         for i, p in enumerate(points):
-#             d = points - p
-#             r2 = np.sum(d*d, axis=1)
-#             mask = (r2 > 0) & (r2 < h*h)
-
-#             if np.any(mask):
-#                 r = np.sqrt(r2[mask])
-#                 disp[i] += np.sum(
-#                     (1 - r/h)[:,None] * d[mask] / r[:,None],
-#                     axis=0
-#                 )
-
-#         points += alpha * disp
-
-#         # Reproject to valid shell
-#         r = np.linalg.norm(points, axis=1)
-
-#         points_lat_lon = ftrns2_abs(points)[:,0:2]
-#         points_lat_lon = np.concatenate((points_lat_lon, np.zeros((len(points_lat_lon),1))), axis = 1)
-#         r_min_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis = 1) + depth_range[0]
-#         r_max_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis = 1) + depth_range[1]
-
-#         r = np.clip(r, r_min_vals, r_max_vals)
-#         points = points / np.linalg.norm(points, axis=1)[:,None] * r[:,None]
-
-#     return ftrns2_abs(points)
-
-
-# def relax_poisson2(points, h, iters=20, alpha=0.5):
-#     for _ in range(iters):
-#         disp = np.zeros_like(points)
-#         for i, p in enumerate(points):
-#             d = points - p
-#             r2 = np.sum(d*d, axis=1)
-#             mask = (r2 > 0) & (r2 < (2*h)**2)  # Wider range for softer push
-#             if np.any(mask):
-#                 r = np.sqrt(r2[mask])
-#                 weights = (1 - r / (2*h)) ** 2  # Stronger near, zero at 2h
-#                 disp[i] += np.sum(
-#                     weights[:, None] * d[mask] / r[:, None],
-#                     axis=0
-#                 )
-#         # Normalize disp magnitude if too large
-#         disp_mag = np.linalg.norm(disp, axis=1)
-#         mask_large = disp_mag > h
-#         disp[mask_large] *= (h / disp_mag[mask_large])[:, None]
-        
-#         points += alpha * disp
-        
-#         # Reproject (your code — good for constraining)
-#         r = np.linalg.norm(points, axis=1)
-#         points_lat_lon = ftrns2_abs(points)[:,0:2]
-#         points_lat_lon = np.concatenate((points_lat_lon, np.zeros((len(points_lat_lon),1))), axis = 1)
-#         r_min_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis = 1) + depth_range[0]
-#         r_max_vals = np.linalg.norm(ftrns1_abs(points_lat_lon), axis = 1) + depth_range[1]
-#         r = np.clip(r, r_min_vals, r_max_vals)
-#         points = points / np.linalg.norm(points, axis=1)[:,None] * r[:,None]  # Directions preserved, r clipped
-    
-#     return ftrns2_abs(points)
-
-
-##### Finished ######
