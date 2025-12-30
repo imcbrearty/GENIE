@@ -495,7 +495,7 @@ def u_to_geodetic_lat(u_random, lat_range):
     return np.rad2deg(np.arcsin(q_target / q_polar))
 
 
-def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, buffer_scale = 0.0):
+def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0):
 
 	if use_spherical == False:
 		a = 6378137.0
@@ -585,7 +585,18 @@ def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_exten
 		# mask_points = (x_grid[:,0] >= lat_range[0]) & (x_grid[:,0] <= lat_range[1]) & \
 		#                   (lons_wrapped >= lon_range[0]) & (lons_wrapped <= lon_range[1]) & \
 		#                   (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0]) & \
-		#                   (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range)) 
+		#                   (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range))
+
+
+		## Now retain only the fraction of boundary nodes that will emulate the right density of the target number of nodes
+		if N_target is not None:
+			ratio = (Volume_expanded - Volume)/Volume
+			n_boundary_retain = int(N_target*ratio)
+			ichoose = np.concatenate((np.where(mask_points == 1)[0], np.random.choice(np.where(mask_points == 0)[0], \
+				size = n_boundary_retain, replace = False)), axis = 0)
+			x_grid = x_grid[ichoose]
+			mask_points = mask_points[ichoose]
+
 
 		return x_grid, mask_points
 
@@ -1767,7 +1778,7 @@ for n in range(num_grids):
 
 		print('Beginning FPS sampling [%d]'%n)
 		## Increase efficiency of this script
-		trial_points, mask_points = regular_sobolov(number_candidate_nodes, buffer_scale = 2.0)
+		trial_points, mask_points = regular_sobolov(number_candidate_nodes, N_target = number_of_spatial_nodes, buffer_scale = 2.0)
 		x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, mask_candidates = mask_points)
 
 	else:
@@ -1896,6 +1907,49 @@ if build_expander_graphs == True:
 
 		return edges
 
+	def make_labeled_cayley_graph(n):
+	    s1 = np.array([[1, 1], [0, 1]])
+	    s2 = np.array([[1, 0], [1, 1]])
+	    
+	    def get_inv(m):
+	        inv = np.array([[m[1,1], -m[0,1]], [-m[1,0], m[0,0]]])
+	        return np.mod(inv, n)
+
+	    # Define the 4 algebraic relations
+	    gens = [s1, s2, get_inv(s1), get_inv(s2)]
+	    
+	    identity = np.eye(2, dtype=int)
+	    nodes_list = [identity]
+	    nodes_dict = {tuple(identity.flatten()): 0}
+	    
+	    edge_list = []
+	    edge_types = []
+	    
+	    queue = [0]
+	    while queue:
+	        u_idx = queue.pop(0)
+	        u_mat = nodes_list[u_idx]
+	        
+	        for g_type, g in enumerate(gens):
+	            v_mat = np.mod(u_mat @ g, n)
+	            v_tuple = tuple(v_mat.flatten())
+	            
+	            if v_tuple not in nodes_dict:
+	                v_idx = len(nodes_list)
+	                nodes_dict[v_tuple] = v_idx
+	                nodes_list.append(v_mat)
+	                queue.append(v_idx)
+	            else:
+	                v_idx = nodes_dict[v_tuple]
+	            
+	            edge_list.append([u_idx, v_idx])
+	            edge_types.append(g_type) # 0:S1, 1:S2, 2:S1_inv, 3:S2_inv
+
+	    return torch.tensor(edge_list).t(), torch.tensor(edge_types)
+
+
+
+
 	## Choose type of expander graph (or none)
 	use_gabber = True
 	if number_of_spatial_nodes > 2500: use_gabber = True
@@ -1915,8 +1969,49 @@ if build_expander_graphs == True:
 	else:
 
 		int_need = int(np.ceil(np.sqrt(number_of_spatial_nodes)))
-		A_edges_c = from_networkx(nx.margulis_gabber_galil_graph(int_need)).edge_index.long().flip(0).contiguous()
-		Ac = subgraph(torch.arange(number_of_spatial_nodes), A_edges_c)[0].cpu().detach().numpy() # .to(device)
+
+		use_networkx_construction = False
+		if use_networkx_construction == True:
+
+			A_edges_c = from_networkx(nx.margulis_gabber_galil_graph(int_need)).edge_index.long().flip(0).contiguous()
+			A_edges_c = torch.Tensor(np.random.permutation(A_edges_c.max() + 1)).long()[A_edges_c]
+			Ac = subgraph(torch.arange(number_of_spatial_nodes), A_edges_c)[0].cpu().detach().numpy() # .to(device)
+			# A_edges_c = perm_vec[A_edges_c]
+
+		else:
+
+
+			def make_labeled_mgg_graph(m):
+			    # m is the side of the grid (nodes = m*m)
+			    edge_index = []
+			    edge_type = []
+			    
+			    for x in range(m):
+			        for y in range(m):
+			            u = x * m + y
+			            # Define the standard MGG transformations
+			            targets = [
+			                ((x + y) % m, y),           # T1
+			                ((x - y) % m, y),           # T1 inverse
+			                (x, (y + x) % m),           # T2
+			                (x, (y - x) % m),           # T2 inverse
+			                ((x + 2*y + 1) % m, y),     # Shifted T
+			                ((x - 2*y - 1) % m, y)      # Shifted T inverse
+			            ]
+			            
+			            for i, (tx, ty) in enumerate(targets):
+			                v = tx * m + ty
+			                edge_index.append([u, v])
+			                edge_type.append(i) # Label 0 through 5
+			                
+			    return torch.tensor(edge_index).t(), torch.tensor(edge_type)
+
+			A_edges_c, edge_type = make_labeled_mgg_graph(int_need)
+			A_edges_c = torch.Tensor(np.random.permutation(A_edges_c.max() + 1)).long()[A_edges_c]
+			Ac, edge_type = subgraph(torch.arange(number_of_spatial_nodes), A_edges_c, edge_attr = edge_type) # [0].cpu().detach().numpy() # .to(device)
+			Ac, edge_type = Ac.cpu().detach().numpy(), edge_type.cpu().detach().numpy()
+
+			# A_edges_c = from_networkx(A_edges_c)
 
 	np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_expanders_ver_1.npz'%name_of_project, Ac = Ac)
 
