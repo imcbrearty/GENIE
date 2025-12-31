@@ -26,7 +26,7 @@ pip install h5py
 pip install pyyaml
 
 ## If going to run calculate_travel_times.py, then need to install skfmm
-pip install scikit-fmm==0.0.7
+pip install scikit-fmm
 ## (possibly conda install -c conda-forge scikit-fmm)
 
 
