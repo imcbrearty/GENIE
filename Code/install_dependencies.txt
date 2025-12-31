@@ -4,15 +4,19 @@
 
 ## Suggested install routine
 
-conda create -n Geometric python=3.10 numpy scipy matplotlib pip ipython
+conda create -n Geometric python=3.9 numpy scipy matplotlib ipython pip -y
 conda activate Geometric
-conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+
+pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ## (note: use your correct cuda version in place of "11.8" above; run nvcc -V on command line to check)
 ## (Also can check pytorch website for install details; https://pytorch.org/)
 ## (Unix and linux will also have a different pytorch install command)
+
 pip install torch_geometric
-## (may also need to install additional packages; e.g., for cuda 11.8, pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html)
+TORCH_VER=$(python -c "import torch; print(torch.__version__.split('+')[0])")
+pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-${TORCH_VER}+cu118.html
 ## (Also can check pytorch geometric website for install details; https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html)
+
 pip install -U scikit-learn
 ## (can also install sklearn with conda install -c anaconda scikit-learn; https://scikit-learn.org/stable/install.html)
 pip install networkx
@@ -21,7 +25,10 @@ pip install cvxpy
 pip install h5py
 pip install pyyaml
 
-
 ## If going to run calculate_travel_times.py, then need to install skfmm
 pip install scikit-fmm==0.0.7
 ## (possibly conda install -c conda-forge scikit-fmm)
+
+
+## Old install command
+## (may also need to install additional packages; e.g., for cuda 11.8, pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html)
