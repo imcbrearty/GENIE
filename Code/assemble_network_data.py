@@ -1754,6 +1754,9 @@ use_farthest_point_filtering = True
 # 	x_grid = regular_sobolov(number_of_spatial_nodes)
 
 
+moi
+
+
 ## Now build all spatial grids using optimal sampling strategy
 x_grids = []
 for n in range(num_grids):
