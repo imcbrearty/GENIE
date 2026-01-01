@@ -499,6 +499,164 @@ def kmeans_packing_fit_sources(srcs, scale_x, offset_x, ndim, n_clusters, ftrns1
 
 	return ftrns2(V_results[ibest]), V_results, Losses, losses, rz
 
+
+def collect_regular_lattice(n_trgt, lat_range = None, lon_range = None, use_global = False, tol_fraction = 0.01, max_iter = 100):
+
+	r = Area/Area_globe
+	n_low = max(1, int((n_trgt / r) * 0.2))
+	n_high = int((n_trgt / r) * 3.0) + 1
+	n_current = int(0.5*(n_low + n_high)) if use_global == False else n_trgt
+
+	## Set tolerance as ~1% of grid, and then retain only this fraction
+	tol = int(np.floor(tol_fraction*n_trgt))
+
+
+	def random_rotation_matrix():
+	    u1, u2, u3 = np.random.rand(3)
+
+	    q = np.array([
+	        np.sqrt(1 - u1) * np.sin(2*np.pi*u2),
+	        np.sqrt(1 - u1) * np.cos(2*np.pi*u2),
+	        np.sqrt(u1)     * np.sin(2*np.pi*u3),
+	        np.sqrt(u1)     * np.cos(2*np.pi*u3)
+	    ])
+
+	    w, x, y, z = q
+	    return np.array([
+	        [1 - 2*(y*y + z*z), 2*(x*y - z*w),     2*(x*z + y*w)],
+	        [2*(x*y + z*w),     1 - 2*(x*x + z*z), 2*(y*z - x*w)],
+	        [2*(x*z - y*w),     2*(y*z + x*w),     1 - 2*(x*x + y*y)]
+	    ])
+
+
+	def fibonacci_sphere_latlon(N):
+
+	    # Golden ratio constants
+	    phi = (1 + 5**0.5) / 2
+	    alpha = 1 / phi
+
+	    # Random phases
+	    delta_phi, delta_z = np.random.rand(2)
+
+	    n = np.arange(N)
+
+	    # Fibonacci sphere (vectorized)
+	    z = 1 - 2 * (n + delta_z) / N
+	    theta = 2 * np.pi * (n * alpha + delta_phi)
+	    r = np.sqrt(1 - z*z)
+
+	    x = r * np.cos(theta)
+	    y = r * np.sin(theta)
+
+	    P = np.column_stack((x, y, z))
+
+	    # Random global rotation
+	    R = random_rotation_matrix()
+	    P = P @ R.T
+
+	    # Cartesian → lat/lon
+	    lon = 180.0*np.arctan2(P[:, 1], P[:, 0])/np.pi        # [-pi, pi)
+	    lat = 180.0*np.arcsin(np.clip(P[:, 2], -1, 1))/np.pi  # [-pi/2, pi/2]
+
+	    return np.concatenate((lat.reshape(-1,1), lon.reshape(-1,1)), axis = 1)
+
+
+	iter_cnt = 0
+	found_grid = False
+	while (iter_cnt < max_iter)*(found_grid == False):
+
+
+		points = fibonacci_sphere_latlon(n_current)
+		if use_global == False:
+			ifind = np.where((points[:,0] < lat_range[1])*(points[:,0] > lat_range[0])*(points[:,1] < lon_range[1])*(points[:,1] > lon_range[0]))[0]
+			points = points[ifind]
+
+		n_pts = len(points)
+		if (np.abs(n_pts - n_trgt) <= tol)*(n_pts >= n_trgt):
+			found_grid = True
+
+		else:
+			if n_pts < n_trgt:
+				n_low = n_current
+			else:
+				n_high = n_current
+			n_current = int(0.5*(n_low + n_high))
+
+			# n_current = int(0.5*(n_low + n_high))
+		iter_cnt += 1
+		print('Iter: %d, Diff: %d'%(iter_cnt, n_pts - n_trgt))
+
+	if n_pts > n_trgt:
+		points = points[0:n_trgt] # , size = n_trgt, replace = False)]
+
+	return points
+
+
+
+# def knn_distance(x_proj1, x_proj2, idx1, idx2, centroid_proj, k = 10):
+
+# 	if isinstance(x_proj1, np.ndarray):
+
+# 		dist_ref = knn(torch.Tensor(centroid_proj[idx1]).to(device), torch.Tensor(centroid_proj[idx1]).to(device))
+
+def knn_distance(
+	x_rel_query,      # Tensor [M, 3] float32: relative coords of query points
+	x_rel_db,         # Tensor [N, 3] float32: relative coords of database points (can == query for self)
+	idx_query,        # LongTensor [M]: centroid indices for queries
+	idx_db,           # LongTensor [N]: centroid indices for database
+	centroids,        # Tensor [C, 3] float64: absolute centroid positions
+	k=10,
+	device='cuda' if torch.cuda.is_available() else 'cpu',
+	return_edges = True,
+	use_self_loops = True
+):
+
+	if isinstance(x_rel_query, np.ndarray):
+		"""
+		Returns K-nearest neighbors (distances and indices) using relative coords + centroids.
+		"""
+		# Move everything to device
+		x_rel_query = torch.Tensor(x_rel_query).to(device)
+		x_rel_db = torch.Tensor(x_rel_db).to(device)
+		idx_query = torch.Tensor(idx_query).long().to(device)
+		idx_db = torch.Tensor(idx_db).long().to(device)
+		centroids = torch.Tensor(centroids).to(device)  # float64 preserved
+    
+	# Reconstruct effective absolute positions
+	abs_query = centroids[idx_query] + x_rel_query  # [M, 3]
+	abs_db = centroids[idx_db] + x_rel_db          # [N, 3]
+    
+	# Pairwise distances (exact, GPU-optimized)
+	D = torch.cdist(abs_query, abs_db)  # [M, N], float64 if centroids dominate
+    
+	# Top-K smallest
+	if use_self_loops == False:
+		distances, indices = torch.topk(D, k + 1, dim=1, largest=False, sorted=True) ## This distance not reliable due to limited GPU ram, must re-compute for subset of indices
+		distances = distances[:,1::]
+		indices = indices[:,1::]
+	else:
+		distances, indices = torch.topk(D, k, dim=1, largest=False, sorted=True) ## This distance not reliable due to limited GPU ram, must re-compute for subset of indices
+
+
+	rel_refs = (~(idx_query.reshape(-1,1) == idx_db[indices])).unsqueeze(2)*(centroids[idx_query].unsqueeze(1) - centroids[idx_db[indices]])
+	rel_local = x_rel_query.unsqueeze(1) - x_rel_db[indices]
+	distances = torch.norm(rel_refs + rel_local, dim = 2)
+
+	# distances = torch.norm()
+
+	if return_edges == True:
+
+		edges = torch.cat((indices.reshape(1,-1), torch.arange(len(x_rel_query), device = device).repeat_interleave(k).reshape(1,-1)), dim = 0)
+
+		return edges, distances.reshape(-1,1), (rel_refs + rel_local).reshape(-1,rel_refs.shape[2])
+
+	else:
+
+		return distances, indices  # distances: [M, k], indices: [M, k] (into db)
+
+
+
+
 ### TRAVEL TIMES ###
 
 def interp_3D_return_function_adaptive(X, Xmin, Dx, Mn, Tp, Ts, N, ftrns1, ftrns2):
@@ -1234,6 +1392,7 @@ def visualize_predictions(out, lbls_query, pick_lbls, x_query, lp_times, lp_stat
 		plt.close('all')
 
 	return True
+
 
 
 
