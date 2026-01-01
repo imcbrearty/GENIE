@@ -17,8 +17,13 @@ from torch_geometric.utils import from_networkx
 from scipy.optimize import differential_evolution
 from torch_geometric.utils import remove_self_loops
 from torch_geometric.nn import MessagePassing
+from skopt.utils import use_named_args
 from torch_scatter import scatter
 from scipy.stats import pearsonr
+import scipy.stats.qmc as qmc
+from scipy.spatial import KDTree
+from skopt import gp_minimize
+from skopt.space import Real
 import networkx as nx
 from utils import *
 
@@ -69,10 +74,7 @@ def optimize_with_differential_evolution(center_loc):
     return soln
 
 
-## User: Input stations and spatial region
-## (must have station and region files at
-## (ext_dir + 'stations.npz'), and
-## (ext_dir + 'region.npz')
+
 
 path_to_file = str(pathlib.Path().absolute())
 path_to_file += '\\' if '\\' in path_to_file else '/'
@@ -147,6 +149,8 @@ offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_rang
 ## Check if using full Earth, set target sampling bounds ##
 if (lat_range_extend[0] <= -89.98)*(lat_range_extend[1] >= 89.98)*(lon_range_extend[0] <= -179.98)*(lon_range_extend[1] >= 179.98):
 	use_global = True
+	lat_range_extend = [-90.0, 90.0]
+	lon_range_extend = [-180.0, 180.0]
 else:
 	use_global = False
 
@@ -281,11 +285,11 @@ def optimize_r_max(lat_vals, lon_mean = np.mean(lon_range), h_max = depth_range[
 
 bounds = [(lat_range_extend[0], lat_range_extend[1])]
 soln = differential_evolution(optimize_r_min, bounds, popsize = 50, maxiter = 1000, disp = True)
-r_min = optimize_r_min(np.array([soln.x])); print('\n')
+r_min = optimize_r_min(np.array([soln.x]))[0]; print('\n')
 
 bounds = [(lat_range_extend[0], lat_range_extend[1])]
 soln = differential_evolution(optimize_r_max, bounds, popsize = 50, maxiter = 1000, disp = True)
-r_max = -1.0*optimize_r_max(np.array([soln.x])); print('\n')
+r_max = -1.0*optimize_r_max(np.array([soln.x]))[0]; print('\n')
 assert(r_max >= r_min)
 
 
@@ -313,7 +317,7 @@ if use_time_shift == True:
 
     if use_effective_time_scale == True:
     	print('Overwriting time scale as effective time scale: %0.8f (from %0.8f)'%(scale_time_effective, scale_time))
-    	scale_time = scale_time_effective[0]
+    	scale_time = scale_time_effective # [0]
 
 
 if use_time_shift == True:
@@ -423,15 +427,6 @@ def is_in_lon_range(lon, lon_min, lon_max):
     else: # Crossing the seam
         return (lon >= lon_min) | (lon <= lon_max)
 
-
-# def u_to_geodetic_lat(u, lat_min, lat_max):
-#     # Mapping u [0,1] to sin(lat) is spherical equal-area.
-#     # For ellipsoidal (Authalic), the formula involves the eccentricity squared (e^2).
-#     # e2 = 0.00669437999014 for WGS84.
-#     u_min = (1.0 + np.sin(np.deg2rad(lat_min))) / 2.0
-#     u_max = (1.0 + np.sin(np.deg2rad(lat_max))) / 2.0
-#     u_val = u_min + u * (u_max - u_min)
-#     return np.arcsin(2 * u_val - 1) * (180.0 / np.pi)
 
 
 def u_to_geodetic_lat(u_random, lat_range):
@@ -680,473 +675,273 @@ def farthest_point_sampling(points_candidates, target_N, scale_time = scale_time
 
 
 
-# import torch
-
-
-
-def collect_regular_lattice(n_trgt, lat_range = lat_range_extend, lon_range = lon_range_extend, use_global = use_global, tol_fraction = 0.01, max_iter = 100):
-
-	r = Area/Area_globe
-	n_low = max(1, int((n_trgt / r) * 0.2))
-	n_high = int((n_trgt / r) * 3.0) + 1
-	n_current = int(0.5*(n_low + n_high)) if use_global == False else n_trgt
-
-	## Set tolerance as ~1% of grid, and then retain only this fraction
-	tol = int(np.floor(tol_fraction*n_trgt))
-
-	iter_cnt = 0
-	found_grid = False
-	while (iter_cnt < max_iter)*(found_grid == False):
-
-
-		points = fibonacci_sphere_latlon(n_current)
-		if use_global == False:
-			ifind = np.where((points[:,0] < lat_range[1])*(points[:,0] > lat_range[0])*(points[:,1] < lon_range[1])*(points[:,1] > lon_range[0]))[0]
-			points = points[ifind]
-
-		n_pts = len(points)
-		if (np.abs(n_pts - n_trgt) <= tol)*(n_pts >= n_trgt):
-			found_grid = True
-
-		else:
-			if n_pts < n_trgt:
-				n_low = n_current
-			else:
-				n_high = n_current
-			n_current = int(0.5*(n_low + n_high))
-
-			# n_current = int(0.5*(n_low + n_high))
-		iter_cnt += 1
-		print('Iter: %d, Diff: %d'%(iter_cnt, n_pts - n_trgt))
-
-	if n_pts > n_trgt:
-		points = points[0:n_trgt] # , size = n_trgt, replace = False)]
-
-	return points
-
-# def knn_distance(x_proj1, x_proj2, idx1, idx2, centroid_proj, k = 10):
-
-# 	if isinstance(x_proj1, np.ndarray):
-
-# 		dist_ref = knn(torch.Tensor(centroid_proj[idx1]).to(device), torch.Tensor(centroid_proj[idx1]).to(device))
-
-def knn_distance(
-	x_rel_query,      # Tensor [M, 3] float32: relative coords of query points
-	x_rel_db,         # Tensor [N, 3] float32: relative coords of database points (can == query for self)
-	idx_query,        # LongTensor [M]: centroid indices for queries
-	idx_db,           # LongTensor [N]: centroid indices for database
-	centroids,        # Tensor [C, 3] float64: absolute centroid positions
-	k=10,
-	device='cuda' if torch.cuda.is_available() else 'cpu',
-	return_edges = True,
-	use_self_loops = True
-):
-
-	if isinstance(x_rel_query, np.ndarray):
-		"""
-		Returns K-nearest neighbors (distances and indices) using relative coords + centroids.
-		"""
-		# Move everything to device
-		x_rel_query = torch.Tensor(x_rel_query).to(device)
-		x_rel_db = torch.Tensor(x_rel_db).to(device)
-		idx_query = torch.Tensor(idx_query).long().to(device)
-		idx_db = torch.Tensor(idx_db).long().to(device)
-		centroids = torch.Tensor(centroids).to(device)  # float64 preserved
-    
-	# Reconstruct effective absolute positions
-	abs_query = centroids[idx_query] + x_rel_query  # [M, 3]
-	abs_db = centroids[idx_db] + x_rel_db          # [N, 3]
-    
-	# Pairwise distances (exact, GPU-optimized)
-	D = torch.cdist(abs_query, abs_db)  # [M, N], float64 if centroids dominate
-    
-	# Top-K smallest
-	if use_self_loops == False:
-		distances, indices = torch.topk(D, k + 1, dim=1, largest=False, sorted=True) ## This distance not reliable due to limited GPU ram, must re-compute for subset of indices
-		distances = distances[:,1::]
-		indices = indices[:,1::]
-	else:
-		distances, indices = torch.topk(D, k, dim=1, largest=False, sorted=True) ## This distance not reliable due to limited GPU ram, must re-compute for subset of indices
-
-
-	rel_refs = (~(idx_query.reshape(-1,1) == idx_db[indices])).unsqueeze(2)*(centroids[idx_query].unsqueeze(1) - centroids[idx_db[indices]])
-	rel_local = x_rel_query.unsqueeze(1) - x_rel_db[indices]
-	distances = torch.norm(rel_refs + rel_local, dim = 2)
-
-	# distances = torch.norm()
-
-	if return_edges == True:
-
-		edges = torch.cat((indices.reshape(1,-1), torch.arange(len(x_rel_query), device = device).repeat_interleave(k).reshape(1,-1)), dim = 0)
-
-		return edges, distances.reshape(-1,1), (rel_refs + rel_local).reshape(-1,rel_refs.shape[2])
-
-	else:
-
-		return distances, indices  # distances: [M, k], indices: [M, k] (into db)
-
-
-
-def loss_metrics(x_grid, grid_ind = 0, use_time_shift = use_time_shift, plot_on = False):
-
-	## Compute quality checks:
-	# [1]. Flat in depth
-	n_bins = 30
-	r = np.linalg.norm(ftrns1_abs(x_grid[:,0:3]), axis = 1)
-	h_vals = np.histogram(r**3, bins = int(len(x_grid)/n_bins)) # [0]
-	mean_loss = np.mean(n_bins*np.ones(len(h_vals[0])) - h_vals[0])
-	rms_loss = (np.sqrt(((n_bins*np.ones(len(h_vals[0])) - h_vals[0])**2).sum()/len(h_vals[0]))/n_bins)
-	print('\nMean deviation of radius flatness: %0.8f'%mean_loss)
-	print('RMS deviation of radius flatness: %0.8f'%rms_loss)
-
-	# [2]. Sorted depths
-	n = len(x_grid)
-	# u = np.arange(1, n+1) / n
-	u = np.arange(n) / (n - 1)
-	iarg = np.argsort(x_grid[:,2])
-	d_sorted = np.sort(x_grid[:,2])
-	# expected CDF
-	r_surface = np.linalg.norm(ftrns1_abs(x_grid[:,0:3]*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1)
-	# r = r_surface[iarg] + d_sorted
-	r = r_surface.mean() + d_sorted
-	F_expected = (r**3 - r_min**3) / (r_max**3 - r_min**3)
-	r2_loss = r2_score(F_expected, u)
-	print('R2 of expected depth distribution: %0.8f'%r2_loss)
-
-	# diagnostic plot
-	if plot_on == True:
-		plt.figure()
-		plt.plot(d_sorted, u, label="empirical")
-		plt.plot(d_sorted, F_expected, "--", label="expected")
-		plt.legend()
-		fig = plt.gcf()
-		fig.set_size_inches([8,8])
-		plt.savefig(path_to_file + 'Plots' + seperator + 'grid_sorted_depths_ver_%d.png'%grid_ind, bbox_inches = 'tight', pad_inches = 0.1)
-
-	# [3]. Nearest neighbor distances, and nearest neighbors as function of depth
-	if use_time_shift == False:
-		tree = cKDTree(ftrns1(x_grid))
-		q = tree.query(ftrns1(x_grid), k = 2)[0][:,1]
-		min_dist = q.min()/1000.0
-		mean_dist = q.mean()/1000.0
-		std_dist = q.std()/1000.0
-		print('Nearest neighbors: Min: %0.4f, Mean: %0.4f (+/- %0.4f) km \n'%(min_dist, mean_dist, std_dist))
-
-	else:
-		tree = cKDTree(x_grid*np.array([1.0, 1.0, 1.0, scale_time]).reshape(1,-1))
-		q = tree.query(x_grid*np.array([1.0, 1.0, 1.0, scale_time]).reshape(1,-1), k = 2) # [0][:,1]
-		q = np.linalg.norm(ftrns1(x_grid[:,0:3]) - ftrns1(x_grid[q[1][:,1],0:3]), axis = 1)		
-		min_dist = q.min()/1000.0
-		mean_dist = q.mean()/1000.0
-		std_dist = q.std()/1000.0
-		print('Nearest neighbors: Min: %0.4f, Mean: %0.4f (+/- %0.4f) km \n'%(min_dist, mean_dist, std_dist))
-
-
-	nn_cv = nn_distance_cv(ftrns1_abs(x_grid[:,0:3]), scale_time)
-	knn_cv = knn_volume_cv(ftrns1_abs(x_grid[:,0:3]), k=8, scale_time=scale_time)
-	print(f"Spatial: NN-CV={nn_cv:.3f}, kNN-CV={knn_cv:.3f}")
-
-	if x_grid.shape[1] == 4:
-		nn_cv = nn_distance_cv(ftrns1_abs(x_grid), scale_time)
-		knn_cv = knn_volume_cv(ftrns1_abs(x_grid), k=8, scale_time=scale_time)
-		print(f"Full: NN-CV={nn_cv:.3f}, kNN-CV={knn_cv:.3f}")
-
-	if use_time_shift == True:
-		# [4]. R2 of expected time distribution
-		n = len(x_grid)
-		# u = np.arange(1, n+1) / n
-		u = np.arange(n) / (n - 1)
-		iarg = np.argsort(x_grid[:,3])
-		t_sorted = np.sort(x_grid[:,3])
-		F_expected = (t_sorted - (-time_shift_range)) / (time_shift_range - (-time_shift_range))
-		r2_loss_time = r2_score(F_expected, u)
-		print('R2 of expected time distribution: %0.8f'%r2_loss_time)
-
-		# [5]. Check nearest neighbors
-		tree = cKDTree(x_grid*np.array([1.0, 1.0, 1.0, scale_time]).reshape(1,-1))
-		q = tree.query(x_grid*np.array([1.0, 1.0, 1.0, scale_time]).reshape(1,-1), k = 2) # [0][:,1]
-		q_min = q[0][:,1].min()/1000.0
-		q_mean = q[0][:,1].mean()/1000.0
-		q_std = q[0][:,1].std()/1000.0
-		print('Nearest neighbors (scaled): Min: %0.4f, Mean: %0.4f (+/- %0.4f) km \n'%(q_min, q_mean, q_std))
-
-
-		# [6]. Space offsets
-		dist_space = np.linalg.norm(ftrns1(x_grid[:,0:3]) - ftrns1(x_grid[q[1][:,1],0:3]), axis = 1)
-		dist_time = np.abs(x_grid[:,3] - x_grid[q[1][:,1],3])
-		# min_spc_dist = dist_space.min()/1000.0
-		# mean_spc_dist = dist_space.mean()/1000.0
-		# std_spc_dist = dist_space.std()/1000.0
-		# print('Nearest neighbors: Min: %0.4f, Mean: %0.4f (+/- %0.4f) km \n'%(min_spc_dist, mean_spc_dist, std_spc_dist))
-
-		# [6]. Correlation of space and time nearest neighbors
-		pearsonr_val = pearsonr(dist_space, dist_time).statistic
-		print('Correlation of space and time nearest neighbors: %0.8f'%pearsonr_val)
-
-		# [7]. Ratio of small dt
-		ratio_within_time_radius = len(np.where(dist_time*scale_time < 0.005*nominal_spacing)[0])/len(dist_time)
-		print('Ratio of small time offset nearest neighbors: %0.8f \n'%ratio_within_time_radius)
-
-
-	return mean_loss, rms_loss, r2_loss, mean_dist, std_dist
-
-
-
-# import numpy as np
-# from scipy.spatial import cKDTree
-
-def nn_distance_stats(
-    xyz_t, 
-    scale_time, 
-    Volume_space,  # from compute_expected_spacing
-    time_range,    # T, full span = 2 * time_range
-    cluster_threshold=0.5  # tunable: nn_dist < threshold * mean_nn = cluster
-):
-    points_scaled = xyz_t.copy()
-    points_scaled[:, 3] *= scale_time
-    
-    tree = cKDTree(points_scaled)
-    dists, _ = tree.query(points_scaled, k=2)
-    nn_dists = dists[:, 1]
-    
-    mean_nn = np.mean(nn_dists)
-    median_nn = np.median(nn_dists)
-    min_nn = np.min(nn_dists)
-    max_nn = np.quantile(nn_dists, 0.99)
-    std_nn = np.std(nn_dists)
-    cv_nn = std_nn / mean_nn if mean_nn > 0 else 0.0  # Coefficient of Variation
-    
-    hypervolume = Volume_space * (scale_time * 2 * time_range)
-    expected_random_mean = 0.65 * (hypervolume / len(xyz_t)) ** (1/4)
-    normalized_mean = mean_nn / expected_random_mean
-    
-    # Void ratio: max gap relative to mean spacing
-    void_ratio = max_nn / mean_nn  # >2-3 = notable voids
-    
-    # Cluster ratio: fraction of small NN distances
-    cluster_count = np.sum(nn_dists < (cluster_threshold * mean_nn))
-    cluster_ratio = cluster_count / len(nn_dists)  # 0 = no clusters, >0.1 = some crowding
-    
-    # Spatial-only (3D projection) stats for space voids/clusters
-    tree_space = cKDTree(xyz_t[:, :3])
-    dists_space, _ = tree_space.query(xyz_t[:, :3], k=2)
-    nn_dists_space = dists_space[:, 1]
-    mean_nn_space = np.mean(nn_dists_space)
-    void_ratio_space = np.quantile(nn_dists_space, 0.99) / mean_nn_space
-    cluster_ratio_space = np.sum(nn_dists_space < (cluster_threshold * mean_nn_space)) / len(nn_dists_space)
-    
-    # Time-only (1D projection) stats for time voids/clusters
-    t_reshaped = xyz_t[:, 3].reshape(-1, 1)  # 1D for KDTree
-    tree_time = cKDTree(t_reshaped)
-    dists_time, _ = tree_time.query(t_reshaped, k=2)
-    nn_dists_time = dists_time[:, 1]
-    mean_nn_time = np.mean(nn_dists_time)
-    void_ratio_time = np.quantile(nn_dists_time, 0.99) / mean_nn_time
-    cluster_ratio_time = np.sum(nn_dists_time < (cluster_threshold * mean_nn_time)) / len(nn_dists_time)
-    
-    stats = {
-        'mean_nn_dist': mean_nn,
-        'median_nn_dist': median_nn,
-        'min_nn_dist': min_nn,
-        'max_nn_dist': max_nn,
-        'cv_nn': cv_nn,  # new: 0.2-0.3 = excellent, >0.5 = random/clustered
-        'normalized_mean': normalized_mean[0],
-        'void_ratio': void_ratio,  # new: 2-3 = balanced, >4 = voids present
-        'cluster_ratio': cluster_ratio,  # new: <0.05 = minimal clustering
-        'void_ratio_space': void_ratio_space,
-        'cluster_ratio_space': cluster_ratio_space,
-        'void_ratio_time': void_ratio_time,
-        'cluster_ratio_time': cluster_ratio_time,
-        'nn_distances': nn_dists
-    }
-
-    # print(stats)
-    # Usage
-    # stats = nn_distance_stats(xyz_t, w_scale=w_scale)
-    print(f"Min NN distance: {stats['min_nn_dist']:.1f} m (spatial+time)")
-    print(f"Mean NN distance: {stats['mean_nn_dist']:.1f} m (spatial+time)")
-    print(f"Median NN distance: {stats['median_nn_dist']:.1f} m (spatial+time)")
-    print(f"\nNormalized mean: {stats['normalized_mean']:.3f} (spatial+time)")
-    print(f"Interpretation: 1.0 = random, 1.3–1.6 = good, >1.7 = excellent low-discrepancy\n")
-    print(f"CV NN: {stats['cv_nn']:.2f} m (spatial+time) [=0.2-0.3 = excellent, >0.5 = random/clustered]")
-    print(f"Void ratio: {stats['void_ratio']:.2f} (spatial+time) [2-3 = balanced, >4 = voids present]")
-    print(f"Cluster ratio: {stats['cluster_ratio']:.2f} (spatial+time) [<0.05 = minimal clustering]")
-    print(f"\nVoid ratio: {stats['void_ratio_space']:.2f} (spatial)")
-    print(f"Cluster ratio: {stats['cluster_ratio_space']:.2f} (spatial)")
-    print(f"\nVoid ratio: {stats['void_ratio_time']:.2f} (time)")
-    print(f"Cluster ratio: {stats['cluster_ratio_time']:.2f} (time)")
-
-
-    return stats
-
-# Tuning T: Yes, if T is arbitrary, use the process inversely: Fix scale_time to physics, generate points, check time-specific metrics (void_ratio_time, cluster_ratio_time). If void_ratio_time >3 (large gaps), shrink T; if cluster_ratio_time >0.1 (crowding), expand T. Or set T such that nominal_spacing_time ≈ seismic resolution (e.g., 1/10 of interference length).
-# Tuning N: Use kernel needs: Required N ≈ (Volume_space / (kernel_radius / 3)^3) * (2T / kernel_time)^1 for ~3-5 nodes per kernel in space-time. If metrics show over-clustering (high cluster_ratio), increase N.
-
-# CV: <0.3 = highly regular; 0.3-0.4 = good; >0.5 = check for clusters.
-# Void ratio: ~2 = tight packing; >3-4 = potential voids (investigate max_nn locations).
-# Cluster ratio: <0.05 = clean; >0.1 = tune to spread points.
-# Space/time breakdowns: If void_ratio_time >> void_ratio_space, time is under-sampled → increase scale_time or decrease time_shift_range
-
-# def scale_points(points, scale_time = scale_time):
-#     if points.shape[1] == 4:
-#         P = points.copy()
-#         P[:, 3] *= scale_time
-#         return P
-#     return points
-
-def nn_distance_cv(points, scale_time=scale_time):
-    P = scale_points(points, scale_time)
-    tree = cKDTree(P)
-    d, _ = tree.query(P, k=2)   # d[:,0] = 0 (self)
-    nn = d[:, 1]
-    return np.std(nn) / np.mean(nn)
-
-# CV	Interpretation
-# > 0.25	poor
-# 0.15–0.25	OK (Poisson only)
-# 0.08–0.15	good
-# < 0.08	excellent
-
-def knn_volume_cv(points, k=8, scale_time=scale_time):
-    P = scale_points(points, scale_time)
-    tree = cKDTree(P)
-    d, _ = tree.query(P, k=k+1)  # includes self
-    rk = d[:, -1]
-    dim = P.shape[1]
-    volumes = rk**dim
-    return np.std(volumes) / np.mean(volumes)
-
-
-def r_min_func(points):
-    r_min_vals = np.linalg.norm(ftrns1_abs(ftrns2_abs(points[:,0:3])*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) + depth_range[0]
-    return r_min_vals
-
-def r_max_func(points):
-    r_max_vals = np.linalg.norm(ftrns1_abs(ftrns2_abs(points[:,0:3])*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) + depth_range[1]
-    return r_max_vals
-
-
-def scale_points(points, scale_time = scale_time):
-    if points.shape[1] == 4:
-        P = points.copy()
-        P[:, 3] *= scale_time
-        return P
-    return points
-
-
-# up_sample_factor = 10 if use_time_shift == False else 20
-# number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
-
-
 use_poisson_filtering = False 
 use_farthest_point_filtering = True 
 
 
-# ## Sampling options
-# perm_option1 = [1.0, True, True]
-# perm_option2 = [1.5, True, True]
-# perm_option3 = [2.0, True, True]
-# perm_option4 = [1.0, False, True]
-# perm_option5 = [1.0, False, False]
-# perm_options = [perm_option1, perm_option2, perm_option3, perm_option4, perm_option5]
-# use_relaxation = True
+def get_wgs84_area_val(lat_deg):    
+    """Computes the WGS84 area-proportional value for a given latitude."""
+    lat_rad = np.deg2rad(lat_deg)
+    e2 = 0.00669437999014  # WGS84 eccentricity squared
+    e = np.sqrt(e2)
+    sin_phi = np.sin(lat_rad)
+    # Standard formula for ellipsoidal surface area relative to latitude
+    term1 = (1 - e2) * sin_phi / (1 - e2 * sin_phi**2)
+    term2 = ((1 - e2) / (2 * e)) * np.log((1 - e * sin_phi) / (1 + e * sin_phi))
+    return term1 - term2
+    
 
-# ## Now implement Poisson disk filtering to obtain the target number of nodes
-# trial_points = collect_trial_points(number_candidate_nodes)
-# R2_losses = [] ## Base decision on depth R2 loss (or use the RMS loss)
+class SamplingTuner:
 
-# for p in perm_options: ## Note the increased tol_fraction for this search
-# 	# x_grid, _ = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, tol_fraction = 0.01, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
-# 	x_grid = regular_sobolov(number_of_spatial_nodes)
+    def __init__(self, target_N, lat_range, lon_range, depth_range, time_range, use_global = use_global, device = device):
+
+        from skopt.space import Real
+        self.target_N = target_N
+        # Store ranges as [min, max] pairs
+        self.ranges = [lat_range, lon_range, depth_range, [-time_range, time_range]]
+        self.device = device
+        self.time_range = time_range
+        self.use_global = use_global
+        
+        # 1. Define Search Space
+        # scale_t: km/s
+        # depth_boost: dimensionless vertical stretch
+        # buffer_scale: multiplier for the nominal spacing
+        self.space = [
+            Real(1e3, 15e3, prior='log-uniform', name='scale_t'),      
+            Real(1.0, 5.0, name='depth_boost'),   
+            Real(1.1, 2.5, name='buffer_scale')   
+        ]
+
+    def optimize(self, n_calls = 30):
+
+        """Runs Bayesian Optimization to find the triplet of parameters."""
+
+        @use_named_args(self.space)
+        def objective(scale_t, depth_boost, buffer_scale):
+
+            # 1. GENERATE CANDIDATES
+            up_sample_factor = 20 if use_time_shift else 10
+            number_candidate_nodes = up_sample_factor * self.target_N
+
+            trial_points, mask_points = regular_sobolov(
+                number_candidate_nodes, 
+                lat_range=self.ranges[0], 
+                lon_range=self.ranges[1], 
+                depth_range=self.ranges[2], 
+                time_range=self.time_range, 
+                use_time=use_time_shift, 
+                use_global=self.use_global, 
+                scale_time=scale_t, 
+                N_target=self.target_N, 
+                buffer_scale=buffer_scale
+            )        
+
+            # 2. RUN FPS (Physical -> Scaled Search Space)
+            # fps returns the selected physical [Lat, Lon, Depth, Time] points
+            x_grid = farthest_point_sampling(
+                ftrns1_abs(trial_points), 
+                self.target_N, 
+                scale_time=scale_t, 
+                depth_boost=depth_boost, 
+                mask_candidates=mask_points
+            )        
+
+            # 3. PROJECT TO SCALED METRIC SPACE (For CV and Anisotropy)
+            # Use depth_boost on the 3rd column and scale_t on the 4th
+            scaling_vector = np.array([1.0, 1.0, depth_boost, scale_t])
+            x_proj_scaled = ftrns1_abs(x_grid * scaling_vector)        
+            # --- PART A: Uniformity (Scaled World) ---
+            tree = cKDTree(x_proj_scaled)
+            nn_dist = tree.query(x_proj_scaled, k=2)[0][:, 1]
+            cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)    
+
+            # 4. CDF ANALYSIS (The WGS84 "Gold Standard")
+            cdf_loss = 0
+            N = len(x_grid)
+            empirical_cdf = np.arange(N) / (N - 1)
+            for i in range(4):
+                if i == 0: # LATITUDE: WGS84 Authalic correction
+                    # Map latitudes to their area-proportional values
+                    q_vals = get_wgs84_area_val(x_grid[:, 0])
+                    q_min = get_wgs84_area_val(self.ranges[0][0])
+                    q_max = get_wgs84_area_val(self.ranges[0][1])
+                    val_to_sort = (q_vals - q_min) / (q_max - q_min + 1e-12)
+
+                elif i == 1: # LONGITUDE: Linear
+                    val_to_sort = (x_grid[:, 1] - self.ranges[1][0]) / (self.ranges[1][1] - self.ranges[1][0] + 1e-12)
+
+                elif i == 2: # DEPTH: WGS84 Volume Fraction (as we wrote before)
+                    r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), self.ranges[2][0])])), axis=1)
+                    r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), self.ranges[2][1])])), axis=1)
+                    r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+                    val_to_sort = (r_actual**3 - r_min_local**3) / (r_max_local**3 - r_min_local**3 + 1e-12)
+
+                elif i == 3: # TIME: Linear
+                    val_to_sort = (x_grid[:, 3] - self.ranges[3][0]) / (self.ranges[3][1] - self.ranges[3][0] + 1e-12)       
+
+                sorted_vals = np.sort(val_to_sort)
+                cdf_loss += np.mean(np.abs(sorted_vals - empirical_cdf))
+
+            cdf_loss = cdf_loss/x_grid.shape[1] ## Normalize by number of dimensions used
+            # --- PART C: The Sanity Check (Anisotropy) ---
+            spreads = np.std(x_proj_scaled, axis=0)
+            anisotropy = np.max(spreads) / (np.min(spreads) + 1e-9)
+            penalty = np.maximum(0, np.log10(anisotropy) - 1.0)**2   
+
+            return cv + (3.0 * cdf_loss) + (1.0 * penalty)
+
+        res = gp_minimize(objective, self.space, n_calls = n_calls, random_state = 42, verbose = True)
+        
+        best_scale_t, best_depth_boost, best_buffer_scale = res.x
+        
+
+        _, _, nominal_spacing_4d, _, _ = compute_expected_spacing(
+        	self.target_N,  # total number of points
+        	lat_range=self.ranges[0],
+        	lon_range=self.ranges[1],
+        	depth_range=self.ranges[2],
+        	time_range=self.time_range,  # T, full range = 2T
+        	use_time=use_time_shift,
+        	scale_time=best_scale_t,  # w_scale: length per unit time
+        	use_global=use_global,
+        	earth_radius=earth_radius)
+
+        # nominal_spacing = (total_vol / self.target_N)**(1/4)
+        # buffer_width_phys = best_buffer_scale * nominal_spacing
+        buffer_width_phys = best_buffer_scale * nominal_spacing_4d # [0]
+
+        print("\n--- Optimization Results ---")
+        print(f"Optimal scale_t:     {best_scale_t:.3f} m/s")
+        print(f"Optimal depth_boost: {best_depth_boost:.3f}")
+        print(f"Optimal buffer_scale: {best_buffer_scale:.3f}")
+        print(f"Effective Padding:   {buffer_width_phys:.2f} (units)")
+
+        return {
+            'scale_t': best_scale_t,
+            'depth_boost': best_depth_boost,
+            'buffer_scale': best_buffer_scale,
+            'buffer_width_phys': buffer_width_phys
+        }
 
 
-
-## First do tuning
-
-def evaluate_sampling_quality(nodes, lat_range, lon_range, depth_range, time_range):
+def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range, depth_range, time_range, volume_space):
     """
-    nodes: [N, 4] array (Lat, Lon, Depth, Time)
+    Terminal-optimized health report for WGS84 4D grids.
     """
-    N = nodes.shape[0]
+    N = len(x_grid)
+    full_ranges = [lat_range, lon_range, depth_range, [-time_range, time_range]]
     
-    # 1. Uniformity Check: Coefficient of Variation (CV)
-    # A perfectly uniform (Blue Noise) set has a very low CV of NN distances.
-    tree = KDTree(nodes)
-    dist, _ = tree.query(nodes, k=2) # k=2 because k=1 is the point itself
-    nn_distances = dist[:, 1]
+    # 1. PREP COORDINATE SPACES
+    # Scaled Metric Space (for NN stats)
+    scaling_vec = np.array([1.0, 1.0, depth_boost, scale_t])
+    x_metric = ftrns1_abs(x_grid * scaling_vec)
     
-    cv = np.std(nn_distances) / np.mean(nn_distances)
+    # 2. NEAREST NEIGHBOR ANALYSIS (Metric Space)
+    tree = cKDTree(x_metric)
+    nn_dists = tree.query(x_metric, k=2)[0][:, 1]
     
-    # 2. Boundary "Curling" Check
-    # We check if the density in the outer 10% of the volume matches the inner 90%
-    def get_edge_mask(pts):
-        masks = []
-        ranges = [lat_range, lon_range, depth_range, [-time_range, time_range]]
-        for i, r in enumerate(ranges):
-            margin = (r[1] - r[0]) * 0.1
-            masks.append((pts[:, i] < r[0] + margin) | (pts[:, i] > r[1] - margin))
-        return np.any(masks, axis=0)
+    cv_nn = np.std(nn_dists) / (np.mean(nn_dists) + 1e-9)
+    hypervolume_4d = volume_space * (2.0 * time_range * scale_t)
+    expected_random_mean = 0.65 * (hypervolume_4d / N)**(1/4)
+    norm_mean = np.mean(nn_dists) / expected_random_mean
+    void_ratio = np.quantile(nn_dists, 0.99) / (np.mean(nn_dists) + 1e-9)
 
-    edge_mask = get_edge_mask(nodes)
-    edge_density = np.sum(edge_mask) / N
-    # Expected edge density for a 4D hypercube's outer 10% shell is roughly:
-    # 1 - (0.8)^4 = 0.59 (59% of points should be in the 'edge' zones)
+    # 3. CDF ANALYSIS (WGS84 Corrected)
+    cdf_r2s = {}
+    empirical_cdf = np.arange(N) / (N - 1)
+
+    for i, name in enumerate(["Lat", "Lon", "Depth", "Time"]):
+        if i == 0: # LATITUDE: WGS84 Authalic
+            q_vals = get_wgs84_area_val(x_grid[:, 0])
+            q_min = get_wgs84_area_val(lat_range[0])
+            q_max = get_wgs84_area_val(lat_range[1])
+            val_to_sort = (q_vals - q_min) / (q_max - q_min + 1e-12)
+            
+        elif i == 1: # LON: Linear
+            val_to_sort = (x_grid[:, i] - lon_range[0]) / (lon_range[1] - lon_range[0] + 1e-12)
+            
+        elif i == 2: # DEPTH: WGS84 Local Volume Fraction
+            r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[0])])), axis=1)
+            r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[1])])), axis=1)
+            r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+            val_to_sort = (r_actual**3 - r_min_local**3) / (r_max_local**3 - r_min_local**3 + 1e-12)
+            
+        else: # TIME: Linear
+            val_to_sort = (x_grid[:, i] - (-time_range)) / (2.0 * time_range + 1e-12)
+
+        sorted_vals = np.sort(val_to_sort)
+        cdf_r2s[name] = r2_score(empirical_cdf, sorted_vals)
+
+    # 4. TERMINAL DIAGNOSTIC PRINT
+    print(f"\n{'='*60}")
+    print(f"       GEOMETRIC GRID HEALTH REPORT (WGS84-4D)")
+    print(f"{'='*60}")
+    print(f"Nodes (N): {N:<10} | scale_t: {scale_t:<8.1f} | d_boost: {depth_boost:<.2f}")
     
-    # 3. Anisotropy Check (Aspect Ratio)
-    # We look at the standard deviation of distances along each axis
-    axis_scales = np.std(nodes, axis=0)
-    aspect_ratios = axis_scales / axis_scales[0] # Relative to Latitude
+    print(f"\n--- Uniformity Metrics (Metric Space) ---")
+    def get_bar(val, ideal_min, ideal_max):
+        bar = ["-"] * 20
+        pos = int(min(max(val / (ideal_max * 1.5), 0), 1) * 19)
+        bar[pos] = "O"
+        return "".join(bar)
+
+    print(f"CV NN:           {cv_nn:.4f}  [{get_bar(cv_nn, 0.2, 0.3)}] (Goal: 0.2-0.3)")
+    print(f"Normalized Mean: {norm_mean:.4f}  [{get_bar(norm_mean, 1.4, 1.7)}] (Goal: >1.4)")
+    print(f"Void Ratio:      {void_ratio:.4f}  [{get_bar(void_ratio, 2.0, 3.0)}] (Goal: <3.0)")
     
-    print("--- Sampling Diagnostics ---")
-    print(f"Nearest Neighbor CV: {cv:.4f} (Lower is better, target < 0.15)")
-    print(f"Edge Density: {edge_density:.4f} (Target vs. 0.59)")
-    print(f"Axis Aspect Ratios (Lat/Lon/Dep/Time): {aspect_ratios}")
+    print(f"\n--- Transparency Metrics (CDF R2 Scores) ---")
+    for name, score in cdf_r2s.items():
+        status = "PASS" if score > 0.999 else "WARN"
+        bar_len = int(score * 20)
+        bar = "#" * bar_len + " " * (20 - bar_len)
+        print(f"{name:6} R2: {score:.6f}  [{bar}] {status}")
     
-    return cv, edge_density, aspect_ratios
+    print(f"{'='*60}\n")
+    
+    return cdf_r2s
 
 
+def save_grid_diagnostic_plot(x_grid, path_to_file, grid_ind):
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+    names = ["Lat", "Lon", "Depth", "Time"]
+    for i in range(4):
+        axes[i].hist(x_grid[:, i], bins=50, color='teal', alpha=0.7)
+        axes[i].set_title(f"Distribution: {names[i]}")
+        axes[i].set_xlabel(names[i])
+    plt.tight_layout()
+    plt.savefig(f"{path_to_file}/grid_diag_{grid_ind}.png")
+    plt.close()
 
 
+# moi
+
+
+use_tuning = True
+if use_tuning == True:
+	## Run the auto tuning strategy to refine some scale parameters
+	m = SamplingTuner(number_of_spatial_nodes, lat_range_extend, lon_range_extend, depth_range, time_shift_range)
+	params = m.optimize()
+	scale_time, depth_upscale_factor, buffer_scale = params['scale_t'], params['depth_boost'], params['buffer_scale']
+
+else:
+	# depth_upscale_factor = 1.0
+	buffer_scale = 2.0
+
+
+# moi
 
 
 ## Now build all spatial grids using optimal sampling strategy
 x_grids = []
 for n in range(num_grids):
 
-	# trial_points = collect_trial_points(number_candidate_nodes)
-	# x_grid, nominal_spacing = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
-
-	if use_poisson_filtering == True:
-
-		up_sample_factor = 10 if use_time_shift == False else 20
-		number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
-
-		print('Beginning  Poisson filtering [%d]'%n)
-		p = [1.0, False, False] ## Optimize this choice (on the first grid built)
-		trial_points = regular_sobolov(number_candidate_nodes)
-		x_grid, nominal_spacing = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
-
-	elif use_farthest_point_filtering == True:
-
-		up_sample_factor = 10 if use_time_shift == False else 20 ## Could reduce to just 10 most likely
-		number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
-
-		print('Beginning FPS sampling [%d]'%n)
-		## Increase efficiency of this script
-		trial_points, mask_points = regular_sobolov(number_candidate_nodes, N_target = number_of_spatial_nodes, buffer_scale = 2.0)
-		x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, mask_candidates = mask_points)
-
-	else:
-
-		print('Using standard Sobolov sampling [%d]'%n)
-		x_grid = regular_sobolov(number_of_spatial_nodes)
-
-
-	# else:
-	# 	p = [1.0, False, False] ## Optimize this choice (on the first grid built)
-	# 	trial_points = regular_sobolov(number_candidate_nodes)
-	# 	x_grid, nominal_spacing = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
-
+	print('Beginning FPS sampling [%d]'%n)
+	up_sample_factor = 10 if use_time_shift == False else 20 ## Could reduce to just 10 most likely
+	number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
+	trial_points, mask_points = regular_sobolov(number_candidate_nodes, N_target = number_of_spatial_nodes, buffer_scale = buffer_scale)
+	x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = mask_points)
 
 	tol_frac = 0.01
 	assert(x_grid[:,0].min() >= (lat_range_extend[0] - tol_frac*np.diff(lat_range_extend)))
@@ -1157,9 +952,11 @@ for n in range(num_grids):
 	assert(x_grid[:,2].max() <= (depth_range[1] + tol_frac*np.diff(depth_range)))
 	assert(len(x_grid) == number_of_spatial_nodes)
 
-	loss_metrics(x_grid, plot_on = True, grid_ind = n)
-	# nn_distance_stats(ftrns1_abs(x_grid)/1000.0, w_scale = scale_time/1000.0)
-	nn_distance_stats(ftrns1_abs(x_grid), scale_time, Volume_space, time_shift_range)
+	compute_final_grid_health(x_grid, scale_time, depth_upscale_factor, lat_range_extend, lon_range_extend, depth_range, time_shift_range, Volume_space)
+
+	# loss_metrics(x_grid, plot_on = True, grid_ind = n)
+	# # nn_distance_stats(ftrns1_abs(x_grid)/1000.0, w_scale = scale_time/1000.0)
+	# nn_distance_stats(ftrns1_abs(x_grid), scale_time, Volume_space, time_shift_range)
 	x_grids.append(np.expand_dims(x_grid, axis = 0))
 
 
@@ -1341,7 +1138,7 @@ if build_expander_graphs == True:
 		if use_networkx_construction == True:
 
 			A_edges_c = from_networkx(nx.margulis_gabber_galil_graph(int_need)).edge_index.long().flip(0).contiguous()
-			# A_edges_c = torch.Tensor(np.random.permutation(A_edges_c.max() + 1)).long()[A_edges_c]
+			A_edges_c = torch.Tensor(np.random.permutation(A_edges_c.max() + 1)).long()[A_edges_c]
 			Ac = subgraph(torch.arange(number_of_spatial_nodes), A_edges_c)[0].cpu().detach().numpy() # .to(device)
 			# A_edges_c = perm_vec[A_edges_c]
 
@@ -1374,7 +1171,7 @@ if build_expander_graphs == True:
 			    return torch.tensor(edge_index).t(), torch.tensor(edge_type)
 
 			A_edges_c, edge_type = make_labeled_mgg_graph(int_need)
-			# A_edges_c = torch.Tensor(np.random.permutation(A_edges_c.max() + 1)).long()[A_edges_c]
+			A_edges_c = torch.Tensor(np.random.permutation(A_edges_c.max() + 1)).long()[A_edges_c]
 			Ac, edge_type = subgraph(torch.arange(number_of_spatial_nodes), A_edges_c, edge_attr = edge_type) # [0].cpu().detach().numpy() # .to(device)
 			Ac, edge_type = Ac.cpu().detach().numpy(), edge_type.cpu().detach().numpy()
 
@@ -1385,6 +1182,1507 @@ if build_expander_graphs == True:
 
 print("All files saved successfully!")
 print("✔ Script execution: Done")
+
+
+
+
+
+
+
+# trial_points = collect_trial_points(number_candidate_nodes)
+# x_grid, nominal_spacing = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
+
+# if use_poisson_filtering == True:
+
+# 	up_sample_factor = 10 if use_time_shift == False else 20
+# 	number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
+
+# 	print('Beginning  Poisson filtering [%d]'%n)
+# 	p = [1.0, False, False] ## Optimize this choice (on the first grid built)
+# 	trial_points = regular_sobolov(number_candidate_nodes)
+# 	x_grid, nominal_spacing = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
+
+# elif use_farthest_point_filtering == True:
+
+# else:
+
+# 	print('Using standard Sobolov sampling [%d]'%n)
+# 	x_grid = regular_sobolov(number_of_spatial_nodes)
+
+
+# else:
+# 	p = [1.0, False, False] ## Optimize this choice (on the first grid built)
+# 	trial_points = regular_sobolov(number_candidate_nodes)
+# 	x_grid, nominal_spacing = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
+
+
+
+
+# # --- PART B: Boundary Transparency (Measured in Physical World) ---
+# # We check the CDF here to ensure there's no 'curling' at the 0km or 40km edges.
+# cdf_loss = 0
+# for i in range(4):
+#     sorted_axis = np.sort(x_grid[:, i])
+#     theoretical = np.linspace(self.ranges[i][0], self.ranges[i][1], len(x_grid))
+#     span = self.ranges[i][1] - self.ranges[i][0]
+#     cdf_loss += np.mean(np.abs(sorted_axis - theoretical)) / (span + 1e-9)
+
+# def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range, depth_range, time_range, earth_radius=earth_radius):
+
+#     N = len(x_grid)
+#     ranges = [lat_range, lon_range, depth_range]
+    
+#     # 1. PREP COORDINATE SPACES
+#     scaling_vec = np.array([1.0, 1.0, depth_boost, scale_t])
+#     x_metric = ftrns1_abs(x_grid * scaling_vec)
+    
+#     # 2. NEAREST NEIGHBOR ANALYSIS (Metric Space)
+#     tree = cKDTree(x_metric)
+#     nn_dists = tree.query(x_metric, k=2)[0][:, 1]
+#     cv_nn = np.std(nn_dists) / np.mean(nn_dists)
+    
+#     hypervolume_4d = volume_space * (2.0 * time_range * scale_t)
+#     expected_random_mean = 0.65 * (hypervolume_4d / N)**(1/4)
+#     norm_mean = np.mean(nn_dists) / expected_random_mean
+#     void_ratio = np.quantile(nn_dists, 0.99) / np.mean(nn_dists)
+
+#     # 3. CDF ANALYSIS (Physical Space)
+#     cdf_r2s = {}
+#     empirical_cdf = np.arange(N) / (N - 1)
+
+#     # --- Linear Dimensions (Lat, Lon, Time) ---
+#     for i, name in [(0, "Lat"), (1, "Lon"), (3, "Time")]:
+#         sorted_data = np.sort(x_grid[:, i])
+#         theoretical_cdf = (sorted_data - ranges[i][0]) / (ranges[i][1] - ranges[i][0])
+#         cdf_r2s[name] = r2_score(empirical_cdf, theoretical_cdf)
+
+#     # --- Spherical Dimension (Depth/Radius) ---
+#     # r_max = surface, r_min = bottom of crust
+#     r_max = earth_radius - ranges[2][0] 
+#     r_min = earth_radius - ranges[2][1]
+    
+#     # Calculate physical radii of the nodes
+#     # We use the raw depths (x_grid[:, 2]) to find r
+#     d_sorted = np.sort(x_grid[:, 2])
+#     # Note: radius decreases as depth increases: r = earth_radius - depth
+#     r_sorted = earth_radius - d_sorted 
+    
+#     # The expected CDF for uniform volume sampling in a sphere:
+#     # F(r) = (r^3 - r_min^3) / (r_max^3 - r_min^3)
+#     # We sort r ascending (from r_min to r_max) to match empirical_cdf
+#     r_sorted_asc = np.sort(r_sorted) 
+#     theoretical_cdf_r = (r_sorted_asc**3 - r_min**3) / (r_max**3 - r_min**3)
+    
+#     cdf_r2s["Depth"] = r2_score(empirical_cdf, theoretical_cdf_r)
+
+#     # 4. PRINT SUMMARY
+#     print(f"\n{'='*40}\n FINAL GRID HEALTH REPORT (SPHERICAL) \n{'='*40}")
+#     print(f"Nodes (N): {N} | scale_t: {scale_t:.1f} | d_boost: {depth_boost:.2f}")
+#     print(f"\n--- Uniformity (Metric Space) ---")
+#     print(f"CV NN:           {cv_nn:.4f}  (Ideal: 0.2-0.3)")
+#     print(f"Normalized Mean: {norm_mean:.4f}  (Ideal: >1.4)")
+#     print(f"Void Ratio:      {void_ratio:.4f}  (Ideal: <3.0)")
+    
+#     print(f"\n--- Transparency (CDF R2 Scores) ---")
+#     for name, score in cdf_r2s.items():
+#         status = "PASS" if score > 0.99 else "WARN"
+#         print(f"{name:6} R2: {score:.6f}  [{status}]")
+    
+#     return cdf_r2s
+
+
+
+# import numpy as np
+# from scipy.spatial import cKDTree
+# from sklearn.metrics import r2_score
+
+
+# @use_named_args(self.space) # self.target_N, self.space, self.ranges, self.time_range, self.use_global
+# def objective(scale_t, depth_boost, buffer_scale, return_metrics = False):
+#     """ This replaces the simple calculate_loss function """
+#     # 1. GENERATE THE NODES
+#     # Your pipeline should return the real coordinates AND the scaled ones
+#     # nodes_phys: [Lat, Lon, Depth, Time] 
+#     # nodes_scaled: [Lat, Lon, Depth * depth_boost, Time * scale_t]
+
+#     # nodes_phys, nodes_scaled = self.run_pipeline(scale_t, depth_boost, buffer_scale)
+#     up_sample_factor = 10 if use_time_shift == False else 20 ## Could reduce to just 10 most likely
+#     number_candidate_nodes = up_sample_factor*self.target_N
+#     ## Increase efficiency of this script
+#     trial_points, mask_points = regular_sobolov(number_candidate_nodes, lat_range = self.ranges[0], lon_range = self.ranges[1], depth_range = self.ranges[2], time_range = self.time_range, use_time = use_time_shift, use_global = self.use_global, scale_time = scale_t, N_target = self.target_N, buffer_scale = buffer_scale) # lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0
+#     x_grid = farthest_point_sampling(ftrns1_abs(trial_points), self.target_N, scale_time = scale_t, depth_boost = depth_boost, mask_candidates = mask_points)
+#     x_proj_scaled = ftrns1_abs(x_grid*np.array([1.0, 1.0, depth_boost, scale_t]).reshape(1,-1))
+
+#     # --- PART A: Uniformity (Measured in Scaled World) ---
+#     # If we measured this in 'Physical' world, the 40km depth would 
+#     # make the CV look weird regardless of how good the sampling is.
+#     tree = cKDTree(x_proj_scaled)
+#     nn_dist = tree.query(x_proj_scaled, k=2)[0][:, 1]
+#     cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)
+
+#     # 3. CDF ANALYSIS (The WGS84 "Gold Standard")
+#     cdf_loss = 0
+#     N = len(x_grid)
+#     empirical_cdf = np.arange(N) / (N - 1)
+    
+#     for i in range(4):
+#         if i == 0: # LATITUDE: WGS84 Authalic correction
+#             # Map latitudes to their area-proportional values
+#             q_vals = get_wgs84_area_val(x_grid[:, 0])
+#             q_min = get_wgs84_area_val(self.ranges[0][0])
+#             q_max = get_wgs84_area_val(self.ranges[0][1])
+#             val_to_sort = (q_vals - q_min) / (q_max - q_min + 1e-12)
+            
+#         elif i == 1: # LONGITUDE: Linear
+#             val_to_sort = (x_grid[:, 1] - self.ranges[1][0]) / (self.ranges[1][1] - self.ranges[1][0] + 1e-12)
+            
+#         elif i == 2: # DEPTH: WGS84 Volume Fraction (as we wrote before)
+#             r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), self.ranges[2][0])])), axis=1)
+#             r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), self.ranges[2][1])])), axis=1)
+#             r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+#             val_to_sort = (r_actual**3 - r_min_local**3) / (r_max_local**3 - r_min_local**3 + 1e-12)
+            
+#         elif i == 3: # TIME: Linear
+#             val_to_sort = (x_grid[:, 3] - self.ranges[3][0]) / (self.ranges[3][1] - self.ranges[3][0] + 1e-12)        
+
+#         sorted_vals = np.sort(val_to_sort)
+#         cdf_loss += np.mean(np.abs(sorted_vals - empirical_cdf))
+
+
+#     # --- PART C: The Sanity Check (Measured in Scaled World) ---
+#     # This prevents the optimizer from making one axis 10,000x longer than the others.
+#     spreads = np.std(x_proj_scaled, axis=0)
+#     anisotropy = np.max(spreads) / (np.min(spreads) + 1e-9)
+#     penalty = np.maximum(0, np.log10(anisotropy) - 1.0)**2
+#     # Return the combined loss (Lower is Better)
+
+#     if return_metrics == False:
+#     	return cv + (3.0 * cdf_loss) + (1.0 * penalty)
+#     else:
+#     	return cv + (3.0 * cdf_loss) + (1.0 * penalty), [cv, cdf_loss, penalty]
+
+
+# # --- PART B: Boundary Transparency (WGS84 Volume Aware) ---
+# cdf_loss = 0
+# empirical_cdf = np.arange(len(x_grid)) / (len(x_grid) - 1)
+
+# for i in range(4):
+#     if i == 2: # Depth/Radius dimension (WGS84 Spherical Shell)
+#         # Compute local radius bounds for each point's Lat/Lon
+#         r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((len(x_grid),1), self.ranges[2][0])])), axis=1)
+#         r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((len(x_grid),1), self.ranges[2][1])])), axis=1)
+#         r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+        
+#         # Volume fraction normalized locally (0 to 1)
+#         vol_frac = (r_actual**3 - r_min_local**3) / (r_max_local**3 - r_min_local**3 + 1e-9)
+#         sorted_vals = np.sort(vol_frac)
+#         theoretical = empirical_cdf # In perfect volume sampling, frac is linear
+#     else:
+#         # Lat, Lon, and Time use standard linear spacing
+#         sorted_vals = (np.sort(x_grid[:, i]) - self.ranges[i][0]) / (self.ranges[i][1] - self.ranges[i][0] + 1e-9)
+#         theoretical = empirical_cdf        
+
+#     cdf_loss += np.mean(np.abs(sorted_vals - theoretical))    
+
+
+
+# def calculate_loss(self, nodes):
+#     """Standardized loss: Uniformity + CDF Linearity + Anisotropy Guardrail."""
+#     # --- 1. Uniformity (Blue Noise Quality) ---
+#     tree = cKDTree(nodes)
+#     dists, _ = tree.query(nodes, k=2)
+#     nn_dist = dists[:, 1]
+#     cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)
+
+#     # --- 2. Boundary Flatness (CDF Deviation) ---
+#     # This is the primary check for edge-curling
+#     cdf_loss = 0
+#     for i in range(4):
+#         sorted_axis = np.sort(nodes[:, i])
+#         theoretical = np.linspace(self.ranges[i][0], self.ranges[i][1], len(nodes))
+#         span = self.ranges[i][1] - self.ranges[i][0]
+#         cdf_loss += np.mean(np.abs(sorted_axis - theoretical)) / (span + 1e-9)
+
+#     # --- 3. Anisotropy Penalty (The Sanity Check) ---
+#     spreads = np.std(nodes, axis=0)
+#     anisotropy = np.max(spreads) / (np.min(spreads) + 1e-9)
+#     # Penalize log-linearly if aspect ratio exceeds 10:1
+#     penalty = np.maximum(0, np.log10(anisotropy) - 1.0)**2
+
+#     # Weighted Sum: CDF loss is weighted highest to ensure 'transparency'
+#     return cv + (3.0 * cdf_loss) + (1.0 * penalty)
+
+
+
+
+## User: Input stations and spatial region
+## (must have station and region files at
+## (ext_dir + 'stations.npz'), and
+## (ext_dir + 'region.npz')
+
+
+
+# Calculate the resulting physical buffer width for the user
+# This uses the nominal spacing formula for 4D
+# total_vol = (self.ranges[0][1]-self.ranges[0][0]) * \
+#             (self.ranges[1][1]-self.ranges[1][0]) * \
+#             (self.ranges[2][1]-self.ranges[2][0]) * \
+#             (self.ranges[3][1]-self.ranges[3][0])
+
+# nominal_spacing = (total_vol / self.target_N)**(1/4)
+# buffer_width_phys = best_buffer_scale * nominal_spacing
+
+
+
+
+
+# def u_to_geodetic_lat(u, lat_min, lat_max):
+#     # Mapping u [0,1] to sin(lat) is spherical equal-area.
+#     # For ellipsoidal (Authalic), the formula involves the eccentricity squared (e^2).
+#     # e2 = 0.00669437999014 for WGS84.
+#     u_min = (1.0 + np.sin(np.deg2rad(lat_min))) / 2.0
+#     u_max = (1.0 + np.sin(np.deg2rad(lat_max))) / 2.0
+#     u_val = u_min + u * (u_max - u_min)
+#     return np.arcsin(2 * u_val - 1) * (180.0 / np.pi)
+
+
+
+
+# @use_named_args(self.space)
+# def objective(scale_t, depth_boost, buffer_scale):
+#     # This calls your external pipeline (Sobol -> Ghost Density -> FPS)
+#     # nodes = run_full_pipeline(
+#     #     N=self.target_N, 
+#     #     scale_t=scale_t, 
+#     #     depth_boost=depth_boost, 
+#     #     buffer_scale=buffer_scale
+#     # )
+
+#     up_sample_factor = 10 if use_time_shift == False else 20 ## Could reduce to just 10 most likely
+#     number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
+#     print('Beginning FPS sampling [%d]'%n)
+#     ## Increase efficiency of this script
+#     trial_points, mask_points = regular_sobolov(lat_range = self.ranges[0], lon_range = self.ranges[1], depth_range = self.ranges[2], time_range = self.time_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_t, N_target = number_of_spatial_nodes, buffer_scale = buffer_scale) # lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0
+#     x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, scale_time = scale_t, depth_boost = depth_boost, mask_candidates = mask_points)
+#     # x_grid_scaled
+
+#     return self.calculate_loss(nodes)
+
+
+
+
+
+
+# ## Sampling options
+# perm_option1 = [1.0, True, True]
+# perm_option2 = [1.5, True, True]
+# perm_option3 = [2.0, True, True]
+# perm_option4 = [1.0, False, True]
+# perm_option5 = [1.0, False, False]
+# perm_options = [perm_option1, perm_option2, perm_option3, perm_option4, perm_option5]
+# use_relaxation = True
+
+# ## Now implement Poisson disk filtering to obtain the target number of nodes
+# trial_points = collect_trial_points(number_candidate_nodes)
+# R2_losses = [] ## Base decision on depth R2 loss (or use the RMS loss)
+
+# for p in perm_options: ## Note the increased tol_fraction for this search
+# 	# x_grid, _ = poisson_exact_count(ftrns1_abs(trial_points), number_of_spatial_nodes, nominal_spacing, tol_fraction = 0.01, prob_factor = p[0], use_probablistic_acceptance = p[1], use_mirrored = p[2])
+# 	x_grid = regular_sobolov(number_of_spatial_nodes)
+
+
+
+## First do tuning
+
+# def evaluate_sampling_quality(nodes, lat_range, lon_range, depth_range, time_range):
+#     """
+#     nodes: [N, 4] array (Lat, Lon, Depth, Time)
+#     """
+#     N = nodes.shape[0]
+    
+#     # 1. Uniformity Check: Coefficient of Variation (CV)
+#     # A perfectly uniform (Blue Noise) set has a very low CV of NN distances.
+#     tree = KDTree(nodes)
+#     dist, _ = tree.query(nodes, k=2) # k=2 because k=1 is the point itself
+#     nn_distances = dist[:, 1]
+    
+#     cv = np.std(nn_distances) / np.mean(nn_distances)
+    
+#     # 2. Boundary "Curling" Check
+#     # We check if the density in the outer 10% of the volume matches the inner 90%
+#     def get_edge_mask(pts):
+#         masks = []
+#         ranges = [lat_range, lon_range, depth_range, [-time_range, time_range]]
+#         for i, r in enumerate(ranges):
+#             margin = (r[1] - r[0]) * 0.1
+#             masks.append((pts[:, i] < r[0] + margin) | (pts[:, i] > r[1] - margin))
+#         return np.any(masks, axis=0)
+
+#     edge_mask = get_edge_mask(nodes)
+#     edge_density = np.sum(edge_mask) / N
+#     # Expected edge density for a 4D hypercube's outer 10% shell is roughly:
+#     # 1 - (0.8)^4 = 0.59 (59% of points should be in the 'edge' zones)
+    
+#     # 3. Anisotropy Check (Aspect Ratio)
+#     # We look at the standard deviation of distances along each axis
+#     axis_scales = np.std(nodes, axis=0)
+#     aspect_ratios = axis_scales / axis_scales[0] # Relative to Latitude
+    
+#     print("--- Sampling Diagnostics ---")
+#     print(f"Nearest Neighbor CV: {cv:.4f} (Lower is better, target < 0.15)")
+#     print(f"Edge Density: {edge_density:.4f} (Target vs. 0.59)")
+#     print(f"Axis Aspect Ratios (Lat/Lon/Dep/Time): {aspect_ratios}")
+    
+#     return cv, edge_density, aspect_ratios
+
+
+
+
+
+
+
+
+
+# import torch
+
+# def loss_metrics(x_grid, grid_ind = 0, depth_scale = depth_upscale_factor, use_time_shift = use_time_shift, plot_on = False):
+
+# 	## Compute quality checks:
+# 	# [1]. Flat in depth
+# 	n_bins = 30
+# 	r = np.linalg.norm(ftrns1_abs(x_grid[:,0:3]*np.array([1.0, 1.0, depth_scale]).reshape(1,-1)), axis = 1)
+# 	h_vals = np.histogram(r**3, bins = int(len(x_grid)/n_bins)) # [0]
+# 	mean_loss = np.mean(n_bins*np.ones(len(h_vals[0])) - h_vals[0])
+# 	rms_loss = (np.sqrt(((n_bins*np.ones(len(h_vals[0])) - h_vals[0])**2).sum()/len(h_vals[0]))/n_bins)
+# 	print('\nMean deviation of radius flatness: %0.8f'%mean_loss)
+# 	print('RMS deviation of radius flatness: %0.8f'%rms_loss)
+
+# 	# [2]. Sorted depths
+# 	n = len(x_grid)
+# 	# u = np.arange(1, n+1) / n
+# 	u = np.arange(n) / (n - 1)
+# 	iarg = np.argsort(x_grid[:,2])
+# 	d_sorted = np.sort(x_grid[:,2])
+# 	# expected CDF
+# 	r_surface = np.linalg.norm(ftrns1_abs(x_grid[:,0:3]*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1)
+# 	# r = r_surface[iarg] + d_sorted
+# 	r = r_surface.mean() + d_sorted
+# 	F_expected = (r**3 - r_min**3) / (r_max**3 - r_min**3)
+# 	r2_loss = r2_score(F_expected, u)
+# 	print('R2 of expected depth distribution: %0.8f'%r2_loss)
+
+# 	# diagnostic plot
+# 	if plot_on == True:
+# 		plt.figure()
+# 		plt.plot(d_sorted, u, label="empirical")
+# 		plt.plot(d_sorted, F_expected, "--", label="expected")
+# 		plt.legend()
+# 		fig = plt.gcf()
+# 		fig.set_size_inches([8,8])
+# 		plt.savefig(path_to_file + 'Plots' + seperator + 'grid_sorted_depths_ver_%d.png'%grid_ind, bbox_inches = 'tight', pad_inches = 0.1)
+
+# 	# [3]. Nearest neighbor distances, and nearest neighbors as function of depth
+# 	if use_time_shift == False:
+# 		tree = cKDTree(ftrns1(x_grid*np.array([1.0, 1.0, depth_scale]).reshape(1,-1)))
+# 		q = tree.query(ftrns1(x_grid*np.array([1.0, 1.0, depth_scale]).reshape(1,-1)), k = 2)[0][:,1]
+# 		min_dist = q.min()/1000.0
+# 		mean_dist = q.mean()/1000.0
+# 		std_dist = q.std()/1000.0
+# 		print('Nearest neighbors: Min: %0.4f, Mean: %0.4f (+/- %0.4f) km \n'%(min_dist, mean_dist, std_dist))
+
+# 	else:
+# 		tree = cKDTree(ftrns1(x_grid*np.array([1.0, 1.0, depth_scale, scale_time]).reshape(1,-1)))
+# 		q = tree.query(ftrns1(x_grid*np.array([1.0, 1.0, depth_scale, scale_time]).reshape(1,-1)), k = 2) # [0][:,1]
+# 		q = np.linalg.norm(ftrns1(x_grid[:,0:3]) - ftrns1(x_grid[q[1][:,1],0:3]), axis = 1)		
+# 		min_dist = q.min()/1000.0
+# 		mean_dist = q.mean()/1000.0
+# 		std_dist = q.std()/1000.0
+# 		print('Nearest neighbors: Min: %0.4f, Mean: %0.4f (+/- %0.4f) km \n'%(min_dist, mean_dist, std_dist))
+
+
+# 	nn_cv = nn_distance_cv(ftrns1_abs(x_grid[:,0:3]*np.array([1.0, 1.0, depth_scale]).reshape(1,-1)), scale_time)
+# 	knn_cv = knn_volume_cv(ftrns1_abs(x_grid[:,0:3]*np.array([1.0, 1.0, depth_scale]).reshape(1,-1)), k=8, scale_time=scale_time)
+# 	print(f"Spatial: NN-CV={nn_cv:.3f}, kNN-CV={knn_cv:.3f}")
+
+# 	if x_grid.shape[1] == 4:
+# 		nn_cv = nn_distance_cv(ftrns1_abs(x_grid*np.array([1.0, 1.0, depth_scale, 1.0]).reshape(1,-1)), scale_time) ## Note, time scaling happens inside these functions
+# 		knn_cv = knn_volume_cv(ftrns1_abs(x_grid*np.array([1.0, 1.0, depth_scale, 1.0]).reshape(1,-1)), k=8, scale_time=scale_time)
+# 		print(f"Full: NN-CV={nn_cv:.3f}, kNN-CV={knn_cv:.3f}")
+
+# 	if use_time_shift == True:
+# 		# [4]. R2 of expected time distribution
+# 		n = len(x_grid)
+# 		# u = np.arange(1, n+1) / n
+# 		u = np.arange(n) / (n - 1)
+# 		iarg = np.argsort(x_grid[:,3])
+# 		t_sorted = np.sort(x_grid[:,3])
+# 		F_expected = (t_sorted - (-time_shift_range)) / (time_shift_range - (-time_shift_range))
+# 		r2_loss_time = r2_score(F_expected, u)
+# 		print('R2 of expected time distribution: %0.8f'%r2_loss_time)
+
+# 		# [5]. Check nearest neighbors
+# 		tree = cKDTree(ftrns1_abs(x_grid*np.array([1.0, 1.0, depth_scale, scale_time])).reshape(1,-1))
+# 		q = tree.query(ftrns1_abs(x_grid*np.array([1.0, 1.0, depth_scale, scale_time])).reshape(1,-1), k = 2) # [0][:,1]
+# 		q_min = q[0][:,1].min()/1000.0
+# 		q_mean = q[0][:,1].mean()/1000.0
+# 		q_std = q[0][:,1].std()/1000.0
+# 		print('Nearest neighbors (scaled): Min: %0.4f, Mean: %0.4f (+/- %0.4f) km \n'%(q_min, q_mean, q_std))
+
+
+# 		# [6]. Space offsets
+# 		dist_space = np.linalg.norm(ftrns1(x_grid[:,0:3]*np.array([1.0, 1.0, depth_scale]).reshape(1,-1)) - ftrns1(x_grid[q[1][:,1],0:3]*np.array([1.0, 1.0, depth_scale]).reshape(1,-1)), axis = 1)
+# 		dist_time = np.abs(x_grid[:,3] - x_grid[q[1][:,1],3])
+# 		# min_spc_dist = dist_space.min()/1000.0
+# 		# mean_spc_dist = dist_space.mean()/1000.0
+# 		# std_spc_dist = dist_space.std()/1000.0
+# 		# print('Nearest neighbors: Min: %0.4f, Mean: %0.4f (+/- %0.4f) km \n'%(min_spc_dist, mean_spc_dist, std_spc_dist))
+
+# 		# [6]. Correlation of space and time nearest neighbors
+# 		pearsonr_val = pearsonr(dist_space, dist_time).statistic
+# 		print('Correlation of space and time nearest neighbors: %0.8f'%pearsonr_val)
+
+# 		# [7]. Ratio of small dt
+# 		ratio_within_time_radius = len(np.where(dist_time*scale_time < 0.005*nominal_spacing)[0])/len(dist_time)
+# 		print('Ratio of small time offset nearest neighbors: %0.8f \n'%ratio_within_time_radius)
+
+
+# 	return mean_loss, rms_loss, r2_loss, mean_dist, std_dist
+
+
+
+# import numpy as np
+# from scipy.spatial import cKDTree
+
+# def nn_distance_stats(
+#     xyz_t, 
+#     scale_time, 
+#     Volume_space,  # from compute_expected_spacing
+#     time_range,    # T, full span = 2 * time_range
+#     cluster_threshold=0.5,  # tunable: nn_dist < threshold * mean_nn = cluster
+# ):
+#     points_scaled = xyz_t.copy()
+#     points_scaled[:, 3] *= scale_time
+
+#     tree = cKDTree(points_scaled)
+#     dists, _ = tree.query(points_scaled, k=2)
+#     nn_dists = dists[:, 1]
+    
+#     mean_nn = np.mean(nn_dists)
+#     median_nn = np.median(nn_dists)
+#     min_nn = np.min(nn_dists)
+#     max_nn = np.quantile(nn_dists, 0.99)
+#     std_nn = np.std(nn_dists)
+#     cv_nn = std_nn / mean_nn if mean_nn > 0 else 0.0  # Coefficient of Variation
+    
+#     hypervolume = Volume_space * (scale_time * 2 * time_range)
+#     expected_random_mean = 0.65 * (hypervolume / len(xyz_t)) ** (1/4)
+#     normalized_mean = mean_nn / expected_random_mean
+    
+#     # Void ratio: max gap relative to mean spacing
+#     void_ratio = max_nn / mean_nn  # >2-3 = notable voids
+    
+#     # Cluster ratio: fraction of small NN distances
+#     cluster_count = np.sum(nn_dists < (cluster_threshold * mean_nn))
+#     cluster_ratio = cluster_count / len(nn_dists)  # 0 = no clusters, >0.1 = some crowding
+    
+#     # Spatial-only (3D projection) stats for space voids/clusters
+#     tree_space = cKDTree(xyz_t[:, :3])
+#     dists_space, _ = tree_space.query(xyz_t[:, :3], k=2)
+#     nn_dists_space = dists_space[:, 1]
+#     mean_nn_space = np.mean(nn_dists_space)
+#     void_ratio_space = np.quantile(nn_dists_space, 0.99) / mean_nn_space
+#     cluster_ratio_space = np.sum(nn_dists_space < (cluster_threshold * mean_nn_space)) / len(nn_dists_space)
+    
+#     # Time-only (1D projection) stats for time voids/clusters
+#     t_reshaped = xyz_t[:, 3].reshape(-1, 1)  # 1D for KDTree
+#     tree_time = cKDTree(t_reshaped)
+#     dists_time, _ = tree_time.query(t_reshaped, k=2)
+#     nn_dists_time = dists_time[:, 1]
+#     mean_nn_time = np.mean(nn_dists_time)
+#     void_ratio_time = np.quantile(nn_dists_time, 0.99) / mean_nn_time
+#     cluster_ratio_time = np.sum(nn_dists_time < (cluster_threshold * mean_nn_time)) / len(nn_dists_time)
+    
+#     stats = {
+#         'mean_nn_dist': mean_nn,
+#         'median_nn_dist': median_nn,
+#         'min_nn_dist': min_nn,
+#         'max_nn_dist': max_nn,
+#         'cv_nn': cv_nn,  # new: 0.2-0.3 = excellent, >0.5 = random/clustered
+#         'normalized_mean': normalized_mean[0],
+#         'void_ratio': void_ratio,  # new: 2-3 = balanced, >4 = voids present
+#         'cluster_ratio': cluster_ratio,  # new: <0.05 = minimal clustering
+#         'void_ratio_space': void_ratio_space,
+#         'cluster_ratio_space': cluster_ratio_space,
+#         'void_ratio_time': void_ratio_time,
+#         'cluster_ratio_time': cluster_ratio_time,
+#         'nn_distances': nn_dists
+#     }
+
+#     # print(stats)
+#     # Usage
+#     # stats = nn_distance_stats(xyz_t, w_scale=w_scale)
+#     print(f"Min NN distance: {stats['min_nn_dist']:.1f} m (spatial+time)")
+#     print(f"Mean NN distance: {stats['mean_nn_dist']:.1f} m (spatial+time)")
+#     print(f"Median NN distance: {stats['median_nn_dist']:.1f} m (spatial+time)")
+#     print(f"\nNormalized mean: {stats['normalized_mean']:.3f} (spatial+time)")
+#     print(f"Interpretation: 1.0 = random, 1.3–1.6 = good, >1.7 = excellent low-discrepancy\n")
+#     print(f"CV NN: {stats['cv_nn']:.2f} m (spatial+time) [=0.2-0.3 = excellent, >0.5 = random/clustered]")
+#     print(f"Void ratio: {stats['void_ratio']:.2f} (spatial+time) [2-3 = balanced, >4 = voids present]")
+#     print(f"Cluster ratio: {stats['cluster_ratio']:.2f} (spatial+time) [<0.05 = minimal clustering]")
+#     print(f"\nVoid ratio: {stats['void_ratio_space']:.2f} (spatial)")
+#     print(f"Cluster ratio: {stats['cluster_ratio_space']:.2f} (spatial)")
+#     print(f"\nVoid ratio: {stats['void_ratio_time']:.2f} (time)")
+#     print(f"Cluster ratio: {stats['cluster_ratio_time']:.2f} (time)")
+
+
+#     return stats
+
+# Tuning T: Yes, if T is arbitrary, use the process inversely: Fix scale_time to physics, generate points, check time-specific metrics (void_ratio_time, cluster_ratio_time). If void_ratio_time >3 (large gaps), shrink T; if cluster_ratio_time >0.1 (crowding), expand T. Or set T such that nominal_spacing_time ≈ seismic resolution (e.g., 1/10 of interference length).
+# Tuning N: Use kernel needs: Required N ≈ (Volume_space / (kernel_radius / 3)^3) * (2T / kernel_time)^1 for ~3-5 nodes per kernel in space-time. If metrics show over-clustering (high cluster_ratio), increase N.
+
+# CV: <0.3 = highly regular; 0.3-0.4 = good; >0.5 = check for clusters.
+# Void ratio: ~2 = tight packing; >3-4 = potential voids (investigate max_nn locations).
+# Cluster ratio: <0.05 = clean; >0.1 = tune to spread points.
+# Space/time breakdowns: If void_ratio_time >> void_ratio_space, time is under-sampled → increase scale_time or decrease time_shift_range
+
+# def scale_points(points, scale_time = scale_time):
+#     if points.shape[1] == 4:
+#         P = points.copy()
+#         P[:, 3] *= scale_time
+#         return P
+#     return points
+
+# def nn_distance_cv(points, scale_time=scale_time):
+#     P = scale_points(points, scale_time)
+#     tree = cKDTree(P)
+#     d, _ = tree.query(P, k=2)   # d[:,0] = 0 (self)
+#     nn = d[:, 1]
+#     return np.std(nn) / np.mean(nn)
+
+# # CV	Interpretation
+# # > 0.25	poor
+# # 0.15–0.25	OK (Poisson only)
+# # 0.08–0.15	good
+# # < 0.08	excellent
+
+# def knn_volume_cv(points, k=8, scale_time=scale_time):
+#     P = scale_points(points, scale_time)
+#     tree = cKDTree(P)
+#     d, _ = tree.query(P, k=k+1)  # includes self
+#     rk = d[:, -1]
+#     dim = P.shape[1]
+#     volumes = rk**dim
+#     return np.std(volumes) / np.mean(volumes)
+
+
+# def r_min_func(points):
+#     r_min_vals = np.linalg.norm(ftrns1_abs(ftrns2_abs(points[:,0:3])*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) # + depth_range[0]
+#     return r_min_vals
+
+# def r_max_func(points):
+#     r_max_vals = np.linalg.norm(ftrns1_abs(ftrns2_abs(points[:,0:3])*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) # + depth_range[1]
+#     return r_max_vals
+
+
+# def r_min_func(points):
+#     r_min_vals = np.linalg.norm(ftrns1_abs(ftrns2_abs(points[:,0:3])*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) # + depth_range[0]
+#     return r_min_vals
+
+# def r_max_func(points):
+#     r_max_vals = np.linalg.norm(ftrns1_abs(ftrns2_abs(points[:,0:3])*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) # + depth_range[1]
+#     return r_max_vals
+
+
+# def scale_points(points, scale_time = scale_time):
+#     if points.shape[1] == 4:
+#         P = points.copy()
+#         P[:, 3] *= scale_time
+#         return P
+#     return points
+
+
+# up_sample_factor = 10 if use_time_shift == False else 20
+# number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
+
+
+
+
+
+
+
+# def collect_regular_lattice(n_trgt, lat_range = lat_range_extend, lon_range = lon_range_extend, use_global = use_global, tol_fraction = 0.01, max_iter = 100):
+
+# 	r = Area/Area_globe
+# 	n_low = max(1, int((n_trgt / r) * 0.2))
+# 	n_high = int((n_trgt / r) * 3.0) + 1
+# 	n_current = int(0.5*(n_low + n_high)) if use_global == False else n_trgt
+
+# 	## Set tolerance as ~1% of grid, and then retain only this fraction
+# 	tol = int(np.floor(tol_fraction*n_trgt))
+
+
+# 	def random_rotation_matrix():
+# 	    u1, u2, u3 = np.random.rand(3)
+
+# 	    q = np.array([
+# 	        np.sqrt(1 - u1) * np.sin(2*np.pi*u2),
+# 	        np.sqrt(1 - u1) * np.cos(2*np.pi*u2),
+# 	        np.sqrt(u1)     * np.sin(2*np.pi*u3),
+# 	        np.sqrt(u1)     * np.cos(2*np.pi*u3)
+# 	    ])
+
+# 	    w, x, y, z = q
+# 	    return np.array([
+# 	        [1 - 2*(y*y + z*z), 2*(x*y - z*w),     2*(x*z + y*w)],
+# 	        [2*(x*y + z*w),     1 - 2*(x*x + z*z), 2*(y*z - x*w)],
+# 	        [2*(x*z - y*w),     2*(y*z + x*w),     1 - 2*(x*x + y*y)]
+# 	    ])
+
+
+# 	def fibonacci_sphere_latlon(N):
+
+# 	    # Golden ratio constants
+# 	    phi = (1 + 5**0.5) / 2
+# 	    alpha = 1 / phi
+
+# 	    # Random phases
+# 	    delta_phi, delta_z = np.random.rand(2)
+
+# 	    n = np.arange(N)
+
+# 	    # Fibonacci sphere (vectorized)
+# 	    z = 1 - 2 * (n + delta_z) / N
+# 	    theta = 2 * np.pi * (n * alpha + delta_phi)
+# 	    r = np.sqrt(1 - z*z)
+
+# 	    x = r * np.cos(theta)
+# 	    y = r * np.sin(theta)
+
+# 	    P = np.column_stack((x, y, z))
+
+# 	    # Random global rotation
+# 	    R = random_rotation_matrix()
+# 	    P = P @ R.T
+
+# 	    # Cartesian → lat/lon
+# 	    lon = 180.0*np.arctan2(P[:, 1], P[:, 0])/np.pi        # [-pi, pi)
+# 	    lat = 180.0*np.arcsin(np.clip(P[:, 2], -1, 1))/np.pi  # [-pi/2, pi/2]
+
+# 	    return np.concatenate((lat.reshape(-1,1), lon.reshape(-1,1)), axis = 1)
+
+
+# 	iter_cnt = 0
+# 	found_grid = False
+# 	while (iter_cnt < max_iter)*(found_grid == False):
+
+
+# 		points = fibonacci_sphere_latlon(n_current)
+# 		if use_global == False:
+# 			ifind = np.where((points[:,0] < lat_range[1])*(points[:,0] > lat_range[0])*(points[:,1] < lon_range[1])*(points[:,1] > lon_range[0]))[0]
+# 			points = points[ifind]
+
+# 		n_pts = len(points)
+# 		if (np.abs(n_pts - n_trgt) <= tol)*(n_pts >= n_trgt):
+# 			found_grid = True
+
+# 		else:
+# 			if n_pts < n_trgt:
+# 				n_low = n_current
+# 			else:
+# 				n_high = n_current
+# 			n_current = int(0.5*(n_low + n_high))
+
+# 			# n_current = int(0.5*(n_low + n_high))
+# 		iter_cnt += 1
+# 		print('Iter: %d, Diff: %d'%(iter_cnt, n_pts - n_trgt))
+
+# 	if n_pts > n_trgt:
+# 		points = points[0:n_trgt] # , size = n_trgt, replace = False)]
+
+# 	return points
+
+# # def knn_distance(x_proj1, x_proj2, idx1, idx2, centroid_proj, k = 10):
+
+# # 	if isinstance(x_proj1, np.ndarray):
+
+# # 		dist_ref = knn(torch.Tensor(centroid_proj[idx1]).to(device), torch.Tensor(centroid_proj[idx1]).to(device))
+
+# def knn_distance(
+# 	x_rel_query,      # Tensor [M, 3] float32: relative coords of query points
+# 	x_rel_db,         # Tensor [N, 3] float32: relative coords of database points (can == query for self)
+# 	idx_query,        # LongTensor [M]: centroid indices for queries
+# 	idx_db,           # LongTensor [N]: centroid indices for database
+# 	centroids,        # Tensor [C, 3] float64: absolute centroid positions
+# 	k=10,
+# 	device='cuda' if torch.cuda.is_available() else 'cpu',
+# 	return_edges = True,
+# 	use_self_loops = True
+# ):
+
+# 	if isinstance(x_rel_query, np.ndarray):
+# 		"""
+# 		Returns K-nearest neighbors (distances and indices) using relative coords + centroids.
+# 		"""
+# 		# Move everything to device
+# 		x_rel_query = torch.Tensor(x_rel_query).to(device)
+# 		x_rel_db = torch.Tensor(x_rel_db).to(device)
+# 		idx_query = torch.Tensor(idx_query).long().to(device)
+# 		idx_db = torch.Tensor(idx_db).long().to(device)
+# 		centroids = torch.Tensor(centroids).to(device)  # float64 preserved
+    
+# 	# Reconstruct effective absolute positions
+# 	abs_query = centroids[idx_query] + x_rel_query  # [M, 3]
+# 	abs_db = centroids[idx_db] + x_rel_db          # [N, 3]
+    
+# 	# Pairwise distances (exact, GPU-optimized)
+# 	D = torch.cdist(abs_query, abs_db)  # [M, N], float64 if centroids dominate
+    
+# 	# Top-K smallest
+# 	if use_self_loops == False:
+# 		distances, indices = torch.topk(D, k + 1, dim=1, largest=False, sorted=True) ## This distance not reliable due to limited GPU ram, must re-compute for subset of indices
+# 		distances = distances[:,1::]
+# 		indices = indices[:,1::]
+# 	else:
+# 		distances, indices = torch.topk(D, k, dim=1, largest=False, sorted=True) ## This distance not reliable due to limited GPU ram, must re-compute for subset of indices
+
+
+# 	rel_refs = (~(idx_query.reshape(-1,1) == idx_db[indices])).unsqueeze(2)*(centroids[idx_query].unsqueeze(1) - centroids[idx_db[indices]])
+# 	rel_local = x_rel_query.unsqueeze(1) - x_rel_db[indices]
+# 	distances = torch.norm(rel_refs + rel_local, dim = 2)
+
+# 	# distances = torch.norm()
+
+# 	if return_edges == True:
+
+# 		edges = torch.cat((indices.reshape(1,-1), torch.arange(len(x_rel_query), device = device).repeat_interleave(k).reshape(1,-1)), dim = 0)
+
+# 		return edges, distances.reshape(-1,1), (rel_refs + rel_local).reshape(-1,rel_refs.shape[2])
+
+# 	else:
+
+# 		return distances, indices  # distances: [M, k], indices: [M, k] (into db)
+
+
+
+
+
+
+
+
+
+
+
+# ## Create relative centroid lattice (for removing means and establishing stable numerical values)
+# ## Could also use this approach to create a dense grid for estimating densities?
+# n_frac_lattice = 0.1
+# scale_km = 1000.0
+# centroid_lattice = collect_regular_lattice(int(len(x_grid)*n_frac_lattice))
+# centroid_lattice_proj = ftrns1_abs(np.concatenate((centroid_lattice, np.mean(depth_range)*np.ones((len(centroid_lattice),1))), axis = 1))/scale_km
+# if use_time_shift == True: 
+# 	# centroid_lattice = np.concatenate((centroid_lattice, np.zeros((len(centroid_lattice),1))), axis = 1)
+# 	centroid_lattice_proj = np.concatenate((centroid_lattice_proj, np.zeros((len(centroid_lattice_proj),1))), axis = 1)
+
+# tree_centroids = cKDTree(centroid_lattice_proj[:,:3])
+# x_grid_id = tree_centroids.query(ftrns1_abs(x_grid[:,:3]))[1]
+# x_grid_proj_local = ftrns1_abs(x_grid[:,:3])/scale_km - centroid_lattice_proj[x_grid_id,:3]
+# if use_time_shift == True: x_grid_proj_local = np.concatenate((x_grid_proj_local, x_grid[:,[3]]/scale_km), axis = 1)
+
+
+
+# from scipy.spatial import KDTree
+# import numpy as np
+
+# # Oversampled points
+# xyz_t_over = np.hstack([xyz_over, t_over.reshape(-1,1)])
+
+# # Scale for emphasis on depth (z is ~depth axis, but use full metric)
+# w_scale = 6371e3 / (2 * time_shift_range)  # as before
+# points_scaled = xyz_t_over.copy()
+# points_scaled[:, 3] *= w_scale  # time
+# # To prioritize depth, artificially scale the depth direction (approximate as radial norm variation)
+# r_over = np.linalg.norm(xyz_over, axis=1)
+# depth_scale = 5.0  # arbitrary factor >1 to make depth "larger" in metric → denser sampling preserved
+# points_scaled[:, :3] *= (r_over[:, np.newaxis] / np.mean(r_over)) * depth_scale  # or just scale z: points_scaled[:,2] *= depth_scale
+
+# # Thin to N points by greedy farthest-point sampling (approximates higher depth density)
+# keep_idx = []
+# remaining = set(range(N_over))
+# current = np.random.choice(list(remaining))  # start random
+# keep_idx.append(current)
+# remaining.remove(current)
+
+# tree = KDTree(points_scaled[list(remaining)])
+
+# while len(keep_idx) < N and remaining:
+#     dists = tree.query(points_scaled[keep_idx[-1]])[0]
+#     farthest = np.argmax(dists)
+#     next_idx = list(remaining)[farthest]
+#     keep_idx.append(next_idx)
+#     remaining.remove(next_idx)
+#     # Update tree (inefficient for large N; use batch for speed)
+#     tree = KDTree(points_scaled[list(remaining)])
+
+# xyz = xyz_over[keep_idx]
+# t = t_over[keep_idx]
+
+
+
+# def nn_distance_stats1(xyz_t, w_scale=scale_time):
+#     """
+#     Compute statistics on nearest-neighbor distances in scaled space-time.
+    
+#     Returns:
+#     - mean_nn_dist
+#     - median_nn_dist  
+#     - normalized_mean (higher = better uniformity)
+#     """
+#     points_scaled = xyz_t.copy()
+#     points_scaled[:, 3] *= w_scale  # scale time dimension
+    
+#     tree = cKDTree(points_scaled)
+#     dists, _ = tree.query(points_scaled, k=2)  # k=2 to get nearest non-self
+#     nn_dists = dists[:, 1]  # nearest-neighbor distances for all points
+    
+#     mean_nn = np.mean(nn_dists)
+#     median_nn = np.median(nn_dists)
+#     min_nn = np.min(nn_dists)
+    
+#     # Approximate expected mean NN distance for uniform random points in 4D
+#     # Using Gamma function approximation: E[NN] ≈ 0.65 * (V / N)^{1/4} in 4D
+#     N = len(xyz_t)
+#     ranges = np.ptp(xyz_t, axis=0)
+#     vol_spatial = np.prod(ranges[:3])
+#     vol_time_scaled = ranges[3] * w_scale
+#     total_vol = vol_spatial * vol_time_scaled
+    
+#     # More accurate constant for 4D unit ball, scaled
+#     expected_random_mean = 0.65 * (total_vol / N) ** (1/4)
+    
+#     normalized_mean = mean_nn / expected_random_mean
+    
+#     stats = {
+#         'mean_nn_dist': mean_nn,
+#         'median_nn_dist': median_nn,
+#         'min_nn_dist': min_nn,
+#         'normalized_mean': normalized_mean,   # >1.0 = better than random
+#         'nn_distances': nn_dists  # for histograms if desired
+#     }
+
+#     # Usage
+#     # stats = nn_distance_stats(xyz_t, w_scale=w_scale)
+#     print(f"Mean NN distance: {stats['mean_nn_dist']:.1f} m (spatial+time)")
+#     print(f"Normalized mean: {stats['normalized_mean']:.3f}")
+#     print(f"Interpretation: 1.0 = random, 1.3–1.6 = good, >1.7 = excellent low-discrepancy")
+
+#     return stats
+
+# def nn_distance_stats1(
+#     xyz_t, 
+#     scale_time, 
+#     Volume_space,  # actual spatial shell volume from compute_expected_spacing
+#     time_range  # T, so full time span = 2 * time_range
+# ):
+#     """
+#     Compute statistics on nearest-neighbor distances in scaled space-time.
+    
+#     Returns dict with:
+#     - mean_nn_dist
+#     - median_nn_dist
+#     - min_nn_dist
+#     - normalized_mean (higher = better uniformity)
+#     - nn_distances (array for histograms)
+#     """
+#     points_scaled = xyz_t.copy()
+#     points_scaled[:, 3] *= scale_time  # scale time dimension
+    
+#     tree = cKDTree(points_scaled)
+#     dists, _ = tree.query(points_scaled, k=2)  # k=2 to get nearest non-self
+#     nn_dists = dists[:, 1]  # nearest-neighbor distances for all points
+    
+#     mean_nn = np.mean(nn_dists)
+#     median_nn = np.median(nn_dists)
+#     min_nn = np.min(nn_dists)
+    
+#     # Actual hypervolume: spatial shell volume * scaled time range
+#     N = len(xyz_t)
+#     hypervolume = Volume_space * (scale_time * 2 * time_range)
+    
+#     # Approximate expected mean NN for uniform random in 4D (constant tuned for ball-like domain)
+#     expected_random_mean = 0.65 * (hypervolume / N) ** (1/4)
+    
+#     normalized_mean = mean_nn / expected_random_mean
+    
+#     stats = {
+#     	'min_nn_dist': min_nn,
+#         'mean_nn_dist': mean_nn,
+#         'median_nn_dist': median_nn,
+#         'normalized_mean': normalized_mean[0],   # >1.0 = better than random
+#         'nn_distances': nn_dists  # for histograms if desired
+#     }
+
+#     # print(stats)
+#     # Usage
+#     # stats = nn_distance_stats(xyz_t, w_scale=w_scale)
+#     print(f"Min NN distance: {stats['min_nn_dist']:.1f} m (spatial+time)")
+#     print(f"Mean NN distance: {stats['mean_nn_dist']:.1f} m (spatial+time)")
+#     print(f"Median NN distance: {stats['median_nn_dist']:.1f} m (spatial+time)")
+#     print(f"Normalized mean: {stats['normalized_mean']:.3f} (spatial+time)")
+#     print(f"Interpretation: 1.0 = random, 1.3–1.6 = good, >1.7 = excellent low-discrepancy")
+
+#     return stats
+
+
+
+# def farthest_point_sampling_global_shell(
+#     xyz_t_candidates, 
+#     target_N, 
+#     scale_time=1.0, 
+#     depth_boost=1.0, 
+#     mask_candidates=None, 
+#     device='cuda'
+# ):
+#     # 1. Convert to Tensor
+#     # xyz_t_candidates: [N, 4] where 0:3 are ECEF meters, 3 is time
+#     points = torch.as_tensor(xyz_t_candidates, device=device, dtype=torch.float64)
+#     N = points.shape[0]
+    
+#     # 2. Extract Components
+#     coords = points[:, :3]
+#     time = points[:, 3:] * scale_time
+    
+#     # 3. Normalize Radius and Isolate Depth
+#     # Calculate radius of every point
+#     radii = torch.norm(coords, dim=1, keepdim=True)
+#     mean_radius = torch.mean(radii)
+    
+#     # Normalized surface coordinates (Unit Sphere)
+#     unit_coords = coords / radii
+    
+#     # Relative depth (distance from mean radius, e.g., -20km to +20km)
+#     # Scale this relative to the unit sphere (1.0 = one Earth Radius)
+#     relative_depth = (radii - mean_radius) / mean_radius
+    
+#     # 4. Reconstruct Feature Space for Sampling
+#     # We amplify the depth so the algorithm 'cares' about the 40km thickness
+#     sampling_space = torch.cat([
+#         unit_coords,                 # Surface position (Unit Scale)
+#         relative_depth * depth_boost, # Amplified Depth
+#         time / mean_radius           # Time scaled relative to Earth Radius
+#     ], dim=1)
+
+#     # 5. FPS Logic
+#     distance = torch.full((N,), float('inf'), device=device, dtype=torch.float64)
+#     mask = torch.as_tensor(mask_candidates, device=device, dtype=torch.bool)
+    
+#     # Start at a random REAL point
+#     real_indices = torch.where(mask)[0]
+#     farthest = real_indices[torch.randint(0, len(real_indices), (1,))].item()
+    
+#     collected_indices = []
+#     cnt_found = 0
+    
+#     while cnt_found < target_N:
+#         collected_indices.append(farthest)
+#         if mask[farthest]:
+#             cnt_found += 1
+            
+#         centroid = sampling_space[farthest, :].view(1, -1)
+#         # Calculate squared distance in our custom 'boosted' space
+#         dist = torch.sum((sampling_space - centroid) ** 2, dim=-1)
+        
+#         distance = torch.min(distance, dist)
+#         distance[farthest] = -1.0
+#         farthest = torch.argmax(distance).item()
+        
+#     final_indices = torch.tensor(collected_indices, device=device)
+#     final_indices = final_indices[mask[final_indices]]
+    
+#     return final_indices.cpu().numpy()
+
+
+
+
+
+
+# def poisson_disk_filter(
+#     points,
+#     h,
+#     use_time = use_time_shift,
+#     scale_time = scale_time,
+#     t_min = -time_shift_range,
+#     t_max =  time_shift_range,
+#     use_mirrored = True,
+#     use_mirrored_time = True,
+#     use_probablistic_acceptance = True,
+#     prob_factor = 1.5,
+#     mc_samples = 300,
+# ):
+#     """
+#     Dimension-agnostic Poisson disk filter.
+#     Works for 3D or 4D (space-time).
+#     """
+
+#     M, D = points.shape
+#     assert D == 3 or (D == 4 and use_time)
+
+#     N = 4 if use_time else 3   # Poisson dimension
+#     h2 = h * h
+#     cell_size = h / sqrt(N)
+
+#     grid = defaultdict(list)
+#     accepted = []
+
+#     order = np.random.permutation(M)
+
+#     for idx in order:
+#         p = points[idx]
+
+#         # --- scaled coordinate for hashing ---
+#         if use_time:
+#             pN = np.array([p[0], p[1], p[2], scale_time * p[3]], dtype = float)
+#         else:
+#             # pN = p[:3].astype('float')
+#             pN = np.array([p[0], p[1], p[2]], dtype = float)
+
+#         cell = tuple(int(floor(pN[i] / cell_size)) for i in range(N))
+
+#         # --- radial geometry (3D only) ---
+#         x = p[:3]
+#         rp = np.linalg.norm(x)
+#         u = x / rp
+
+#         r_min = r_min_func(x.reshape(1,-1))
+#         r_max = r_max_func(x.reshape(1,-1))
+
+#         need_min = ((rp - r_min) < h)*(use_mirrored == True)
+#         need_max = ((r_max - rp) < h)*(use_mirrored == True)
+
+#         ok = True
+
+#         # --- neighbor search ---
+#         for offset in product([-1, 0, 1], repeat=N):
+#             nbr_cell = tuple(cell[i] + offset[i] for i in range(N))
+#             if nbr_cell not in grid:
+#                 continue
+
+#             for q in grid[nbr_cell]:
+
+#                 # --- original ---
+#                 if use_time:
+#                     dq = np.array([
+#                         p[0] - q[0],
+#                         p[1] - q[1],
+#                         p[2] - q[2],
+#                         scale_time * (p[3] - q[3]),
+#                     ])
+#                 else:
+#                     dq = p[:3] - q[:3]
+
+#                 if np.dot(dq, dq) < h2:
+#                     ok = False
+#                     break
+
+#                 # --- radial mirrors ---
+#                 qx = q[:3]
+#                 rq = np.linalg.norm(qx)
+#                 uq = qx / rq
+
+#                 if need_min:
+#                     qmin = q.copy()
+#                     qmin[:3] = uq * (2 * r_min_func(uq.reshape(1,-1)*rq) - rq)
+
+#                     if use_time:
+#                         dq = np.array([
+#                             p[0] - qmin[0],
+#                             p[1] - qmin[1],
+#                             p[2] - qmin[2],
+#                             scale_time * (p[3] - qmin[3]),
+#                         ])
+#                     else:
+#                         dq = p[:3] - qmin[:3]
+
+#                     if np.dot(dq, dq) < h2:
+#                         ok = False
+#                         break
+
+#                 if need_max:
+#                     qmax = q.copy()
+#                     qmax[:3] = uq * (2 * r_max_func(uq.reshape(1,-1)*rq) - rq)
+
+#                     if use_time:
+#                         dq = np.array([
+#                             p[0] - qmax[0],
+#                             p[1] - qmax[1],
+#                             p[2] - qmax[2],
+#                             scale_time * (p[3] - qmax[3]),
+#                         ])
+#                     else:
+#                         dq = p[:3] - qmax[:3]
+
+#                     if np.dot(dq, dq) < h2:
+#                         ok = False
+#                         break
+
+#                 # --- time mirroring ---
+#                 if use_time and use_mirrored_time:
+#                     if (p[3] - t_min) < h / scale_time:
+#                         qtm = q.copy()
+#                         qtm[3] = 2 * t_min - q[3]
+#                         dq = np.array([
+#                             p[0] - qtm[0],
+#                             p[1] - qtm[1],
+#                             p[2] - qtm[2],
+#                             scale_time * (p[3] - qtm[3]),
+#                         ])
+#                         if np.dot(dq, dq) < h2:
+#                             ok = False
+#                             break
+
+#                     if (t_max - p[3]) < h / scale_time:
+#                         qtp = q.copy()
+#                         qtp[3] = 2 * t_max - q[3]
+#                         dq = np.array([
+#                             p[0] - qtp[0],
+#                             p[1] - qtp[1],
+#                             p[2] - qtp[2],
+#                             scale_time * (p[3] - qtp[3]),
+#                         ])
+#                         if np.dot(dq, dq) < h2:
+#                             ok = False
+#                             break
+
+#             if not ok:
+#                 break
+
+#         if not ok:
+#             continue
+
+#         # --- probabilistic acceptance ---
+#         if use_probablistic_acceptance:
+#             Nmc = mc_samples
+#             v = np.random.randn(Nmc, N)
+#             v /= np.linalg.norm(v, axis=1)[:, None]
+#             v *= (h / 2) * (np.random.rand(Nmc) ** (1 / N))[:, None]
+
+#             if use_time:
+#                 samples = np.zeros((Nmc, 4))
+#                 samples[:, :3] = p[:3] + v[:, :3]
+#                 samples[:, 3]  = p[3] + v[:, 3] / scale_time
+#             else:
+#                 samples = p[:3] + v
+
+#             rs = np.linalg.norm(samples[:, :3], axis=1)
+#             inside = (rs >= r_min) & (rs <= r_max)
+#             f = inside.mean()
+
+#             # --- compute local occupancy ---
+#             gamma = 1.0
+#             occupancy = 0
+#             for offset in product([-1,0,1], repeat=N):
+#                 nbr_cell = tuple(cell[i]+offset[i] for i in range(N))
+#                 occupancy += len(grid.get(nbr_cell, []))
+
+#             adj_factor = (h**N / (occupancy + 1e-6))**gamma
+#             if np.random.rand() > (f * adj_factor)**prob_factor:
+#                 continue
+#                     # if np.random.rand() > (inside.mean() ** prob_factor):
+#                     #     continue
+
+#         # --- accept ---
+#         grid[cell].append(p)
+#         accepted.append(p)
+
+#     return np.array(accepted)
+
+# def poisson_exact_count(points, target_N, h0, max_iter = 300, tol_fraction = 0.001, prob_factor = 1.5, use_probablistic_acceptance = True, use_mirrored = True):
+#     """
+#     points   : candidate points (oversampled)
+#     target_N : desired number of accepted points
+#     h0       : initial spacing guess
+#     """
+#     h_low = 0.5 * h0
+#     h_high = 2.0 * h0
+
+#     ## Set tolerance as ~1% of grid, and then retain only this fraction
+#     tol = int(np.floor(tol_fraction*target_N))
+
+#     best_pts = None
+
+#     for iter_count in range(max_iter):
+        
+#         h = 0.5 * (h_low + h_high)
+
+#         # if use_mirrored == False:
+#         pts = poisson_disk_filter(points, h, prob_factor = prob_factor, use_probablistic_acceptance = use_probablistic_acceptance, use_mirrored = use_mirrored)
+#         # else:
+#         #   pts = poisson_disk_filter_mirrored(points, h)
+
+#         # pts = poisson_disk_filter(points, h)
+#         n = len(pts)
+
+#         if n > target_N:
+#             h_low = h
+#             best_pts = pts
+
+#         else:
+#             h_high = h
+#             best_pts = pts
+
+#         print('Finished iteration %d (diff %d)'%(iter_count, n - target_N))
+
+#         if (abs(n - target_N) <= tol)*(n >= target_N):
+#             break
+
+#     # If slightly too many, truncate safely
+#     if len(best_pts) > target_N:
+#         best_pts = best_pts[np.random.choice(len(best_pts), size = target_N, replace = False)]
+
+#     return ftrns2_abs(best_pts), h
+
+# def farthest_point_sampling1(xyz_t_candidates, target_N, scale_time = scale_time, depth_boost = depth_upscale_factor):
+
+#     points_scaled = xyz_t_candidates.copy()
+#     points_scaled[:, 3] *= scale_time*time_upscale_factor
+
+#     if depth_boost != 1:
+#     	points_scaled = ftrns1_abs(ftrns2_abs(xyz_t_candidates)*np.array([1.0, 1.0, depth_boost, 1.0]))
+#         # points_scaled[:, 2] *= depth_boost  # or radial as before
+    
+#     M = len(points_scaled)
+#     keep_idx = [np.random.randint(M)]  # start with random seed
+#     remaining = list(set(range(M)) - set(keep_idx))
+    
+#     tree = cKDTree(points_scaled[keep_idx])
+    
+#     while len(keep_idx) < target_N and remaining:
+#         dists = tree.query(points_scaled[remaining])[0]
+#         farthest = np.argmax(dists)
+#         next_idx = remaining.pop(farthest)
+#         keep_idx.append(next_idx)
+#         tree = cKDTree(points_scaled[keep_idx])  # update tree
+    
+#     return ftrns2_abs(xyz_t_candidates[keep_idx])
+
+
+# def farthest_point_sampling1(xyz_t_candidates, target_N, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = None, use_cuda = True):
+
+# 	points_scaled = xyz_t_candidates.copy()
+# 	points_scaled[:, 3] *= scale_time*time_upscale_factor
+
+# 	if depth_boost != 1:
+# 		points_scaled = ftrns1_abs(ftrns2_abs(xyz_t_candidates)*np.array([1.0, 1.0, depth_boost, 1.0]))
+# 		# points_scaled[:, 2] *= depth_boost  # or radial as before
+    
+# 	M = len(points_scaled)
+# 	keep_idx = [np.random.randint(M)]  # start with random seed
+# 	remaining = list(set(range(M)) - set(keep_idx))
+# 	cnt_found = 0
+
+# 	if mask_candidates is None: mask_candidates = np.ones(len(xyz_t_candidates)) ## Can use mask to create dummy points
+# 	assert(mask_candidates.sum() >= target_N)
+# 	assert(len(mask_candidates) == len(xyz_t_candidates))
+
+# 	if (torch.cuda.is_available() == True)*(use_cuda == True):
+# 		# current_points = torch.Tensor(points_scaled[keep_idx], device = device)
+# 		# remaining_points = torch.Tensor(points_scaled[remaining], device = device)
+# 		# keep_idx = torch.tensor(keep_idx, device = device).long()
+
+# 		points_scaled = torch.tensor(points_scaled, device = device)
+
+# 		while cnt_found < target_N and remaining:
+# 			farthest = torch.argmax(torch.cdist(points_scaled[keep_idx], \
+# 				points_scaled[remaining]).amin(0))
+# 			next_idx = remaining.pop(farthest)
+# 			keep_idx.append(next_idx)
+# 			cnt_found += 1 if mask_candidates[next_idx] == 1 else 0
+# 			if (cnt_found % 100) == 0: print(cnt_found)
+# 	else:
+
+# 		tree = cKDTree(points_scaled[keep_idx])
+# 		while cnt_found < target_N and remaining:
+# 			dists = tree.query(points_scaled[remaining])[0]
+# 			farthest = np.argmax(dists)
+# 			next_idx = remaining.pop(farthest)
+# 			keep_idx.append(next_idx)
+# 			tree = cKDTree(points_scaled[keep_idx])  # update tree
+# 			cnt_found += 1 if mask_candidates[next_idx] == 1 else 0
+# 			if (cnt_found % 100) == 0: print(cnt_found)
+
+# 	keep_idx = np.array(keep_idx)
+# 	keep_idx = keep_idx[np.where(mask_candidates[keep_idx] == 1)[0]]
+
+# 	return ftrns2_abs(xyz_t_candidates[keep_idx])
+
+
+
+
+
+# def compute_expected_spacing1(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, scale_time = scale_time, time_upscale_factor = time_upscale_factor, depth_scale = depth_upscale_factor, use_global = use_global):
+
+# 	Area_globe = 4*np.pi*(earth_radius**2)
+# 	if use_global == True:
+# 		Area = 4*np.pi*(earth_radius**2)
+# 		Volume = (4.0*np.pi/3.0)*(r_max**3 - r_min**3)
+# 		Volume_space = 1.0*Volume
+
+# 	else:
+# 		Area = (earth_radius**2)*(np.deg2rad(lon_range_extend[1]) - np.deg2rad(lon_range_extend[0]))*(np.sin(np.pi*lat_range_extend[1]/180.0) - np.sin(np.pi*lat_range_extend[0]/180.0))
+# 		Volume = Area*(r_max**3 - r_min**3)/(3*(earth_radius**2))
+# 		Volume_space = 1.0*Volume
+
+# 	if use_time == True:
+# 		Volume = Volume*(2*scale_time*time_shift_range) # time_upscale_factor
+
+# 	## Determine nominal node spacing
+# 	if use_time == False:
+# 		hex_factor = 0.74048
+# 		nominal_spacing = (Volume/(hex_factor*N))**(1/3) ## Hex-based spacing
+# 		nominal_spacing_space = (Volume_space/(hex_factor*N))**(1/3) ## Hex-based spacing
+# 		nominal_spacing_time = 0.0 # (2 * time_shift_range) / (target_N ** (1/4)) / scale_time
+
+# 	else:
+# 		hex_factor = 1.0 # ≈0.125
+# 		nominal_spacing = (Volume/(hex_factor*N))**(1/4) ## Hex-based spacing
+# 		nominal_spacing_space = (Volume_space/(hex_factor*N))**(1/3) ## Hex-based spacing
+# 		nominal_spacing_time = (2 * time_shift_range) / (N ** (1/4)) # / scale_time
+
+# 	return nominal_spacing, nominal_spacing_space, nominal_spacing_time
+
+
+
+
+
+# def farthest_point_sampling1(points_candidates, target_N, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = None, device='cuda'):
+#     """
+#     points: [N, 3] or [N, 4] (already scaled/transformed)
+#     target_N: Number of 'real' points to collect
+#     mask_candidates: Tensor/Array of 1s (real) and 0s (buffer/mirrored)
+#     """
+
+#     scale_val = (1000.0)*10.0
+#     points = points_candidates.copy()
+#     if points.shape[1] == 4: points[:,3] *= scale_time
+#     if depth_boost != 1.0: points = ftrns1_abs(ftrns2_abs(points)*np.array([1.0, 1.0, depth_boost, 1.0]))
+#     origin = points[:, :3].mean(axis = 0, keepdims = True)
+#     points[:,:3] = points[:,:3] - origin
+#     points = torch.as_tensor(points/scale_val, device = device, dtype = torch.float64)
+
+#     if mask_candidates is None: mask_candidates = np.ones(len(points))
+#     mask = torch.as_tensor(mask_candidates, device = device, dtype = torch.bool)
+#     assert(len(mask) == len(points))
+#     assert(mask.sum().item() >= target_N)
+
+#     N, C = points.shape
+    
+#     # Trackers
+#     # We don't know the exact total length, so we use a list or a large buffer
+#     collected_indices = []
+#     distance = torch.full((N,), float('inf'), device = device, dtype = torch.float64)
+    
+#     # Start with a random REAL point
+#     real_indices = torch.where(mask)[0]
+#     dist_centroid = torch.sum((points[real_indices] - points[real_indices].mean(0, keepdims = True))**2, dim = 1)
+#     init_index = torch.argmin(dist_centroid)
+#     farthest = real_indices[init_index].item()
+    
+#     cnt_found = 0
+    
+#     # Optimization: pre-fetch mask to avoid device transfers in loop
+#     mask_np = mask.cpu().numpy() if device == 'cuda' else mask.numpy()
+
+#     while cnt_found < target_N:
+#         collected_indices.append(farthest)
+        
+#         # Increment counter only if it's a real point
+#         if mask[farthest]:
+#             cnt_found += 1
+            
+#         # Standard FPS Update: O(N)
+#         centroid = points[farthest, :].view(1, C)
+#         dist = torch.sum((points - centroid) ** 2, dim = -1)
+        
+#         # Update distances to the closest selected point
+#         distance = torch.min(distance, dist)
+        
+#         # Crucial: Set the distance of the point we just picked to -1 
+#         # so it is never picked again
+#         distance[farthest] = -1.0
+        
+#         # Next farthest
+#         farthest = torch.argmax(distance).item()
+
+#     # Final Filter: Only keep the indices that were 'real' points
+#     all_selected = torch.tensor(collected_indices, device=device)
+#     final_indices = all_selected[mask[all_selected]]
+    
+#     return ftrns2_abs(points_candidates[final_indices.cpu().detach().numpy()])
+
+
+# def farthest_point_sampling1(points_candidates, target_N, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = None, device='cuda'):
+#     """
+#     points: [N, 3] or [N, 4] (already scaled/transformed)
+#     target_N: Number of 'real' points to collect
+#     mask_candidates: Tensor/Array of 1s (real) and 0s (buffer/mirrored)
+#     """
+
+#     scale_val = (1000.0)*10.0
+#     points = points_candidates.copy()
+#     if points.shape[1] == 4: points[:,3] *= scale_time
+#     if depth_boost != 1.0: points = ftrns1_abs(ftrns2_abs(points)*np.array([1.0, 1.0, depth_boost, 1.0]))
+#     origin = points[:, :3].mean(axis = 0, keepdims = True)
+#     points[:,:3] = points[:,:3] - origin
+#     points = torch.as_tensor(points/scale_val, device = device, dtype = torch.float64)
+
+#     if mask_candidates is None: mask_candidates = np.ones(len(points))
+#     mask = torch.as_tensor(mask_candidates, device = device, dtype = torch.bool)
+#     assert(len(mask) == len(points))
+#     assert(mask.sum().item() >= target_N)
+
+#     N, C = points.shape
+    
+#     # Trackers
+#     # We don't know the exact total length, so we use a list or a large buffer
+#     collected_indices = []
+#     distance = torch.full((N,), float('inf'), device = device, dtype = torch.float64)
+    
+
+#     # Start with a random REAL point
+#     real_indices = torch.where(mask)[0]
+#     dist_centroid = torch.sum((points[real_indices] - points[real_indices].mean(0, keepdims = True))**2, dim = 1)
+#     init_index = torch.argmin(dist_centroid)
+#     farthest = real_indices[init_index].item()
+    
+#     cnt_found = 0
+    
+#     # Optimization: pre-fetch mask to avoid device transfers in loop
+#     mask_np = mask.cpu().numpy() if device == 'cuda' else mask.numpy()
+
+#     while cnt_found < target_N:
+#         collected_indices.append(farthest)
+        
+#         # Increment counter only if it's a real point
+#         if mask[farthest]:
+#             cnt_found += 1
+            
+#         # Standard FPS Update: O(N)
+#         centroid = points[farthest, :].view(1, C)
+#         dist = torch.sum((points - centroid) ** 2, dim = -1)
+        
+#         # Update distances to the closest selected point
+#         distance = torch.min(distance, dist)
+        
+#         # Crucial: Set the distance of the point we just picked to -1 
+#         # so it is never picked again
+#         distance[farthest] = -1.0
+        
+#         # Next farthest
+#         farthest = torch.argmax(distance).item()
+
+#     # Final Filter: Only keep the indices that were 'real' points
+#     all_selected = torch.tensor(collected_indices, device=device)
+#     final_indices = all_selected[mask[all_selected]]
+    
+#     return ftrns2_abs(points_candidates[final_indices.cpu().detach().numpy()])
 
 
 
