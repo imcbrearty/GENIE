@@ -1813,7 +1813,7 @@ class SamplingTuner:
             Real(0.5, 2.5, name='buffer_scale')    # prior='log-uniform',
         ]
 
-    def optimize(self, n_calls = 30):
+    def optimize(self, n_calls = 90):
 
         """Runs Bayesian Optimization to find the triplet of parameters."""
 
@@ -2237,7 +2237,7 @@ def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range
         return "".join(bar)
 
     print(f"\n[1] 4D Metric Uniformity")
-    print(f"    CV NN:           {cv_4d:.4f}  [{get_bar(cv_4d, 0.2, 0.3)}] (Goal: 0.2-0.3)")
+    print(f"    CV NN:           {cv_4d:.4f}  [{get_bar(cv_4d, 0.2, 0.3)}] (Goal: <0.2)")
     print(f"    Normalized Mean: {norm_mean:.4f}  [{get_bar(norm_mean, 1.4, 1.7)}] (Goal: >1.4)")
     print(f"    Void Ratio:      {void_ratio:.4f}  [{get_bar(void_ratio, 2.0, 3.0)}] (Goal: <3.0)")
 
@@ -2389,29 +2389,29 @@ print('Should add metrics computed near boundary')
 
 
 
-# [2]. Sorted depths
-n = len(x_grid)
-# u = np.arange(1, n+1) / n
-u = np.arange(n) / (n - 1)
-iarg = np.argsort(x_grid[:,2])
-d_sorted = np.sort(x_grid[:,2])
-# expected CDF
-r_surface = np.linalg.norm(ftrns1_abs(x_grid[:,0:3]*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1)
-# r = r_surface[iarg] + d_sorted
-r = r_surface.mean() + d_sorted
-F_expected = (r**3 - r_min**3) / (r_max**3 - r_min**3)
-r2_loss = r2_score(F_expected, u)
-print('R2 of expected depth distribution: %0.8f'%r2_loss)
+# # [2]. Sorted depths
+# n = len(x_grid)
+# # u = np.arange(1, n+1) / n
+# u = np.arange(n) / (n - 1)
+# iarg = np.argsort(x_grid[:,2])
+# d_sorted = np.sort(x_grid[:,2])
+# # expected CDF
+# r_surface = np.linalg.norm(ftrns1_abs(x_grid[:,0:3]*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1)
+# # r = r_surface[iarg] + d_sorted
+# r = r_surface.mean() + d_sorted
+# F_expected = (r**3 - r_min**3) / (r_max**3 - r_min**3)
+# r2_loss = r2_score(F_expected, u)
+# print('R2 of expected depth distribution: %0.8f'%r2_loss)
 
-# diagnostic plot
-if plot_on == True:
-	plt.figure()
-	plt.plot(d_sorted, u, label="empirical")
-	plt.plot(d_sorted, F_expected, "--", label="expected")
-	plt.legend()
-	fig = plt.gcf()
-	fig.set_size_inches([8,8])
-	plt.savefig(path_to_file + 'Plots' + seperator + 'grid_sorted_depths_ver_%d.png'%grid_ind, bbox_inches = 'tight', pad_inches = 0.1)
+# # diagnostic plot
+# if plot_on == True:
+# 	plt.figure()
+# 	plt.plot(d_sorted, u, label="empirical")
+# 	plt.plot(d_sorted, F_expected, "--", label="expected")
+# 	plt.legend()
+# 	fig = plt.gcf()
+# 	fig.set_size_inches([8,8])
+# 	plt.savefig(path_to_file + 'Plots' + seperator + 'grid_sorted_depths_ver_%d.png'%grid_ind, bbox_inches = 'tight', pad_inches = 0.1)
 
 
 
