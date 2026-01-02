@@ -18,6 +18,7 @@ pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -
 ## (Also can check pytorch geometric website for install details; https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html)
 
 pip install -U scikit-learn
+pip install scikit-optimize
 ## (can also install sklearn with conda install -c anaconda scikit-learn; https://scikit-learn.org/stable/install.html)
 pip install networkx
 pip install obspy
