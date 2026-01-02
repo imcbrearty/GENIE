@@ -670,7 +670,7 @@ def u_to_geodetic_lat(u_random, lat_range):
 #     return np.hstack([xyz_boosted, time_boosted]), radii
 
 
-def get_warped_metric_space(x_grid, depth_boost, scale_t, R_ref = earth_radius, scale_val=10000.0):
+def get_warped_metric_space(x_grid, depth_boost, scale_t, R_ref = earth_radius, scale_val = 10000.0, return_physical_units = False):
     """
     Unified 4D Metric Space for Global Gridding.
     Fixes: Vertical Shearing, Time-Space Coupling, and Radial Density Bias.
@@ -703,9 +703,13 @@ def get_warped_metric_space(x_grid, depth_boost, scale_t, R_ref = earth_radius, 
     
     # 6. Precision Centering & Scaling
     # Centering on the batch prevents large-coordinate precision loss on GPU
-    origin = p4d_warped.mean(axis=0, keepdims=True)
-    p4d_scaled = (p4d_warped - origin) / scale_val
-    
+
+    if return_physical_units == False:
+	    origin = p4d_warped.mean(axis=0, keepdims=True)
+	    p4d_scaled = (p4d_warped - origin) / scale_val
+    else:
+    	p4d_scaled = 1.0*p4d_warped
+
     return p4d_scaled
 
 
@@ -2114,9 +2118,11 @@ def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range
     N = len(x_grid)
     
     # --- 1. COORDINATE PROJECTIONS ---
-    scaling_4d = np.array([1.0, 1.0, depth_boost, scale_t])
-    x_metric_4d = ftrns1_abs(x_grid * scaling_4d)
+    # scaling_4d = np.array([1.0, 1.0, depth_boost, scale_t])
+    # x_metric_4d = ftrns1_abs(x_grid * scaling_4d)
     
+    x_metric_4d = get_warped_metric_space(x_grid, depth_boost, scale_t, return_physical_units = True)
+
     # --- 2. GLOBAL 4D METRICS (The "O" Sliders) ---
     tree_4d = cKDTree(x_metric_4d)
     dist_4d, idx_nn = tree_4d.query(x_metric_4d, k=2)
@@ -2264,8 +2270,8 @@ def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range
         print(f"    {name:6} R2: {score:.6f}  [{'#'*int(score*20):<20}] {status}")
     
     # Collisions
-    collision_count = np.sum(dist_space < avg_space_km*0.5) ## Anything within half the average distance
-    print(f"\n[4] Collision Check: {collision_count} nodes < 500m apart.")
+    collision_count = np.sum(nn_4d < nn_4d.mean()*0.75) ## Anything within half the average distance
+    print(f"\n[4] Collision Check: {collision_count} nodes < half avg. distance apart.")
 
     print(f"{'='*65}\n")
     return {"cv_4d": cv_4d, "min_dist": np.min(dist_space), "collisions": collision_count, "cdf_r2s": cdf_r2s, "v_eff": v_eff}
