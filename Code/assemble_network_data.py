@@ -462,7 +462,7 @@ def u_to_geodetic_lat(u_random, lat_range):
     def get_q(lat_deg):
         # q is the authalic part of the projection
         sin_lat = np.sin(np.deg2rad(lat_deg)) # sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
-        sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
+        # sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
         term1 = sin_lat / (1 - e**2 * sin_lat**2)
         term2 = (1 / (2 * e)) * np.log((1 - e * sin_lat) / (1 + e * sin_lat))
         return (1 - e**2) * (term1 - term2)
@@ -482,11 +482,239 @@ def u_to_geodetic_lat(u_random, lat_range):
     return np.rad2deg(np.arcsin(q_target / q_polar))
 
 
+# # 1. Get the surface position and the normal vector at that latitude/longitude
+# # Assuming ftrns1_abs returns XYZ in meters
+# xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), np.zeros((len(phi),1))), axis=1))
+
+# # 2. For WGS84, the normal vector 'n' at the surface is easy to compute 
+# # if you have the XYZ of a surface point:
+# # n = [x/(a^2), y/(a^2), z/(b^2)] then normalize
+# a = 6378137.0
+# b = 6356752.314245
+# n = xyz_surface / np.array([a**2, a**2, b**2])
+# n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+
+# # 3. Instead of scaling the vector from the center, 
+# # you start at the surface and move ALONG the normal.
+# # Note: Since your 'r' is distance from center, we need 'h' (height).
+# # Height h = r_actual - r_surface (roughly), but better to use your depth_range directly.
+
+# # Better Approach:
+# # Let Sobol sample 'h' (altitude/depth) directly instead of 'r'
+# h = expanded_depth[0] + u[:, [2]] * (expanded_depth[1] - expanded_depth[0])
+
+# # XYZ = Surface_XYZ + (Normal_Vector * Height)
+# xyz = xyz_surface + (n_unit * h.reshape(-1,1))
+
+# def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0):
+
+# 	if use_spherical == False:
+# 		a = 6378137.0
+# 		b = 6356752.3142
+# 	else:
+# 		a = 6371e3
+# 		b = 6371e3
+
+# 	if buffer_scale > 0.0:
+# 		## Use a buffer around min-max regions. How to estimate? First estimate volume
+# 		Volume, Volume_space, _, nominal_spacing_space, nominal_spacing_time = compute_expected_spacing(N, lat_range = lat_range, lon_range = lon_range, depth_range = depth_range, time_range = time_range, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
+# 		lat_mid = np.mean(lat_range)
+# 		pad_lat = (nominal_spacing_space * buffer_scale / earth_radius) * (180 / np.pi)
+# 		pad_lon = (nominal_spacing_space * buffer_scale / (earth_radius * np.cos(np.deg2rad(lat_mid)))) * (180 / np.pi) # Adjust lon padding for the convergence of meridians
+# 		pad_depth = nominal_spacing_space * buffer_scale # 3. Calculate Depth and Time Padding
+# 		pad_time = nominal_spacing_time * buffer_scale
+
+# 		# 4. Define New Ranges
+# 		expanded_lat = list(np.array([lat_range[0] - pad_lat, lat_range[1] + pad_lat]).clip(-90.0, 90.0)) if use_global == False else lat_range
+# 		expanded_lon = [lon_range[0] - pad_lon, lon_range[1] + pad_lon] if use_global == False else lon_range
+# 		expanded_depth = [depth_range[0] - pad_depth, depth_range[1] + pad_depth]
+# 		expanded_time = time_range + pad_time # [time_range - pad_time, time_range + pad_time] # If time_range is half-width
+# 		Volume_expanded, Volume_space_expanded, _, _, _ = compute_expected_spacing(N, lat_range = expanded_lat, lon_range = expanded_lon, depth_range = expanded_depth, time_range = expanded_time, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
+# 		N_updated = int(np.ceil(N * (Volume_expanded/Volume)))
+	
+# 	# u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random(N)
+# 	# longitude = (2*np.pi*u[:,0] - np.pi)*180.0/np.pi
+# 	# latitude = np.arccos(((a**2)*(1 - u[:,1]) + (b**2)*u[:,1] - a**2 + b**2) / (b**2 - a**2))
+
+# 	# m = int(np.ceil(np.log2(N)))
+# 	# initial_points = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random_base2(m = m)[0:N]
+
+
+# 	if buffer_scale > 0.0:
+
+# 		m = int(np.ceil(np.log2(N_updated)))
+# 		N_sobol = 2**m
+
+# 		u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random_base2(m)  # Sobol 4D
+# 		assert((len(u) == N_sobol)*(len(u) >= N_updated))
+# 		# assert(len(u) >= N_updated)
+
+# 		if use_global == False:
+# 			# phi = expanded_lon[0] + u[:,0]*(expanded_lon[1] - expanded_lon[0]) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			phi = expanded_lon[0] + u[:,0]*dlon_diff(expanded_lon) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			u_min = (1.0 + np.sin(np.deg2rad(expanded_lat[0])))/2.0
+# 			u_max = (1.0 + np.sin(np.deg2rad(expanded_lat[1])))/2.0
+# 			# theta = u_min + u[:,1]*(u_max - u_min) # *(180.0/np.pi) # np.arcsin(2 * u_lat_rescaled - 1)
+# 			# theta = np.arcsin(2 * theta - 1)*(180.0/np.pi)
+# 			theta = u_to_geodetic_lat(u[:,1], expanded_lat)
+
+# 		else:
+# 			phi = ((2 * np.pi * u[:, 0]) - np.pi)*(180.0/np.pi)                # longitude
+# 			# theta = np.arcsin(1 - 2 * u[:,1])*(180.0/np.pi)
+# 			# theta = (np.arccos(1 - 2 * u[:, 1]) - np.pi/2.0)*(180.0/np.pi)            # colatitude (equal-area on sphere)
+# 			theta = u_to_geodetic_lat(u[:,1], [-90.0, 90.0])
+
+# 		phi_wrapped = (phi + 180) % 360 - 180
+# 		r_min_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), expanded_depth[0]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		r_max_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), expanded_depth[1]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), np.zeros((len(phi),1))), axis = 1))
+# 		r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+# 		r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
+# 		xyz = (r*xyz_surface)/r_surface
+# 		x_grid = ftrns2_abs(xyz) 
+
+# 		if use_time == True:
+# 			t = -expanded_time + 2.0 * expanded_time * u[:, [3]]
+# 			x_grid = np.concatenate((x_grid, t), axis = 1)
+
+# 		if use_global == False:
+
+# 			lons_wrapped = (x_grid[:,1] + 180) % 360 - 180
+# 			mask_points = (x_grid[:,0] >= lat_range[0]) & (x_grid[:,0] <= lat_range[1]) & \
+# 			                   is_in_lon_range(lons_wrapped, lon_range[0], lon_range[1]) & \
+# 			                  (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0]) & \
+# 			                  (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range)) 
+
+# 		else:
+
+# 			# lons_wrapped = (x_grid[:,1] + 180) % 360 - 180
+# 			mask_points = (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0]) & \
+# 			                  (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range)) 
+
+
+
+# 		# mask_points = (x_grid[:,0] >= lat_range[0]) & (x_grid[:,0] <= lat_range[1]) & \
+# 		#                   (lons_wrapped >= lon_range[0]) & (lons_wrapped <= lon_range[1]) & \
+# 		#                   (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0]) & \
+# 		#                   (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range))
+
+
+# 		## Now retain only the fraction of boundary nodes that will emulate the right density of the target number of nodes
+# 		if N_target is not None:
+# 			ratio = (Volume_expanded - Volume)/Volume
+# 			n_boundary_retain = int(N_target*ratio)
+# 			ichoose = np.concatenate((np.where(mask_points == 1)[0], np.random.choice(np.where(mask_points == 0)[0], \
+# 				size = n_boundary_retain, replace = False)), axis = 0)
+# 			x_grid = x_grid[ichoose]
+# 			mask_points = mask_points[ichoose]
+
+
+# 		return x_grid, mask_points
+
+
+# 	else: # buffer_scale == 1.0:
+
+# 		u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random(N)  # Sobol 4D
+# 		if use_global == False:
+# 			# phi = lon_range[0] + u[:,0]*(lon_range[1] - lon_range[0]) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			phi = lon_range[0] + u[:,0]*dlon_diff(lon_range) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			u_min = (1.0 + np.sin(np.deg2rad(lat_range[0])))/2.0
+# 			u_max = (1.0 + np.sin(np.deg2rad(lat_range[1])))/2.0
+# 			# theta = u_min + u[:,1]*(u_max - u_min) # *(180.0/np.pi) # np.arcsin(2 * u_lat_rescaled - 1)
+# 			# theta = np.arcsin(2 * theta - 1)*(180.0/np.pi)
+# 			theta = u_to_geodetic_lat(u[:,1], lat_range)
+
+# 		else:
+# 			phi = ((2 * np.pi * u[:, 0]) - np.pi)*(180.0/np.pi)                # longitude
+# 			# theta = np.arcsin(1 - 2 * u[:,1])*(180.0/np.pi)
+# 			# theta = (np.arccos(1 - 2 * u[:, 1]) - np.pi/2.0)*(180.0/np.pi)            # colatitude (equal-area on sphere)
+# 			theta = u_to_geodetic_lat(u[:,1], [-90.0, 90.0])
+
+
+# 		r_min_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), depth_range[0]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		r_max_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), depth_range[1]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), np.zeros((len(phi),1))), axis = 1))
+# 		r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+# 		r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
+# 		xyz = (r*xyz_surface)/r_surface
+# 		x_grid = ftrns2_abs(xyz)
+
+# 		if use_time == True:
+# 			t = -time_shift_range + 2 * time_shift_range * u[:, [3]]
+# 			x_grid = np.concatenate((x_grid, t), axis = 1)
+
+# 		return x_grid
+
+
+
+# def get_metric_space(x_grid, depth_boost, scale_t):
+
+#     # 1. True ECEF
+#     xyz_ecef = ftrns1_abs(x_grid[:, :3])
+#     radii = np.linalg.norm(xyz_ecef, axis = 1)
+    
+#     # 2. WGS84 Normal Vector
+#     a, b = 6378137.0, 6356752.314245 ## Note: can technially adjust a and b locally for this formula by the depth
+#     n = xyz_ecef / np.array([a**2, a**2, b**2])
+#     n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+    
+#     # 3. Apply depth_boost along the normal
+#     # We move the point from its true ECEF position to a 'boosted' position
+#     # that represents its 'importance' to the FPS algorithm.
+#     true_depths = x_grid[:, 2:3]
+#     xyz_boosted = xyz_ecef + (n_unit * true_depths * (depth_boost - 1.0))
+    
+#     # 4. Temporal component
+#     time_boosted = x_grid[:, 3:4] * scale_t
+    
+#     return np.hstack([xyz_boosted, time_boosted]), radii
+
+
+def get_warped_metric_space(x_grid, depth_boost, scale_t, R_ref = earth_radius, scale_val=10000.0):
+    """
+    Unified 4D Metric Space for Global Gridding.
+    Fixes: Vertical Shearing, Time-Space Coupling, and Radial Density Bias.
+    """
+    # 1. Physical Projection (True Geodetic to ECEF)
+    # x_grid: [Lat, Lon, Depth, Time]
+    xyz_ecef = ftrns1_abs(x_grid[:, :3])
+    r_true = np.linalg.norm(xyz_ecef, axis=1, keepdims=True)
+    
+    # 2. Get Geodetic Normal (Straight 'Up' for WGS84)
+    a, b = 6378137.0, 6356752.314245
+    n = xyz_ecef / np.array([a**2, a**2, b**2])
+    n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+    
+    # 3. Apply Depth Boost along the Normal (The Anchor)
+    # We move the point further from the surface to increase vertical resolution
+    true_depths = x_grid[:, 2:3]
+    xyz_boosted = xyz_ecef + (n_unit * true_depths * (depth_boost - 1.0))
+    
+    # 4. Apply Time Boost
+    time_boosted = x_grid[:, 3:4] * scale_t
+    
+    # 5. Volume Warping (The 1/r Fix)
+    # R_ref keeps the ratio near 1.0 for numerical stability
+    radius_ratio = r_true / R_ref
+    
+    # Combine into 4D and warp the entire manifold
+    p4d_boosted = np.hstack([xyz_boosted, time_boosted])
+    p4d_warped = p4d_boosted / radius_ratio
+    
+    # 6. Precision Centering & Scaling
+    # Centering on the batch prevents large-coordinate precision loss on GPU
+    origin = p4d_warped.mean(axis=0, keepdims=True)
+    p4d_scaled = (p4d_warped - origin) / scale_val
+    
+    return p4d_scaled
+
+
+
 def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0):
 
 	if use_spherical == False:
 		a = 6378137.0
-		b = 6356752.3142
+		b = 6356752.314245
 	else:
 		a = 6371e3
 		b = 6371e3
@@ -541,13 +769,34 @@ def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_exten
 			theta = u_to_geodetic_lat(u[:,1], [-90.0, 90.0])
 
 		phi_wrapped = (phi + 180) % 360 - 180
-		r_min_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), expanded_depth[0]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
-		r_max_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), expanded_depth[1]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+		# r_min_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), expanded_depth[0]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+		# r_max_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), expanded_depth[1]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
 		xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), np.zeros((len(phi),1))), axis = 1))
-		r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
-		r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
-		xyz = (r*xyz_surface)/r_surface
-		x_grid = ftrns2_abs(xyz) 
+		# r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+
+		n = xyz_surface / np.array([a**2, a**2, b**2])
+		n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+		# Local radius from center to surface point
+		r_surface = np.linalg.norm(xyz_surface, axis=1, keepdims=True)
+		# --- STEP B: Cubic Height Sampling ---
+		# depth_range[0] is Top (+), depth_range[1] is Bottom (-)
+		h_top = depth_range[0]
+		h_bot = depth_range[1]
+		# u is Sobol variable [0, 1]
+		# We use the cubic formula to get 'h' that respects volume growth
+		r_top = r_surface + h_top
+		r_bot = r_surface + h_bot
+		# Corrected height:
+		h_sampled = (r_bot**3 + u[:, [2]] * (r_top**3 - r_bot**3))**(1/3.0) - r_surface
+		# --- STEP C: Final Positioning ---
+		# Move from the surface XYZ along the Normal by h_sampled
+		xyz = xyz_surface + (n_unit * h_sampled)
+		x_grid = ftrns2_abs(xyz)
+
+		# r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+		# r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
+		# xyz = (r*xyz_surface)/r_surface
+		# x_grid = ftrns2_abs(xyz) 
 
 		if use_time == True:
 			t = -expanded_time + 2.0 * expanded_time * u[:, [3]]
@@ -610,16 +859,111 @@ def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_exten
 		r_min_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), depth_range[0]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
 		r_max_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), depth_range[1]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
 		xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), np.zeros((len(phi),1))), axis = 1))
-		r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
-		r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
-		xyz = (r*xyz_surface)/r_surface
+		# r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+		# r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
+		# xyz = (r*xyz_surface)/r_surface
+		# x_grid = ftrns2_abs(xyz)
+
+		n = xyz_surface / np.array([a**2, a**2, b**2])
+		n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+		# Local radius from center to surface point
+		r_surface = np.linalg.norm(xyz_surface, axis=1, keepdims=True)
+		# --- STEP B: Cubic Height Sampling ---
+		# depth_range[0] is Top (+), depth_range[1] is Bottom (-)
+		h_top = depth_range[0]
+		h_bot = depth_range[1]
+		# u is Sobol variable [0, 1]
+		# We use the cubic formula to get 'h' that respects volume growth
+		r_top = r_surface + h_top
+		r_bot = r_surface + h_bot
+		# Corrected height:
+		h_sampled = (r_bot**3 + u[:, [2]] * (r_top**3 - r_bot**3))**(1/3.0) - r_surface
+		# --- STEP C: Final Positioning ---
+		# Move from the surface XYZ along the Normal by h_sampled
+		xyz = xyz_surface + (n_unit * h_sampled)
 		x_grid = ftrns2_abs(xyz)
+
 
 		if use_time == True:
 			t = -time_shift_range + 2 * time_shift_range * u[:, [3]]
 			x_grid = np.concatenate((x_grid, t), axis = 1)
 
 		return x_grid
+
+
+
+# def farthest_point_sampling(points_candidates, target_N, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = None, device = device):
+    
+#     """
+#     points: [N, 3] or [N, 4] (already scaled/transformed)
+#     target_N: Number of 'real' points to collect
+#     mask_candidates: Tensor/Array of 1s (real) and 0s (buffer/mirrored)
+#     """    
+
+#     scale_val = 10000.0
+#     points = points_candidates.copy()
+#     if points.shape[1] == 4: points[:, 3] *= scale_time
+#     if depth_boost != 1.0: points = ftrns1_abs(ftrns2_abs(points) * np.array([1.0, 1.0, depth_boost, 1.0]))
+#     origin = points[:, :3].mean(axis = 0, keepdims = True)
+#     points[:, :3] -= origin
+#     points = torch.as_tensor(points / scale_val, device = device, dtype = torch.float64)
+
+#     if mask_candidates is None: mask_candidates = np.ones(len(points))
+#     mask = torch.as_tensor(mask_candidates, device = device, dtype = torch.bool)
+#     assert(len(mask) == len(points))
+#     assert(mask.sum().item() >= target_N)
+#     N, C = points.shape
+    
+#     # 1. Initialize distance array
+#     # If we have boundary points (mask == 0), we pre-calculate distances to them
+#     distance = torch.full((N,), float('inf'), device = device, dtype = torch.float64)
+    
+#     boundary_indices = torch.where(~mask)[0]
+#     real_indices = torch.where(mask)[0]
+
+#     # 2. Pre-process boundary Points (The repulsion field)
+#     if len(boundary_indices) > 0:
+#         # Optimization: Update distance array with the proximity to any ghost point
+#         # For very large N, we do this in chunks to avoid OOM
+#         for i in range(0, len(boundary_indices), 500):
+#             batch = boundary_indices[i:i+500]
+#             # dists shape: [len(batch), N]
+#             dists = torch.cdist(points[batch], points, p=2)**2
+#             distance = torch.min(distance, torch.min(dists, dim=0)[0])
+        
+#         # Ensure ghost points themselves are never selected
+#         distance[boundary_indices] = -1.0
+
+#     # 3. Choose the first REAL point
+#     # Instead of random, we pick the point farthest from the boundary ghosts
+#     # If no ghosts exist, we default to the point closest to the centroid
+#     if len(boundary_indices) > 0:
+#         farthest = torch.argmax(distance).item()
+#     else:
+#         centroid = points[real_indices].mean(0, keepdims=True)
+#         dist_centroid = torch.sum((points[real_indices] - centroid)**2, dim=1)
+#         farthest = real_indices[torch.argmin(dist_centroid)].item()
+
+#     collected_indices = []
+#     cnt_found = 0
+
+#     # 4. Main FPS Loop
+#     while cnt_found < target_N:
+#         collected_indices.append(farthest)
+#         cnt_found += 1 # We only ever pick real points now
+            
+#         centroid_pt = points[farthest, :].view(1, C)
+#         dist = torch.sum((points - centroid_pt) ** 2, dim=-1)
+        
+#         distance = torch.min(distance, dist)
+#         distance[farthest] = -1.0
+        
+#         if cnt_found < target_N:
+#             farthest = torch.argmax(distance).item()
+
+#     # Final Filter
+#     final_indices = torch.tensor(collected_indices, device=device)
+#     return ftrns2_abs(points_candidates[final_indices.cpu().numpy()])
 
 
 
@@ -631,13 +975,18 @@ def farthest_point_sampling(points_candidates, target_N, scale_time = scale_time
     mask_candidates: Tensor/Array of 1s (real) and 0s (buffer/mirrored)
     """    
 
-    scale_val = 10000.0
+    # scale_val = 10000.0
     points = points_candidates.copy()
-    if points.shape[1] == 4: points[:, 3] *= scale_time
-    if depth_boost != 1.0: points = ftrns1_abs(ftrns2_abs(points) * np.array([1.0, 1.0, depth_boost, 1.0]))
-    origin = points[:, :3].mean(axis = 0, keepdims = True)
-    points[:, :3] -= origin
-    points = torch.as_tensor(points / scale_val, device = device, dtype = torch.float64)
+    # points, radii = get_metric_space(points, depth_boost, scale_time)
+    points = get_warped_metric_space(points, depth_boost, scale_time)
+
+
+    # if points.shape[1] == 4: points[:, 3] *= scale_time
+    # if depth_boost != 1.0: points = ftrns1_abs(ftrns2_abs(points) * np.array([1.0, 1.0, depth_boost, 1.0]))
+    # origin = points[:, :3].mean(axis = 0, keepdims = True)
+    # points[:, :3] -= origin
+    points = torch.as_tensor(points, device = device, dtype = torch.float64)
+    # radii = torch.as_tensor(radii / scale_val, device = device, dtype = torch.float64)
 
     if mask_candidates is None: mask_candidates = np.ones(len(points))
     mask = torch.as_tensor(mask_candidates, device = device, dtype = torch.bool)
@@ -694,7 +1043,8 @@ def farthest_point_sampling(points_candidates, target_N, scale_time = scale_time
 
     # Final Filter
     final_indices = torch.tensor(collected_indices, device=device)
-    return ftrns2_abs(points_candidates[final_indices.cpu().numpy()])
+    # return ftrns2_abs(points_candidates[final_indices.cpu().numpy()])
+    return points_candidates[final_indices.cpu().numpy()]
 
 
 
@@ -1347,6 +1697,96 @@ def check_boundary_densities(x_grid, lat_range, lon_range, depth_range, time_ran
 
 ## Could add Ricci curvature to the loss function
 
+
+## Expected velocity scaling
+# # Penalty if scale_t wanders too far from 5000
+# reg_penalty = 0.01 * ((scale_t - 5000) / 5000)**2
+# return total_cdf_loss + seating_penalty + reg_penalty
+
+
+## Coupled time and depth scaling
+# Example: If you expect scale_t ~ 5000 and depth_boost ~ 1.0
+# Penalty = abs(log(scale_t / 5000)) + abs(log(depth_boost / 1.0))
+
+
+
+# def compute_cdf_analysis(x_grid, lat_range, lon_range, depth_range, time_range):
+#     N = len(x_grid)
+#     empirical_cdf = np.linspace(0, 1, N)
+#     total_cdf_loss = 0
+    
+#     # 1. Latitude: Authalic (Area-Corrected)
+#     q_vals = get_wgs84_area_val(x_grid[:, 0])
+#     q_min, q_max = get_wgs84_area_val(lat_range[0]), get_wgs84_area_val(lat_range[1])
+#     val_lat = (q_vals - q_min) / (q_max - q_min + 1e-12)
+#     total_cdf_loss += np.mean(np.abs(np.sort(val_lat) - empirical_cdf))
+
+#     # 2. Longitude: Linear (or Circular)
+#     val_lon = (x_grid[:, 1] - lon_range[0]) / (lon_range[1] - lon_range[0] + 1e-12)
+#     total_cdf_loss += np.mean(np.abs(np.sort(val_lon) - empirical_cdf))
+
+#     # 3. Depth: Volumetric (using our Normal + Cubic logic)
+#     # We use the Radius-Cubed transformation to linearize the volume
+#     r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+    
+#     # We need the local boundaries for EVERY point to normalize correctly
+#     r_bound_bot = np.linalg.norm(ftrns1_abs(np.c_[x_grid[:,:2], np.full(N, depth_range[0])]), axis=1)
+#     r_bound_top = np.linalg.norm(ftrns1_abs(np.c_[x_grid[:,:2], np.full(N, depth_range[1])]), axis=1)
+    
+#     # Volume Fraction: (r^3 - r_min^3) / (r_max^3 - r_min^3)
+#     val_depth = (r_actual**3 - r_bound_bot**3) / (r_bound_top**3 - r_bound_bot**3 + 1e-12)
+#     total_cdf_loss += np.mean(np.abs(np.sort(val_depth) - empirical_cdf))
+
+#     # 4. Time: Linear
+#     val_time = (x_grid[:, 3] - (-time_range)) / (2 * time_range + 1e-12)
+#     total_cdf_loss += np.mean(np.abs(np.sort(val_time) - empirical_cdf))
+
+#     return total_cdf_loss / 4.0
+
+
+def compute_cdf_analysis(x_grid, ranges):
+
+    N = len(x_grid)
+    empirical_cdf = np.linspace(0, 1, N)
+    cdf_loss = 0
+    
+    for i in range(x_grid.shape[1]):
+
+        if i == 0: # LATITUDE
+            q_vals = get_wgs84_area_val(x_grid[:, 0])
+            q_bounds = sorted([get_wgs84_area_val(ranges[0][0]), get_wgs84_area_val(ranges[0][1])])
+            val = (q_vals - q_bounds[0]) / (q_bounds[1] - q_bounds[0] + 1e-12)
+
+        elif i == 1: # LONGITUDE
+            # For longitude, we use dlon_diff to handle the wrap-around correctly
+            val = (x_grid[:, 1] - ranges[1][0]) / (dlon_diff([ranges[1][0], ranges[1][1]]) + 1e-12)
+
+        elif i == 2: # DEPTH
+            # Get actual distances from geocenter
+            r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+            
+            # Project the bounds to absolute radii
+            r_b1 = np.linalg.norm(ftrns1_abs(np.c_[x_grid[:,:2], np.full(N, ranges[2][0])]), axis=1)
+            r_b2 = np.linalg.norm(ftrns1_abs(np.c_[x_grid[:,:2], np.full(N, ranges[2][1])]), axis=1)
+            
+            # Use absolute min/max to ensure (r_max^3 - r_min^3) is always positive
+            r_min = np.minimum(r_b1, r_b2)
+            r_max = np.maximum(r_b1, r_b2)
+            
+            val = (r_actual**3 - r_min**3) / (r_max**3 - r_min**3 + 1e-12)
+
+        elif i == 3: # TIME
+            val = (x_grid[:, 3] - ranges[3][0]) / (ranges[3][1] - ranges[3][0] + 1e-12)
+
+        # CRITICAL: Clip to [0, 1] to prevent the optimizer from chasing outliers
+        val = np.clip(val, 0.0, 1.0)
+        
+        sorted_vals = np.sort(val)
+        cdf_loss += np.mean(np.abs(sorted_vals - empirical_cdf))
+
+    return cdf_loss / x_grid.shape[1]
+
+
 class SamplingTuner:
 
     def __init__(self, target_N, lat_range, lon_range, depth_range, time_range, use_global = use_global, device = device):
@@ -1364,9 +1804,9 @@ class SamplingTuner:
         # depth_boost: dimensionless vertical stretch
         # buffer_scale: multiplier for the nominal spacing
         self.space = [
-            Real(1e3, 15e3, prior='log-uniform', name='scale_t'),      
-            Real(1.0, 5.0, name='depth_boost'),   
-            Real(1.1, 2.5, name='buffer_scale')   
+            Real(1e3, 15e3, prior = 'log-uniform', name='scale_t'),      
+            Real(1.0, 3.0, name='depth_boost'),   
+            Real(0.5, 2.5, name='buffer_scale')    # prior='log-uniform',
         ]
 
     def optimize(self, n_calls = 30):
@@ -1395,18 +1835,28 @@ class SamplingTuner:
 
             # 2. RUN FPS (Physical -> Scaled Search Space)
             # fps returns the selected physical [Lat, Lon, Depth, Time] points
+            # x_grid = farthest_point_sampling(
+            #     ftrns1_abs(trial_points), 
+            #     self.target_N, 
+            #     scale_time=scale_t, 
+            #     depth_boost=depth_boost, 
+            #     mask_candidates=mask_points
+            # )        
+
             x_grid = farthest_point_sampling(
-                ftrns1_abs(trial_points), 
+                trial_points, 
                 self.target_N, 
                 scale_time=scale_t, 
                 depth_boost=depth_boost, 
                 mask_candidates=mask_points
-            )        
+            )       
 
             # 3. PROJECT TO SCALED METRIC SPACE (For CV and Anisotropy)
             # Use depth_boost on the 3rd column and scale_t on the 4th
-            scaling_vector = np.array([1.0, 1.0, depth_boost, scale_t])
-            x_proj_scaled = ftrns1_abs(x_grid * scaling_vector)        
+            # scaling_vector = np.array([1.0, 1.0, depth_boost, scale_t])
+            # x_proj_scaled = ftrns1_abs(x_grid * scaling_vector)        
+
+            x_proj_scaled = get_warped_metric_space(x_grid, depth_boost, scale_t)
             # --- PART A: Uniformity (Scaled World) ---
             tree = cKDTree(x_proj_scaled)
             nn_dist = tree.query(x_proj_scaled, k=2)[0][:, 1]
@@ -1425,39 +1875,26 @@ class SamplingTuner:
             #            abs(1.0 - densities['Lat']) * 5.0)
 
             # 4. CDF ANALYSIS (The WGS84 "Gold Standard")
-            cdf_loss = 0
-            N = len(x_grid)
-            empirical_cdf = np.arange(N) / (N - 1)
-            for i in range(4):
-                if i == 0: # LATITUDE: WGS84 Authalic correction
-                    # Map latitudes to their area-proportional values
-                    q_vals = get_wgs84_area_val(x_grid[:, 0])
-                    q_min = get_wgs84_area_val(self.ranges[0][0])
-                    q_max = get_wgs84_area_val(self.ranges[0][1])
-                    val_to_sort = (q_vals - q_min) / (q_max - q_min + 1e-12)
+            cdf_loss = compute_cdf_analysis(x_grid, self.ranges)
 
-                elif i == 1: # LONGITUDE: Linear
-                    val_to_sort = (x_grid[:, 1] - self.ranges[1][0]) / (self.ranges[1][1] - self.ranges[1][0] + 1e-12)
 
-                elif i == 2: # DEPTH: WGS84 Volume Fraction (as we wrote before)
-                    r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), self.ranges[2][0])])), axis=1)
-                    r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), self.ranges[2][1])])), axis=1)
-                    r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
-                    val_to_sort = (r_actual**3 - r_min_local**3) / (r_max_local**3 - r_min_local**3 + 1e-12)
+            # reg_penalty = (
+            #     0.005 * (np.log10(scale_t / 5000)**2) +      # Prefer scale_t near 5000
+            #     0.010 * (depth_boost - 1.0)**2 +             # Prefer depth_boost near 1.0
+            #     0.010 * (buffer_scale - 1.0)**2              # Prefer buffer_scale near 1.0
+            # )
 
-                elif i == 3: # TIME: Linear
-                    val_to_sort = (x_grid[:, 3] - self.ranges[3][0]) / (self.ranges[3][1] - self.ranges[3][0] + 1e-12)       
+            reg_penalty = (
+                0.1 * (np.log10(scale_t / scale_time_effective)**2)      # Prefer scale_t near 5000
+            )
 
-                sorted_vals = np.sort(val_to_sort)
-                cdf_loss += np.mean(np.abs(sorted_vals - empirical_cdf))
-
-            cdf_loss = cdf_loss/x_grid.shape[1] ## Normalize by number of dimensions used
+            # cdf_loss = cdf_loss/x_grid.shape[1] ## Normalize by number of dimensions used
             # --- PART C: The Sanity Check (Anisotropy) ---
-            spreads = np.std(x_proj_scaled, axis=0)
-            anisotropy = np.max(spreads) / (np.min(spreads) + 1e-9)
-            penalty = np.maximum(0, np.log10(anisotropy) - 1.0)**2   
+            # spreads = np.std(x_proj_scaled, axis=0)
+            # anisotropy = np.max(spreads) / (np.min(spreads) + 1e-9)
+            # penalty = np.maximum(0, np.log10(anisotropy) - 1.0)**2   
 
-            return cv + (3.0 * cdf_loss) + (1.0 * penalty) + (2.0 * penalty_boundary)
+            return cv + (3.0 * cdf_loss) + (0.2 * penalty_boundary) + (1.0 * reg_penalty)
 
         # res = gp_minimize(objective, self.space, n_calls = n_calls, n_initial_points = 5, initial_point_generator = 'sobol', verbose = True) # random_state = 42
         res = gp_minimize(objective, self.space, n_calls = n_calls, verbose = True) # random_state = 42
@@ -1493,7 +1930,186 @@ class SamplingTuner:
             'buffer_width_phys': buffer_width_phys
         }
 
-def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range, depth_range, time_range, volume_space):
+            # cdf_loss = 0
+            # N = len(x_grid)
+            # empirical_cdf = np.arange(N) / (N - 1)
+            # for i in range(4):
+            #     if i == 0: # LATITUDE: WGS84 Authalic correction
+            #         # Map latitudes to their area-proportional values
+            #         q_vals = get_wgs84_area_val(x_grid[:, 0])
+            #         q_min = get_wgs84_area_val(self.ranges[0][0])
+            #         q_max = get_wgs84_area_val(self.ranges[0][1])
+            #         val_to_sort = (q_vals - q_min) / (q_max - q_min + 1e-12)
+
+            #     elif i == 1: # LONGITUDE: Linear
+            #         val_to_sort = (x_grid[:, 1] - self.ranges[1][0]) / (self.ranges[1][1] - self.ranges[1][0] + 1e-12)
+
+            #     elif i == 2: # DEPTH: WGS84 Volume Fraction (as we wrote before)
+            #         r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), self.ranges[2][0])])), axis=1)
+            #         r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), self.ranges[2][1])])), axis=1)
+            #         r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+            #         val_to_sort = (r_actual**3 - r_min_local**3) / (r_max_local**3 - r_min_local**3 + 1e-12)
+
+            #     elif i == 3: # TIME: Linear
+            #         val_to_sort = (x_grid[:, 3] - self.ranges[3][0]) / (self.ranges[3][1] - self.ranges[3][0] + 1e-12)       
+
+            #     sorted_vals = np.sort(val_to_sort)
+            #     cdf_loss += np.mean(np.abs(sorted_vals - empirical_cdf))
+
+            # scaling_vector = np.array([1.0, 1.0, depth_boost, scale_t])
+            # x_proj_scaled = ftrns1_abs(x_grid * scaling_vector)        
+            # # --- PART A: Uniformity (Scaled World) ---
+            # tree = cKDTree(x_proj_scaled)
+            # nn_dist = tree.query(x_proj_scaled, k=2)[0][:, 1]
+            # cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)    
+
+# class SamplingTuner:
+
+#     def __init__(self, target_N, lat_range, lon_range, depth_range, time_range, use_global = use_global, device = device):
+
+#         from skopt.space import Real
+#         self.target_N = target_N
+#         # Store ranges as [min, max] pairs
+#         self.ranges = [lat_range, lon_range, depth_range, [-time_range, time_range]]
+#         self.device = device
+#         self.time_range = time_range
+#         self.use_global = use_global
+        
+#         # 1. Define Search Space
+#         # scale_t: km/s
+#         # depth_boost: dimensionless vertical stretch
+#         # buffer_scale: multiplier for the nominal spacing
+#         self.space = [
+#             Real(1e3, 15e3, name='scale_t'),      
+#             Real(1.0, 5.0, name='depth_boost'),   
+#             Real(1.1, 2.5, name='buffer_scale')    # prior='log-uniform',
+#         ]
+
+#     def optimize(self, n_calls = 30):
+
+#         """Runs Bayesian Optimization to find the triplet of parameters."""
+
+#         @use_named_args(self.space)
+#         def objective(scale_t, depth_boost, buffer_scale):
+
+#             # 1. GENERATE CANDIDATES
+#             up_sample_factor = 20 if use_time_shift else 10
+#             number_candidate_nodes = up_sample_factor * self.target_N
+
+#             trial_points, mask_points = regular_sobolov(
+#                 number_candidate_nodes, 
+#                 lat_range=self.ranges[0], 
+#                 lon_range=self.ranges[1], 
+#                 depth_range=self.ranges[2], 
+#                 time_range=self.time_range, 
+#                 use_time=use_time_shift, 
+#                 use_global=self.use_global, 
+#                 scale_time=scale_t, 
+#                 N_target=self.target_N, 
+#                 buffer_scale=buffer_scale
+#             )        
+
+#             # 2. RUN FPS (Physical -> Scaled Search Space)
+#             # fps returns the selected physical [Lat, Lon, Depth, Time] points
+#             x_grid = farthest_point_sampling(
+#                 ftrns1_abs(trial_points), 
+#                 self.target_N, 
+#                 scale_time=scale_t, 
+#                 depth_boost=depth_boost, 
+#                 mask_candidates=mask_points
+#             )        
+
+#             # 3. PROJECT TO SCALED METRIC SPACE (For CV and Anisotropy)
+#             # Use depth_boost on the 3rd column and scale_t on the 4th
+#             scaling_vector = np.array([1.0, 1.0, depth_boost, scale_t])
+#             x_proj_scaled = ftrns1_abs(x_grid * scaling_vector)        
+#             # --- PART A: Uniformity (Scaled World) ---
+#             tree = cKDTree(x_proj_scaled)
+#             nn_dist = tree.query(x_proj_scaled, k=2)[0][:, 1]
+#             cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)    
+
+
+#             densities = check_boundary_densities(x_grid, self.ranges[0], self.ranges[1], self.ranges[2], self.ranges[3][1], self.use_global)
+#             # Weighted penalty: we care most about Depth (Surface) and Time boundaries
+#             penalty_boundary = (abs(1.0 - densities['Depth']) * 1.0 +  ## Make these weights proportional to volume
+#                        abs(1.0 - densities['Time']) * 1.0 + 
+#                        abs(1.0 - densities['Lat']) * 1.0 + 
+#                        abs(1.0 - densities['Lon']) * 1.0)/4.0
+
+#             # penalty = (abs(1.0 - densities['Depth']) * 15.0 + 
+#             #            abs(1.0 - densities['Time']) * 10.0 + 
+#             #            abs(1.0 - densities['Lat']) * 5.0)
+
+#             # 4. CDF ANALYSIS (The WGS84 "Gold Standard")
+#             cdf_loss = 0
+#             N = len(x_grid)
+#             empirical_cdf = np.arange(N) / (N - 1)
+#             for i in range(4):
+#                 if i == 0: # LATITUDE: WGS84 Authalic correction
+#                     # Map latitudes to their area-proportional values
+#                     q_vals = get_wgs84_area_val(x_grid[:, 0])
+#                     q_min = get_wgs84_area_val(self.ranges[0][0])
+#                     q_max = get_wgs84_area_val(self.ranges[0][1])
+#                     val_to_sort = (q_vals - q_min) / (q_max - q_min + 1e-12)
+
+#                 elif i == 1: # LONGITUDE: Linear
+#                     val_to_sort = (x_grid[:, 1] - self.ranges[1][0]) / (self.ranges[1][1] - self.ranges[1][0] + 1e-12)
+
+#                 elif i == 2: # DEPTH: WGS84 Volume Fraction (as we wrote before)
+#                     r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), self.ranges[2][0])])), axis=1)
+#                     r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), self.ranges[2][1])])), axis=1)
+#                     r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+#                     val_to_sort = (r_actual**3 - r_min_local**3) / (r_max_local**3 - r_min_local**3 + 1e-12)
+
+#                 elif i == 3: # TIME: Linear
+#                     val_to_sort = (x_grid[:, 3] - self.ranges[3][0]) / (self.ranges[3][1] - self.ranges[3][0] + 1e-12)       
+
+#                 sorted_vals = np.sort(val_to_sort)
+#                 cdf_loss += np.mean(np.abs(sorted_vals - empirical_cdf))
+
+#             cdf_loss = cdf_loss/x_grid.shape[1] ## Normalize by number of dimensions used
+#             # --- PART C: The Sanity Check (Anisotropy) ---
+#             spreads = np.std(x_proj_scaled, axis=0)
+#             anisotropy = np.max(spreads) / (np.min(spreads) + 1e-9)
+#             penalty = np.maximum(0, np.log10(anisotropy) - 1.0)**2   
+
+#             return cv + (3.0 * cdf_loss) + (1.0 * penalty) + (2.0 * penalty_boundary)
+
+#         # res = gp_minimize(objective, self.space, n_calls = n_calls, n_initial_points = 5, initial_point_generator = 'sobol', verbose = True) # random_state = 42
+#         res = gp_minimize(objective, self.space, n_calls = n_calls, verbose = True) # random_state = 42
+
+#         best_scale_t, best_depth_boost, best_buffer_scale = res.x
+        
+
+#         _, _, nominal_spacing_4d, _, _ = compute_expected_spacing(
+#         	self.target_N,  # total number of points
+#         	lat_range=self.ranges[0],
+#         	lon_range=self.ranges[1],
+#         	depth_range=self.ranges[2],
+#         	time_range=self.time_range,  # T, full range = 2T
+#         	use_time=use_time_shift,
+#         	scale_time=best_scale_t,  # w_scale: length per unit time
+#         	use_global=use_global,
+#         	earth_radius=earth_radius)
+
+#         # nominal_spacing = (total_vol / self.target_N)**(1/4)
+#         # buffer_width_phys = best_buffer_scale * nominal_spacing
+#         buffer_width_phys = best_buffer_scale * nominal_spacing_4d # [0]
+
+#         print("\n--- Optimization Results ---")
+#         print(f"Optimal scale_t:     {best_scale_t:.3f} m/s")
+#         print(f"Optimal depth_boost: {best_depth_boost:.3f}")
+#         print(f"Optimal buffer_scale: {best_buffer_scale:.3f}")
+#         print(f"Effective Padding:   {buffer_width_phys:.2f} (units)")
+
+#         return {
+#             'scale_t': best_scale_t,
+#             'depth_boost': best_depth_boost,
+#             'buffer_scale': best_buffer_scale,
+#             'buffer_width_phys': buffer_width_phys
+#         }
+
+def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range, depth_range, time_range, buffer_scale, volume_space):
     
     N = len(x_grid)
     
@@ -1507,6 +2123,7 @@ def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range
     nn_4d = dist_4d[:, 1]
     nn_indices = idx_nn[:, 1] # Index of the 4D nearest neighbor
     
+    ## Can replace these nearest neighbors with the warped metric
     cv_4d = np.std(nn_4d) / (np.mean(nn_4d) + 1e-9)
     v_4d = volume_space * (2.0 * time_range * scale_t)
     expected_mean = 0.65 * (v_4d / N)**(1/4)
@@ -1605,7 +2222,7 @@ def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range
     print(f"\n{'='*65}")
     print(f"       GEOMETRIC GRID HEALTH REPORT (WGS84-4D)")
     print(f"{'='*65}")
-    print(f"Nodes (N): {N:<8} | scale_t: {scale_t:<8.1f} | d_boost: {depth_boost:<.2f}")
+    print(f"Nodes (N): {N:<8} | scale_t: {scale_t:<8.1f} | d_boost: {depth_boost:<.2f} | buffer_scale: {buffer_scale:<.2f}")
     
     def get_bar(val, ideal_min, ideal_max):
         bar = ["-"] * 20
@@ -1694,7 +2311,7 @@ else:
 	buffer_scale = 2.0
 
 
-moi
+# moi
 
 
 ## Now build all spatial grids using optimal sampling strategy
@@ -1705,7 +2322,8 @@ for n in range(num_grids):
 	up_sample_factor = 10 if use_time_shift == False else 20 ## Could reduce to just 10 most likely
 	number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
 	trial_points, mask_points = regular_sobolov(number_candidate_nodes, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = number_of_spatial_nodes, buffer_scale = buffer_scale) # lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0
-	x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = mask_points)
+	# x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = mask_points)
+	x_grid = farthest_point_sampling(trial_points, number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = mask_points)
 
 	tol_frac = 0.01
 	assert(x_grid[:,0].min() >= (lat_range_extend[0] - tol_frac*np.diff(lat_range_extend)))
@@ -1717,12 +2335,36 @@ for n in range(num_grids):
 	assert(len(x_grid) == number_of_spatial_nodes)
 
 	if n == 0:
-		compute_final_grid_health(x_grid, scale_time, depth_upscale_factor, lat_range_extend, lon_range_extend, depth_range, time_shift_range, Volume_space)
+		compute_final_grid_health(x_grid, scale_time, depth_upscale_factor, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume_space)
 
 	# loss_metrics(x_grid, plot_on = True, grid_ind = n)
 	# # nn_distance_stats(ftrns1_abs(x_grid)/1000.0, w_scale = scale_time/1000.0)
 	# nn_distance_stats(ftrns1_abs(x_grid), scale_time, Volume_space, time_shift_range)
 	x_grids.append(np.expand_dims(x_grid, axis = 0))
+
+
+            # trial_points, mask_points = regular_sobolov(
+            #     number_candidate_nodes, 
+            #     lat_range=self.ranges[0], 
+            #     lon_range=self.ranges[1], 
+            #     depth_range=self.ranges[2], 
+            #     time_range=self.time_range, 
+            #     use_time=use_time_shift, 
+            #     use_global=self.use_global, 
+            #     scale_time=scale_t, 
+            #     N_target=self.target_N, 
+            #     buffer_scale=buffer_scale
+            # )        
+
+            # # 2. RUN FPS (Physical -> Scaled Search Space)
+            # # fps returns the selected physical [Lat, Lon, Depth, Time] points
+            # x_grid = farthest_point_sampling(
+            #     ftrns1_abs(trial_points), 
+            #     self.target_N, 
+            #     scale_time=scale_t, 
+            #     depth_boost=depth_boost, 
+            #     mask_candidates=mask_points
+            # )        
 
 
 x_grids = np.vstack(x_grids)
