@@ -709,7 +709,7 @@ def get_wgs84_area_val(lat_deg):
     e2 = 0.00669437999014  # WGS84 eccentricity squared
     e = np.sqrt(e2)
     sin_phi = np.sin(lat_rad)
-    sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
+    sin_phi = np.clip(sin_phi, -0.999999, 0.999999)
 
     # Standard formula for ellipsoidal surface area relative to latitude
     term1 = (1 - e2) * sin_phi / (1 - e2 * sin_phi**2)
@@ -1056,85 +1056,290 @@ def get_natural_scale_t(Volume_space, time_range_total, target_V_eff=8000.0):
 #         term2 = (1 / (2 * e)) * np.log((1 - e * sin_lat) / (1 + e * sin_lat))
 #         return (1 - e**2) * (term1 - term2)
 
-def get_dim_density_ellipsoidal(data, bounds, name, N, frac_edge = 0.2, earth_radius=earth_radius):
+# def get_dim_density_ellipsoidal(data, bounds, name, N, frac_edge = 0.03, earth_radius=earth_radius):
 
-    num_bins = int(1.0/frac_edge)
-    counts, edges = np.histogram(data, bins = num_bins, range = (bounds[0], bounds[1]))
+#     num_bins = int(1.0/frac_edge)
+#     counts, edges = np.histogram(data, bins = num_bins, range = (bounds[0], bounds[1]))
     
-    # WGS84 Eccentricity
-    e = 0.0818191908426
+#     # WGS84 Eccentricity
+#     e = 0.0818191908426
 
-    def get_q_wgs84(lat_deg):
-        sin_lat = np.sin(np.deg2rad(lat_deg))
-        # Ensure we don't have log(0) at poles (though unlikely in regional)
-        sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
-        term1 = sin_lat / (1 - e**2 * sin_lat**2)
-        term2 = (1 / (2 * e)) * np.log((1 - e * sin_lat) / (1 + e * sin_lat))
-        return (1 - e**2) * (term1 - term2)
+#     def get_q_wgs84(lat_deg):
+#         sin_lat = np.sin(np.deg2rad(lat_deg))
+#         # Ensure we don't have log(0) at poles (though unlikely in regional)
+#         sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
+#         term1 = sin_lat / (1 - e**2 * sin_lat**2)
+#         term2 = (1 / (2 * e)) * np.log((1 - e * sin_lat) / (1 + e * sin_lat))
+#         return (1 - e**2) * (term1 - term2)
 
-    # --- 1. ELLIPSOIDAL WEIGHTING ---
-    if name == 'Lat':
-        # Area of an ellipsoidal belt is proportional to the difference in q values
-        q_edges = get_q_wgs84(edges)
-        bin_areas = np.diff(q_edges)
-        expected_counts = (bin_areas / np.sum(bin_areas)) * N
+#     # --- 1. ELLIPSOIDAL WEIGHTING ---
+#     if name == 'Lat':
+#         # Area of an ellipsoidal belt is proportional to the difference in q values
+#         q_edges = get_q_wgs84(edges)
+#         bin_areas = np.diff(q_edges)
+#         expected_counts = (bin_areas / np.sum(bin_areas)) * N
         
-    elif name == 'Depth':
-        # Even on an ellipsoid, the radial 'shell' volume is dominated by r^3.
-        # However, for perfection, we use r = (R_local - depth)
-        # Here we use a standard r^3 weighting:
-        r_edges = earth_radius - edges
-        bin_volumes = np.abs(np.diff(r_edges**3))
-        expected_counts = (bin_volumes / np.sum(bin_volumes)) * N
+#     elif name == 'Depth':
+#         # Even on an ellipsoid, the radial 'shell' volume is dominated by r^3.
+#         # However, for perfection, we use r = (R_local - depth)
+#         # Here we use a standard r^3 weighting:
+#         r_edges = earth_radius - edges
+#         bin_volumes = np.abs(np.diff(r_edges**3))
+#         expected_counts = (bin_volumes / np.sum(bin_volumes)) * N
         
-    else: # Time or Longitude
-        expected_counts = np.full(num_bins, N / num_bins)
+#     else: # Time or Longitude
+#         expected_counts = np.full(num_bins, N / num_bins)
 
-    # --- 2. BOUNDARY RATIO CALCULATION ---
-    # We look at the very first and very last bin
-    # Ratio > 1.0: Clumping | Ratio < 1.0: Erosion
-    boundary_ratio = (counts[0] + counts[-1]) / (expected_counts[0] + expected_counts[-1] + 1e-9)
+#     # --- 2. BOUNDARY RATIO CALCULATION ---
+#     # We look at the very first and very last bin
+#     # Ratio > 1.0: Clumping | Ratio < 1.0: Erosion
+#     boundary_ratio = (counts[0] + counts[-1]) / (expected_counts[0] + expected_counts[-1] + 1e-9)
     
-    return boundary_ratio, counts, expected_counts
+#     return boundary_ratio, counts, expected_counts
 
+
+# def check_boundary_densities(x_grid, lat_range, lon_range, depth_range, time_range, use_global = use_global):
+#     """
+#     Calls the ellipsoidal density check for each dimension and returns a health dict.
+#     """
+#     N = len(x_grid)
+#     boundary_health = {}
+    
+#     # Mapping dimensions to their grid column index and bounds
+#     dims = {
+#         'Lat':   {'idx': 0, 'bounds': lat_range},
+#         'Lon':   {'idx': 1, 'bounds': lon_range},
+#         'Depth': {'idx': 2, 'bounds': depth_range},
+#         'Time':  {'idx': 3, 'bounds': [-time_range, time_range]} # [-time_range, time_range]
+#     }
+    
+#     for name, config in dims.items():
+#         # If global, we skip Lon as it has no boundary (periodic)
+#         if name == 'Lon' and use_global:
+#             health_results[name] = 1.0 # Perfect seating by definition
+#             continue
+
+#         if name == 'Depth':
+#             val = np.linalg.norm(ftrns1_abs(x_grid), axis = 1)
+#             r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[0])])), axis=1).min()
+#             r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[1])])), axis=1).max()
+#             bounds = [r_min_local, r_max_local]
+
+#         else:
+#             val = x_grid[:, config['idx']]
+#             bounds = config['bounds']
+            
+#         ratio, counts, expected = get_dim_density_ellipsoidal(
+#             data=val,
+#             bounds=bounds,
+#             name=name,
+#             N=N
+#         )
+#         boundary_health[name] = ratio
+        
+#     return boundary_health
+
+
+
+# def get_dim_density_ellipsoidal(data, bounds, name, N, frac_edge = 0.03, r_context = None, earth_radius = earth_radius):
+
+#     num_bins = int(1.0/frac_edge)
+#     counts, edges = np.histogram(data, bins = num_bins, range = (bounds[0], bounds[1]))
+    
+#     # WGS84 Eccentricity
+#     e = 0.0818191908426
+
+#     def get_q_wgs84(lat_deg):
+#         sin_lat = np.sin(np.deg2rad(lat_deg))
+#         # Ensure we don't have log(0) at poles (though unlikely in regional)
+#         sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
+#         term1 = sin_lat / (1 - e**2 * sin_lat**2)
+#         term2 = (1 / (2 * e)) * np.log((1 - e * sin_lat) / (1 + e * sin_lat))
+#         return (1 - e**2) * (term1 - term2)
+
+#     # --- 1. ELLIPSOIDAL WEIGHTING ---
+#     if name == 'Lat':
+#         # Area of an ellipsoidal belt is proportional to the difference in q values
+#         q_edges = get_q_wgs84(edges)
+#         bin_areas = np.diff(q_edges)
+#         expected_counts = (bin_areas / np.sum(bin_areas)) * N
+        
+#     # elif name == 'Depth':
+#     #     # Even on an ellipsoid, the radial 'shell' volume is dominated by r^3.
+#     #     # However, for perfection, we use r = (R_local - depth)
+#     #     # Here we use a standard r^3 weighting:
+#     #     r_edges = earth_radius - edges
+#     #     bin_volumes = np.abs(np.diff(r_edges**3))
+#     #     expected_counts = (bin_volumes / np.sum(bin_volumes)) * N
+
+#     elif name == 'Depth' and r_context is not None:
+
+#         r_min, delta_r = r_context
+#         # edges are norm values 0 to 1
+#         # r_edges = r_min + (linear_step * delta_r)
+#         r_edges = r_min + edges * delta_r
+        
+#         # Volume of a shell slice is r_outer^3 - r_inner^3
+#         # Since r_edges is strictly increasing, diff is positive
+#         bin_volumes = np.diff(r_edges**3)
+        
+#         expected_counts = (bin_volumes / (np.sum(bin_volumes) + 1e-12)) * N
+
+        
+#     else: # Time or Longitude
+#         expected_counts = np.full(num_bins, N / num_bins)
+
+#     # --- 2. BOUNDARY RATIO CALCULATION ---
+#     # We look at the very first and very last bin
+#     # Ratio > 1.0: Clumping | Ratio < 1.0: Erosion
+#     boundary_ratio = (counts[0] + counts[-1]) / (expected_counts[0] + expected_counts[-1] + 1e-9)
+    
+#     return boundary_ratio, counts, expected_counts
+
+
+# def check_boundary_densities(x_grid, lat_range, lon_range, depth_range, time_range, use_global = use_global):
+#     """
+#     Calls the ellipsoidal density check for each dimension and returns a health dict.
+#     """
+#     N = len(x_grid)
+#     boundary_health = {}
+    
+#     # Mapping dimensions to their grid column index and bounds
+#     dims = {
+#         'Lat':   {'idx': 0, 'bounds': lat_range},
+#         'Lon':   {'idx': 1, 'bounds': lon_range},
+#         'Depth': {'idx': 2, 'bounds': depth_range},
+#         'Time':  {'idx': 3, 'bounds': [-time_range, time_range]} # [-time_range, time_range]
+#     }
+    
+#     for name, config in dims.items():
+
+#         # If global, we skip Lon as it has no boundary (periodic)
+#         if name == 'Lon' and use_global:
+#             health_results[name] = 1.0 # Perfect seating by definition
+
+#             continue
+
+#         if name == 'Depth':
+
+#             # 1. Project actual radii (distance from geocenter)
+#             r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+            
+#             # 2. Project local radii for your specific depth limits
+#             # depth_range[0] is typically the 'start' and [1] the 'end'
+#             # We determine which is physically lower vs higher
+#             r_bound_0 = np.linalg.norm(ftrns1_abs(np.c_[x_grid[:,:2], np.full(N, depth_range[0])]), axis=1)
+#             r_bound_1 = np.linalg.norm(ftrns1_abs(np.c_[x_grid[:,:2], np.full(N, depth_range[1])]), axis=1)
+            
+#             r_min_local = np.minimum(r_bound_0, r_bound_1)
+#             r_max_local = np.maximum(r_bound_0, r_bound_1)
+            
+#             # 3. Normalize: 0.0 (Deepest/Bottom) to 1.0 (Highest/Top)
+#             val = (r_actual**3 - r_min_local**3) / (r_max_local**3 - r_min_local**3 + 1e-12)
+#             bounds = [0.0, 1.0]
+            
+#             # 4. Context for the r^3 expectation
+#             avg_r_min = np.mean(r_min_local)
+#             avg_delta_r = np.mean(r_max_local - r_min_local)
+            
+#             ratio, counts, expected = get_dim_density_ellipsoidal(
+#                 data=val,
+#                 bounds=bounds,
+#                 name=name,
+#                 N=N,
+#                 r_context=(avg_r_min, avg_delta_r)
+#             )
+
+#         else:
+
+#             val = x_grid[:, config['idx']]
+#             bounds = config['bounds']
+            
+#         ratio, counts, expected = get_dim_density_ellipsoidal(
+#             data=val,
+#             bounds=bounds,
+#             name=name,
+#             N=N
+#         )
+#         boundary_health[name] = ratio
+        
+#     return boundary_health
+
+# def get_dim_density_simple(data, bounds, N, frac_edge=0.03):
+
+#     num_bins = int(1.0/frac_edge)
+#     counts, _ = np.histogram(data, bins=num_bins, range=(bounds[0], bounds[1]))
+#     # In this normalized space, every bin SHOULD have exactly N/num_bins points
+#     expected_per_bin = N / num_bins
+#     # Ratio of Actual Boundary counts to Expected
+#     boundary_ratio = (counts[0] + counts[-1]) / (2 * expected_per_bin + 1e-9)
+
+#     return boundary_ratio, counts, expected_per_bin
+
+def get_simple_density_ratio(normalized_data, N, frac_edge=0.1):
+    num_bins = int(1.0 / frac_edge)
+    # Histogram on the [0, 1] range
+    counts, _ = np.histogram(normalized_data, bins=num_bins, range=(0.0, 1.0))
+    
+    expected_per_bin = N / num_bins
+    
+    # Boundary Ratio: (Average of both edge bins) / (Expected)
+    # A value of 1.0 means the edges have the same density as the bulk.
+    boundary_ratio = (counts[0] + counts[-1]) / (2 * expected_per_bin + 1e-9)
+    
+    return boundary_ratio, counts
 
 def check_boundary_densities(x_grid, lat_range, lon_range, depth_range, time_range, use_global = use_global):
-    """
-    Calls the ellipsoidal density check for each dimension and returns a health dict.
-    """
+
     N = len(x_grid)
     boundary_health = {}
+    e = 0.0818191908426  # WGS84 Eccentricity
+
+    def get_q_wgs84(lat_deg):
+        sin_phi = np.sin(np.deg2rad(lat_deg))
+        sin_phi = np.clip(sin_phi, -0.999999, 0.999999)
+        t1 = sin_phi / (1 - e**2 * sin_phi**2)
+        t2 = (1 / (2 * e)) * np.log((1 - e * sin_phi) / (1 + e * sin_phi))
+        return (1 - e**2) * (t1 - t2)
+
+    # --- 1. LATITUDE (Authalic Transformation) ---
+    q_actual = get_q_wgs84(x_grid[:, 0])
+    q_min = get_q_wgs84(lat_range[0])
+    q_max = get_q_wgs84(lat_range[1])
+    val_lat = (q_actual - q_min) / (q_max - q_min + 1e-12)
+
+    # --- 2. DEPTH (Volumetric Transformation) ---
+    r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+    r_bound_0 = np.linalg.norm(ftrns1_abs(np.c_[x_grid[:,:2], np.full(N, depth_range[0])]), axis=1)
+    r_bound_1 = np.linalg.norm(ftrns1_abs(np.c_[x_grid[:,:2], np.full(N, depth_range[1])]), axis=1)
     
-    # Mapping dimensions to their grid column index and bounds
-    dims = {
-        'Lat':   {'idx': 0, 'bounds': lat_range},
-        'Lon':   {'idx': 1, 'bounds': lon_range},
-        'Depth': {'idx': 2, 'bounds': depth_range},
-        'Time':  {'idx': 3, 'bounds': [-time_range, time_range]} # [-time_range, time_range]
+    r_min_i = np.minimum(r_bound_0, r_bound_1)
+    r_max_i = np.maximum(r_bound_0, r_bound_1)
+    val_depth = (r_actual**3 - r_min_i**3) / (r_max_i**3 - r_min_i**3 + 1e-12)
+
+    # --- 3. TIME & LON (Linear Transformation) ---
+    val_time = (x_grid[:, 3] - (-time_range)) / (2 * time_range + 1e-12)
+    
+    if not use_global:
+        val_lon = (x_grid[:, 1] - lon_range[0]) / (lon_range[1] - lon_range[0] + 1e-12)
+    else:
+        val_lon = None # Skip boundary check for global periodic lon
+
+    # --- 4. UNIFIED DENSITY CALCULATION ---
+    processed_dims = {
+        'Lat': val_lat,
+        'Lon': val_lon,
+        'Depth': val_depth, 
+        'Time': val_time, 
     }
-    
-    for name, config in dims.items():
-        # If global, we skip Lon as it has no boundary (periodic)
-        if name == 'Lon' and use_global:
-            health_results[name] = 1.0 # Perfect seating by definition
+
+    for name, val in processed_dims.items():
+        if val is None:
+            boundary_health[name] = 1.0
             continue
-
-        if name == 'Depth':
-            val = np.linalg.norm(ftrns1_abs(x_grid), axis = 1)
-            r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[0])])), axis=1).min()
-            r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[1])])), axis=1).max()
-            bounds = [r_min_local, r_max_local]
-
-        else:
-            val = x_grid[:, config['idx']]
-            bounds = config['bounds']
             
-        ratio, counts, expected = get_dim_density_ellipsoidal(
-            data=val,
-            bounds=bounds,
-            name=name,
-            N=N
-        )
+        # Every dimension now uses the same simple "flat" check
+        ratio, counts = get_simple_density_ratio(val, N)
         boundary_health[name] = ratio
         
     return boundary_health
@@ -1489,7 +1694,7 @@ else:
 	buffer_scale = 2.0
 
 
-# moi
+moi
 
 
 ## Now build all spatial grids using optimal sampling strategy
@@ -1499,7 +1704,7 @@ for n in range(num_grids):
 	print('Beginning FPS sampling [%d]'%n)
 	up_sample_factor = 10 if use_time_shift == False else 20 ## Could reduce to just 10 most likely
 	number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
-	trial_points, mask_points = regular_sobolov(number_candidate_nodes, N_target = number_of_spatial_nodes, buffer_scale = buffer_scale)
+	trial_points, mask_points = regular_sobolov(number_candidate_nodes, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = number_of_spatial_nodes, buffer_scale = buffer_scale) # lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0
 	x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = mask_points)
 
 	tol_frac = 0.01
@@ -1533,6 +1738,35 @@ print('Void ratio (spatial) < 2')
 print('Void ratio (temporal) < 5')
 
 print('Should add metrics computed near boundary')
+
+
+
+# [2]. Sorted depths
+n = len(x_grid)
+# u = np.arange(1, n+1) / n
+u = np.arange(n) / (n - 1)
+iarg = np.argsort(x_grid[:,2])
+d_sorted = np.sort(x_grid[:,2])
+# expected CDF
+r_surface = np.linalg.norm(ftrns1_abs(x_grid[:,0:3]*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1)
+# r = r_surface[iarg] + d_sorted
+r = r_surface.mean() + d_sorted
+F_expected = (r**3 - r_min**3) / (r_max**3 - r_min**3)
+r2_loss = r2_score(F_expected, u)
+print('R2 of expected depth distribution: %0.8f'%r2_loss)
+
+# diagnostic plot
+if plot_on == True:
+	plt.figure()
+	plt.plot(d_sorted, u, label="empirical")
+	plt.plot(d_sorted, F_expected, "--", label="expected")
+	plt.legend()
+	fig = plt.gcf()
+	fig.set_size_inches([8,8])
+	plt.savefig(path_to_file + 'Plots' + seperator + 'grid_sorted_depths_ver_%d.png'%grid_ind, bbox_inches = 'tight', pad_inches = 0.1)
+
+
+
 
 
 ## Now build expander graphs
