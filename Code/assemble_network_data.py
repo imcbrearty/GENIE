@@ -315,9 +315,31 @@ if use_time_shift == True:
     print('Isotropic scaling effective time scale: %0.4f m/s'%scale_time_effective) ## For a given spatial and temporal volume
     ## Could use this to guide how much time window can be increased or decreased
 
+    dx = (Volume_space)**(1/3)
+    dt = 2*time_shift_range # / # (number_of_spatial_nodes**(1/4))
+    scale_time_effective = dx/dt
+    print('Isotropic scaling effective time scale: %0.4f m/s'%scale_time_effective) ## For a given spatial and temporal volume
+    ## Could use this to guide how much time window can be increased or decreased
+
+
     if use_effective_time_scale == True:
     	print('Overwriting time scale as effective time scale: %0.8f (from %0.8f)'%(scale_time_effective, scale_time))
     	scale_time = scale_time_effective # [0]
+
+def get_initial_spacing_estimates(N, Volume_space, time_range_total, scale_t):
+    # 1. Total 4D Hypervolume
+    V_4d = Volume_space * (scale_t * time_range_total)
+    
+    # 2. The Theoretical 4D spacing (if perfectly uniform)
+    # Using 1.0 as the packing factor for a simple 4D hypercube
+    d_4d = (V_4d / N)**(1/4)
+    
+    # 3. Marginalized back to physical units
+    # In the metric space, dx = dy = dz = dt_scaled = d_4d
+    expected_dx_meters = d_4d  # Because spatial scaling is 1.0
+    expected_dt_seconds = d_4d / scale_t
+    
+    return expected_dx_meters, expected_dt_seconds
 
 
 if use_time_shift == True:
@@ -439,7 +461,8 @@ def u_to_geodetic_lat(u_random, lat_range):
     
     def get_q(lat_deg):
         # q is the authalic part of the projection
-        sin_lat = np.sin(np.deg2rad(lat_deg))
+        sin_lat = np.sin(np.deg2rad(lat_deg)) # sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
+        sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
         term1 = sin_lat / (1 - e**2 * sin_lat**2)
         term2 = (1 / (2 * e)) * np.log((1 - e * sin_lat) / (1 + e * sin_lat))
         return (1 - e**2) * (term1 - term2)
@@ -679,17 +702,445 @@ use_poisson_filtering = False
 use_farthest_point_filtering = True 
 
 
-def get_wgs84_area_val(lat_deg):    
+def get_wgs84_area_val(lat_deg):
+
     """Computes the WGS84 area-proportional value for a given latitude."""
     lat_rad = np.deg2rad(lat_deg)
     e2 = 0.00669437999014  # WGS84 eccentricity squared
     e = np.sqrt(e2)
     sin_phi = np.sin(lat_rad)
+    sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
+
     # Standard formula for ellipsoidal surface area relative to latitude
     term1 = (1 - e2) * sin_phi / (1 - e2 * sin_phi**2)
     term2 = ((1 - e2) / (2 * e)) * np.log((1 - e * sin_phi) / (1 + e * sin_phi))
     return term1 - term2
+   
+
+def get_natural_scale_t(Volume_space, time_range_total, target_V_eff=8000.0):
+    """
+    Volume_space: from your compute_expected_spacing (in m^3)
+    time_range_total: full width of time (e.g., 500s)
+    target_V_eff: meters per second (seismic P-wave speed approx 8000 m/s)
+    """
+    # Characteristic spatial length (L = V^(1/3))
+    L_space = Volume_space**(1.0/3.0)
     
+    # We want (scale_t * time) to be comparable to L_space.
+    # However, to be physically resonant, scale_t should be near the velocity 
+    # that 'connects' the dimensions.
+    
+    # Method A: Isotropic (Geometry only)
+    isotropic_scale = L_space / (time_range_total + 1e-9)
+    
+    # Method B: Physical (Seismic Velocity)
+    # This is often the 'sweet spot' for seismic GNNs
+    physical_scale = target_V_eff 
+    
+    # Suggest an upper bound that allows the optimizer to find either 
+    # a geometry-driven or physics-driven balance.
+    upper_bound = max(isotropic_scale, physical_scale) * 5.0
+    return upper_bound
+
+
+# def compute_boundary_biases(x_grid, nn_4d, lat_range, lon_range, depth_range, time_range, scale_t, earth_radius=earth_radius):
+#     """
+#     Computes biases by comparing physical distances to boundaries 
+#     against the 4D metric nearest-neighbor distance.
+#     """
+#     N = len(x_grid)
+#     x_phys_3d = ftrns1_abs(x_grid[:, :3]) # Your WGS84 -> XYZ conversion
+    
+#     # 1. Temporal Bias (1D is simple)
+#     t_min, t_max = -time_range, time_range
+#     dist_t = np.minimum(np.abs(x_grid[:, 3] - t_min), np.abs(x_grid[:, 3] - t_max)) * scale_t
+#     t_bias = np.mean(dist_t) / (np.mean(nn_4d) + 1e-9)
+
+#     # 2. Radial/Depth Bias (Ellipsoidal Shell)
+#     # Distance from the center of the Earth to the node
+#     r_node = np.linalg.norm(x_phys_3d, axis=1)
+#     # The actual shell boundaries (meters from center)
+#     r_top = earth_radius - depth_range[0]
+#     r_bottom = earth_radius - depth_range[1]
+#     dist_r = np.minimum(np.abs(r_node - r_top), np.abs(r_node - r_bottom))
+#     r_bias = np.mean(dist_r) / (np.mean(nn_4d) + 1e-9)
+
+#     # 3. Lateral Bias (Regional Only)
+#     # We find the distance to the 4 vertical 'planes' defined by lat/lon
+#     # Using a simplified but accurate ellipsoidal distance for regional bounds
+#     lat_min, lat_max = lat_range
+#     lon_min, lon_max = lon_range
+    
+#     # Haversine distance to Lat/Lon lines (in meters)
+#     def haversine_m(lat1, lon1, lat2, lon2):
+#         dlat = np.deg2rad(lat2 - lat1)
+#         dlon = np.deg2rad(lon2 - lon1)
+#         a = np.sin(dlat/2)**2 + np.cos(np.deg2rad(lat1)) * np.cos(np.deg2rad(lat2)) * np.sin(dlon/2)**2
+#         return 2 * earth_radius * np.arcsin(np.sqrt(a))
+
+#     # Distance to the nearest Latitude boundary
+#     d_lat = haversine_m(x_grid[:, 0], x_grid[:, 1], 
+#                         np.clip(x_grid[:, 0], lat_min, lat_max), x_grid[:, 1])
+#     # Note: clip creates the 'closest point' on the boundary line
+#     d_lat = np.minimum(haversine_m(x_grid[:,0], x_grid[:,1], lat_min, x_grid[:,1]),
+#                        haversine_m(x_grid[:,0], x_grid[:,1], lat_max, x_grid[:,1]))
+
+#     # Distance to the nearest Longitude boundary
+#     d_lon = np.minimum(haversine_m(x_grid[:,0], x_grid[:,1], x_grid[:,0], lon_min),
+#                        haversine_m(x_grid[:,0], x_grid[:,1], x_grid[:,0], lon_max))
+
+#     lat_lon_bias = np.mean(np.minimum(d_lat, d_lon)) / (np.mean(nn_4d) + 1e-9)
+    
+#     return t_bias, r_bias, lat_lon_bias
+
+# def compute_boundary_biases(x_grid, x_phys_3d, nn_4d, lat_range, lon_range, depth_range, time_range, scale_t, depth_boost, use_global = use_global, earth_radius=6378137.0):
+#     """
+#     Computes boundary biases in the 4D metric space.
+#     Target bias is 0.5 (perfectly centered between wall and neighbors).
+#     """
+#     N = len(x_grid)
+    
+#     # 1. Temporal Boundary (Metric Space)
+#     # distance in seconds * scale_t = distance in 'scaled meters'
+#     dist_t = np.minimum(np.abs(x_grid[:, 3] - (-time_range)), 
+#                         np.abs(x_grid[:, 3] - time_range)) * scale_t
+#     t_bias = np.mean(dist_t) / (np.mean(nn_4d) + 1e-9)
+
+#     # 2. Radial/Depth Boundary (Metric Space)
+#     # We must apply depth_boost here to match the 4D metric distortion
+#     r_nodes = np.linalg.norm(x_phys_3d, axis=1)
+#     r_top = earth_radius - depth_range[0]
+#     r_bottom = earth_radius - depth_range[1]
+    
+#     # Apply boost to the differences to stay in 'metric meters'
+#     dist_r = np.minimum(np.abs(r_nodes - r_top), np.abs(r_nodes - r_bottom)) * depth_boost
+#     r_bias = np.mean(dist_r) / (np.mean(nn_4d) + 1e-9)
+
+#     # 3. Lateral Boundary (Regional Only)
+#     if not use_global:
+#         # Proper Haversine-based distance to boundary lines
+#         def dist_to_line(lats, lons, target_lat, target_lon, mode='lat'):
+#             if mode == 'lat': # Distance to a constant latitude line
+#                 dlat = np.deg2rad(target_lat - lats)
+#                 return np.abs(dlat) * earth_radius
+#             else: # Distance to a constant longitude line
+#                 dlon = np.deg2rad(target_lon - lons)
+#                 return np.abs(dlon) * earth_radius * np.cos(np.deg2rad(lats))
+
+#         d_lat = np.minimum(dist_to_line(x_grid[:,0], x_grid[:,1], lat_range[0], None, 'lat'),
+#                            dist_to_line(x_grid[:,0], x_grid[:,1], lat_range[1], None, 'lat'))
+#         d_lon = np.minimum(dist_to_line(x_grid[:,0], x_grid[:,1], None, lon_range[0], 'lon'),
+#                            dist_to_line(x_grid[:,0], x_grid[:,1], None, lon_range[1], 'lon'))
+        
+#         # Lateral scaling is 1.0, so no boost needed here
+#         lat_lon_bias = np.mean(np.minimum(d_lat, d_lon)) / (np.mean(nn_4d) + 1e-9)
+#     else:
+#         # Global Lon is periodic (no boundary); Poles are points, not edges.
+#         lat_lon_bias = 0.5 
+
+#     return t_bias, r_bias, lat_lon_bias
+
+
+# def compute_boundary_biases(x_grid, nn_4d, lat_range, lon_range, depth_range, time_range, scale_t, depth_boost, use_global = use_global):
+#     """
+#     Corrected Boundary Bias:
+#     Calculates the 4D metric distance to the nearest "hyper-plane" boundary.
+#     """
+#     N = len(x_grid)
+    
+#     # --- 1. PRECISE RADIAL BOUNDARIES ---
+#     # Use your actual projection to find the exact metric radii
+
+#     r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_boost*depth_range[0])])), axis=1)
+#     r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_boost*depth_range[1])])), axis=1)
+#     r_nodes = np.linalg.norm(ftrns1_abs(x_grid[:, :3]*np.array([1.0, 1.0, depth_boost]).reshape(1,-1)), axis=1)
+    
+#     # Boundary radial values (these vary slightly with latitude in WGS84)
+#     # For a point-by-point check:
+#     # r_top_nodes = np.linalg.norm(ftrns1_abs(np.c_[x_grid[:,:2], np.full(N, depth_range[0])]), axis=1)
+#     # r_bot_nodes = np.linalg.norm(ftrns1_abs(np.c_[x_grid[:,:2], np.full(N, depth_range[1])]), axis=1)
+    
+#     # --- 2. 4D METRIC DISTANCES TO BOUNDARIES ---
+    
+#     # Distance to Depth boundaries (Metric)
+#     dist_r_metric = np.minimum(np.abs(r_nodes - r_max_local), 
+#                                np.abs(r_nodes - r_min_local))
+    
+#     # Distance to Time boundaries (Metric)
+#     dist_t_metric = np.minimum(np.abs(x_grid[:, 3] - (-time_range)), 
+#                                np.abs(x_grid[:, 3] - time_range)) * scale_t
+
+#     # Distance to Lateral boundaries (Metric - Scaled 1.0)
+#     if not use_global:
+#         # Using the actual metric distance (Cartesian) to the boundary planes
+#         # simplified here as haversine for regional scaling
+#         d_lat = np.minimum(np.abs(x_grid[:,0] - lat_range[0]), np.abs(x_grid[:,0] - lat_range[1])) * 111319.5
+#         d_lon = np.minimum(np.abs(x_grid[:,1] - lon_range[0]), np.abs(x_grid[:,1] - lon_range[1])) * 111319.5 * np.cos(np.deg2rad(x_grid[:,0]))
+#         dist_lat_metric = np.minimum(d_lat, d_lon)
+#     else:
+#         dist_lat_metric = np.full(N, np.inf) # No lateral boundaries in global
+
+#     # --- 3. THE "TRUE" 4D PROXIMITY ---
+#     # For each point, what is the distance to the CLOSEST of all 4D boundaries?
+#     dist_to_any_boundary = np.minimum(np.minimum(dist_r_metric, dist_t_metric), dist_lat_metric)
+    
+#     # The bias is the ratio of [Dist to closest Wall] / [Dist to closest Neighbor]
+#     # In a balanced FPS grid, this ratio should converge toward 0.5.
+#     total_bias = np.mean(dist_to_any_boundary) / (np.mean(nn_4d) + 1e-9)
+    
+#     # Breakdown for diagnostic purposes
+#     r_bias_diag = np.mean(dist_r_metric) / (np.mean(nn_4d) + 1e-9)
+#     t_bias_diag = np.mean(dist_t_metric) / (np.mean(nn_4d) + 1e-9)
+
+#     return total_bias, r_bias_diag, t_bias_diag
+
+# def compute_boundary_biases(x_grid, nn_4d, lat_range, lon_range, depth_range, time_range, use_global = use_global):
+#     """
+#     Computes bias by comparing the neighbor distances of points near the 
+#     edges vs the bulk average. No unsafe coordinate projections required.
+#     """
+#     N = len(x_grid)
+#     d_bulk = np.mean(nn_4d)
+    
+#     # Define 'Edge' as the outer 5% of the range in any dimension
+#     def get_edge_mask(data, bounds, fraction=0.1):
+
+#         span = bounds[1] - bounds[0]
+#         lower = bounds[0] + fraction * span
+#         upper = bounds[1] - fraction * span
+
+#         return (data < lower) | (data > upper)
+
+#     # Masks for each dimension
+#     if use_global == False:
+#     	m_lat = get_edge_mask(x_grid[:, 0], lat_range)
+#     	m_lon = get_edge_mask(x_grid[:, 1], lon_range)
+#     else:
+#     	m_lat = np.
+
+#     m_dep = get_edge_mask(x_grid[:, 2], depth_range)
+#     m_tim = get_edge_mask(x_grid[:, 3], [-time_range, time_range])
+    
+#     # Combined mask for any spatial or temporal boundary
+#     edge_mask = m_lat | m_lon | m_dep | m_tim
+    
+#     if np.any(edge_mask):
+#         d_edge = np.mean(nn_4d[edge_mask])
+#         # Bias = How much 'roomier' or 'tighter' the edges are vs the bulk
+#         boundary_bias = d_edge / (d_bulk + 1e-9)
+#     else:
+#         boundary_bias = 1.0
+
+#     return boundary_bias, edge_mask
+
+# distribution, a point on the edge should be roughly half as far from the boundary as it is from its nearest neighbor.
+
+# If Dist 
+# Boundary
+# ​	
+#  ≪0.5×d 
+# NN
+# ​	
+#  , the point is "slamming" into the wall (Crowding).
+
+# If Dist 
+# Boundary
+# ​	
+#  ≫0.5×d 
+# NN
+# ​	
+#  , the point is "retreating" from the wall (Erosion).
+
+# def compute_boundary_biases(x_grid, nn_4d, lat_range, lon_range, depth_range, time_range, frac_edge = 0.05, use_global = use_global):
+
+#     N = len(x_grid)
+#     d_bulk = np.mean(nn_4d)
+#     # frac = 0.1 # Edge zone definition
+    
+#     def get_linear_edge_mask(data, bounds):
+#         span = bounds[1] - bounds[0]
+#         return (data < (bounds[0] + frac_edge*span) ) | (data > (bounds[1] - frac_edge*span))
+
+#     # 1. Linear dimensions are easy
+#     m_lat = get_linear_edge_mask(x_grid[:, 0], lat_range)
+#     m_depth = get_linear_edge_mask(x_grid[:, 2], depth_range)
+#     m_time = get_linear_edge_mask(x_grid[:, 3], [-time_range, time_range])
+    
+#     # 2. Longitude: The Wraparound Check
+#     if use_global:
+#         # In a global model, longitude has no "edge." 
+#         # Points at 180 are neighbors with -180.
+#         m_lon = np.zeros(N, dtype=bool)
+#     else:
+#         # Shortest angular distance to the lon_range boundaries
+#         lon_min, lon_max = lon_range
+#         lon_span = (lon_max - lon_min) % 360
+#         if lon_span == 0: lon_span = 360 # Handle full circle cases
+        
+#         # Distance from each point to the 'start' of the lon range
+#         dist_to_start = (x_grid[:, 1] - lon_min) % 360
+#         # Distance from each point to the 'end'
+#         dist_to_end = (lon_max - x_grid[:, 1]) % 360
+        
+#         m_lon = (dist_to_start < frac_edge * lon_span) | (dist_to_end < frac_edge * lon_span)
+
+#     # Combined Edge Mask
+#     edge_mask = m_lat | m_lon | m_depth | m_time
+#     # pdb.set_trace()
+    
+#     bias = np.mean(nn_4d[edge_mask]) / (d_bulk + 1e-9) if np.any(edge_mask) else 1.0
+#     bias_lat = np.mean(nn_4d[m_lat]) / (d_bulk + 1e-9) if np.any(m_lat) else 1.0
+#     bias_lon = np.mean(nn_4d[m_lon]) / (d_bulk + 1e-9) if np.any(m_lon) else 1.0
+#     bias_depth = np.mean(nn_4d[m_depth]) / (d_bulk + 1e-9) if np.any(m_depth) else 1.0
+#     bias_time = np.mean(nn_4d[m_time]) / (d_bulk + 1e-9) if np.any(m_time) else 1.0
+
+
+#     return bias, bias_lat, bias_lon, bias_depth, bias_time, {"lat": m_lat, "lon": m_lon, "dep": m_depth, "tim": m_time}
+
+
+# def compute_boundary_biases(x_grid, lat_range, lon_range, depth_range, time_range, frac_edge = 0.1, use_global = use_global):
+#     """
+#     Computes density ratios at the boundaries. 
+#     Ratio > 1.0: Clumping (Excess points at the edge)
+#     Ratio < 1.0: Erosion (Empty space at the edge)
+#     """
+#     N = len(x_grid)
+#     results = {}
+    
+#     # We check the first/last 10% of the coordinate ranges
+#     def get_dim_density(data, bounds, name):
+
+#         # Define 10 bins
+#         total_span = bounds[1] - bounds[0]        
+#         bin_number = int(1.0/frac_edge)
+#         counts, edges = np.histogram(data, bins = bin_number, range = (bounds[0], bounds[1]))
+        
+#         # In a perfect grid, every bin has N/10 points.
+#         # However, for Lat/Depth, we must normalize by volume!
+#         expected_counts = np.full(bin_number, N/bin_number)
+        
+#         if name == 'Lat':
+
+#             # Volume of a latitude slice is prop to sin(lat2) - sin(lat1)
+#             bin_lats = np.linspace(bounds[0], bounds[1], 11)
+#             vols = np.sin(np.deg2rad(bin_lats[1:])) - np.sin(np.deg2rad(bin_lats[:-1]))
+#             expected_counts = (vols / np.sum(vols)) * N
+
+#         elif name == 'Depth':
+
+#             # Volume of a shell slice is prop to r_outer^3 - r_inner^3
+#             # (Simplifying here, but ideally uses your r_max logic)
+#             bin_depths = np.linspace(bounds[0], bounds[1], 11)
+#             r = 6371 - bin_depths # earth radius - depth
+#             vols = np.abs(r[:-1]**3 - r[1:]**3)
+#             expected_counts = (vols / np.sum(vols)) * N
+            
+#         # Density Ratio = Actual / Expected
+#         # We average the two boundary bins (index 0 and index 9)
+#         boundary_density = (counts[0] + counts[-1]) / (expected_counts[0] + expected_counts[-1] + 1e-9)
+
+#         return boundary_density
+
+#     results['Time'] = get_dim_density(x_grid[:, 3], [-time_range, time_range], 'Time')
+#     results['Depth'] = get_dim_density(x_grid[:, 2], depth_range, 'Depth')
+#     results['Lat'] = get_dim_density(x_grid[:, 0], lat_range, 'Lat')
+    
+#     return results
+
+
+# def get_q_wgs84(lat_deg):
+#         sin_lat = np.sin(np.deg2rad(lat_deg))
+#         # Ensure we don't have log(0) at poles (though unlikely in regional)
+#         sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
+#         term1 = sin_lat / (1 - e**2 * sin_lat**2)
+#         term2 = (1 / (2 * e)) * np.log((1 - e * sin_lat) / (1 + e * sin_lat))
+#         return (1 - e**2) * (term1 - term2)
+
+def get_dim_density_ellipsoidal(data, bounds, name, N, frac_edge = 0.2, earth_radius=earth_radius):
+
+    num_bins = int(1.0/frac_edge)
+    counts, edges = np.histogram(data, bins = num_bins, range = (bounds[0], bounds[1]))
+    
+    # WGS84 Eccentricity
+    e = 0.0818191908426
+
+    def get_q_wgs84(lat_deg):
+        sin_lat = np.sin(np.deg2rad(lat_deg))
+        # Ensure we don't have log(0) at poles (though unlikely in regional)
+        sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
+        term1 = sin_lat / (1 - e**2 * sin_lat**2)
+        term2 = (1 / (2 * e)) * np.log((1 - e * sin_lat) / (1 + e * sin_lat))
+        return (1 - e**2) * (term1 - term2)
+
+    # --- 1. ELLIPSOIDAL WEIGHTING ---
+    if name == 'Lat':
+        # Area of an ellipsoidal belt is proportional to the difference in q values
+        q_edges = get_q_wgs84(edges)
+        bin_areas = np.diff(q_edges)
+        expected_counts = (bin_areas / np.sum(bin_areas)) * N
+        
+    elif name == 'Depth':
+        # Even on an ellipsoid, the radial 'shell' volume is dominated by r^3.
+        # However, for perfection, we use r = (R_local - depth)
+        # Here we use a standard r^3 weighting:
+        r_edges = earth_radius - edges
+        bin_volumes = np.abs(np.diff(r_edges**3))
+        expected_counts = (bin_volumes / np.sum(bin_volumes)) * N
+        
+    else: # Time or Longitude
+        expected_counts = np.full(num_bins, N / num_bins)
+
+    # --- 2. BOUNDARY RATIO CALCULATION ---
+    # We look at the very first and very last bin
+    # Ratio > 1.0: Clumping | Ratio < 1.0: Erosion
+    boundary_ratio = (counts[0] + counts[-1]) / (expected_counts[0] + expected_counts[-1] + 1e-9)
+    
+    return boundary_ratio, counts, expected_counts
+
+
+def check_boundary_densities(x_grid, lat_range, lon_range, depth_range, time_range, use_global = use_global):
+    """
+    Calls the ellipsoidal density check for each dimension and returns a health dict.
+    """
+    N = len(x_grid)
+    boundary_health = {}
+    
+    # Mapping dimensions to their grid column index and bounds
+    dims = {
+        'Lat':   {'idx': 0, 'bounds': lat_range},
+        'Lon':   {'idx': 1, 'bounds': lon_range},
+        'Depth': {'idx': 2, 'bounds': depth_range},
+        'Time':  {'idx': 3, 'bounds': [-time_range, time_range]} # [-time_range, time_range]
+    }
+    
+    for name, config in dims.items():
+        # If global, we skip Lon as it has no boundary (periodic)
+        if name == 'Lon' and use_global:
+            health_results[name] = 1.0 # Perfect seating by definition
+            continue
+
+        if name == 'Depth':
+            val = np.linalg.norm(ftrns1_abs(x_grid), axis = 1)
+            r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[0])])), axis=1).min()
+            r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[1])])), axis=1).max()
+            bounds = [r_min_local, r_max_local]
+
+        else:
+            val = x_grid[:, config['idx']]
+            bounds = config['bounds']
+            
+        ratio, counts, expected = get_dim_density_ellipsoidal(
+            data=val,
+            bounds=bounds,
+            name=name,
+            N=N
+        )
+        boundary_health[name] = ratio
+        
+    return boundary_health
+
+
+## Could add Ricci curvature to the loss function
 
 class SamplingTuner:
 
@@ -756,6 +1207,18 @@ class SamplingTuner:
             nn_dist = tree.query(x_proj_scaled, k=2)[0][:, 1]
             cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)    
 
+
+            densities = check_boundary_densities(x_grid, self.ranges[0], self.ranges[1], self.ranges[2], self.ranges[3][1], self.use_global)
+            # Weighted penalty: we care most about Depth (Surface) and Time boundaries
+            penalty_boundary = (abs(1.0 - densities['Depth']) * 1.0 +  ## Make these weights proportional to volume
+                       abs(1.0 - densities['Time']) * 1.0 + 
+                       abs(1.0 - densities['Lat']) * 1.0 + 
+                       abs(1.0 - densities['Lon']) * 1.0)/4.0
+
+            # penalty = (abs(1.0 - densities['Depth']) * 15.0 + 
+            #            abs(1.0 - densities['Time']) * 10.0 + 
+            #            abs(1.0 - densities['Lat']) * 5.0)
+
             # 4. CDF ANALYSIS (The WGS84 "Gold Standard")
             cdf_loss = 0
             N = len(x_grid)
@@ -789,10 +1252,11 @@ class SamplingTuner:
             anisotropy = np.max(spreads) / (np.min(spreads) + 1e-9)
             penalty = np.maximum(0, np.log10(anisotropy) - 1.0)**2   
 
-            return cv + (3.0 * cdf_loss) + (1.0 * penalty)
+            return cv + (3.0 * cdf_loss) + (1.0 * penalty) + (2.0 * penalty_boundary)
 
-        res = gp_minimize(objective, self.space, n_calls = n_calls, random_state = 42, verbose = True)
-        
+        # res = gp_minimize(objective, self.space, n_calls = n_calls, n_initial_points = 5, initial_point_generator = 'sobol', verbose = True) # random_state = 42
+        res = gp_minimize(objective, self.space, n_calls = n_calls, verbose = True) # random_state = 42
+
         best_scale_t, best_depth_boost, best_buffer_scale = res.x
         
 
@@ -824,82 +1288,177 @@ class SamplingTuner:
             'buffer_width_phys': buffer_width_phys
         }
 
-
 def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range, depth_range, time_range, volume_space):
-    """
-    Terminal-optimized health report for WGS84 4D grids.
-    """
+    
     N = len(x_grid)
-    full_ranges = [lat_range, lon_range, depth_range, [-time_range, time_range]]
     
-    # 1. PREP COORDINATE SPACES
-    # Scaled Metric Space (for NN stats)
-    scaling_vec = np.array([1.0, 1.0, depth_boost, scale_t])
-    x_metric = ftrns1_abs(x_grid * scaling_vec)
+    # --- 1. COORDINATE PROJECTIONS ---
+    scaling_4d = np.array([1.0, 1.0, depth_boost, scale_t])
+    x_metric_4d = ftrns1_abs(x_grid * scaling_4d)
     
-    # 2. NEAREST NEIGHBOR ANALYSIS (Metric Space)
-    tree = cKDTree(x_metric)
-    nn_dists = tree.query(x_metric, k=2)[0][:, 1]
+    # --- 2. GLOBAL 4D METRICS (The "O" Sliders) ---
+    tree_4d = cKDTree(x_metric_4d)
+    dist_4d, idx_nn = tree_4d.query(x_metric_4d, k=2)
+    nn_4d = dist_4d[:, 1]
+    nn_indices = idx_nn[:, 1] # Index of the 4D nearest neighbor
     
-    cv_nn = np.std(nn_dists) / (np.mean(nn_dists) + 1e-9)
-    hypervolume_4d = volume_space * (2.0 * time_range * scale_t)
-    expected_random_mean = 0.65 * (hypervolume_4d / N)**(1/4)
-    norm_mean = np.mean(nn_dists) / expected_random_mean
-    void_ratio = np.quantile(nn_dists, 0.99) / (np.mean(nn_dists) + 1e-9)
+    cv_4d = np.std(nn_4d) / (np.mean(nn_4d) + 1e-9)
+    v_4d = volume_space * (2.0 * time_range * scale_t)
+    expected_mean = 0.65 * (v_4d / N)**(1/4)
+    norm_mean = np.mean(nn_4d) / expected_mean
+    void_ratio = np.quantile(nn_4d, 0.99) / (np.mean(nn_4d) + 1e-9)
 
-    # 3. CDF ANALYSIS (WGS84 Corrected)
+    # --- 3. GRAPH MARGINALS & EFFECTIVE VELOCITY ---
+    # Spatial part (in km)
+    x_phys_3d_km = ftrns1_abs(x_grid[:, :3]) / 1000.0
+    dist_space = np.linalg.norm(x_phys_3d_km - x_phys_3d_km[nn_indices], axis=1)
+    
+    # Temporal part (in seconds)
+    dist_time = np.abs(x_grid[:, 3] - x_grid[nn_indices, 3])
+    
+    avg_space_km = np.mean(dist_space)
+    avg_time_s = np.mean(dist_time)
+    min_space_km = np.min(dist_space)
+    min_time_s = np.min(dist_time)
+    
+    # V_eff: How fast does one have to travel to reach the 4D neighbor?
+    # Higher scale_t = Lower V_eff (because time is 'longer')
+    v_eff = avg_space_km / (avg_time_s + 1e-9)
+    cv_space_4d = np.std(dist_space) / (avg_space_km + 1e-9)
+    cv_time_4d = np.std(dist_time) / (avg_time_s + 1e-9)
+
+
+    # --- 4. MARGINAL VOID ANALYSIS ---
+    # Spatial Void (3D): Largest spatial jump in the 4D neighbor graph
+    x_phys_3d = ftrns1_abs(x_grid[:, :3])
+    dist_space_m = np.linalg.norm(x_phys_3d - x_phys_3d[nn_indices], axis=1)
+    # Void ratio = 99th percentile distance / Mean distance
+    space_void_ratio = np.quantile(dist_space_m, 0.99) / (np.mean(dist_space_m) + 1e-9)
+    
+    # Time Void (1D): Largest temporal gap between events
+    dist_time_s = np.abs(x_grid[:, 3] - x_grid[nn_indices, 3])
+    time_void_ratio = np.quantile(dist_time_s, 0.99) / (np.mean(dist_time_s) + 1e-9)
+
+
+
+    # # # --- 3. EXPANDED BOUNDARY HEALTH CHECK ---
+    # # A. Temporal Boundary (1D)
+    # t_min, t_max = -time_range * scale_t, time_range * scale_t
+    # dist_to_t_bound = np.minimum(np.abs(x_metric_4d[:, 3] - t_min), np.abs(x_metric_4d[:, 3] - t_max))
+    # t_bias = np.mean(dist_to_t_bound) / (np.mean(nn_4d) + 1e-9)
+
+    # # B. Radial / Depth Boundary (1D in Metric Space)
+    # # We use the metric depth which includes depth_boost
+    # r_metric = np.linalg.norm(x_phys_3d, axis=1) * depth_boost
+    # r_min_m, r_max_m = r_min * depth_boost, r_max * depth_boost
+    # dist_to_r_bound = np.minimum(np.abs(r_metric - r_min_m), np.abs(r_metric - r_max_m))
+    # r_bias = np.mean(dist_to_r_bound) / (np.mean(nn_4d) + 1e-9)
+
+
+    # # C. Lateral Boundary (If Regional)
+    # if not use_global:
+    #     # Check proximity to Lat/Lon edges in degrees (roughly converted to metric for ratio)
+    #     lat_dist = np.minimum(np.abs(x_grid[:, 0] - lat_range[0]), np.abs(x_grid[:, 0] - lat_range[1])) * 111000
+    #     lon_dist = np.minimum(np.abs(x_grid[:, 1] - lon_range[0]), np.abs(x_grid[:, 1] - lon_range[1])) * 111000 * np.cos(np.deg2rad(x_grid[:,0]))
+    #     lat_lon_bias = np.mean(np.minimum(lat_dist, lon_dist)) / (np.mean(nn_4d) + 1e-9)
+    # else:
+    #     lat_lon_bias = 0.5 # Global has no lateral "edges" in Lon, and Pole effects are handled by WGS84 logic
+
+    # compute_boundary_biases(x_grid, x_phys_3d, nn_4d, lat_range, lon_range, depth_range, time_range, scale_t, depth_boost
+    # bias, bias_lat, bias_lon, bias_depth, bias_time, bias_masks = compute_boundary_biases(x_grid, nn_4d, lat_range, lon_range, depth_range, time_range) # scale_t, depth_boost
+    boundary_health = check_boundary_densities(x_grid, lat_range, lon_range, depth_range, time_range)
+    bias_lat = boundary_health['Lat']
+    bias_lon = boundary_health['Lon']
+    bias_depth = boundary_health['Depth']
+    bias_time = boundary_health['Time']
+
+
+    # --- 5. WGS84 TRANSPARENCY (CDF R2) ---
     cdf_r2s = {}
-    empirical_cdf = np.arange(N) / (N - 1)
-
-    for i, name in enumerate(["Lat", "Lon", "Depth", "Time"]):
-        if i == 0: # LATITUDE: WGS84 Authalic
-            q_vals = get_wgs84_area_val(x_grid[:, 0])
-            q_min = get_wgs84_area_val(lat_range[0])
-            q_max = get_wgs84_area_val(lat_range[1])
-            val_to_sort = (q_vals - q_min) / (q_max - q_min + 1e-12)
-            
-        elif i == 1: # LON: Linear
-            val_to_sort = (x_grid[:, i] - lon_range[0]) / (lon_range[1] - lon_range[0] + 1e-12)
-            
-        elif i == 2: # DEPTH: WGS84 Local Volume Fraction
-            r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[0])])), axis=1)
-            r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[1])])), axis=1)
-            r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
-            val_to_sort = (r_actual**3 - r_min_local**3) / (r_max_local**3 - r_min_local**3 + 1e-12)
-            
-        else: # TIME: Linear
-            val_to_sort = (x_grid[:, i] - (-time_range)) / (2.0 * time_range + 1e-12)
-
-        sorted_vals = np.sort(val_to_sort)
-        cdf_r2s[name] = r2_score(empirical_cdf, sorted_vals)
-
-    # 4. TERMINAL DIAGNOSTIC PRINT
-    print(f"\n{'='*60}")
-    print(f"       GEOMETRIC GRID HEALTH REPORT (WGS84-4D)")
-    print(f"{'='*60}")
-    print(f"Nodes (N): {N:<10} | scale_t: {scale_t:<8.1f} | d_boost: {depth_boost:<.2f}")
+    emp_cdf = np.arange(N) / (N - 1)
     
-    print(f"\n--- Uniformity Metrics (Metric Space) ---")
+
+    # Lat (Authalic)
+    q = get_wgs84_area_val(x_grid[:, 0])
+    q_min, q_max = get_wgs84_area_val(lat_range[0]), get_wgs84_area_val(lat_range[1])
+    cdf_r2s["Lat"] = r2_score(emp_cdf, np.sort((q - q_min)/(q_max - q_min + 1e-12)))
+    
+    # Lon (Linear)
+    cdf_r2s["Lon"] = r2_score(emp_cdf, np.sort((x_grid[:, 1] - lon_range[0])/(lon_range[1] - lon_range[0])))
+    
+    # Depth (WGS84 Vol Frac)
+    r_min_l = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[0])])), axis=1)
+    r_max_l = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[1])])), axis=1)
+    r_act = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+    vol_f = (r_act**3 - r_min_l**3) / (r_max_l**3 - r_min_l**3 + 1e-12)
+    cdf_r2s["Depth"] = r2_score(emp_cdf, np.sort(vol_f))
+    
+    # Time (Linear)
+    cdf_r2s["Time"] = r2_score(emp_cdf, np.sort((x_grid[:, 3] - (-time_range))/(2*time_range)))
+
+    # --- 5. TERMINAL OUTPUT ---
+    print(f"\n{'='*65}")
+    print(f"       GEOMETRIC GRID HEALTH REPORT (WGS84-4D)")
+    print(f"{'='*65}")
+    print(f"Nodes (N): {N:<8} | scale_t: {scale_t:<8.1f} | d_boost: {depth_boost:<.2f}")
+    
     def get_bar(val, ideal_min, ideal_max):
         bar = ["-"] * 20
         pos = int(min(max(val / (ideal_max * 1.5), 0), 1) * 19)
         bar[pos] = "O"
         return "".join(bar)
 
-    print(f"CV NN:           {cv_nn:.4f}  [{get_bar(cv_nn, 0.2, 0.3)}] (Goal: 0.2-0.3)")
-    print(f"Normalized Mean: {norm_mean:.4f}  [{get_bar(norm_mean, 1.4, 1.7)}] (Goal: >1.4)")
-    print(f"Void Ratio:      {void_ratio:.4f}  [{get_bar(void_ratio, 2.0, 3.0)}] (Goal: <3.0)")
-    
-    print(f"\n--- Transparency Metrics (CDF R2 Scores) ---")
+    print(f"\n[1] 4D Metric Uniformity")
+    print(f"    CV NN:           {cv_4d:.4f}  [{get_bar(cv_4d, 0.2, 0.3)}] (Goal: 0.2-0.3)")
+    print(f"    Normalized Mean: {norm_mean:.4f}  [{get_bar(norm_mean, 1.4, 1.7)}] (Goal: >1.4)")
+    print(f"    Void Ratio:      {void_ratio:.4f}  [{get_bar(void_ratio, 2.0, 3.0)}] (Goal: <3.0)")
+
+    print(f"\n[2] Graph Neighbor Marginals (4D Links)")
+    print(f"    Avg Spatial Gap: {avg_space_km:.2f} km  (CV: {cv_space_4d:.3f})")
+    print(f"    Avg Temporal Gap: {avg_time_s:.2f} s   (CV: {cv_time_4d:.3f})")
+    print(f"    Min Spatial Gap: {min_space_km:.2f} km ")
+    print(f"    Min Temporal Gap: {min_time_s:.2f} s  \n")
+
+
+    print(f"    Effective Velocity: {v_eff:.2f} km/s {'[PHYSICAL]' if 4<v_eff<10 else '[STRETCHED]'}")
+    print(f"    Void Ratio (space):  {space_void_ratio:.4f}  [{get_bar(space_void_ratio, 2.0, 3.0)}] (Goal: <3.0)")
+    print(f"    Void Ratio (time):  {time_void_ratio:.4f}  [{get_bar(time_void_ratio, 2.0, 3.0)}] (Goal: <3.0)")
+
+    # --- [3] Boundary & Edge Health ---
+    print(f"\n[3] Boundary & Edge Health (Bias Ratio)")
+    def format_bias(name, val):
+        status = "OK" if 0.7 < val < 1.3 else "BIASED"
+        return f"    {name:12}: {val:.3f} [{get_bar(val, 0.5, 1.5)}] ({status})"
+    print(format_bias("Temporal", bias_time))
+    print(format_bias("Depth/Radial", bias_depth))
+    if not use_global:
+        print(format_bias("Lat", bias_lat))
+        print(format_bias("Lon", bias_lon))
+
+
+    print(f"\n[3] WGS84 Transparency (CDF R2 Scores)")
     for name, score in cdf_r2s.items():
-        status = "PASS" if score > 0.999 else "WARN"
-        bar_len = int(score * 20)
-        bar = "#" * bar_len + " " * (20 - bar_len)
-        print(f"{name:6} R2: {score:.6f}  [{bar}] {status}")
+        status = "PASS" if score > 0.98 else "WARN"
+        print(f"    {name:6} R2: {score:.6f}  [{'#'*int(score*20):<20}] {status}")
     
-    print(f"{'='*60}\n")
-    
-    return cdf_r2s
+    # Collisions
+    collision_count = np.sum(dist_space < avg_space_km*0.5) ## Anything within half the average distance
+    print(f"\n[4] Collision Check: {collision_count} nodes < 500m apart.")
+
+    print(f"{'='*65}\n")
+    return {"cv_4d": cv_4d, "min_dist": np.min(dist_space), "collisions": collision_count, "cdf_r2s": cdf_r2s, "v_eff": v_eff}
+
+
+def save_grid_metadata(path_to_file, grid_ind, params, health):
+    meta = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "params": params,
+        "health": health,
+        "coord_system": "WGS84_Ellipsoidal_4D"
+    }
+    with open(f"{path_to_file}/grid_{grid_ind}_meta.json", 'w') as f:
+        json.dump(meta, f, indent=4)
+
 
 
 def save_grid_diagnostic_plot(x_grid, path_to_file, grid_ind):
@@ -952,7 +1511,8 @@ for n in range(num_grids):
 	assert(x_grid[:,2].max() <= (depth_range[1] + tol_frac*np.diff(depth_range)))
 	assert(len(x_grid) == number_of_spatial_nodes)
 
-	compute_final_grid_health(x_grid, scale_time, depth_upscale_factor, lat_range_extend, lon_range_extend, depth_range, time_shift_range, Volume_space)
+	if n == 0:
+		compute_final_grid_health(x_grid, scale_time, depth_upscale_factor, lat_range_extend, lon_range_extend, depth_range, time_shift_range, Volume_space)
 
 	# loss_metrics(x_grid, plot_on = True, grid_ind = n)
 	# # nn_distance_stats(ftrns1_abs(x_grid)/1000.0, w_scale = scale_time/1000.0)
@@ -1185,6 +1745,300 @@ print("✔ Script execution: Done")
 
 
 
+
+
+
+
+# def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range, depth_range, time_range, volume_space):
+#     """
+#     Terminal-optimized health report for WGS84 4D grids.
+#     """
+#     N = len(x_grid)
+#     full_ranges = [lat_range, lon_range, depth_range, [-time_range, time_range]]
+    
+#     # 1. PREP COORDINATE SPACES
+#     # Scaled Metric Space (for NN stats)
+#     scaling_vec = np.array([1.0, 1.0, depth_boost, scale_t])
+#     x_metric = ftrns1_abs(x_grid * scaling_vec)
+    
+#     # 2. NEAREST NEIGHBOR ANALYSIS (Metric Space)
+#     tree = cKDTree(x_metric)
+#     nn_dists = tree.query(x_metric, k=2)[0][:, 1]
+    
+#     cv_nn = np.std(nn_dists) / (np.mean(nn_dists) + 1e-9)
+#     hypervolume_4d = volume_space * (2.0 * time_range * scale_t)
+#     expected_random_mean = 0.65 * (hypervolume_4d / N)**(1/4)
+#     norm_mean = np.mean(nn_dists) / expected_random_mean
+#     void_ratio = np.quantile(nn_dists, 0.99) / (np.mean(nn_dists) + 1e-9)
+
+#     # 3. CDF ANALYSIS (WGS84 Corrected)
+#     cdf_r2s = {}
+#     empirical_cdf = np.arange(N) / (N - 1)
+
+#     for i, name in enumerate(["Lat", "Lon", "Depth", "Time"]):
+#         if i == 0: # LATITUDE: WGS84 Authalic
+#             q_vals = get_wgs84_area_val(x_grid[:, 0])
+#             q_min = get_wgs84_area_val(lat_range[0])
+#             q_max = get_wgs84_area_val(lat_range[1])
+#             val_to_sort = (q_vals - q_min) / (q_max - q_min + 1e-12)
+            
+#         elif i == 1: # LON: Linear
+#             val_to_sort = (x_grid[:, i] - lon_range[0]) / (lon_range[1] - lon_range[0] + 1e-12)
+            
+#         elif i == 2: # DEPTH: WGS84 Local Volume Fraction
+#             r_min_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[0])])), axis=1)
+#             r_max_local = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[1])])), axis=1)
+#             r_actual = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+#             val_to_sort = (r_actual**3 - r_min_local**3) / (r_max_local**3 - r_min_local**3 + 1e-12)
+            
+#         else: # TIME: Linear
+#             val_to_sort = (x_grid[:, i] - (-time_range)) / (2.0 * time_range + 1e-12)
+
+#         sorted_vals = np.sort(val_to_sort)
+#         cdf_r2s[name] = r2_score(empirical_cdf, sorted_vals)
+
+#     # 4. TERMINAL DIAGNOSTIC PRINT
+#     print(f"\n{'='*60}")
+#     print(f"       GEOMETRIC GRID HEALTH REPORT (WGS84-4D)")
+#     print(f"{'='*60}")
+#     print(f"Nodes (N): {N:<10} | scale_t: {scale_t:<8.1f} | d_boost: {depth_boost:<.2f}")
+    
+#     print(f"\n--- Uniformity Metrics (Metric Space) ---")
+#     def get_bar(val, ideal_min, ideal_max):
+#         bar = ["-"] * 20
+#         pos = int(min(max(val / (ideal_max * 1.5), 0), 1) * 19)
+#         bar[pos] = "O"
+#         return "".join(bar)
+
+#     print(f"CV NN:           {cv_nn:.4f}  [{get_bar(cv_nn, 0.2, 0.3)}] (Goal: 0.2-0.3)")
+#     print(f"Normalized Mean: {norm_mean:.4f}  [{get_bar(norm_mean, 1.4, 1.7)}] (Goal: >1.4)")
+#     print(f"Void Ratio:      {void_ratio:.4f}  [{get_bar(void_ratio, 2.0, 3.0)}] (Goal: <3.0)")
+    
+#     print(f"\n--- Transparency Metrics (CDF R2 Scores) ---")
+#     for name, score in cdf_r2s.items():
+#         status = "PASS" if score > 0.999 else "WARN"
+#         bar_len = int(score * 20)
+#         bar = "#" * bar_len + " " * (20 - bar_len)
+#         print(f"{name:6} R2: {score:.6f}  [{bar}] {status}")
+    
+#     print(f"{'='*60}\n")
+    
+#     return cdf_r2s
+
+
+# import numpy as np
+# from scipy.spatial import cKDTree
+# from sklearn.metrics import r2_score
+
+# def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range, depth_range, time_range, volume_space):
+#     """
+#     Complete Pre-Training Health Check for 4D Seismic Source Grids.
+#     Accounts for WGS84 Ellipsoid and provides terminal diagnostics.
+#     """
+#     N = len(x_grid)
+    
+#     # --- 1. COORDINATE PROJECTIONS ---
+#     # Metric 4D: For global uniformity
+#     scaling_4d = np.array([1.0, 1.0, depth_boost, scale_t])
+#     x_metric_4d = ftrns1_abs(x_grid * scaling_4d)
+    
+#     # Spatial 3D: For spatial voids/clustering
+#     scaling_3d = np.array([1.0, 1.0, depth_boost])
+#     x_metric_3d = ftrns1_abs(x_grid[:, :3] * scaling_3d)
+    
+#     # Physical 3D: For real-world collision checks (km)
+#     x_phys_3d_km = ftrns1_abs(x_grid[:, :3]) / 1000.0
+
+#     # --- 2. UNIFORMITY & COLLISION LOGIC ---
+#     def get_nn_stats(pts, vol, dim):
+#         dists = cKDTree(pts).query(pts, k=2)[0][:, 1]
+#         cv = np.std(dists) / (np.mean(dists) + 1e-9)
+#         k_dim = {1: 1.0, 3: 0.55, 4: 0.65}[dim] # Empirical Blue Noise constants
+#         norm_mean = np.mean(dists) / (k_dim * (vol / N)**(1/dim))
+#         void_ratio = np.quantile(dists, 0.99) / (np.mean(dists) + 1e-9)
+#         return cv, norm_mean, void_ratio, dists
+
+#     # Volumes for normalization
+#     v_4d = volume_space * (2.0 * time_range * scale_t)
+#     v_3d = volume_space
+#     v_1d = 2.0 * time_range * scale_t
+
+#     # Compute Stats
+#     cv4, nm4, vr4, _ = get_nn_stats(x_metric_4d, v_4d, 4)
+#     cv3, nm3, vr3, _ = get_nn_stats(x_metric_3d, v_3d, 3)
+#     cv1, nm1, vr1, nn1d = get_nn_stats((x_grid[:, 3] * scale_t).reshape(-1, 1), v_1d, 1)
+    
+#     # Physical Collisions
+#     nn_phys = cKDTree(x_phys_3d_km).query(x_phys_3d_km, k=2)[0][:, 1]
+#     min_dist = np.min(nn_phys)
+#     mean_dist = np.mean(nn_phys)
+#     collision_count = np.sum(nn_phys < 0.5) # Points < 500m apart
+
+#     # --- 3. WGS84 TRANSPARENCY (CDF R2) ---
+#     cdf_r2s = {}
+#     emp_cdf = np.arange(N) / (N - 1)
+    
+#     # Lat (Authalic)
+#     q = get_wgs84_area_val(x_grid[:, 0])
+#     q_min, q_max = get_wgs84_area_val(lat_range[0]), get_wgs84_area_val(lat_range[1])
+#     cdf_r2s["Lat"] = r2_score(emp_cdf, np.sort((q - q_min)/(q_max - q_min + 1e-12)))
+    
+#     # Lon (Linear)
+#     cdf_r2s["Lon"] = r2_score(emp_cdf, np.sort((x_grid[:, 1] - lon_range[0])/(lon_range[1] - lon_range[0])))
+    
+#     # Depth (WGS84 Vol Frac)
+#     r_min_l = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[0])])), axis=1)
+#     r_max_l = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[1])])), axis=1)
+#     r_act = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+#     vol_f = (r_act**3 - r_min_l**3) / (r_max_l**3 - r_min_l**3 + 1e-12)
+#     cdf_r2s["Depth"] = r2_score(emp_cdf, np.sort(vol_f))
+    
+#     # Time (Linear)
+#     cdf_r2s["Time"] = r2_score(emp_cdf, np.sort((x_grid[:, 3] - (-time_range))/(2*time_range)))
+
+#     # --- 4. THE TERMINAL REPORT ---
+#     print(f"\n{'='*65}")
+#     print(f"       PRE-TRAINING GRID CERTIFICATION (WGS84-4D)")
+#     print(f"{'='*65}")
+#     print(f"Nodes: {N} | scale_t: {scale_t:.2f} | d_boost: {depth_boost:.2f}")
+
+#     print(f"\n[1] UNIFORMITY (CV NN - Goal: 0.20-0.35)")
+#     print(f"    Full 4D:    {cv4:.4f} {'[PASS]' if 0.2<=cv4<=0.4 else '[WARN]'}")
+#     print(f"    Spatial 3D: {cv3:.4f} {'[PASS]' if 0.2<=cv3<=0.4 else '[WARN]'}")
+#     print(f"    Temporal 1D:{cv1:.4f} {'[PASS]' if 0.2<=cv1<=0.4 else '[WARN]'}")
+
+#     print(f"\n[2] SPACING & COLLISIONS")
+#     print(f"    Min / Mean Spacing: {min_dist:.3f} / {mean_dist:.3f} km")
+#     print(f"    Collisions (<500m): {collision_count} {'[CLEAN]' if collision_count==0 else '[DIRTY]'}")
+    
+#     print(f"\n[3] WGS84 TRANSPARENCY (R2 Score - Goal: >0.999)")
+#     for name, r2 in cdf_r2s.items():
+#         print(f"    {name:6} R2: {r2:.6f} {'[OK]' if r2 > 0.999 else '[FAIL]'}")
+
+#     # --- 5. BEST PARAMETER SUGGESTION LOGIC ---
+#     total_score = (cv4 < 0.35) + (all(r > 0.99 for r in cdf_r2s.values())) + (collision_count == 0)
+    
+#     print(f"\n{'='*65}")
+#     if total_score == 3:
+#         print(">>> SUGGESTION: GRID IS OPTIMAL. Proceed to model training.")
+#     elif collision_count > 0:
+#         print(">>> SUGGESTION: REDUCE N or INCREASE buffer_scale to avoid collisions.")
+#     elif cv4 > 0.4:
+#         print(">>> SUGGESTION: INCREASE up_sample_factor to improve Blue Noise quality.")
+#     else:
+#         print(">>> SUGGESTION: Adjust scale_t / depth_boost; CDF or CV is lagging.")
+#     print(f"{'='*65}\n")
+
+#     return cdf_r2s
+
+
+# def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range, depth_range, time_range, volume_space):
+#     N = len(x_grid)
+    
+#     # --- 1. COORDINATE PROJECTIONS ---
+#     scaling_4d = np.array([1.0, 1.0, depth_boost, scale_t])
+#     x_metric_4d = ftrns1_abs(x_grid * scaling_4d)
+#     x_phys_3d_km = ftrns1_abs(x_grid[:, :3]) / 1000.0
+
+#     # --- 2. GLOBAL 4D METRICS (The "O" Sliders) ---
+#     tree_4d = cKDTree(x_metric_4d)
+#     nn_4d = tree_4d.query(x_metric_4d, k=2)[0][:, 1]
+    
+#     cv_4d = np.std(nn_4d) / (np.mean(nn_4d) + 1e-9)
+#     v_4d = volume_space * (2.0 * time_range * scale_t)
+#     # Expected mean for 4D Blue Noise ~ 0.65
+#     expected_mean = 0.65 * (v_4d / N)**(1/4)
+#     norm_mean = np.mean(nn_4d) / expected_mean
+#     void_ratio = np.quantile(nn_4d, 0.99) / (np.mean(nn_4d) + 1e-9)
+
+#     # --- 3. SUB-GRID & COLLISION LOGIC ---
+#     def get_cv(pts):
+#         d = cKDTree(pts).query(pts, k=2)[0][:, 1]
+#         return np.std(d) / (np.mean(d) + 1e-9)
+
+#     cv_3d = get_cv(ftrns1_abs(x_grid[:, :3] * np.array([1.0, 1.0, depth_boost])))
+#     cv_1d = get_cv((x_grid[:, 3] * scale_t).reshape(-1, 1))
+    
+#     nn_phys = cKDTree(x_phys_3d_km).query(x_phys_3d_km, k=2)[0][:, 1]
+#     min_dist = np.min(nn_phys)
+#     collision_count = np.sum(nn_phys < 0.5)
+
+#     # --- 4. WGS84 TRANSPARENCY (CDF R2) ---
+#     cdf_r2s = {}
+#     emp_cdf = np.arange(N) / (N - 1)
+    
+#     # Lat (Authalic)
+#     q = get_wgs84_area_val(x_grid[:, 0])
+#     q_min, q_max = get_wgs84_area_val(lat_range[0]), get_wgs84_area_val(lat_range[1])
+#     cdf_r2s["Lat"] = r2_score(emp_cdf, np.sort((q - q_min)/(q_max - q_min + 1e-12)))
+    
+#     # Lon (Linear)
+#     cdf_r2s["Lon"] = r2_score(emp_cdf, np.sort((x_grid[:, 1] - lon_range[0])/(lon_range[1] - lon_range[0])))
+    
+#     # Depth (WGS84 Vol Frac)
+#     r_min_l = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[0])])), axis=1)
+#     r_max_l = np.linalg.norm(ftrns1_abs(np.hstack([x_grid[:,:2], np.full((N,1), depth_range[1])])), axis=1)
+#     r_act = np.linalg.norm(ftrns1_abs(x_grid[:, :3]), axis=1)
+#     vol_f = (r_act**3 - r_min_l**3) / (r_max_l**3 - r_min_l**3 + 1e-12)
+#     cdf_r2s["Depth"] = r2_score(emp_cdf, np.sort(vol_f))
+    
+#     # Time (Linear)
+#     cdf_r2s["Time"] = r2_score(emp_cdf, np.sort((x_grid[:, 3] - (-time_range))/(2*time_range)))
+
+#     # --- 5. TERMINAL OUTPUT ---
+#     print(f"\n{'='*60}")
+#     print(f"       GEOMETRIC GRID HEALTH REPORT (WGS84-4D)")
+#     print(f"{'='*60}")
+#     print(f"Nodes (N): {N:<8} | scale_t: {scale_t:<8.1f} | d_boost: {depth_boost:<.2f}")
+    
+#     def get_bar(val, ideal_min, ideal_max):
+#         bar = ["-"] * 20
+#         pos = int(min(max(val / (ideal_max * 1.5), 0), 1) * 19)
+#         bar[pos] = "O"
+#         return "".join(bar)
+
+#     print(f"\n--- Uniformity Metrics (Metric Space) ---")
+#     print(f"CV NN:           {cv_4d:.4f}  [{get_bar(cv_4d, 0.2, 0.3)}] (Goal: 0.2-0.3)")
+#     print(f"Normalized Mean: {norm_mean:.4f}  [{get_bar(norm_mean, 1.4, 1.7)}] (Goal: >1.4)")
+#     print(f"Void Ratio:      {void_ratio:.4f}  [{get_bar(void_ratio, 2.0, 3.0)}] (Goal: <3.0)")
+
+#     print(f"\n--- Sub-Grid Uniformity (CV) ---")
+#     print(f"Spatial 3D CV: {cv_3d:.4f} | Temporal 1D CV: {cv_1d:.4f}")
+    
+#     print(f"\n--- Spacing & Collisions ---")
+#     print(f"Min Spacing: {min_dist:.3f} km | Collisions (<0.5km): {collision_count}")
+
+#     print(f"\n--- Transparency Metrics (CDF R2 Scores) ---")
+#     for name, score in cdf_r2s.items():
+#         status = "PASS" if score > 0.999 else "WARN"
+#         print(f"{name:6} R2: {score:.6f}  [{'#'*int(score*20):<20}] {status}")
+    
+#     # Recommendation Logic
+#     print(f"\n{'='*60}")
+#     if all(r > 0.999 for r in cdf_r2s.values()) and 0.2 < cv_4d < 0.4:
+#         print(">>> SUGGESTION: GRID IS OPTIMAL.")
+#     else:
+#         print(">>> SUGGESTION: ADJUST PARAMETERS (Check WARN fields).")
+#     print(f"{'='*60}\n")
+
+#     return {"cv_4d": cv_4d, "min_dist": min_dist, "collisions": collision_count, "cdf_r2s": cdf_r2s}
+
+
+# import numpy as np
+# import json
+# import datetime
+# from scipy.spatial import cKDTree
+# from sklearn.metrics import r2_score
+
+# def get_wgs84_area_val(lat_deg):
+#     """Computes the WGS84 authalic (equal-area) value for a given latitude."""
+#     lat_rad = np.deg2rad(lat_deg)
+#     e2 = 0.00669437999014  # WGS84 eccentricity squared
+#     e = np.sqrt(e2)
+#     sin_phi = np.sin(lat_rad)
+#     term1 = (1 - e2) * sin_phi / (1 - e2 * sin_phi**2)
+#     term2 = ((1 - e2) / (2 * e)) * np.log((1 - e * sin_phi) / (1 + e * sin_phi))
+#     return term1 - term2
 
 
 
