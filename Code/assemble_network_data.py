@@ -293,66 +293,306 @@ r_max = -1.0*optimize_r_max(np.array([soln.x]))[0]; print('\n')
 assert(r_max >= r_min)
 
 
-### Define Fibonnaci sampling routine ####
+# ### Define Fibonnaci sampling routine ####
 
-Area_globe = 4*np.pi*(earth_radius**2)
-if use_global == True:
-    Area = 4*np.pi*(earth_radius**2)
-    Volume = (4.0*np.pi/3.0)*(r_max**3 - r_min**3)
-    Volume_space = 1.0*Volume
+# Area_globe = 4*np.pi*(earth_radius**2)
+# if use_global == True:
+#     Area = 4*np.pi*(earth_radius**2)
+#     Volume = (4.0*np.pi/3.0)*(r_max**3 - r_min**3)
+#     Volume_space = 1.0*Volume
 
-else:
-    Area = (earth_radius**2)*(np.deg2rad(lon_range_extend[1]) - np.deg2rad(lon_range_extend[0]))*(np.sin(np.pi*lat_range_extend[1]/180.0) - np.sin(np.pi*lat_range_extend[0]/180.0))
-    Volume = Area*(r_max**3 - r_min**3)/(3*(earth_radius**2))
-    Volume_space = 1.0*Volume
-
-
-## Estimate an optimal time scaling for isotropic spacing
-if use_time_shift == True:
-    dx = (Volume/number_of_spatial_nodes)**(1/3)
-    dt = 2*time_shift_range/(number_of_spatial_nodes**(1/4))
-    scale_time_effective = dx/dt
-    print('Isotropic scaling effective time scale: %0.4f m/s'%scale_time_effective) ## For a given spatial and temporal volume
-    ## Could use this to guide how much time window can be increased or decreased
-
-    dx = (Volume_space)**(1/3)
-    dt = 2*time_shift_range # / # (number_of_spatial_nodes**(1/4))
-    scale_time_effective = dx/dt
-    print('Isotropic scaling effective time scale: %0.4f m/s'%scale_time_effective) ## For a given spatial and temporal volume
-    ## Could use this to guide how much time window can be increased or decreased
+# else:
+#     Area = (earth_radius**2)*(np.deg2rad(lon_range_extend[1]) - np.deg2rad(lon_range_extend[0]))*(np.sin(np.pi*lat_range_extend[1]/180.0) - np.sin(np.pi*lat_range_extend[0]/180.0))
+#     Volume = Area*(r_max**3 - r_min**3)/(3*(earth_radius**2))
+#     Volume_space = 1.0*Volume
 
 
-    if use_effective_time_scale == True:
-    	print('Overwriting time scale as effective time scale: %0.8f (from %0.8f)'%(scale_time_effective, scale_time))
-    	scale_time = scale_time_effective # [0]
+# ## Estimate an optimal time scaling for isotropic spacing
+# if use_time_shift == True:
+#     dx = (Volume/number_of_spatial_nodes)**(1/3)
+#     dt = 2*time_shift_range/(number_of_spatial_nodes**(1/4))
+#     scale_time_effective = dx/dt
+#     print('Isotropic scaling effective time scale: %0.4f m/s'%scale_time_effective) ## For a given spatial and temporal volume
+#     ## Could use this to guide how much time window can be increased or decreased
 
-def get_initial_spacing_estimates(N, Volume_space, time_range_total, scale_t):
-    # 1. Total 4D Hypervolume
-    V_4d = Volume_space * (scale_t * time_range_total)
+#     dx = (Volume_space)**(1/3)
+#     dt = 2*time_shift_range # / # (number_of_spatial_nodes**(1/4))
+#     scale_time_effective = dx/dt
+#     print('Isotropic scaling effective time scale: %0.4f m/s'%scale_time_effective) ## For a given spatial and temporal volume
+#     ## Could use this to guide how much time window can be increased or decreased
+
+
+#     if use_effective_time_scale == True:
+#     	print('Overwriting time scale as effective time scale: %0.8f (from %0.8f)'%(scale_time_effective, scale_time))
+#     	scale_time = scale_time_effective # [0]
+
+# def get_initial_spacing_estimates(N, Volume_space, time_range_total, scale_t):
+#     # 1. Total 4D Hypervolume
+#     V_4d = Volume_space * (scale_t * time_range_total)
     
-    # 2. The Theoretical 4D spacing (if perfectly uniform)
-    # Using 1.0 as the packing factor for a simple 4D hypercube
-    d_4d = (V_4d / N)**(1/4)
+#     # 2. The Theoretical 4D spacing (if perfectly uniform)
+#     # Using 1.0 as the packing factor for a simple 4D hypercube
+#     d_4d = (V_4d / N)**(1/4)
     
-    # 3. Marginalized back to physical units
-    # In the metric space, dx = dy = dz = dt_scaled = d_4d
-    expected_dx_meters = d_4d  # Because spatial scaling is 1.0
-    expected_dt_seconds = d_4d / scale_t
+#     # 3. Marginalized back to physical units
+#     # In the metric space, dx = dy = dz = dt_scaled = d_4d
+#     expected_dx_meters = d_4d  # Because spatial scaling is 1.0
+#     expected_dt_seconds = d_4d / scale_t
     
-    return expected_dx_meters, expected_dt_seconds
+#     return expected_dx_meters, expected_dt_seconds
 
 
-if use_time_shift == True:
-	Volume = Volume*(2*scale_time*time_shift_range)
+# if use_time_shift == True:
+# 	Volume = Volume*(2*scale_time*time_shift_range)
 
-## Determine nominal node spacing
-if use_time_shift == False:
-	nominal_spacing = (Volume/(0.74048*number_of_spatial_nodes))**(1/3) ## Hex-based spacing
-	nominal_spacing_space = (Volume_space/(0.74048*number_of_spatial_nodes))**(1/3) ## Hex-based spacing
+# ## Determine nominal node spacing
+# if use_time_shift == False:
+# 	nominal_spacing = (Volume/(0.74048*number_of_spatial_nodes))**(1/3) ## Hex-based spacing
+# 	nominal_spacing_space = (Volume_space/(0.74048*number_of_spatial_nodes))**(1/3) ## Hex-based spacing
 
-else:
-	nominal_spacing = (Volume/(0.74048*number_of_spatial_nodes))**(1/4) ## Hex-based spacing
-	nominal_spacing_space = (Volume_space/(0.74048*number_of_spatial_nodes))**(1/3) ## Hex-based spacing
+# else:
+# 	nominal_spacing = (Volume/(0.74048*number_of_spatial_nodes))**(1/4) ## Hex-based spacing
+# 	nominal_spacing_space = (Volume_space/(0.74048*number_of_spatial_nodes))**(1/3) ## Hex-based spacing
+
+
+
+
+# # --- ONE CALL TO RULE THEM ALL ---
+# (Volume, Volume_space, Area, nominal_spacing, nominal_spacing_space, nominal_spacing_time) = compute_warped_expected_spacing(
+#     N=number_of_spatial_nodes,
+#     lat_range=lat_range_extend,
+#     lon_range=lon_range_extend,
+#     depth_range=depth_range,
+#     time_range=time_shift_range,
+#     scale_time=scale_time,
+#     depth_boost=depth_upscale_factor,
+#     use_global=use_global
+# )
+
+
+# print(f"--- Metric Insight Report ---")
+# print(f"Expected 4D Metric Spacing: {nominal_spacing:.2f} meters")
+# print(f"Projected Spatial Resolution: {nominal_spacing_space:.2f} meters")
+# print(f"Projected Temporal Resolution: {nominal_spacing_time:.2f} seconds")
+
+
+
+
+
+########## Determine initial nominal scales ###############
+
+# N_target = number_of_spatial_nodes
+
+# # --- PHASE 1: Baseline Spatial Resolution ---
+# # d_space tells us the physical meters between nodes in 3D
+# baseline = compute_warped_expected_spacing(
+#     N_target, lat_range=lat_range_extend, lon_range=lon_range_extend,
+#     depth_range=depth_range, time_range=time_shift_range,
+#     scale_time=1.0, depth_boost=depth_upscale_factor, use_global=use_global
+# )
+# d_space = baseline[4] # nominal_spacing_space
+
+# # Ideal temporal budget to maintain d_space (seconds)
+# dt_slice_ideal = d_space / scale_time 
+
+
+# initilization_strategy = 'KEEP_FIXED'
+# initilization_strategy = 'USE_ISOTROPIC'
+# initilization_strategy = 'ADJUST_N'
+# initilization_strategy = 'ADJUST_TIME_WINDOW'
+# initilization_strategy = 'JOINT_OPTIMIZATION'
+
+
+# # --- PHASE 2: Selection Logic ---
+# if strategy == "KEEP_FIXED":
+#     print(f"Strategy: Fixed. Scale: {scale_time}")
+
+# elif strategy == "USE_ISOTROPIC":
+#     # Match the 'Velocity' to the current N and Volume
+#     dt_slice_current = (2.0 * time_shift_range) / (N_target**0.25)
+#     scale_time = d_space / dt_slice_current
+#     print(f"Strategy: Isotropic. New Scale: {scale_time:.4f}")
+
+# elif strategy == "ADJUST_N":
+#     # Match N to the desired Scale (with Safety Cap)
+#     MAX_N = int(15e3) # 500_000 
+#     N_required = int(((scale_time * 2.0 * time_shift_range) / d_space)**4)
+    
+#     if N_required > MAX_N:
+#         print(f"Warning: Adjusted N ({N_required}) exceeds cap. Clipping to {MAX_N}")
+#         N_target = MAX_N
+#     else:
+#         N_target = N_required
+#     print(f"Strategy: Adjust N. New N: {N_target}")
+
+# elif strategy == "ADJUST_TIME_WINDOW":
+#     # Strategy 4: Change the 2T window so N points are isotropic at scale_time
+#     # Solving scale_time = d_space / ( (2*T_new) / N^(1/4) ) for T_new:
+#     # 2*T_new = (d_space * N^(1/4)) / scale_time
+#     new_total_span = (d_space * (N_target**0.25)) / scale_time
+#     time_shift_range = new_total_span / 2.0
+#     print(f"Strategy: Adjust Window. New Time Range: +/-{time_shift_range:.2f}s")
+
+# elif strategy == "JOINT_OPTIMIZATION":
+#     # 1. Set N to your maximum computational budget
+#     MAX_N_BUDGET = 200_000 
+#     N_target = MAX_N_BUDGET
+    
+#     # 2. Force scale_time to be isotropic (or a specific preferred value)
+#     # We'll use the scale_time provided in the config as the "target velocity"
+    
+#     # 3. Solve for the Time Window that makes this N and Scale isotropic:
+#     # 2*T = (d_space * N^(1/4)) / scale_time
+#     new_total_span = (d_space * (N_target**0.25)) / scale_time
+#     time_shift_range = new_total_span / 2.0
+#     print(f"Strategy: Joint Optimization. Maxed N to {N_target}, adjusted Window to +/-{time_shift_range:.2f}s")
+
+
+# # --- PHASE 3: Final Execution ---
+# number_of_spatial_nodes = N_target ## Update assignmnet of number of nodes if adjusted
+# metrics = compute_warped_expected_spacing(
+#     number_of_spatial_nodes, lat_range=lat_range_extend, lon_range=lon_range_extend,
+#     depth_range=depth_range, time_range=time_shift_range,
+#     scale_time=scale_time, depth_boost=depth_upscale_factor, use_global=use_global
+# )
+
+# Volume, Volume_space, Area, nominal_spacing, nominal_spacing_space, nominal_spacing_time = metrics
+
+# summary_data = {
+#     "Metric": ["Total Nodes (N)", "Time Scale (m/s)", "Time Window (±s)", "Spatial Res (m)", "Temporal Res (s)", "4D Joint Res (m)"],
+#     "Value": [
+#         f"{N_target:,}", 
+#         f"{scale_time:.2f}", 
+#         f"{time_shift_range:.2f}", 
+#         f"{metrics[4]:.1f}",  # nominal_spacing_space
+#         f"{metrics[5]:.3f}",  # nominal_spacing_time
+#         f"{metrics[3]:.1f}"   # nominal_spacing_4d
+#     ],
+#     "Role": ["Cost", "Velocity", "Coverage", "XY-Resolution", "T-Resolution", "FPS-Metric"]
+# }
+
+# df_summary = pd.DataFrame(summary_data)
+# print("\n" + "="*40)
+# print("      GRID CONFIGURATION SUMMARY")
+# print("="*40)
+# print(df_summary.to_string(index=False))
+# print("="*40)
+
+
+
+N_target = number_of_spatial_nodes
+
+# --- PHASE 1: Baseline Spatial Resolution ---
+baseline = compute_warped_expected_spacing(
+    N_target, lat_range=lat_range_extend, lon_range=lon_range_extend,
+    depth_range=depth_range, time_range=time_shift_range,
+    scale_time=1.0, depth_boost=depth_upscale_factor, use_global=use_global
+)
+d_space = baseline[4] # nominal_spacing_space
+
+# --- PHASE 2: Selection Logic ---
+# (Assumes 'strategy' variable is set previously)
+if strategy == "KEEP_FIXED":
+    print(f"Strategy: Fixed. Scale: {scale_time}")
+
+elif strategy == "USE_ISOTROPIC":
+    dt_slice_current = (2.0 * time_shift_range) / (N_target**0.25)
+    scale_time = d_space / dt_slice_current
+    print(f"Strategy: Isotropic. New Scale: {scale_time:.4f}")
+
+elif strategy == "ADJUST_N":
+    MAX_N = int(15e3) 
+    N_required = int(((scale_time * 2.0 * time_shift_range) / d_space)**4)
+    if N_required > MAX_N:
+        print(f"Warning: Adjusted N ({N_required}) exceeds cap. Clipping to {MAX_N}")
+        N_target = MAX_N
+    else:
+        N_target = N_required
+    print(f"Strategy: Adjust N. New N: {N_target}")
+
+elif strategy == "ADJUST_TIME_WINDOW":
+    new_total_span = (d_space * (N_target**0.25)) / scale_time
+    time_shift_range = new_total_span / 2.0
+    print(f"Strategy: Adjust Window. New Time Range: +/-{time_shift_range:.2f}s")
+
+elif strategy == "JOINT_OPTIMIZATION": 
+
+    # Starting intents
+    N_init = float(N_target)
+    T_init = float(time_shift_range)
+    target_W = scale_time 
+    # User-specified weight (Default 1.0)
+    # Higher alpha_weight = "Don't change N as much"
+
+	# Manual weighting (Replace 'getattr' with a simple variable/default)
+    # alpha_weight > 1.0 makes N "stiffer" (harder to change)
+    alpha_weight = 1.0
+
+    # alpha_weight = getattr(self, 'alpha_weight', 1.0)
+    def objective(params):
+        ln_N, ln_T = params
+        # Current scale in the warped metric: W = (d_space * N^0.25) / (2T)
+        current_W = (d_space * np.exp(ln_N)**0.25) / (2.0 * np.exp(ln_T))
+        # MOVERS DISTANCE (Log-space differences)
+        # We multiply the N-distance by alpha_weight
+        dist_N = alpha_weight * (ln_N - np.log(N_init))**2
+        dist_T = (ln_T - np.log(T_init))**2
+        # Constraint: Achieve target scale
+        constraint_penalty = 1e8 * (np.log(current_W) - np.log(target_W))**2
+        return dist_N + dist_T + constraint_penalty
+
+    # Optimize
+    res = minimize(objective, x0=[np.log(N_init), np.log(T_init)],  ## Initial bounds for N : 50 to 15e3; bounds for time: 5 s to 3600 s
+                   bounds=[(np.log(50), np.log(int(15e3))), (np.log(5.0), np.log(3600))])
+    N_target = int(np.round(np.exp(res.x[0])))
+    time_shift_range = np.exp(res.x[1])
+    # Calculate Percent Changes for the report
+    pct_change_N = (N_target / N_init - 1) * 100
+    pct_change_T = (time_shift_range / T_init - 1) * 100
+    print(f"Joint Optimization (α_weight={alpha_weight}):")
+    print(f"  -> N: {N_init:,.0f} to {N_target:,.0f} ({pct_change_N:+.1f}%)")
+    print(f"  -> T: ±{T_init:.2f}s to ±{time_shift_range:.2f}s ({pct_change_T:+.1f}%)")
+
+
+# Sync the main variable
+number_of_spatial_nodes = N_target 
+
+# --- PHASE 3: Final Execution ---
+metrics = compute_warped_expected_spacing(
+    N_target, lat_range=lat_range_extend, lon_range=lon_range_extend,
+    depth_range=depth_range, time_range=time_shift_range,
+    scale_time=scale_time, depth_boost=depth_upscale_factor, use_global=use_global
+)
+
+# Unpack for the summary
+Volume, Volume_space, Area, nominal_spacing_4d, nominal_spacing_space, nominal_spacing_time = metrics
+
+# --- SUMMARY TABLE ---
+summary_data = {
+    "Metric": ["Total Nodes (N)", "Time Scale (m/s)", "Time Window (±s)", "Spatial Res (m)", "Temporal Res (s)", "4D Joint Res (m)"],
+    "Value": [
+        f"{N_target:,}", 
+        f"{scale_time:.2f}", 
+        f"{time_shift_range:.2f}", 
+        f"{nominal_spacing_space:.1f}", 
+        f"{nominal_spacing_time:.3f}", 
+        f"{nominal_spacing_4d:.1f}"
+    ],
+    "Role": ["Cost", "Velocity", "Coverage", "XY-Resolution", "T-Resolution", "FPS-Metric"]
+}
+
+df_summary = pd.DataFrame(summary_data)
+print("\n" + "="*45)
+print(f"      GRID CONFIGURATION: {strategy}")
+print("="*45)
+print(df_summary.to_string(index=False))
+print("="*45)
+
+
+# getattr(self, 'alpha_weight', 1.0)
+
+
+########## Determine initial nominal scales ###############
 
 
 
@@ -429,6 +669,84 @@ def compute_expected_spacing(
 	nominal_spacing_time = (2.0 * time_range) / (N ** (1.0 / 4.0))
 
 	return Volume, Volume_space, nominal_spacing_4d, nominal_spacing_space, nominal_spacing_time
+
+
+def compute_warped_expected_spacing(
+	N,  # total number of points
+	lat_range=lat_range_extend,
+	lon_range=lon_range_extend,
+	depth_range=depth_range,
+	time_range=time_shift_range,  # T, full range = 2T
+	use_time=use_time_shift,
+	scale_time=scale_time,  # w_scale: length per unit time
+	depth_boost = depth_upscale_factor,
+	use_global=use_global,
+	earth_radius=6378137.0
+):
+    # 1. --- METRIC AREA ---
+    # Because of 1/r warping, the area is constant at all depths in metric space.
+    # We use the surface area at earth_radius as the reference cross-section.
+    if use_global:
+        Area_metric = 4 * np.pi * earth_radius**2
+    else:
+        dlon_deg = (lon_range[1] - lon_range[0]) % 360
+        if dlon_deg == 0 and lon_range[1] != lon_range[0]: 
+            dlon_deg = 360
+        dlon = np.deg2rad(dlon_deg)
+        sin_diff = np.sin(np.deg2rad(lat_range[1])) - np.sin(np.deg2rad(lat_range[0]))
+        Area_metric = earth_radius**2 * dlon * sin_diff
+
+    # 2. --- METRIC DEPTH (Z-Stretch) ---
+    # The physical thickness is stretched by the depth_boost factor.
+    thickness_phys = abs(depth_range[1] - depth_range[0])
+    # --- 1. Compute Metric Spatial Volume (The "Unrolled Slab") ---
+    # Use earth_radius area to account for 1/r warp and thickness*depth_boost
+    thickness_metric = (r_max - r_min) * depth_boost
+    Volume_space_metric = Area_at_surface * thickness_metric    
+
+    # --- 2. 3D Nominal Spacing (Spatial Projection) ---
+    # This tells you: "If I only had 3D space, what would the spacing be?"
+    hex_factor_3d = 0.74048
+    nominal_spacing_space = (Volume_space_metric / (hex_factor_3d * N)) ** (1.0 / 3.0)    
+
+    # --- 3. 4D Hypervolume (Space x Scaled Time) ---
+    # Total time span (2T) stretched by scale_time
+    Volume_4d_metric = Volume_space_metric * (2.0 * time_range * scale_time)    
+
+    # --- 4. 4D Joint Spacing (The FPS Target) ---
+    # This is the actual distance (in metric units) FPS will enforce
+    nominal_spacing_4d = (Volume_4d_metric / N) ** (1.0 / 4.0)    
+
+    # --- 5. "Raw" Nominal Time Spacing ---
+    # This represents the temporal "slot" width in seconds.
+    # We use the 4th-root of N to show how the 4D density partitions time.
+    nominal_spacing_time = (2.0 * time_range) / (N ** (1.0 / 4.0))
+
+    return Volume_4d_metric, Volume_space_metric, Area_metric, nominal_spacing_4d, nominal_spacing_space, nominal_spacing_time
+
+# # --- 1. Compute Metric Spatial Volume (The "Unrolled Slab") ---
+# # Use earth_radius area to account for 1/r warp and thickness*depth_boost
+# thickness_metric = (r_max - r_min) * depth_boost
+# Volume_space_metric = Area_at_surface * thickness_metric
+
+# # --- 2. 3D Nominal Spacing (Spatial Projection) ---
+# # This tells you: "If I only had 3D space, what would the spacing be?"
+# hex_factor_3d = 0.74048
+# nominal_spacing_space = (Volume_space_metric / (hex_factor_3d * N)) ** (1.0 / 3.0)
+
+# # --- 3. 4D Hypervolume (Space x Scaled Time) ---
+# # Total time span (2T) stretched by scale_time
+# hypervolume_4d_metric = Volume_space_metric * (2.0 * time_range * scale_time)
+
+# # --- 4. 4D Joint Spacing (The FPS Target) ---
+# # This is the actual distance (in metric units) FPS will enforce
+# nominal_spacing_4d = (hypervolume_4d_metric / N) ** (1.0 / 4.0)
+
+# # --- 5. "Raw" Nominal Time Spacing ---
+# # This represents the temporal "slot" width in seconds.
+# # We use the 4th-root of N to show how the 4D density partitions time.
+# nominal_spacing_time = (2.0 * time_range) / (N ** (1.0 / 4.0))
+
 
 ## Create graph functions
 
@@ -714,7 +1032,188 @@ def get_warped_metric_space(x_grid, depth_boost, scale_t, R_ref = earth_radius, 
 
 
 
-def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0):
+# def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, depth_boost = depth_upscale_factor, N_target = None, buffer_scale = 0.0):
+
+# 	if use_spherical == False:
+# 		a = 6378137.0
+# 		b = 6356752.314245
+# 	else:
+# 		a = 6371e3
+# 		b = 6371e3
+
+# 	if buffer_scale > 0.0:
+# 		## Use a buffer around min-max regions. How to estimate? First estimate volume
+# 		Volume, Volume_space, _, nominal_spacing_space, nominal_spacing_time = compute_expected_spacing(N, lat_range = lat_range, lon_range = lon_range, depth_range = depth_range, time_range = time_range, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
+# 		lat_mid = np.mean(lat_range)
+# 		pad_lat = (nominal_spacing_space * buffer_scale / earth_radius) * (180 / np.pi)
+# 		pad_lon = (nominal_spacing_space * buffer_scale / (earth_radius * np.cos(np.deg2rad(lat_mid)))) * (180 / np.pi) # Adjust lon padding for the convergence of meridians
+# 		pad_depth = nominal_spacing_space * buffer_scale # 3. Calculate Depth and Time Padding
+# 		pad_time = nominal_spacing_time * buffer_scale
+
+# 		# 4. Define New Ranges
+# 		expanded_lat = list(np.array([lat_range[0] - pad_lat, lat_range[1] + pad_lat]).clip(-90.0, 90.0)) if use_global == False else lat_range
+# 		expanded_lon = [lon_range[0] - pad_lon, lon_range[1] + pad_lon] if use_global == False else lon_range
+# 		expanded_depth = [depth_range[0] - pad_depth, depth_range[1] + pad_depth]
+# 		expanded_time = time_range + pad_time # [time_range - pad_time, time_range + pad_time] # If time_range is half-width
+# 		Volume_expanded, Volume_space_expanded, _, _, _ = compute_expected_spacing(N, lat_range = expanded_lat, lon_range = expanded_lon, depth_range = expanded_depth, time_range = expanded_time, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
+# 		N_updated = int(np.ceil(N * (Volume_expanded/Volume)))
+	
+# 	# u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random(N)
+# 	# longitude = (2*np.pi*u[:,0] - np.pi)*180.0/np.pi
+# 	# latitude = np.arccos(((a**2)*(1 - u[:,1]) + (b**2)*u[:,1] - a**2 + b**2) / (b**2 - a**2))
+
+# 	# m = int(np.ceil(np.log2(N)))
+# 	# initial_points = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random_base2(m = m)[0:N]
+
+
+# 	if buffer_scale > 0.0:
+
+# 		m = int(np.ceil(np.log2(N_updated)))
+# 		N_sobol = 2**m
+
+# 		u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random_base2(m)  # Sobol 4D
+# 		assert((len(u) == N_sobol)*(len(u) >= N_updated))
+# 		# assert(len(u) >= N_updated)
+
+# 		if use_global == False:
+# 			# phi = expanded_lon[0] + u[:,0]*(expanded_lon[1] - expanded_lon[0]) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			phi = expanded_lon[0] + u[:,0]*dlon_diff(expanded_lon) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			u_min = (1.0 + np.sin(np.deg2rad(expanded_lat[0])))/2.0
+# 			u_max = (1.0 + np.sin(np.deg2rad(expanded_lat[1])))/2.0
+# 			# theta = u_min + u[:,1]*(u_max - u_min) # *(180.0/np.pi) # np.arcsin(2 * u_lat_rescaled - 1)
+# 			# theta = np.arcsin(2 * theta - 1)*(180.0/np.pi)
+# 			theta = u_to_geodetic_lat(u[:,1], expanded_lat)
+
+# 		else:
+# 			phi = ((2 * np.pi * u[:, 0]) - np.pi)*(180.0/np.pi)                # longitude
+# 			# theta = np.arcsin(1 - 2 * u[:,1])*(180.0/np.pi)
+# 			# theta = (np.arccos(1 - 2 * u[:, 1]) - np.pi/2.0)*(180.0/np.pi)            # colatitude (equal-area on sphere)
+# 			theta = u_to_geodetic_lat(u[:,1], [-90.0, 90.0])
+
+# 		phi_wrapped = (phi + 180) % 360 - 180
+# 		# r_min_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), expanded_depth[0]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		# r_max_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), expanded_depth[1]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), np.zeros((len(phi),1))), axis = 1))
+# 		# r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+
+# 		n = xyz_surface / np.array([a**2, a**2, b**2])
+# 		n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+# 		# Local radius from center to surface point
+# 		r_surface = np.linalg.norm(xyz_surface, axis=1, keepdims=True)
+# 		# --- STEP B: Cubic Height Sampling ---
+# 		# depth_range[0] is Top (+), depth_range[1] is Bottom (-)
+# 		h_top = depth_range[0]
+# 		h_bot = depth_range[1]
+# 		# u is Sobol variable [0, 1]
+# 		# We use the cubic formula to get 'h' that respects volume growth
+# 		r_top = r_surface + h_top
+# 		r_bot = r_surface + h_bot
+# 		# Corrected height:
+# 		h_sampled = (r_bot**3 + u[:, [2]] * (r_top**3 - r_bot**3))**(1/3.0) - r_surface
+# 		# --- STEP C: Final Positioning ---
+# 		# Move from the surface XYZ along the Normal by h_sampled
+# 		xyz = xyz_surface + (n_unit * h_sampled)
+# 		x_grid = ftrns2_abs(xyz)
+
+# 		# r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+# 		# r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
+# 		# xyz = (r*xyz_surface)/r_surface
+# 		# x_grid = ftrns2_abs(xyz) 
+
+# 		if use_time == True:
+# 			t = -expanded_time + 2.0 * expanded_time * u[:, [3]]
+# 			x_grid = np.concatenate((x_grid, t), axis = 1)
+
+# 		if use_global == False:
+
+# 			lons_wrapped = (x_grid[:,1] + 180) % 360 - 180
+# 			mask_points = (x_grid[:,0] >= lat_range[0]) & (x_grid[:,0] <= lat_range[1]) & \
+# 			                   is_in_lon_range(lons_wrapped, lon_range[0], lon_range[1]) & \
+# 			                  (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0]) & \
+# 			                  (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range)) 
+
+# 		else:
+
+# 			# lons_wrapped = (x_grid[:,1] + 180) % 360 - 180
+# 			mask_points = (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0]) & \
+# 			                  (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range)) 
+
+
+
+# 		# mask_points = (x_grid[:,0] >= lat_range[0]) & (x_grid[:,0] <= lat_range[1]) & \
+# 		#                   (lons_wrapped >= lon_range[0]) & (lons_wrapped <= lon_range[1]) & \
+# 		#                   (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0]) & \
+# 		#                   (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range))
+
+
+# 		## Now retain only the fraction of boundary nodes that will emulate the right density of the target number of nodes
+# 		if N_target is not None:
+# 			ratio = (Volume_expanded - Volume)/Volume
+# 			n_boundary_retain = int(N_target*ratio)
+# 			ichoose = np.concatenate((np.where(mask_points == 1)[0], np.random.choice(np.where(mask_points == 0)[0], \
+# 				size = n_boundary_retain, replace = False)), axis = 0)
+# 			x_grid = x_grid[ichoose]
+# 			mask_points = mask_points[ichoose]
+
+
+# 		return x_grid, mask_points
+
+
+# 	else: # buffer_scale == 1.0:
+
+# 		u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random(N)  # Sobol 4D
+# 		if use_global == False:
+# 			# phi = lon_range[0] + u[:,0]*(lon_range[1] - lon_range[0]) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			phi = lon_range[0] + u[:,0]*dlon_diff(lon_range) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			u_min = (1.0 + np.sin(np.deg2rad(lat_range[0])))/2.0
+# 			u_max = (1.0 + np.sin(np.deg2rad(lat_range[1])))/2.0
+# 			# theta = u_min + u[:,1]*(u_max - u_min) # *(180.0/np.pi) # np.arcsin(2 * u_lat_rescaled - 1)
+# 			# theta = np.arcsin(2 * theta - 1)*(180.0/np.pi)
+# 			theta = u_to_geodetic_lat(u[:,1], lat_range)
+
+# 		else:
+# 			phi = ((2 * np.pi * u[:, 0]) - np.pi)*(180.0/np.pi)                # longitude
+# 			# theta = np.arcsin(1 - 2 * u[:,1])*(180.0/np.pi)
+# 			# theta = (np.arccos(1 - 2 * u[:, 1]) - np.pi/2.0)*(180.0/np.pi)            # colatitude (equal-area on sphere)
+# 			theta = u_to_geodetic_lat(u[:,1], [-90.0, 90.0])
+
+
+# 		r_min_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), depth_range[0]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		r_max_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), depth_range[1]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), np.zeros((len(phi),1))), axis = 1))
+# 		# r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+# 		# r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
+# 		# xyz = (r*xyz_surface)/r_surface
+# 		# x_grid = ftrns2_abs(xyz)
+
+# 		n = xyz_surface / np.array([a**2, a**2, b**2])
+# 		n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+# 		# Local radius from center to surface point
+# 		r_surface = np.linalg.norm(xyz_surface, axis=1, keepdims=True)
+# 		# --- STEP B: Cubic Height Sampling ---
+# 		# depth_range[0] is Top (+), depth_range[1] is Bottom (-)
+# 		h_top = depth_range[0]
+# 		h_bot = depth_range[1]
+# 		# u is Sobol variable [0, 1]
+# 		# We use the cubic formula to get 'h' that respects volume growth
+# 		r_top = r_surface + h_top
+# 		r_bot = r_surface + h_bot
+# 		# Corrected height:
+# 		h_sampled = (r_bot**3 + u[:, [2]] * (r_top**3 - r_bot**3))**(1/3.0) - r_surface
+# 		# --- STEP C: Final Positioning ---
+# 		# Move from the surface XYZ along the Normal by h_sampled
+# 		xyz = xyz_surface + (n_unit * h_sampled)
+# 		x_grid = ftrns2_abs(xyz)
+
+
+# 		if use_time == True:
+# 			t = -time_shift_range + 2 * time_shift_range * u[:, [3]]
+# 			x_grid = np.concatenate((x_grid, t), axis = 1)
+
+# 		return x_grid
+
+
+def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, depth_boost = depth_upscale_factor, N_target = None, buffer_scale = 0.0, run_checks = False):
 
 	if use_spherical == False:
 		a = 6378137.0
@@ -725,7 +1224,9 @@ def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_exten
 
 	if buffer_scale > 0.0:
 		## Use a buffer around min-max regions. How to estimate? First estimate volume
-		Volume, Volume_space, _, nominal_spacing_space, nominal_spacing_time = compute_expected_spacing(N, lat_range = lat_range, lon_range = lon_range, depth_range = depth_range, time_range = time_range, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
+		# Volume, Volume_space, _, nominal_spacing_space, nominal_spacing_time = compute_expected_spacing(N, lat_range = lat_range, lon_range = lon_range, depth_range = depth_range, time_range = time_range, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
+		Volume, Volume_space, Area_metric, _, nominal_spacing_space, nominal_spacing_time = compute_warped_expected_spacing(N, lat_range = lat_range, lon_range = lon_range, depth_range = depth_range, time_range = time_range, use_time = use_time, use_global = use_global, scale_time = scale_time, depth_boost = depth_upscale_factor)
+
 		lat_mid = np.mean(lat_range)
 		pad_lat = (nominal_spacing_space * buffer_scale / earth_radius) * (180 / np.pi)
 		pad_lon = (nominal_spacing_space * buffer_scale / (earth_radius * np.cos(np.deg2rad(lat_mid)))) * (180 / np.pi) # Adjust lon padding for the convergence of meridians
@@ -737,7 +1238,9 @@ def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_exten
 		expanded_lon = [lon_range[0] - pad_lon, lon_range[1] + pad_lon] if use_global == False else lon_range
 		expanded_depth = [depth_range[0] - pad_depth, depth_range[1] + pad_depth]
 		expanded_time = time_range + pad_time # [time_range - pad_time, time_range + pad_time] # If time_range is half-width
-		Volume_expanded, Volume_space_expanded, _, _, _ = compute_expected_spacing(N, lat_range = expanded_lat, lon_range = expanded_lon, depth_range = expanded_depth, time_range = expanded_time, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
+		# Volume_expanded, Volume_space_expanded, _, _, _ = compute_expected_spacing(N, lat_range = expanded_lat, lon_range = expanded_lon, depth_range = expanded_depth, time_range = expanded_time, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
+		Volume_expanded, Volume_space_expanded, _, _, _, _ = compute_warped_expected_spacing(N, lat_range = expanded_lat, lon_range = expanded_lon, depth_range = expanded_depth, time_range = expanded_time, use_time = use_time, use_global = use_global, scale_time = scale_time, depth_boost = depth_upscale_factor)
+
 		N_updated = int(np.ceil(N * (Volume_expanded/Volume)))
 	
 	# u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random(N)
@@ -838,6 +1341,28 @@ def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_exten
 			mask_points = mask_points[ichoose]
 
 
+        # --- CORRECTED DENSITY SANITY CHECK ---
+        if (N_target is not None)*(run_checks == True):
+            # 1. The density the Core WILL have after FPS finishes
+            target_density_core = N_target / Volume
+            
+            # 2. The density the Buffer HAS right now (the ghosts we are keeping)
+            n_buffer_retained = np.sum(mask_points == 0)
+            actual_density_buffer = n_buffer_retained / (Volume_expanded - Volume)
+            
+            # 3. The Ratio (Target is 1.0)
+            # This proves the "Wall of Ghosts" matches the "Future Grid"
+            density_ratio = actual_density_buffer / target_density_core
+            
+            print(f"--- FPS Ghost-Pressure Match ---")
+            print(f"Target Core Nodes: {N_target}")
+            print(f"Retained Ghosts:   {n_buffer_retained}")
+            print(f"Expected Core Density: {target_density_core:.2e}")
+            print(f"Actual Ghost Density:  {actual_density_buffer:.2e}")
+            print(f"Pressure Match Ratio:  {density_ratio:.4f} (Ideal: 1.0000)")
+
+
+
 		return x_grid, mask_points
 
 
@@ -893,6 +1418,7 @@ def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_exten
 			x_grid = np.concatenate((x_grid, t), axis = 1)
 
 		return x_grid
+
 
 
 
@@ -2259,8 +2785,8 @@ def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range
         return f"    {name:12}: {val:.3f} [{get_bar(val, 0.5, 1.5)}] ({status})"
     print(format_bias("Temporal", bias_time))
     print(format_bias("Depth/Radial", bias_depth))
+    print(format_bias("Lat", bias_lat))
     if not use_global:
-        print(format_bias("Lat", bias_lat))
         print(format_bias("Lon", bias_lon))
 
 
