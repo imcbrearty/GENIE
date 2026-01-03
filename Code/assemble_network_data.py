@@ -27,6 +27,7 @@ import scipy.stats.qmc as qmc
 from scipy.spatial import KDTree
 from skopt import gp_minimize
 from skopt.space import Real
+from scipy import stats
 import networkx as nx
 from utils import *
 
@@ -481,7 +482,8 @@ elif strategy == "TRIPLE_OPTIMIZATION":
     alpha_N = 1.0  # Cost of changing Node Count
     alpha_T = 5.0  # Cost of changing Time Window
     alpha_W = 2.5  # Cost of changing Velocity Scale
-    
+    alpha_V = 2.5  # Cost of missingt the target v_eff
+
     # 2. Initial State
     N_init = float(number_of_spatial_nodes)
     T_init = float(time_shift_range)
@@ -512,7 +514,7 @@ elif strategy == "TRIPLE_OPTIMIZATION":
         # # 2. The predicted effective velocity
         # # We target this to be exactly equal to curr_W
         predicted_veff = dx / (dt + 1e-9)
-		veff_error = (use_veff_error == True)*(alpha_V * 1e9 * (np.log(predicted_veff) - np.log(curr_W))**2)
+        veff_error = (use_veff_error == True)*(alpha_V * 1e9 * (np.log(predicted_veff) - np.log(curr_W))**2)
 
         # Isotropy Constraint (Log-error ensures relative scaling)
         iso_error = 1e8 * (np.log(dx) - np.log(dt * curr_W))**2
@@ -565,11 +567,16 @@ Volume, Volume_space, Area, nominal_spacing, nominal_spacing_space, nominal_spac
 dt_init_m = ( (2.0 * T_init) / (N_init**0.25) ) * W_init
 dt_final_m = nominal_spacing_time * scale_time
 
+dx = (Volume_space / number_of_spatial_nodes)**(1/3)
+dt = (2.0 * time_shift_range) / (number_of_spatial_nodes**0.25)
+v_eff = dx / (dt + 1e-9)
+
 headers = ["Metric", "Initial", "Final", "Delta %"]
 rows = [
     ["Nodes (N)", f"{int(N_init):,}", f"{number_of_spatial_nodes:,}", f"{(number_of_spatial_nodes/N_init-1)*100:+.1f}%"],
     ["Window (±s)", f"{T_init:.2f}", f"{time_shift_range:.2f}", f"{(time_shift_range/T_init-1)*100:+.1f}%"],
     ["Scale (m/s)", f"{W_init:.1f}", f"{scale_time:.1f}", f"{(scale_time/W_init-1)*100:+.1f}%"],
+    ["Time Res (m*)", f"{dt_init_m:.1f}", f"{dt_final_m:.1f}", f"{(dt_final_m/dt_init_m-1)*100:+.1f}%"],
     ["Space Res (m)", f"{baseline[4]:.1f}", f"{nominal_spacing_space:.1f}", f"{(nominal_spacing_space/baseline[4]-1)*100:+.1f}%"],
     ["Time Res (m*)", f"{dt_init_m:.1f}", f"{dt_final_m:.1f}", f"{(dt_final_m/dt_init_m-1)*100:+.1f}%"]
 ]
@@ -586,7 +593,7 @@ for r in rows:
 print("-" * 55)
 print(f"Isotropy Ratio: {nominal_spacing_space / dt_final_m:.3f} (Ideal: 1.0)")
 print("="*55 + "\n")
-
+print(f"Velocity effective: {v_eff:.3f} m/s (Chosen scale_time: {scale_time:.3f} m/s)")
 
 if number_of_spatial_nodes in [5, 25000]:
     print("!! WARNING: N hit boundary limits. Closeness to target restricted.")
@@ -645,36 +652,113 @@ def is_in_lon_range(lon, lon_min, lon_max):
 
 
 
+# def u_to_geodetic_lat(u_random, lat_range):
+#     """
+#     Converts a uniform random variable u [0, 1] to Geodetic Latitude 
+#     using an Authalic (equal-area) mapping for the WGS84 ellipsoid.
+#     """
+#     # WGS84 Constant: e (eccentricity)
+#     e = 0.0818191908426
+    
+#     def get_q(lat_deg):
+#         # q is the authalic part of the projection
+#         sin_lat = np.sin(np.deg2rad(lat_deg)) # sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
+#         # sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
+#         term1 = sin_lat / (1 - e**2 * sin_lat**2)
+#         term2 = (1 / (2 * e)) * np.log((1 - e * sin_lat) / (1 + e * sin_lat))
+#         return (1 - e**2) * (term1 - term2)
+
+#     # Calculate q limits for your range
+#     q_min = get_q(lat_range[0])
+#     q_max = get_q(lat_range[1])
+    
+#     # Target q for this point
+#     # pdb.set_trace()
+#     q_target = q_min + u_random * (q_max - q_min)
+    
+#     # Map q back to Latitude (Approximation for WGS84)
+#     # The difference between Geodetic and Authalic is very small, 
+#     # so we can use a high-order series or a simple arcsin of (q / q_polar)
+#     q_polar = get_q(90.0)
+#     return np.rad2deg(np.arcsin(q_target / q_polar))
+
+
+# def u_to_geodetic_lat(u_random, lat_range):
+#     # WGS84 Constant: e (eccentricity)
+#     e = 0.0818191908426
+#     e2 = e**2
+    
+#     def get_q(lat_deg):
+#         phi = np.deg2rad(lat_deg)
+#         sin_phi = np.sin(phi)
+#         # Standard Authalic series
+#         term1 = sin_phi / (1 - e2 * sin_phi**2)
+#         term2 = (1 / (2 * e)) * np.log((1 - e * sin_phi) / (1 + e * sin_phi))
+#         return (1 - e2) * (term1 - term2)
+
+#     # 1. Map u to the Authalic space (q)
+#     q_min = get_q(lat_range[0])
+#     q_max = get_q(lat_range[1])
+#     q_target = q_min + u_random * (q_max - q_min)
+    
+#     # 2. Convert q to Authalic Latitude (beta)
+#     q_polar = get_q(90.0)
+#     beta = np.arcsin(q_target / q_polar) # This is in Radians
+    
+#     # 3. Convert Authalic (beta) -> Geodetic (phi)
+#     # Using the 3rd order series expansion for WGS84
+#     phi = beta + (e2/3 + 31*e2**2/180 + 517*e2**3/5040) * np.sin(2*beta) + \
+#                  (23*e2**2/360 + 251*e2**3/3780) * np.sin(4*beta) + \
+#                  (761*e2**3/45360) * np.sin(6*beta)
+
+#     return np.rad2deg(phi)
+
+
 def u_to_geodetic_lat(u_random, lat_range):
-    """
-    Converts a uniform random variable u [0, 1] to Geodetic Latitude 
-    using an Authalic (equal-area) mapping for the WGS84 ellipsoid.
-    """
-    # WGS84 Constant: e (eccentricity)
-    e = 0.0818191908426
+    # WGS84 Constants
+    e = 0.0818191908426215
+    e2 = e**2
     
     def get_q(lat_deg):
-        # q is the authalic part of the projection
-        sin_lat = np.sin(np.deg2rad(lat_deg)) # sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
-        # sin_lat = np.clip(sin_lat, -0.999999, 0.999999)
-        term1 = sin_lat / (1 - e**2 * sin_lat**2)
-        term2 = (1 / (2 * e)) * np.log((1 - e * sin_lat) / (1 + e * sin_lat))
-        return (1 - e**2) * (term1 - term2)
+        phi = np.deg2rad(lat_deg)
+        s = np.sin(phi)
+        # Using the standard USGS/Snyder form for q
+        return (1 - e2) * ( (s / (1 - e2 * s**2)) - (1 / (2 * e)) * np.log((1 - e * s) / (1 + e * s)) )
 
-    # Calculate q limits for your range
+    # Step 1: Linear mapping in q-space (Area-preserving)
     q_min = get_q(lat_range[0])
     q_max = get_q(lat_range[1])
-    
-    # Target q for this point
-    # pdb.set_trace()
     q_target = q_min + u_random * (q_max - q_min)
     
-    # Map q back to Latitude (Approximation for WGS84)
-    # The difference between Geodetic and Authalic is very small, 
-    # so we can use a high-order series or a simple arcsin of (q / q_polar)
+    # Step 2: Inverse to Authalic Latitude (beta)
     q_polar = get_q(90.0)
-    return np.rad2deg(np.arcsin(q_target / q_polar))
+    # Ensure numerical safety for arcsin
+    beta = np.arcsin(np.clip(q_target / q_polar, -1.0, 1.0))
+    
+    # Step 3: Convert Authalic (beta) to Geodetic (phi)
+    # WGS84 series coefficients
+    P1 = (e2/3 + 31*e2**2/180 + 517*e2**3/5040)
+    P2 = (23*e2**2/360 + 251*e2**3/3780)
+    P3 = (761*e2**3/45360)
+    
+    phi_rad = beta + P1*np.sin(2*beta) + P2*np.sin(4*beta) + P3*np.sin(6*beta)
+    return np.rad2deg(phi_rad)
 
+def get_q_wgs84(lat_val):
+    # WGS84 Constants
+    e = 0.0818191908426215
+    e2 = e**2
+    
+    def get_q(lat_deg):
+        phi = np.deg2rad(lat_deg)
+        s = np.sin(phi)
+        # Using the standard USGS/Snyder form for q
+        return (1 - e2) * ( (s / (1 - e2 * s**2)) - (1 / (2 * e)) * np.log((1 - e * s) / (1 + e * s)) )
+
+    # Step 1: Linear mapping in q-space (Area-preserving)
+    q_val = get_q(lat_val)
+
+    return q_val
 
 
 def get_warped_metric_space(x_grid, depth_boost, scale_t, R_ref = earth_radius, scale_val = 10000.0, return_physical_units = False):
@@ -720,6 +804,245 @@ def get_warped_metric_space(x_grid, depth_boost, scale_t, R_ref = earth_radius, 
     return p4d_scaled
 
 
+# def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, depth_boost = depth_upscale_factor, N_target = None, buffer_scale = 0.0, run_checks = False):
+
+# 	if use_spherical == False:
+# 		a = 6378137.0
+# 		b = 6356752.314245
+# 	else:
+# 		a = 6371e3
+# 		b = 6371e3
+
+# 	if buffer_scale > 0.0:
+# 		## Use a buffer around min-max regions. How to estimate? First estimate volume
+# 		# Volume, Volume_space, _, nominal_spacing_space, nominal_spacing_time = compute_expected_spacing(N, lat_range = lat_range, lon_range = lon_range, depth_range = depth_range, time_range = time_range, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
+# 		Volume, Volume_space, Area_metric, _, nominal_spacing_space, nominal_spacing_time = compute_warped_expected_spacing(N, lat_range = lat_range, lon_range = lon_range, depth_range = depth_range, time_range = time_range, use_time = use_time, use_global = use_global, scale_time = scale_time, depth_boost = depth_upscale_factor)
+
+# 		lat_mid = np.mean(lat_range)
+# 		pad_lat = (nominal_spacing_space * buffer_scale / earth_radius) * (180 / np.pi)
+# 		pad_lon = (nominal_spacing_space * buffer_scale / (earth_radius * np.cos(np.deg2rad(lat_mid)))) * (180 / np.pi) # Adjust lon padding for the convergence of meridians
+# 		pad_depth = nominal_spacing_space * buffer_scale # 3. Calculate Depth and Time Padding
+# 		pad_time = nominal_spacing_time * buffer_scale
+
+# 		# 4. Define New Ranges
+# 		expanded_lat = list(np.array([lat_range[0] - pad_lat, lat_range[1] + pad_lat]).clip(-90.0, 90.0)) if use_global == False else lat_range
+# 		expanded_lon = [lon_range[0] - pad_lon, lon_range[1] + pad_lon] if use_global == False else lon_range
+# 		expanded_depth = [depth_range[0] - pad_depth, depth_range[1] + pad_depth]
+# 		expanded_time = time_range + pad_time # [time_range - pad_time, time_range + pad_time] # If time_range is half-width
+# 		# Volume_expanded, Volume_space_expanded, _, _, _ = compute_expected_spacing(N, lat_range = expanded_lat, lon_range = expanded_lon, depth_range = expanded_depth, time_range = expanded_time, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
+# 		Volume_expanded, Volume_space_expanded, _, _, _, _ = compute_warped_expected_spacing(N, lat_range = expanded_lat, lon_range = expanded_lon, depth_range = expanded_depth, time_range = expanded_time, use_time = use_time, use_global = use_global, scale_time = scale_time, depth_boost = depth_upscale_factor)
+
+# 		N_updated = int(np.ceil(N * (Volume_expanded/Volume)))
+	
+# 	# u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random(N)
+# 	# longitude = (2*np.pi*u[:,0] - np.pi)*180.0/np.pi
+# 	# latitude = np.arccos(((a**2)*(1 - u[:,1]) + (b**2)*u[:,1] - a**2 + b**2) / (b**2 - a**2))
+
+# 	# m = int(np.ceil(np.log2(N)))
+# 	# initial_points = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random_base2(m = m)[0:N]
+
+
+# 	if buffer_scale > 0.0:
+
+# 		m = int(np.ceil(np.log2(N_updated)))
+# 		N_sobol = 2**m
+
+# 		u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random_base2(m)  # Sobol 4D
+# 		assert((len(u) == N_sobol)*(len(u) >= N_updated))
+# 		# assert(len(u) >= N_updated)
+
+# 		if use_global == False:
+# 			# phi = expanded_lon[0] + u[:,0]*(expanded_lon[1] - expanded_lon[0]) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			phi = expanded_lon[0] + u[:,0]*dlon_diff(expanded_lon) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			u_min = (1.0 + np.sin(np.deg2rad(expanded_lat[0])))/2.0
+# 			u_max = (1.0 + np.sin(np.deg2rad(expanded_lat[1])))/2.0
+# 			# theta = u_min + u[:,1]*(u_max - u_min) # *(180.0/np.pi) # np.arcsin(2 * u_lat_rescaled - 1)
+# 			# theta = np.arcsin(2 * theta - 1)*(180.0/np.pi)
+# 			theta = u_to_geodetic_lat(u[:,1], expanded_lat)
+
+# 		else:
+# 			phi = ((2 * np.pi * u[:, 0]) - np.pi)*(180.0/np.pi)                # longitude
+# 			# theta = np.arcsin(1 - 2 * u[:,1])*(180.0/np.pi)
+# 			# theta = (np.arccos(1 - 2 * u[:, 1]) - np.pi/2.0)*(180.0/np.pi)            # colatitude (equal-area on sphere)
+# 			theta = u_to_geodetic_lat(u[:,1], [-90.0, 90.0])
+
+# 		phi_wrapped = (phi + 180) % 360 - 180
+# 		# r_min_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), expanded_depth[0]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		# r_max_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), expanded_depth[1]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), np.zeros((len(phi),1))), axis = 1))
+# 		# r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+
+# 		n = xyz_surface / np.array([a**2, a**2, b**2])
+# 		n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+# 		# Local radius from center to surface point
+# 		r_surface = np.linalg.norm(xyz_surface, axis=1, keepdims=True)
+# 		# --- STEP B: Cubic Height Sampling ---
+# 		# depth_range[0] is Top (+), depth_range[1] is Bottom (-)
+# 		h_top = depth_range[0]
+# 		h_bot = depth_range[1]
+# 		# u is Sobol variable [0, 1]
+# 		# We use the cubic formula to get 'h' that respects volume growth
+# 		r_top = r_surface + h_top
+# 		r_bot = r_surface + h_bot
+# 		# Corrected height:
+# 		h_sampled = (r_bot**3 + u[:, [2]] * (r_top**3 - r_bot**3))**(1/3.0) - r_surface
+# 		# --- STEP C: Final Positioning ---
+# 		# Move from the surface XYZ along the Normal by h_sampled
+# 		xyz = xyz_surface + (n_unit * h_sampled)
+# 		x_grid = ftrns2_abs(xyz)
+
+# 		# r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+# 		# r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
+# 		# xyz = (r*xyz_surface)/r_surface
+# 		# x_grid = ftrns2_abs(xyz) 
+
+# 		if use_time == True:
+# 			t = -expanded_time + 2.0 * expanded_time * u[:, [3]]
+# 			x_grid = np.concatenate((x_grid, t), axis = 1)
+
+# 		if use_global == False:
+
+# 			lons_wrapped = (x_grid[:,1] + 180) % 360 - 180
+# 			mask_points = (x_grid[:,0] >= lat_range[0]) & (x_grid[:,0] <= lat_range[1]) & \
+# 			                   is_in_lon_range(lons_wrapped, lon_range[0], lon_range[1]) & \
+# 			                  (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0]) & \
+# 			                  (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range)) 
+
+# 		else:
+
+# 			# lons_wrapped = (x_grid[:,1] + 180) % 360 - 180
+# 			mask_points = (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0]) & \
+# 			                  (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range)) 
+
+
+
+# 		# mask_points = (x_grid[:,0] >= lat_range[0]) & (x_grid[:,0] <= lat_range[1]) & \
+# 		#                   (lons_wrapped >= lon_range[0]) & (lons_wrapped <= lon_range[1]) & \
+# 		#                   (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0]) & \
+# 		#                   (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range))
+
+
+# 		## Now retain only the fraction of boundary nodes that will emulate the right density of the target number of nodes
+# 		if N_target is not None:
+# 			ratio = (Volume_expanded - Volume)/Volume
+# 			n_boundary_retain = int(N_target*ratio)
+# 			ichoose = np.concatenate((np.where(mask_points == 1)[0], np.random.choice(np.where(mask_points == 0)[0], \
+# 				size = n_boundary_retain, replace = False)), axis = 0)
+# 			x_grid = x_grid[ichoose]
+# 			mask_points = mask_points[ichoose]
+
+
+# 		# --- CORRECTED DENSITY SANITY CHECK ---
+# 		if (N_target is not None)*(run_checks == True):
+# 			# 1. The density the Core WILL have after FPS finishes
+# 			target_density_core = N_target / Volume
+# 			# 2. The density the Buffer HAS right now (the ghosts we are keeping)
+# 			n_buffer_retained = np.sum(mask_points == 0)
+# 			actual_density_buffer = n_buffer_retained / (Volume_expanded - Volume)
+# 			# 3. The Ratio (Target is 1.0)
+# 			# This proves the "Wall of Ghosts" matches the "Future Grid"
+# 			density_ratio = actual_density_buffer / target_density_core
+# 			print(f"--- FPS Ghost-Pressure Match ---")
+# 			print(f"Target Core Nodes: {N_target}")
+# 			print(f"Retained Ghosts:   {n_buffer_retained}")
+# 			print(f"Expected Core Density: {target_density_core:.2e}")
+# 			print(f"Actual Ghost Density:  {actual_density_buffer:.2e}")
+# 			print(f"Pressure Match Ratio:  {density_ratio:.4f} (Ideal: 1.0000)")
+
+
+# 		return x_grid, mask_points
+
+
+# 	else: # buffer_scale == 1.0:
+
+# 		u = scipy.stats.qmc.Sobol(d = 4 if use_time else 3, scramble = True).random(N)  # Sobol 4D
+# 		if use_global == False:
+# 			# phi = lon_range[0] + u[:,0]*(lon_range[1] - lon_range[0]) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			phi = lon_range[0] + u[:,0]*dlon_diff(lon_range) # dlon_orig = (lon_range[1] - lon_range[0]) % 360
+# 			u_min = (1.0 + np.sin(np.deg2rad(lat_range[0])))/2.0
+# 			u_max = (1.0 + np.sin(np.deg2rad(lat_range[1])))/2.0
+# 			# theta = u_min + u[:,1]*(u_max - u_min) # *(180.0/np.pi) # np.arcsin(2 * u_lat_rescaled - 1)
+# 			# theta = np.arcsin(2 * theta - 1)*(180.0/np.pi)
+# 			theta = u_to_geodetic_lat(u[:,1], lat_range)
+
+# 		else:
+# 			phi = ((2 * np.pi * u[:, 0]) - np.pi)*(180.0/np.pi)                # longitude
+# 			# theta = np.arcsin(1 - 2 * u[:,1])*(180.0/np.pi)
+# 			# theta = (np.arccos(1 - 2 * u[:, 1]) - np.pi/2.0)*(180.0/np.pi)            # colatitude (equal-area on sphere)
+# 			theta = u_to_geodetic_lat(u[:,1], [-90.0, 90.0])
+
+
+# 		r_min_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), depth_range[0]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		r_max_local = np.linalg.norm(ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), depth_range[1]*np.ones((len(phi),1))), axis = 1)), axis = 1, keepdims = True)
+# 		xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi.reshape(-1,1), np.zeros((len(phi),1))), axis = 1))
+# 		# r_surface = np.linalg.norm(xyz_surface, axis = 1, keepdims = True)
+# 		# r = (r_min_local**3 + u[:, [2]] * (r_max_local**3 - r_min_local**3)) ** (1/3.0)
+# 		# xyz = (r*xyz_surface)/r_surface
+# 		# x_grid = ftrns2_abs(xyz)
+
+# 		n = xyz_surface / np.array([a**2, a**2, b**2])
+# 		n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+# 		# Local radius from center to surface point
+# 		r_surface = np.linalg.norm(xyz_surface, axis=1, keepdims=True)
+# 		# --- STEP B: Cubic Height Sampling ---
+# 		# depth_range[0] is Top (+), depth_range[1] is Bottom (-)
+# 		h_top = depth_range[0]
+# 		h_bot = depth_range[1]
+# 		# u is Sobol variable [0, 1]
+# 		# We use the cubic formula to get 'h' that respects volume growth
+# 		r_top = r_surface + h_top
+# 		r_bot = r_surface + h_bot
+# 		# Corrected height:
+# 		h_sampled = (r_bot**3 + u[:, [2]] * (r_top**3 - r_bot**3))**(1/3.0) - r_surface
+# 		# --- STEP C: Final Positioning ---
+# 		# Move from the surface XYZ along the Normal by h_sampled
+# 		xyz = xyz_surface + (n_unit * h_sampled)
+# 		x_grid = ftrns2_abs(xyz)
+
+
+# 		if use_time == True:
+# 			t = -time_shift_range + 2 * time_shift_range * u[:, [3]]
+# 			x_grid = np.concatenate((x_grid, t), axis = 1)
+
+# 		return x_grid
+
+
+
+def get_ellipsoid_paddings(lat_min, lat_max, buffer_m):
+    # WGS84 Constants
+    a = 6378137.0
+    e2 = 0.00669437999014
+    
+    def get_radii(lat_deg):
+        phi = np.deg2rad(np.clip(lat_deg, -89.9999, 89.9999)) # # lat_deg np.clip(lat_deg, -89.9999, 89.9999)
+        denom = (1.0 - e2 * np.sin(phi)**2)**1.5
+        M = a * (1.0 - e2) / denom  # Radius for Latitude
+        N = a / np.sqrt(1.0 - e2 * np.sin(phi)**2) # Radius for Longitude
+        return M, N
+
+    # Calculate radii at both boundaries
+    M_min, N_min = get_radii(lat_min)
+    M_max, N_max = get_radii(lat_max)
+
+    # Latitude padding (Degrees) - can vary slightly min vs max
+    pad_lat_min = np.rad2deg(buffer_m / M_min)
+    pad_lat_max = np.rad2deg(buffer_m / M_max)
+
+    # Longitude padding (Degrees) - varies significantly min vs max
+    pad_lon_min = np.rad2deg(buffer_m / (N_min * np.cos(np.deg2rad(lat_min))))
+    pad_lon_max = np.rad2deg(buffer_m / (N_max * np.cos(np.deg2rad(lat_max))))
+
+    return (pad_lat_min, pad_lat_max), (pad_lon_min, pad_lon_max)
+
+# --- Implementation ---
+# (pLat_min, pLat_max), (pLon_min, pLon_max) = get_ellipsoid_paddings(lat_range[0], lat_range[1], spatial_buffer_m)
+
+# expanded_lat = [lat_range[0] - pLat_min, lat_range[1] + pLat_max]
+# We take the larger Lon pad to ensure the entire physical buffer is covered
+# max_pLon = max(pLon_min, pLon_max) 
+# expanded_lon = [lon_range[0] - max_pLon, lon_range[1] + max_pLon]
+
+
 def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, depth_boost = depth_upscale_factor, N_target = None, buffer_scale = 0.0, run_checks = False):
 
 	if use_spherical == False:
@@ -734,15 +1057,21 @@ def regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_exten
 		# Volume, Volume_space, _, nominal_spacing_space, nominal_spacing_time = compute_expected_spacing(N, lat_range = lat_range, lon_range = lon_range, depth_range = depth_range, time_range = time_range, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
 		Volume, Volume_space, Area_metric, _, nominal_spacing_space, nominal_spacing_time = compute_warped_expected_spacing(N, lat_range = lat_range, lon_range = lon_range, depth_range = depth_range, time_range = time_range, use_time = use_time, use_global = use_global, scale_time = scale_time, depth_boost = depth_upscale_factor)
 
-		lat_mid = np.mean(lat_range)
-		pad_lat = (nominal_spacing_space * buffer_scale / earth_radius) * (180 / np.pi)
-		pad_lon = (nominal_spacing_space * buffer_scale / (earth_radius * np.cos(np.deg2rad(lat_mid)))) * (180 / np.pi) # Adjust lon padding for the convergence of meridians
+		# lat_mid = np.mean(lat_range)
+		spatial_buffer_m = nominal_spacing_space * buffer_scale  # / earth_radius)
+		(pLat_min, pLat_max), (pLon_min, pLon_max) = get_ellipsoid_paddings(lat_range[0], lat_range[1], spatial_buffer_m)
+		max_pLon = max(pLon_min, pLon_max)
 		pad_depth = nominal_spacing_space * buffer_scale # 3. Calculate Depth and Time Padding
 		pad_time = nominal_spacing_time * buffer_scale
 
+		# pad_lat = (nominal_spacing_space * buffer_scale / earth_radius) * (180 / np.pi)
+		# pad_lon = (nominal_spacing_space * buffer_scale / (earth_radius * np.cos(np.deg2rad(lat_mid)))) * (180 / np.pi) # Adjust lon padding for the convergence of meridians
+
 		# 4. Define New Ranges
-		expanded_lat = list(np.array([lat_range[0] - pad_lat, lat_range[1] + pad_lat]).clip(-90.0, 90.0)) if use_global == False else lat_range
-		expanded_lon = [lon_range[0] - pad_lon, lon_range[1] + pad_lon] if use_global == False else lon_range
+		expanded_lat = list(np.array([lat_range[0] - pLat_min, lat_range[1] + pLat_max]).clip(-90.0, 90.0)) if use_global == False else lat_range
+		expanded_lon = [lon_range[0] - max_pLon, lon_range[1] + max_pLon] if use_global == False else lon_range
+		# expanded_lat = list(np.array([lat_range[0] - pad_lat, lat_range[1] + pad_lat]).clip(-90.0, 90.0)) if use_global == False else lat_range
+		# expanded_lon = [lon_range[0] - pad_lon, lon_range[1] + pad_lon] if use_global == False else lon_range
 		expanded_depth = [depth_range[0] - pad_depth, depth_range[1] + pad_depth]
 		expanded_time = time_range + pad_time # [time_range - pad_time, time_range + pad_time] # If time_range is half-width
 		# Volume_expanded, Volume_space_expanded, _, _, _ = compute_expected_spacing(N, lat_range = expanded_lat, lon_range = expanded_lon, depth_range = expanded_depth, time_range = expanded_time, use_time = use_time, use_global = use_global, scale_time = scale_time)  # w_scale: length per unit time use_global=use_global,)  # T, full range = 2T use_time=use_time_shift, scale_time=scale_time,  # w_scale: length per unit time use_global=use_global,)
@@ -1191,8 +1520,411 @@ class SamplingTuner:
 
         """Runs Bayesian Optimization to find the triplet of parameters."""
 
+
         @use_named_args(self.space)
         def objective(scale_t, depth_boost, buffer_scale):
+            # 1. GENERATE CANDIDATES
+            # We use a high up-sample factor to give FPS a dense pool to pick from
+            up_sample_factor = 20 if use_time_shift else 10
+            number_candidate_nodes = up_sample_factor * self.target_N        
+
+            trial_points, mask_points = regular_sobolov(
+                number_candidate_nodes, 
+                lat_range=self.ranges[0], 
+                lon_range=self.ranges[1], 
+                depth_range=self.ranges[2], 
+                time_range=self.time_range, 
+                use_time=use_time_shift, 
+                use_global=self.use_global, 
+                scale_time=scale_t, 
+                N_target=self.target_N, 
+                buffer_scale=buffer_scale
+            )                 
+
+            # 2. RUN FPS (Physical -> Scaled Search Space)
+            x_grid = farthest_point_sampling(
+                trial_points, 
+                self.target_N, 
+                scale_time=scale_t, 
+                depth_boost=depth_boost, 
+                mask_candidates=mask_points
+            )                 
+
+            # 3. COMPUTE 4D METRICS (Scaled Space)
+            # Get the warped metric for local regularity checks
+            x_proj_scaled = get_warped_metric_space(x_grid, depth_boost, scale_t)
+            tree = cKDTree(x_proj_scaled)
+            dist_scaled, idx_nn = tree.query(x_proj_scaled, k=2)
+            nn_dist_scaled = dist_scaled[:, 1]        
+
+            x_proj_scaled_abs = get_warped_metric_space(x_grid, depth_boost, scale_t, return_physical_units = True)
+            tree_abs = cKDTree(x_proj_scaled_abs)
+            dist_scaled_abs, idx_nn_abs = tree_abs.query(x_proj_scaled_abs, k=2)
+            nn_dist_scaled_abs = dist_scaled_abs[:, 1]
+            
+            # CV: Local Regularity (Lower is better)
+            cv = np.std(nn_dist_scaled) / (np.mean(nn_dist_scaled) + 1e-9)        
+
+            # 4. COMPUTE VOLUME EFFICIENCY (Normalized Mean)
+            # Get physical volume for the density expectation
+            metrics = compute_warped_expected_spacing(
+                self.target_N, 
+                lat_range=self.ranges[0], lon_range=self.ranges[1],
+                depth_range=self.ranges[2], time_range=self.time_range,
+                scale_time=scale_t, depth_boost=depth_boost, 
+                use_global=self.use_global
+            )
+            volume_4d_warped = metrics[0]
+            
+            # 0.463 is the 4D Poisson constant for a hypersphere
+            expected_mean_scaled = 0.463 * (volume_4d_warped / self.target_N)**(0.25)
+            norm_mean = np.mean(nn_dist_scaled_abs) / expected_mean_scaled
+            
+            # Hinge Loss: Penalty only if below the 1.4 "Physical Floor"
+            penalty_norm = max(0, 1.4 - norm_mean) ** 2        
+
+            # 5. COMPUTE ACTUAL GRAPH VELOCITY (The Balance Check)
+            # x_grid is [Lat, Lon, Depth, Time]
+            nn_indices = idx_nn[:, 1]
+            x_neighbors = x_grid[nn_indices]
+            
+            # Spatial distance (km) using the ellipsoidal transformation
+            dx_vec = ftrns1_abs(x_grid[:, :3]) - ftrns1_abs(x_neighbors[:, :3])
+            dist_space_km = np.linalg.norm(dx_vec, axis=1) / 1000.0
+            
+            # Temporal distance (seconds)
+            dt_sec = np.abs(x_grid[:, 3] - x_neighbors[:, 3])
+            
+            # Median velocity of neighbors (km/s)
+            actual_v = np.median(dist_space_km / (dt_sec + 1e-9))
+            target_v = scale_t / 1000.0
+            loss_isotropy = (np.log10(actual_v / target_v)) ** 2        
+
+            # 6. BOUNDARY & GEOGRAPHY HEALTH
+            densities = check_boundary_densities(x_grid, self.ranges[0], self.ranges[1], self.ranges[2], self.time_range, self.use_global)
+            
+            # Total Boundary Bias (Squared to penalize large drifts like your 1.24 depth bias)
+            penalty_boundaries = (
+                (1.0 - densities['Depth'])**2 + 
+                (1.0 - densities['Time'])**2 + 
+                (1.0 - densities['Lat'])**2 + 
+                (1.0 - densities['Lon'])**2
+            )
+            
+            # CDF Loss: Sub-meter transparency check
+            cdf_loss = compute_cdf_analysis(x_grid, self.ranges)        
+
+            # 7. REGULARIZATION
+            # Prevents BO from "cheating" with extreme depth_boost or scale_t
+            reg_penalty = (
+                0.10 * (np.log10(scale_t / scale_time_effective)**2) + 
+                0.50 * (depth_boost - 1.0)**2
+            )        
+
+            # FINAL WEIGHTED LOSS
+            return (
+                1.0 * cv +                  # Local smoothness
+                2.0 * penalty_norm +        # 4D Volume floor
+                2.0 * loss_isotropy +       # Graph physical balance
+                5.0 * cdf_loss +            # WGS84 Geodetic truth
+                2.0 * penalty_boundaries +  # Edge density balance
+                1.0 * reg_penalty)           # Parameter stability
+
+
+        # res = gp_minimize(objective, self.space, n_calls = n_calls, n_initial_points = 5, initial_point_generator = 'sobol', verbose = True) # random_state = 42
+        res = gp_minimize(objective, self.space, n_calls = n_calls, verbose = True) # random_state = 42
+
+        best_scale_t, best_depth_boost, best_buffer_scale = res.x
+        
+
+        _, _, _, nominal_spacing_4d, _, _ = compute_warped_expected_spacing(
+        	self.target_N,  # total number of points
+        	lat_range=self.ranges[0],
+        	lon_range=self.ranges[1],
+        	depth_range=self.ranges[2],
+        	time_range=self.time_range,  # T, full range = 2T
+        	use_time=use_time_shift,
+        	scale_time=best_scale_t,  # w_scale: length per unit time
+        	use_global=use_global,
+        	earth_radius=earth_radius)
+
+        # nominal_spacing = (total_vol / self.target_N)**(1/4)
+        # buffer_width_phys = best_buffer_scale * nominal_spacing
+        buffer_width_phys = best_buffer_scale * nominal_spacing_4d # [0]
+
+        print("\n--- Optimization Results ---")
+        print(f"Optimal scale_t:     {best_scale_t:.3f} m/s")
+        print(f"Optimal depth_boost: {best_depth_boost:.3f}")
+        print(f"Optimal buffer_scale: {best_buffer_scale:.3f}")
+        print(f"Effective Padding:   {buffer_width_phys:.2f} (units)")
+
+        return {
+            'scale_t': best_scale_t,
+            'depth_boost': best_depth_boost,
+            'buffer_scale': best_buffer_scale,
+            'buffer_width_phys': buffer_width_phys
+        }
+
+
+
+
+
+
+        # @use_named_args(self.space)
+        # def objective(scale_t, depth_boost, buffer_scale):
+
+        #     # 1. GENERATE CANDIDATES
+        #     up_sample_factor = 20 if use_time_shift else 10
+        #     number_candidate_nodes = up_sample_factor * self.target_N
+
+        #     trial_points, mask_points = regular_sobolov(
+        #         number_candidate_nodes, 
+        #         lat_range=self.ranges[0], 
+        #         lon_range=self.ranges[1], 
+        #         depth_range=self.ranges[2], 
+        #         time_range=self.time_range, 
+        #         use_time=use_time_shift, 
+        #         use_global=self.use_global, 
+        #         scale_time=scale_t, 
+        #         N_target=self.target_N, 
+        #         buffer_scale=buffer_scale
+        #     )        
+
+        #     x_grid = farthest_point_sampling(
+        #         trial_points, 
+        #         self.target_N, 
+        #         scale_time=scale_t, 
+        #         depth_boost=depth_boost, 
+        #         mask_candidates=mask_points
+        #     )       
+
+        #     # 3. PROJECT TO SCALED METRIC SPACE (For CV and Anisotropy)
+        #     # Use depth_boost on the 3rd column and scale_t on the 4th
+        #     # scaling_vector = np.array([1.0, 1.0, depth_boost, scale_t])
+        #     # x_proj_scaled = ftrns1_abs(x_grid * scaling_vector)        
+
+        #     x_proj_scaled = get_warped_metric_space(x_grid, depth_boost, scale_t)
+        #     # --- PART A: Uniformity (Scaled World) ---
+        #     tree = cKDTree(x_proj_scaled)
+        #     nn_dist = tree.query(x_proj_scaled, k=2)[0][:, 1]
+        #     cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)    
+
+        #     # 1. Use the warped metric for distances
+	    #     x_metric_4d1 = get_warped_metric_space(x_grid, depth_boost, scale_t, return_physical_units=True)
+	    #     tree_4d = cKDTree(x_metric_4d1)
+	    #     dist_4d1, idx_nn1 = tree_4d.query(x_metric_4d1, k=2)
+	    #     nn_4d1 = dist_4d1[:, 1]
+	    #     nn_indices1 = idx_nn1[:, 1]
+
+	    #     # 2. Final Metric Pass (Ground Truth)
+	    #     metrics = compute_warped_expected_spacing(
+	    #         self.target_N, 
+	    #         lat_range=self.ranges[0], 
+	    #         lon_range=self.ranges[1],
+	    #         depth_range=self.ranges[2], 
+	    #         time_range=self.time_range,
+	    #         scale_time=scale_t, 
+	    #         depth_boost=depth_boost, 
+	    #         use_global=self.use_global
+	    #     )
+
+	    #     # Unpack using your exact variable names
+	    #     volume_4d_warped, _, _, _, _, _ = metrics
+	    #     expected_mean = 0.463 * (volume_4d_warped / self.target_N)**(0.25)
+	    #     norm_mean = np.mean(nn_4d1) / expected_mean
+	    #     penalty_norm = max(0, 1.4 - norm_mean) ** 2
+	    #     # cv = cv + 1.0*penalty_norm
+
+        #     densities = check_boundary_densities(x_grid, self.ranges[0], self.ranges[1], self.ranges[2], self.ranges[3][1], self.use_global)
+        #     # Weighted penalty: we care most about Depth (Surface) and Time boundaries
+        #     penalty_boundary = (abs(1.0 - densities['Depth']) * 1.0 +  ## Make these weights proportional to volume
+        #                abs(1.0 - densities['Time']) * 1.0 + 
+        #                abs(1.0 - densities['Lat']) * 1.0 + 
+        #                abs(1.0 - densities['Lon']) * 1.0)/4.0
+
+        #     # 4. CDF ANALYSIS (The WGS84 "Gold Standard")
+        #     cdf_loss = compute_cdf_analysis(x_grid, self.ranges)
+
+
+        #     # --- THE FINAL LOSS COMPOSITION ---            
+
+        #     # A. Local Regularity (Lower is better)
+        #     loss_regularity = cv             
+
+        #     # B. Volume Health (Penalty only if it drops below the physical floor)
+        #     # Once norm_mean hits 1.4, this penalty becomes 0.0 and stops "pushing"
+        #     penalty_norm = max(0, 1.4 - norm_mean) ** 2            
+
+        #     # C. Velocity Alignment (Log-space makes 0.5x and 2.0x errors equally expensive)
+        #     # actual_graph_velocity is in km/s, scale_t is in m/s
+        #     target_v = scale_t / 1000.0
+        #     loss_isotropy = (np.log10(actual_graph_velocity / target_v)) ** 2            
+
+        #     # D. WGS84 Transparency
+        #     loss_transparency = cdf_loss # High weight to ensure ellipsoidal truth            
+
+        #     # E. Boundary Pressure (Targeting that 1.24 Depth Bias)
+        #     loss_boundaries = (abs(1.0 - densities['Depth']))**2 + (abs(1.0 - densities['Time']))**2            
+
+        #     # --- Final Weighted Sum ---
+        #     return (
+        #         1.0 * loss_regularity + 
+        #         2.0 * penalty_norm +     # "The Floor"
+        #         1.5 * loss_isotropy +     # "The Balance"
+        #         5.0 * loss_transparency + # "The Geography"
+        #         2.0 * loss_boundaries +   # "The Edges"
+        #         1.0 * reg_penalty
+        #     )
+
+
+
+        # @use_named_args(self.space)
+        # def objective(scale_t, depth_boost, buffer_scale, use_normalized_mean = True):
+
+        #     # 1. GENERATE CANDIDATES
+        #     up_sample_factor = 20 if use_time_shift else 10
+        #     number_candidate_nodes = up_sample_factor * self.target_N
+
+        #     trial_points, mask_points = regular_sobolov(
+        #         number_candidate_nodes, 
+        #         lat_range=self.ranges[0], 
+        #         lon_range=self.ranges[1], 
+        #         depth_range=self.ranges[2], 
+        #         time_range=self.time_range, 
+        #         use_time=use_time_shift, 
+        #         use_global=self.use_global, 
+        #         scale_time=scale_t, 
+        #         N_target=self.target_N, 
+        #         buffer_scale=buffer_scale
+        #     )        
+
+        #     # 2. RUN FPS (Physical -> Scaled Search Space)
+        #     # fps returns the selected physical [Lat, Lon, Depth, Time] points
+        #     # x_grid = farthest_point_sampling(
+        #     #     ftrns1_abs(trial_points), 
+        #     #     self.target_N, 
+        #     #     scale_time=scale_t, 
+        #     #     depth_boost=depth_boost, 
+        #     #     mask_candidates=mask_points
+        #     # )        
+
+        #     x_grid = farthest_point_sampling(
+        #         trial_points, 
+        #         self.target_N, 
+        #         scale_time=scale_t, 
+        #         depth_boost=depth_boost, 
+        #         mask_candidates=mask_points
+        #     )       
+
+        #     # 3. PROJECT TO SCALED METRIC SPACE (For CV and Anisotropy)
+        #     # Use depth_boost on the 3rd column and scale_t on the 4th
+        #     # scaling_vector = np.array([1.0, 1.0, depth_boost, scale_t])
+        #     # x_proj_scaled = ftrns1_abs(x_grid * scaling_vector)        
+
+        #     x_proj_scaled = get_warped_metric_space(x_grid, depth_boost, scale_t)
+        #     # --- PART A: Uniformity (Scaled World) ---
+        #     tree = cKDTree(x_proj_scaled)
+        #     nn_dist = tree.query(x_proj_scaled, k=2)[0][:, 1]
+        #     cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)    
+
+
+        #     # 1. Use the warped metric for distances
+        #     if use_normalized_mean == True:
+	    #         x_metric_4d1 = get_warped_metric_space(x_grid, depth_boost, scale_t, return_physical_units=True)
+	    #         tree_4d = cKDTree(x_metric_4d1)
+	    #         dist_4d1, idx_nn1 = tree_4d.query(x_metric_4d1, k=2)
+	    #         nn_4d1 = dist_4d1[:, 1]
+	    #         nn_indices1 = idx_nn1[:, 1]
+
+	    #         # 2. Final Metric Pass (Ground Truth)
+	    #         metrics = compute_warped_expected_spacing(
+	    #             self.target_N, 
+	    #             lat_range=self.ranges[0], 
+	    #             lon_range=self.ranges[1],
+	    #             depth_range=self.ranges[2], 
+	    #             time_range=self.time_range,
+	    #             scale_time=scale_t, 
+	    #             depth_boost=depth_boost, 
+	    #             use_global=self.use_global
+	    #         )
+	    #         # Unpack using your exact variable names
+	    #         volume_4d_warped, _, _, _, _, _ = metrics
+	    #         # cv_4d = np.std(nn_4d) / (np.mean(nn_4d) + 1e-9)
+	    #         # 2. Use the warped volume for the density expectation
+	    #         # Standard 4D Poisson constant is 0.463
+	    #         # This accounts for the 4D hypersphere volume constant
+	    #         expected_mean = 0.463 * (volume_4d_warped / self.target_N)**(0.25)
+	    #         norm_mean = np.mean(nn_4d1) / expected_mean
+	    #         penalty_norm = max(0, 1.4 - norm_mean) ** 2
+	    #         cv = cv + 1.0*penalty_norm
+
+
+        #     densities = check_boundary_densities(x_grid, self.ranges[0], self.ranges[1], self.ranges[2], self.ranges[3][1], self.use_global)
+        #     # Weighted penalty: we care most about Depth (Surface) and Time boundaries
+        #     penalty_boundary = (abs(1.0 - densities['Depth']) * 1.0 +  ## Make these weights proportional to volume
+        #                abs(1.0 - densities['Time']) * 1.0 + 
+        #                abs(1.0 - densities['Lat']) * 1.0 + 
+        #                abs(1.0 - densities['Lon']) * 1.0)/4.0
+
+        #     # penalty = (abs(1.0 - densities['Depth']) * 15.0 + 
+        #     #            abs(1.0 - densities['Time']) * 10.0 + 
+        #     #            abs(1.0 - densities['Lat']) * 5.0)
+
+        #     # 4. CDF ANALYSIS (The WGS84 "Gold Standard")
+        #     cdf_loss = compute_cdf_analysis(x_grid, self.ranges)
+
+
+        #     # reg_penalty = (
+        #     #     0.005 * (np.log10(scale_t / 5000)**2) +      # Prefer scale_t near 5000
+        #     #     0.010 * (depth_boost - 1.0)**2 +             # Prefer depth_boost near 1.0
+        #     #     0.010 * (buffer_scale - 1.0)**2              # Prefer buffer_scale near 1.0
+        #     # )
+
+        #     reg_penalty = (
+        #         0.1 * (np.log10(scale_t / scale_time_effective)**2)      # Prefer scale_t near 5000
+        #     )
+
+        #     # cdf_loss = cdf_loss/x_grid.shape[1] ## Normalize by number of dimensions used
+        #     # --- PART C: The Sanity Check (Anisotropy) ---
+        #     # spreads = np.std(x_proj_scaled, axis=0)
+        #     # anisotropy = np.max(spreads) / (np.min(spreads) + 1e-9)
+        #     # penalty = np.maximum(0, np.log10(anisotropy) - 1.0)**2   
+
+        #     return cv + (3.0 * cdf_loss) + (0.2 * penalty_boundary) + (1.0 * reg_penalty)
+
+
+
+
+## Note: this version works fairly well
+
+class SamplingTuner:
+
+    def __init__(self, target_N, lat_range, lon_range, depth_range, time_range, use_global = use_global, device = device):
+
+        from skopt.space import Real
+        self.target_N = target_N
+        # Store ranges as [min, max] pairs
+        self.ranges = [lat_range, lon_range, depth_range, [-time_range, time_range]]
+        self.device = device
+        self.time_range = time_range
+        self.use_global = use_global
+        
+        # 1. Define Search Space
+        # scale_t: km/s
+        # depth_boost: dimensionless vertical stretch
+        # buffer_scale: multiplier for the nominal spacing
+        self.space = [
+            Real(1e3, 15e3, prior = 'log-uniform', name='scale_t'),      
+            Real(1.0, 3.0, name='depth_boost'),   
+            Real(0.5, 2.5, name='buffer_scale')    # prior='log-uniform',
+        ]
+
+    def optimize(self, n_calls = 90):
+
+        """Runs Bayesian Optimization to find the triplet of parameters."""
+
+        @use_named_args(self.space)
+        def objective(scale_t, depth_boost, buffer_scale, use_normalized_mean = True):
 
             # 1. GENERATE CANDIDATES
             up_sample_factor = 20 if use_time_shift else 10
@@ -1241,12 +1973,52 @@ class SamplingTuner:
             cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)    
 
 
+            # 1. Use the warped metric for distances
+            if use_normalized_mean == True:
+	            x_metric_4d1 = get_warped_metric_space(x_grid, depth_boost, scale_t, return_physical_units=True)
+	            tree_4d = cKDTree(x_metric_4d1)
+	            dist_4d1, idx_nn1 = tree_4d.query(x_metric_4d1, k=2)
+	            nn_4d1 = dist_4d1[:, 1]
+	            nn_indices1 = idx_nn1[:, 1]
+
+	            # 2. Final Metric Pass (Ground Truth)
+	            metrics = compute_warped_expected_spacing(
+	                self.target_N, 
+	                lat_range=self.ranges[0], 
+	                lon_range=self.ranges[1],
+	                depth_range=self.ranges[2], 
+	                time_range=self.time_range,
+	                scale_time=scale_t, 
+	                depth_boost=depth_boost, 
+	                use_global=self.use_global
+	            )
+	            # Unpack using your exact variable names
+	            volume_4d_warped, _, _, _, _, _ = metrics
+	            # cv_4d = np.std(nn_4d) / (np.mean(nn_4d) + 1e-9)
+	            # 2. Use the warped volume for the density expectation
+	            # Standard 4D Poisson constant is 0.463
+	            # This accounts for the 4D hypersphere volume constant
+	            expected_mean = 0.463 * (volume_4d_warped / self.target_N)**(0.25)
+	            norm_mean = np.mean(nn_4d1) / expected_mean
+	            penalty_norm = max(0, 1.4 - norm_mean) ** 2
+	            cv = cv + 1.0*penalty_norm
+
+
             densities = check_boundary_densities(x_grid, self.ranges[0], self.ranges[1], self.ranges[2], self.ranges[3][1], self.use_global)
             # Weighted penalty: we care most about Depth (Surface) and Time boundaries
-            penalty_boundary = (abs(1.0 - densities['Depth']) * 1.0 +  ## Make these weights proportional to volume
-                       abs(1.0 - densities['Time']) * 1.0 + 
-                       abs(1.0 - densities['Lat']) * 1.0 + 
-                       abs(1.0 - densities['Lon']) * 1.0)/4.0
+            
+            # penalty_boundary = (abs(1.0 - densities['Depth']) * 1.0 +  ## Make these weights proportional to volume
+            #            abs(1.0 - densities['Time']) * 1.0 + 
+            #            abs(1.0 - densities['Lat']) * 1.0 + 
+            #            abs(1.0 - densities['Lon']) * 1.0)/4.0
+
+            penalty_boundary = (
+                (1.0 - densities['Depth'])**2 + 
+                (1.0 - densities['Time'])**2 + 
+                (1.0 - densities['Lat'])**2 + 
+                (1.0 - densities['Lon'])**2
+            ) / 4.0
+
 
             # penalty = (abs(1.0 - densities['Depth']) * 15.0 + 
             #            abs(1.0 - densities['Time']) * 10.0 + 
@@ -1469,13 +2241,16 @@ def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range
     print(f"    Min Spatial Gap: {min_space_km:.2f} km ")
     print(f"    Min Temporal Gap: {min_time_s:.2f} s  \n")
 
-
+    print(f"\n[3] Voids and Clustering ")
     print(f"    Effective Velocity: {v_eff:.2f} km/s {'[PHYSICAL]' if 4<v_eff<10 else '[STRETCHED]'}")
     print(f"    Void Ratio (space):  {space_void_ratio:.4f}  [{get_bar(space_void_ratio, 2.0, 3.0)}] (Goal: <3.0)")
     print(f"    Void Ratio (time):  {time_void_ratio:.4f}  [{get_bar(time_void_ratio, 2.0, 3.0)}] (Goal: <3.0)")
+    collision_count = np.sum(nn_4d < nn_4d.mean()*0.75) ## Anything within half the average distance
+    print(f"    Collision Check: {collision_count} nodes < half avg. distance apart.")
+
 
     # --- [3] Boundary & Edge Health ---
-    print(f"\n[3] Boundary & Edge Health (Bias Ratio)")
+    print(f"\n[4] Boundary & Edge Health (Bias Ratio)")
     def format_bias(name, val):
         status = "OK" if 0.7 < val < 1.3 else "BIASED"
         return f"    {name:12}: {val:.3f} [{get_bar(val, 0.5, 1.5)}] ({status})"
@@ -1486,17 +2261,105 @@ def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range
         print(format_bias("Lon", bias_lon))
 
 
-    print(f"\n[3] WGS84 Transparency (CDF R2 Scores)")
+    # --- 6. VELOCITY & ISOTROPY DIAGNOSTIC ---
+    # The target is for v_eff (physical) to be close to scale_t (metric)
+    v_mismatch = v_eff / (scale_t / 1000.0) # Ratio of Graph Speed to Metric Speed    
+
+    print(f"\n[5] Physical Graph Balance")
+    print(f"    Target Velocity (Scale): {scale_t/1000.0:.2f} km/s")
+    print(f"    Actual Graph Velocity:   {v_eff:.2f} km/s")
+    status_v = "BALANCED" if 0.8 < v_mismatch < 1.25 else "STRETCHED"
+    print(f"    Velocity Mismatch:       {v_mismatch:.3f}x [{get_bar(v_mismatch, 0.5, 2.0)}] ({status_v})")    
+
+    # Predicted vs Actual spacing
+    expected_dx_km = (volume_4d_warped / (N * scale_t * 2 * time_range))**(1/3) / 1000.0
+    print(f"    Predicted Space Res:     {expected_dx_km:.2f} km")
+    print(f"    Actual Space Res:        {avg_space_km:.2f} km")
+
+
+    print(f"\n[6] WGS84 Transparency (CDF R2 Scores)")
     for name, score in cdf_r2s.items():
         status = "PASS" if score > 0.98 else "WARN"
         print(f"    {name:6} R2: {score:.6f}  [{'#'*int(score*20):<20}] {status}")
     
-    # Collisions
-    collision_count = np.sum(nn_4d < nn_4d.mean()*0.75) ## Anything within half the average distance
-    print(f"\n[4] Collision Check: {collision_count} nodes < half avg. distance apart.")
 
     print(f"{'='*65}\n")
     return {"cv_4d": cv_4d, "min_dist": np.min(dist_space), "collisions": collision_count, "cdf_r2s": cdf_r2s, "v_eff": v_eff}
+
+
+def perform_ks_density_test(x_grid, lat_range):
+    # 1. Transform Latitudes to normalized q-space [0, 1]
+    # (Using your get_q_wgs84 function)
+    q_actual = get_q_wgs84(x_grid[:, 0])
+    q_min = get_q_wgs84(lat_range[0])
+    q_max = get_q_wgs84(lat_range[1])
+    
+    # These are our samples for the KS test
+    samples = (q_actual - q_min) / (q_max - q_min + 1e-12)
+    samples = np.clip(samples, 0, 1) # Ensure no floating point overshoot
+    
+    # 2. Run KS Test against a uniform distribution
+    # D is the maximum distance between the distributions
+    d_stat, p_val = stats.kstest(samples, 'uniform')
+    
+    # 3. Interpret results
+    print(f"\n[6] KS Density Significance (Latitude)")
+    print(f"    Max Deviation (D): {d_stat:.4f}")
+    print(f"    P-Value:           {p_val:.4f}")
+    
+    if p_val < 0.05:
+        print("    RESULT: SIGNIFICANT BIAS DETECTED (p < 0.05)")
+    else:
+        print("    RESULT: PHYSICALLY UNBIASED (Uniform on Ellipsoid)")
+        
+    return d_stat, p_val
+
+
+
+def perform_ks_depth_test(x_grid, depth_range, r_surface):
+    # depth_range[0] is Top (+), depth_range[1] is Bottom (-)
+    # 1. Convert depths to Radii
+    r_actual = r_surface + x_grid[:, 2]
+    r_top = r_surface + depth_range[0]
+    r_bot = r_surface + depth_range[1]
+    
+    # 2. Transform to Cubic Space (Volume is proportional to r^3)
+    # This 'un-warps' the spherical shell growth
+    vol_actual = r_actual**3
+    vol_min = r_bot**3
+    vol_max = r_top**3
+    
+    samples = (vol_actual - vol_min) / (vol_max - vol_min + 1e-12)
+    samples = np.clip(samples, 0, 1)
+    
+    d_stat, p_val = stats.kstest(samples, 'uniform')
+    print(f"\n[7] KS Density Significance (Depth/Volume)")
+    print(f"    P-Value: {p_val:.4f}")
+    return d_stat, p_val
+
+
+# def perform_ks_depth_test(x_grid, depth_range, r_surface):
+#     # depth_range[0] is Top (+), depth_range[1] is Bottom (-)
+#     # 1. Convert depths to Radii
+#     r_actual = r_surface + x_grid[:, 2]
+#     r_top = r_surface + depth_range[0]
+#     r_bot = r_surface + depth_range[1]
+    
+#     # 2. Transform to Cubic Space (Volume is proportional to r^3)
+#     # This 'un-warps' the spherical shell growth
+#     vol_actual = r_actual**3
+#     vol_min = r_bot**3
+#     vol_max = r_top**3
+    
+#     samples = (vol_actual - vol_min) / (vol_max - vol_min + 1e-12)
+#     samples = np.clip(samples, 0, 1)
+    
+#     d_stat, p_val = stats.kstest(samples, 'uniform')
+#     print(f"\n[7] KS Density Significance (Depth/Volume)")
+#     print(f"    P-Value: {p_val:.4f}")
+#     return d_stat, p_val
+
+
 
 
 def save_grid_metadata(path_to_file, grid_ind, params, health):
@@ -1572,7 +2435,9 @@ for n in range(num_grids):
 
 
 x_grids = np.vstack(x_grids)
-np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = x_grids, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
+x_grids_cart = np.vstack([np.expand_dims(ftrns1(x_grids[i]), axis = 0) for i in range(len(x_grids)) for i in range(num_grids)])
+x_grids_warped = np.vstack([np.expand_dims(get_warped_metric_space(x_grids[i], depth_upscale_factor, scale_time, return_physical_units = True), axis = 0) for i in range(num_grids)])
+np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = x_grids, x_grids_cart = x_grids_cart, x_grids_warped = x_grids_warped, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
 
 print('Stable graphs will typically have:')
 print('R2 expected depth >0.95')
