@@ -9,6 +9,7 @@ from collections import defaultdict
 from sklearn.metrics import r2_score
 # import pandas
 import pathlib
+import json
 import pdb
 import scipy
 from math import floor, sqrt
@@ -98,7 +99,7 @@ use_time_shift = config.get('use_time_shift', False)
 number_of_spatial_nodes = config['number_of_spatial_nodes']
 num_grids = config['number_of_grids']
 if use_time_shift == True:
-	time_shift_range = config.get('time_shift_range', 5.0) ## Note this scaling (the full window is time shift range)
+	time_shift_range = config.get('time_shift_range', 10.0)/2.0 ## Note this scaling (the full window is time shift range)
 	scale_time = config.get('scale_time', 5000.0)
 else:
 	time_shift_range = 10.0 ## Not used
@@ -2222,7 +2223,7 @@ def compute_final_grid_health(x_grid, scale_t, depth_boost, lat_range, lon_range
     print(f"\n{'='*65}")
     print(f"       GEOMETRIC GRID HEALTH REPORT (WGS84-4D)")
     print(f"{'='*65}")
-    print(f"Nodes (N): {N:<8} | scale_t: {scale_t:<8.1f} | d_boost: {depth_boost:<.2f} | buffer_scale: {buffer_scale:<.2f}")
+    print(f"Nodes (N): {N:<8} | scale_t: {scale_t:<8.1f} | time range: {time_range:<.2f} | d_boost: {depth_boost:<.2f} | buffer_scale: {buffer_scale:<.2f}")
     
     def get_bar(val, ideal_min, ideal_max):
         bar = ["-"] * 20
@@ -2338,6 +2339,121 @@ def perform_ks_depth_test(x_grid, depth_range, r_surface):
     return d_stat, p_val
 
 
+def perform_ks_depth_test_ellipsoid(x_grid, depth_range):
+    # depth_range: [top, bottom] e.g., [0, -40]
+    
+    # 1. Get local surface radius for every point (using WGS84)
+    # If your ftrns1_abs handles the ellipsoid, we can derive the local R
+    # Let's assume you have a helper to get R_local based on Latitude
+    r_local_surface = np.linalg.norm(ftrns1_abs(x_grid[:,0:3]*np.array([1.0, 1.0, 0.0]).reshape(1,-1)), axis = 1) # Lat-dependent
+    
+    # 2. Calculate actual distance from Earth Center
+    r_actual = r_local_surface + x_grid[:, 2] # Depth is negative
+    
+    # 3. Calculate the local Shell Boundaries
+    r_top = r_local_surface + depth_range[0]
+    r_bot = r_local_surface + depth_range[1]
+    
+    # 4. Transform to Volume Space (r^3)
+    # For a perfect ellipsoid, V is proportional to a*b*c, 
+    # but the shell-ratio within a small depth range 
+    # is still dominated by the r^3 scaling of the local radius.
+    vol_actual = r_actual**3
+    vol_min = r_bot**3
+    vol_max = r_top**3
+    
+    samples = (vol_actual - vol_min) / (vol_max - vol_min + 1e-12)
+    samples = np.clip(samples, 0, 1)
+    
+    d_stat, p_val = stats.kstest(samples, 'uniform')
+    print(f"\n[7] KS Density Significance (Depth/Volume)")
+    print(f"    P-Value: {p_val:.4f}")
+    return d_stat, p_val
+
+
+def export_automated_metadata(filename, x_grid, stats_report, params):
+    """
+    Automated export using actual run statistics.
+    stats_report: The dictionary containing your 'Avg Spatial Gap', etc.
+    params: The winning [scale_t, depth_boost, buffer_scale]
+    """
+    avg_space = 1000.0 * stats_report['avg_spatial_gap_km']
+    avg_time = stats_report['avg_temporal_gap_s']
+    
+    # Calculate GNN sigmas dynamically
+    sigma_x = avg_space / 2.0
+    sigma_t = avg_time / 2.0
+    
+    metadata = {
+        "run_parameters": params,
+        "grid_health": {
+            "cv_nn": stats_report['cv_nn'],
+            "eff_velocity": stats_report['effective_velocity_km_s'],
+            "v_mismatch": stats_report['velocity_mismatch'],
+            "normalized_mean": stats_report['normalized_mean']
+        },
+        "gnn_configuration": {
+            "edge_construction": "K-NN in Warped Metric Space",
+            "recommended_k": 18,
+            "label_sigma_space_m": round(sigma_x, 3),
+            "label_sigma_time_s": round(sigma_t, 3),
+            "node_resolution_spatial_m": round(avg_space, 3),
+            "node_resolution_temporal_s": round(avg_time, 3)
+        }
+    }
+    
+    with open(filename, 'w') as f:
+        json.dump(metadata, f, indent=4)
+
+
+# import numpy as np
+
+def export_gnn_ready_metadata(filename, x_grid_warped, stats_report, params, K_neighbors=18):
+    """
+    Exports metadata for GNN training.
+    x_grid_warped: The grid in the fully warped metric space [Lat_q, Lon_rad, Depth_r, Time_s]
+    """
+    # 1. Compute the actual mean distance to the K-th neighbor in warped space
+    from scipy.spatial import cKDTree
+    tree = cKDTree(x_grid_warped)
+    # k=K+1 because index 0 is the node itself
+    dists, _ = tree.query(x_grid_warped, k=K_neighbors + 1)
+    
+    # Use the mean distance of all neighbors in the K-shell to define sigma
+    # This is more robust than just using the 1st neighbor
+    mean_warped_dist = np.mean(dists[:, 1:]) 
+    
+    # 2. Derive physical Sigmas from the stats report
+    # Sigma = (Avg Neighbor Distance) / 2
+    sigma_x = stats_report['avg_spatial_gap_km'] / 2.0
+    sigma_t = stats_report['avg_temporal_gap_s'] / 2.0
+    
+    metadata = {
+        "physical_constants": {
+            "scale_time_w": params['scale_t'],
+            "depth_boost": params['depth_boost'],
+            "effective_v_km_s": stats_report['effective_velocity_km_s']
+        },
+        "gnn_hyperparameters": {
+            "knn_k_neighbors": K_neighbors,
+            "has_self_loop": False,
+            "metric_space": "Warped (Authalic + 1/r + Scale_t)",
+            "label_sigma_space_km": round(sigma_x, 3),
+            "label_sigma_time_s": round(sigma_t, 3),
+            "mean_warped_neighbor_dist": round(mean_warped_dist, 5)
+        },
+        "grid_quality": {
+            "cv_nn": stats_report['cv_nn'],
+            "ks_p_value": stats_report.get('ks_p_value', "N/A"),
+            "depth_bias": stats_report.get('depth_bias', 1.24)
+        }
+    }
+    
+    with open(filename, 'w') as f:
+        json.dump(metadata, f, indent=4)
+    print(f"GNN sidecar saved: {filename}")
+
+
 # def perform_ks_depth_test(x_grid, depth_range, r_surface):
 #     # depth_range[0] is Top (+), depth_range[1] is Bottom (-)
 #     # 1. Convert depths to Radii
@@ -2437,18 +2553,22 @@ for n in range(num_grids):
 x_grids = np.vstack(x_grids)
 x_grids_cart = np.vstack([np.expand_dims(ftrns1(x_grids[i]), axis = 0) for i in range(len(x_grids)) for i in range(num_grids)])
 x_grids_warped = np.vstack([np.expand_dims(get_warped_metric_space(x_grids[i], depth_upscale_factor, scale_time, return_physical_units = True), axis = 0) for i in range(num_grids)])
-np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = x_grids, x_grids_cart = x_grids_cart, x_grids_warped = x_grids_warped, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
+mean_x_grid_warped = x_grids_warped[:,:,0:3].mean(0, keepdims = True).mean(0, keepdims = True)
+x_grids_warped_scaled = np.copy(x_grids_warped)
+x_grids_warped_scaled[:,:,0:3] -= mean_x_grid_warped
+x_grids_warped_scaled = x_grids_warped_scaled/(10e3)
+np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = x_grids, x_grids_cart = x_grids_cart, x_grids_warped = x_grids_warped, x_grids_warped_scaled = x_grids_warped_scaled, scale_time = scale_time, depth_boost = depth_upscale_factor, time_shift_range = time_shift_range, number_of_spatial_nodes = number_of_spatial_nodes, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
 
-print('Stable graphs will typically have:')
-print('R2 expected depth >0.95')
-print('R2 expected time >0.97')
-print('CV NN full < 0.15')
-print('Normalized Mean >1.5')
-print('Correlation of Space-time nearest neighbors < 0.1')
-print('Void ratio (spatial) < 2')
-print('Void ratio (temporal) < 5')
 
-print('Should add metrics computed near boundary')
+# print('Stable graphs will typically have:')
+# print('R2 expected depth >0.95')
+# print('R2 expected time >0.97')
+# print('CV NN full < 0.15')
+# print('Normalized Mean >1.5')
+# print('Correlation of Space-time nearest neighbors < 0.1')
+# print('Void ratio (spatial) < 2')
+# print('Void ratio (temporal) < 5')
+# print('Should add metrics computed near boundary')
 
 
 
