@@ -18,6 +18,7 @@ from itertools import product
 from torch_geometric.utils import from_networkx
 from scipy.optimize import differential_evolution
 from torch_geometric.utils import remove_self_loops
+from torch_geometric.utils import sort_edge_index, subgraph # , is_sorted # , is_coalesced
 from torch_geometric.nn import MessagePassing
 from skopt.utils import use_named_args
 from scipy.optimize import minimize
@@ -2317,26 +2318,26 @@ def perform_ks_density_test(x_grid, lat_range):
 
 
 
-def perform_ks_depth_test(x_grid, depth_range, r_surface):
-    # depth_range[0] is Top (+), depth_range[1] is Bottom (-)
-    # 1. Convert depths to Radii
-    r_actual = r_surface + x_grid[:, 2]
-    r_top = r_surface + depth_range[0]
-    r_bot = r_surface + depth_range[1]
+# def perform_ks_depth_test(x_grid, depth_range, r_surface):
+#     # depth_range[0] is Top (+), depth_range[1] is Bottom (-)
+#     # 1. Convert depths to Radii
+#     r_actual = r_surface + x_grid[:, 2]
+#     r_top = r_surface + depth_range[0]
+#     r_bot = r_surface + depth_range[1]
     
-    # 2. Transform to Cubic Space (Volume is proportional to r^3)
-    # This 'un-warps' the spherical shell growth
-    vol_actual = r_actual**3
-    vol_min = r_bot**3
-    vol_max = r_top**3
+#     # 2. Transform to Cubic Space (Volume is proportional to r^3)
+#     # This 'un-warps' the spherical shell growth
+#     vol_actual = r_actual**3
+#     vol_min = r_bot**3
+#     vol_max = r_top**3
     
-    samples = (vol_actual - vol_min) / (vol_max - vol_min + 1e-12)
-    samples = np.clip(samples, 0, 1)
+#     samples = (vol_actual - vol_min) / (vol_max - vol_min + 1e-12)
+#     samples = np.clip(samples, 0, 1)
     
-    d_stat, p_val = stats.kstest(samples, 'uniform')
-    print(f"\n[7] KS Density Significance (Depth/Volume)")
-    print(f"    P-Value: {p_val:.4f}")
-    return d_stat, p_val
+#     d_stat, p_val = stats.kstest(samples, 'uniform')
+#     print(f"\n[7] KS Density Significance (Depth/Volume)")
+#     print(f"    P-Value: {p_val:.4f}")
+#     return d_stat, p_val
 
 
 def perform_ks_depth_test_ellipsoid(x_grid, depth_range):
@@ -2542,6 +2543,8 @@ for n in range(num_grids):
 
 	if n == 0:
 		compute_final_grid_health(x_grid, scale_time, depth_upscale_factor, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
+		perform_ks_density_test(x_grid, lat_range_extend)
+		perform_ks_depth_test_ellipsoid(x_grid, depth_range)
 
 	# loss_metrics(x_grid, plot_on = True, grid_ind = n)
 	# # nn_distance_stats(ftrns1_abs(x_grid)/1000.0, w_scale = scale_time/1000.0)
@@ -2557,7 +2560,10 @@ mean_x_grid_warped = x_grids_warped[:,:,0:3].mean(0, keepdims = True).mean(0, ke
 x_grids_warped_scaled = np.copy(x_grids_warped)
 x_grids_warped_scaled[:,:,0:3] -= mean_x_grid_warped
 x_grids_warped_scaled = x_grids_warped_scaled/(10e3)
-np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = x_grids, x_grids_cart = x_grids_cart, x_grids_warped = x_grids_warped, x_grids_warped_scaled = x_grids_warped_scaled, scale_time = scale_time, depth_boost = depth_upscale_factor, time_shift_range = time_shift_range, number_of_spatial_nodes = number_of_spatial_nodes, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
+
+k_edges = 18 ## An effective edge number in 4D
+edges = np.vstack([np.expand_dims(sort_edge_index(remove_self_loops(knn(torch.Tensor(x_grids_warped_scaled[i]), torch.Tensor(x_grids_warped_scaled[i]), k = k_edges + 1))[0].flip(0)).contiguous().cpu().detach().numpy(), axis = 0) for i in range(num_grids)])
+np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = x_grids, x_grids_cart = x_grids_cart, x_grids_warped = x_grids_warped, x_grids_warped_scaled = x_grids_warped_scaled, scale_time = scale_time, depth_boost = depth_upscale_factor, time_shift_range = time_shift_range, number_of_spatial_nodes = number_of_spatial_nodes, edges = edges, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
 
 
 # print('Stable graphs will typically have:')
@@ -2575,6 +2581,70 @@ np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_tem
 ## Now build expander graphs
 build_expander_graphs = True
 if build_expander_graphs == True:
+
+
+	def run_large_graph_forensics(edge_index, num_nodes):
+	    data = Data(edge_index=edge_index, num_nodes=num_nodes)
+	    G = to_networkx(data, to_undirected=True)
+	    
+	    # 1. Diameter (This is actually the slowest part for large graphs)
+	    # We use an approximation if the graph is huge, but 5.9k is okay for exact
+	    if nx.is_connected(G):
+	        diam = nx.diameter(G)
+	    else:
+	        print("Graph is disconnected. Calculating metrics for largest component.")
+	        G = G.subgraph(max(nx.connected_components(G), key=len)).copy()
+	        diam = nx.diameter(G)
+
+	    # 2. Sparse Eigenvector Decomposition (Spectral Gap)
+	    # We use 'SM' (Smallest Magnitude). 
+	    # The smallest is 0, the second smallest is the Fiedler value.
+	    L = nx.laplacian_matrix(G).astype(float)
+	    evals = eigsh(L, k=2, which='SM', return_eigenvectors=False)
+	    fiedler_value = sorted(evals)[1]
+	    
+	    # 3. Density / Regularity
+	    avg_degree = (2 * G.number_of_edges()) / G.number_of_nodes()
+	    
+	    print(f"--- Large Graph Forensics ---")
+	    print(f"Diameter: {diam}")
+	    print(f"Fiedler Value: {fiedler_value:.5f}")
+	    print(f"Avg Degree: {avg_degree:.2f}")
+	    
+	    return diam, fiedler_value
+
+
+	def compute_expansion_stats(edge_index, num_nodes):
+	    # 1. Create Data/NetworkX object
+	    data = Data(edge_index=edge_index, num_nodes=num_nodes)
+	    G = to_networkx(data, to_undirected=True)
+	    
+	    # 2. Get Laplacian (Sparse)
+	    L = nx.laplacian_matrix(G).astype(float)
+	    
+	    # 3. Compute Normalized Spectral Gap
+	    # L_norm = D^-1/2 * L * D^-1/2
+	    degrees = np.array(L.diagonal())
+	    d_inv_sqrt = np.power(degrees, -0.5)
+	    D_inv_sqrt_mat = sp.diags(d_inv_sqrt)
+	    L_norm = D_inv_sqrt_mat @ L @ D_inv_sqrt_mat
+	    
+	    # We want the second smallest eigenvalue (Fiedler value of normalized Laplacian)
+	    evals = eigsh(L_norm, k=2, which='SM', return_eigenvectors=False)
+	    spectral_gap_norm = sorted(evals)[1]
+	    
+	    # 4. Physical Expansion Estimate (Cheeger Lower Bound)
+	    # Using lambda_2 from the standard Laplacian
+	    evals_std = eigsh(L, k=2, which='SM', return_eigenvectors=False)
+	    lambda_2 = sorted(evals_std)[1]
+	    h_lower_bound = lambda_2 / 2
+
+	    print(f"Normalized Spectral Gap: {spectral_gap_norm:.6f}")
+	    print(f"Cheeger Expansion Lower Bound: {h_lower_bound:.6f}")
+
+	    return spectral_gap_norm, h_lower_bound, lambda_2
+
+
 
 	def make_cayleigh_graph(n):
 
@@ -2735,40 +2805,48 @@ if build_expander_graphs == True:
 		if use_networkx_construction == True:
 
 			A_edges_c = from_networkx(nx.margulis_gabber_galil_graph(int_need)).edge_index.long().flip(0).contiguous()
-			A_edges_c = torch.Tensor(np.random.permutation(A_edges_c.max() + 1)).long()[A_edges_c]
+			A_edges_c = torch.Tensor(np.random.permutation(A_edges_c.max().item() + 1)).long()[A_edges_c]
 			Ac = subgraph(torch.arange(number_of_spatial_nodes), A_edges_c)[0].cpu().detach().numpy() # .to(device)
 			# A_edges_c = perm_vec[A_edges_c]
 
 		else:
 
 
-			def make_labeled_mgg_graph(m):
-			    # m is the side of the grid (nodes = m*m)
-			    edge_index = []
-			    edge_type = []
-			    
+			def make_labeled_mgg_graph(m: int):
+			    edge_index_list = []
+			    edge_type_list = []			
+
 			    for x in range(m):
 			        for y in range(m):
-			            u = x * m + y
-			            # Define the standard MGG transformations
-			            targets = [
-			                ((x + y) % m, y),           # T1
-			                ((x - y) % m, y),           # T1 inverse
-			                (x, (y + x) % m),           # T2
-			                (x, (y - x) % m),           # T2 inverse
-			                ((x + 2*y + 1) % m, y),     # Shifted T
-			                ((x - 2*y - 1) % m, y)      # Shifted T inverse
-			            ]
-			            
-			            for i, (tx, ty) in enumerate(targets):
+			            u = x * m + y			
+
+			            # 4 base directed neighbors (as in NetworkX source code)
+			            neighbors = [
+			                ((x + 2 * y) % m, y),                     # type 0
+			                ((x + 2 * y + 1) % m, y),                 # type 1
+			                (x, (y + 2 * x) % m),                     # type 2
+			                (x, (y + 2 * x + 1) % m),                 # type 3
+			            ]			
+
+			            for typ, (tx, ty) in enumerate(neighbors):
 			                v = tx * m + ty
-			                edge_index.append([u, v])
-			                edge_type.append(i) # Label 0 through 5
-			                
-			    return torch.tensor(edge_index).t(), torch.tensor(edge_type)
+			                # Add forward edge with type typ (0-3)
+			                edge_index_list.append([u, v])
+			                edge_type_list.append(typ)			
+
+			                # Add reverse edge with type typ + 4 (4-7) if not self-loop
+			                if u != v:
+			                    edge_index_list.append([v, u])
+			                    edge_type_list.append(typ + 4)			
+
+			    edge_index = torch.tensor(edge_index_list).t().contiguous().long()
+			    edge_type = torch.tensor(edge_type_list).long()			
+
+			    return edge_index, edge_type
+
 
 			A_edges_c, edge_type = make_labeled_mgg_graph(int_need)
-			A_edges_c = torch.Tensor(np.random.permutation(A_edges_c.max() + 1)).long()[A_edges_c]
+			A_edges_c = torch.Tensor(np.random.permutation(A_edges_c.max().item() + 1)).long()[A_edges_c]
 			Ac, edge_type = subgraph(torch.arange(number_of_spatial_nodes), A_edges_c, edge_attr = edge_type) # [0].cpu().detach().numpy() # .to(device)
 			Ac, edge_type = Ac.cpu().detach().numpy(), edge_type.cpu().detach().numpy()
 
