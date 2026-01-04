@@ -9,6 +9,7 @@ from collections import defaultdict
 from sklearn.metrics import r2_score
 # import pandas
 import pathlib
+import random
 import json
 import pdb
 import scipy
@@ -17,18 +18,23 @@ from torch_cluster import knn
 from itertools import product
 from torch_geometric.utils import from_networkx
 from scipy.optimize import differential_evolution
-from torch_geometric.utils import remove_self_loops
+from torch_geometric.utils import remove_self_loops, to_networkx
 from torch_geometric.utils import sort_edge_index, subgraph # , is_sorted # , is_coalesced
+from torch_geometric.utils import degree # , is_sorted # , is_coalesced
 from torch_geometric.nn import MessagePassing
 from skopt.utils import use_named_args
+from sklearn.decomposition import PCA
 from scipy.optimize import minimize
 from scipy.optimize import minimize, fsolve
+from scipy.sparse.linalg import eigsh
 from torch_scatter import scatter
+from scipy.stats import spearmanr
 from scipy.stats import pearsonr
 import scipy.stats.qmc as qmc
 from scipy.spatial import KDTree
 from skopt import gp_minimize
 from skopt.space import Real
+import scipy.sparse as sp
 from scipy import stats
 import networkx as nx
 from utils import *
@@ -80,6 +86,41 @@ def optimize_with_differential_evolution(center_loc):
     return soln
 
 
+def align_point_cloud_to_pca(points):
+    """
+    Centers and rotates a 3D point cloud using PCA for maximum variance alignment.
+
+    Args:
+        points (np.ndarray): Input point cloud as an N x 3 numpy array.
+
+    Returns:
+        np.ndarray: The aligned point cloud as an N x 3 numpy array.
+        np.ndarray: The 3x3 rotation matrix (principal axes as rows).
+        np.ndarray: The 1x3 centroid of the original point cloud.
+    """
+    # 1. Center the point cloud
+    centroid = np.mean(points, axis=0)
+    centered_points = points - centroid
+
+    # 2. Perform PCA to find the principal axes
+    # The PCA object from sklearn handles the covariance matrix calculation
+    # and eigenvalue decomposition internally.
+    pca = PCA(n_components=3)
+    pca.fit(centered_points)
+    
+    # The principal axes (eigenvectors) are stored in pca.components_
+    # Each row is a principal axis. The first row has the most variance.
+    rotation_matrix = pca.components_ 
+
+    # 3. Rotate the centered point cloud to align with the principal axes
+    # The rotation_matrix transforms the data into the new coordinate system.
+    aligned_points = centered_points @ rotation_matrix.T
+
+    # Note: The sign of the axes can be arbitrary with PCA. 
+    # For a consistent orientation (e.g., ensuring a right-handed system),
+    # further checks may be needed based on specific application requirements.
+
+    return aligned_points, rotation_matrix, centroid
 
 
 path_to_file = str(pathlib.Path().absolute())
@@ -2368,7 +2409,7 @@ def perform_ks_depth_test_ellipsoid(x_grid, depth_range):
     
     d_stat, p_val = stats.kstest(samples, 'uniform')
     print(f"\n[7] KS Density Significance (Depth/Volume)")
-    print(f"    P-Value: {p_val:.4f}")
+    print(f"    P-Value: {p_val:.4f}\n")
     return d_stat, p_val
 
 
@@ -2556,14 +2597,15 @@ for n in range(num_grids):
 x_grids = np.vstack(x_grids)
 x_grids_cart = np.vstack([np.expand_dims(ftrns1(x_grids[i]), axis = 0) for i in range(len(x_grids)) for i in range(num_grids)])
 x_grids_warped = np.vstack([np.expand_dims(get_warped_metric_space(x_grids[i], depth_upscale_factor, scale_time, return_physical_units = True), axis = 0) for i in range(num_grids)])
-mean_x_grid_warped = x_grids_warped[:,:,0:3].mean(0, keepdims = True).mean(0, keepdims = True)
+mean_x_grid_warped = x_grids_warped[:,:,0:3].mean(1, keepdims = True).mean(0, keepdims = True)
 x_grids_warped_scaled = np.copy(x_grids_warped)
 x_grids_warped_scaled[:,:,0:3] -= mean_x_grid_warped
 x_grids_warped_scaled = x_grids_warped_scaled/(10e3)
+x_grids_warped_scaled_rotated = np.concatenate((align_point_cloud_to_pca(x_grids_warped[:,:,0:3].reshape(-1,3))[0].reshape(-1, number_of_spatial_nodes, 3), x_grids_warped[:, :, [3]]), axis = 2)/(10e3)
 
 k_edges = 18 ## An effective edge number in 4D
-edges = np.vstack([np.expand_dims(sort_edge_index(remove_self_loops(knn(torch.Tensor(x_grids_warped_scaled[i]), torch.Tensor(x_grids_warped_scaled[i]), k = k_edges + 1))[0].flip(0)).contiguous().cpu().detach().numpy(), axis = 0) for i in range(num_grids)])
-np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = x_grids, x_grids_cart = x_grids_cart, x_grids_warped = x_grids_warped, x_grids_warped_scaled = x_grids_warped_scaled, scale_time = scale_time, depth_boost = depth_upscale_factor, time_shift_range = time_shift_range, number_of_spatial_nodes = number_of_spatial_nodes, edges = edges, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
+edges = np.vstack([np.expand_dims(sort_edge_index(remove_self_loops(knn(torch.Tensor(x_grids_warped_scaled[i]/1000.0), torch.Tensor(x_grids_warped_scaled[i]/1000.0), k = k_edges + 1))[0].flip(0)).contiguous().cpu().detach().numpy(), axis = 0) for i in range(num_grids)])
+np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_templates_ver_1.npz'%name_of_project, x_grids = x_grids, x_grids_cart = x_grids_cart, x_grids_warped = x_grids_warped, x_grids_warped_scaled = x_grids_warped_scaled, x_grids_warped_scaled_rotated = x_grids_warped_scaled_rotated, scale_time = scale_time, depth_boost = depth_upscale_factor, time_shift_range = time_shift_range, number_of_spatial_nodes = number_of_spatial_nodes, edges = edges, corr1 = np.zeros((1,3)), corr2 = np.zeros((1,3)))
 
 
 # print('Stable graphs will typically have:')
@@ -2583,7 +2625,7 @@ build_expander_graphs = True
 if build_expander_graphs == True:
 
 
-	def run_large_graph_forensics(edge_index, num_nodes):
+	def run_graph_forensics(edge_index, num_nodes):
 	    data = Data(edge_index=edge_index, num_nodes=num_nodes)
 	    G = to_networkx(data, to_undirected=True)
 	    
@@ -2606,7 +2648,7 @@ if build_expander_graphs == True:
 	    # 3. Density / Regularity
 	    avg_degree = (2 * G.number_of_edges()) / G.number_of_nodes()
 	    
-	    print(f"--- Large Graph Forensics ---")
+	    # print(f"--- Large Graph Forensics ---")
 	    print(f"Diameter: {diam}")
 	    print(f"Fiedler Value: {fiedler_value:.5f}")
 	    print(f"Avg Degree: {avg_degree:.2f}")
@@ -2614,7 +2656,7 @@ if build_expander_graphs == True:
 	    return diam, fiedler_value
 
 
-	def compute_expansion_stats(edge_index, num_nodes):
+	def compute_expansion_statistics(edge_index, num_nodes):
 	    # 1. Create Data/NetworkX object
 	    data = Data(edge_index=edge_index, num_nodes=num_nodes)
 	    G = to_networkx(data, to_undirected=True)
@@ -2645,6 +2687,162 @@ if build_expander_graphs == True:
 	    return spectral_gap_norm, h_lower_bound, lambda_2
 
 
+	def compute_local_metrics(edge_index, pos, k_local = 20, use_weights = False, num_samples_dist = 10000, num_samples_local=100, name = None):
+	    """
+	    Compute local graph metrics to highlight strengths of local/spatial graphs over expanders.
+	    
+	    Args:
+	        edge_index: torch.LongTensor [2, num_edges] (PyTorch Geometric style)
+	        pos: np.array or torch.Tensor [num_nodes, dim] (node positions for spatial distances)
+	        k_local: Target size for small sets in local conductance (default 20, adjust based on KNN ~18)
+	        use_weights: If True, add edge weights as inverse Euclidean distance (stronger for closer edges)
+	        num_samples_dist: Number of random pairs for distance correlation (default 10k; reduce for large n>10k)
+	        num_samples_local: Number of samples for average local conductance (default 100; fast)
+	        
+	    Returns:
+	        dict of metrics:
+	            - average_clustering: Higher = stronger local density/triangles
+	            - modularity: Higher = better community structure
+	            - degree_assortativity: Higher positive = similar degrees connect (common in spatial graphs)
+	            - distance_correlation: Higher = graph distances better match spatial (geometric fidelity)
+	            - average_local_conductance: Lower in local graphs = tighter small clusters (strong locality);
+	              higher in expanders = quick expansion even locally
+	    Notes:
+	        - Robust for n=100s-1000s: Sampling keeps time O(1) relative to n, but distance calc may take seconds for n=1000s.
+	        - For expander: Expect low clustering/modularity/correlation, high local conductance.
+	        - For local variants: High clustering/modularity/correlation, low local conductance.
+	        - Weights (optional): Use for weighted clustering/modularity if distances add value; makes close edges stronger.
+	        - Assumes graph is undirected; adds edges without direction.
+	        - Handles possible disconnection (inf distances filtered).
+	    """
+	    if isinstance(pos, torch.Tensor):
+	        pos = pos.cpu().numpy()
+	    
+	    num_nodes = pos.shape[0]
+	    
+	    G = nx.Graph()
+	    G.add_nodes_from(range(num_nodes))
+	    
+	    edges = edge_index.t().cpu().numpy()
+	    edge_tuples = [(int(u), int(v)) for u, v in edges]
+	    
+	    if use_weights:	        
+	        mean_dist = []
+	       	for i, (u, v) in enumerate(edge_tuples):
+	            dist = np.linalg.norm(pos[u] - pos[v])
+	            mean_dist.append(dist)
+
+	        mean_dist = np.mean(mean_dist)	        
+	        for i, (u, v) in enumerate(edge_tuples):
+	            dist = np.linalg.norm(pos[u] - pos[v]) ## Fairly arbitrary edge weights
+	            weight = 1.0 / (dist/mean_dist + 1e-6) if dist > 0 else 1.0
+	            G.add_edge(u, v, weight=weight)	    
+	    else:
+	        G.add_edges_from(edge_tuples)
+	    
+	    # 1. Average clustering coefficient
+	    clustering = nx.average_clustering(G, weight='weight' if use_weights else None)
+	    
+	    # 2. Modularity using Louvain
+	    partition = nx.community.louvain_communities(G, weight='weight' if use_weights else None)
+	    mod = nx.community.modularity(G, partition, weight='weight' if use_weights else None)
+	    
+	    # 3. Degree assortativity
+	    deg_assort = nx.degree_assortativity_coefficient(G, weight='weight' if use_weights else None)
+	    
+	    # 4. Graph vs Spatial distance correlation (Spearman rank)
+	    graph_dists = []
+	    spatial_dists = []
+	    for _ in range(num_samples_dist):
+	        u, v = random.sample(range(num_nodes), 2)
+	        spatial_dist = np.linalg.norm(pos[u] - pos[v])
+	        try:
+	            graph_dist = nx.shortest_path_length(G, u, v, weight=None)  # Unweighted paths for "hop" distance
+	        except nx.NetworkXNoPath:
+	            graph_dist = float('inf')
+	        graph_dists.append(graph_dist)
+	        spatial_dists.append(spatial_dist)
+	    finite_mask = np.isfinite(graph_dists)
+	    if np.sum(finite_mask) > 1:
+	        corr, _ = spearmanr(np.array(graph_dists)[finite_mask], np.array(spatial_dists)[finite_mask])
+	    else:
+	        corr = 0.0
+	    
+	    # 5. Average local conductance for small sets (vertex expansion style)
+	    local_cond = []
+	    for _ in range(num_samples_local):
+	        seed = random.randint(0, num_nodes - 1)
+	        S = {seed}
+	        for __ in range(k_local - 1):
+	            boundary = set()
+	            for s in S:
+	                boundary.update(G.neighbors(s))
+	            boundary -= S
+	            if not boundary:
+	                break
+	            S.add(random.choice(list(boundary)))
+	        if len(S) < 2:
+	            continue
+	        if use_weights:
+	            cut_size = sum(G[s][t].get('weight', 1.0) for s in S for t in G.neighbors(s) if t not in S)
+	        else:
+	            cut_size = sum(1 for s in S for t in G.neighbors(s) if t not in S)
+	        cond = cut_size / len(S)
+	        local_cond.append(cond)
+	    avg_local_cond = np.mean(local_cond) if local_cond else 0.0
+	    
+	    stats = {
+	        'average_clustering': clustering,
+	        'modularity': mod,
+	        'degree_assortativity': deg_assort,
+	        'distance_correlation': corr,
+	        'average_local_conductance': avg_local_cond
+	    }	    
+
+	    if name is not None: print('\n' + name)
+	    print(f"Average Clustering Coef.: {clustering:.6f}")
+	    print(f"Modularity: {mod:.6f}")
+	    print(f"Degree Assortativity: {deg_assort:.6f}")
+	    print(f"Distance Correlation: {corr:.6f}")
+	    print(f"Average Conductance: {avg_local_cond:.6f}")	    
+
+	    return stats
+
+
+	# def compute_volume_filling_metrics(pos, name = None):
+	#     n, dim = pos.shape
+	#     # Normalize to [0,1]^dim for discrepancy
+	#     pos_norm = (pos - pos.min(0)) / (pos.max(0) - pos.min(0) + 1e-10)
+	    
+	#     # Star discrepancy approximation (Monte Carlo estimate)
+	#     num_samples = 10000
+	#     samples = np.random.uniform(0, 1, (num_samples, dim))
+	#     local_disc = np.max([np.abs(np.mean((pos_norm <= s).all(1)) - np.prod(s)) for s in samples])
+	    
+	#     # Min nearest-neighbor distance
+	#     from scipy.spatial.distance import pdist
+	#     min_nnd = np.min(pdist(pos)) if n > 1 else 0
+	    
+	#     # Voronoi cell area variance (2D/3D only; skip if dim>3)
+	#     if dim in [2,3,4]:
+	#         vor = Voronoi(pos)
+	#         areas = [np.linalg.norm(vor.vertices[vor.regions[i]] - vor.points[vor.point_region[i]], axis=1).sum() / len(vor.regions[i]) if vor.regions[i] else 0 for i in range(n)]  # Approx cell "size"
+	#         var_areas = np.var(areas)
+	#     else:
+	#         var_areas = None
+	    
+	#     stats = {
+	#         'star_discrepancy_approx': local_disc,  # Lower better
+	#         'min_nearest_neighbor_dist': min_nnd,   # Higher better for uniformity
+	#         'voronoi_area_variance': var_areas      # Lower better; None if dim>3
+	#     }	    
+
+	#     if name is not None: print('\n' + name)
+	#     print(f"Star Discrepency: {local_disc:.6f}")
+	#     print(f"Min Nearest Neighbor Distance: {min_nnd:.6f}")
+	#     print(f"Voronoi area variance: {var_areas:.6f}")	    
+
+	#     return stats
 
 	def make_cayleigh_graph(n):
 
@@ -2782,10 +2980,12 @@ if build_expander_graphs == True:
 
 
 	## Choose type of expander graph (or none)
-	use_gabber = True
-	if number_of_spatial_nodes > 2500: use_gabber = True
+	use_cayley = False
+	use_gabber = False
+	use_random = True
+	# if number_of_spatial_nodes > 2500: use_gabber = True
 
-	if use_gabber == False: ## Then use cayley graphs
+	if use_cayley == True: ## Then use cayley graphs
 
 		# A_c_l = []
 		n_max = 0
@@ -2797,7 +2997,7 @@ if build_expander_graphs == True:
 			cnt += 1
 		Ac = subgraph(torch.arange(number_of_spatial_nodes), torch.Tensor(A_edges.T).long())[0].flip(0).cpu().detach().numpy() # .to(device)
 
-	else:
+	elif use_gabber == True:
 
 		int_need = int(np.ceil(np.sqrt(number_of_spatial_nodes)))
 
@@ -2850,9 +3050,54 @@ if build_expander_graphs == True:
 			Ac, edge_type = subgraph(torch.arange(number_of_spatial_nodes), A_edges_c, edge_attr = edge_type) # [0].cpu().detach().numpy() # .to(device)
 			Ac, edge_type = Ac.cpu().detach().numpy(), edge_type.cpu().detach().numpy()
 
-			# A_edges_c = from_networkx(A_edges_c)
+	elif use_random == True:
 
-	np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_expanders_ver_1.npz'%name_of_project, Ac = Ac)
+		def generate_regular_expander(d, n, max_tries = 100):
+			for i in range(max_tries):
+				try:
+					G = nx.random_regular_graph(d, n)
+					if nx.is_connected(G):  # optional, but will always be true
+						return G
+				except nx.NetworkXError:
+					pass  # retry on failure
+			raise ValueError(f"Failed to generate {d}-regular graph on {n} nodes after {max_tries} tries")
+		# G = nx.random_regular_graph(d = 8, n = number_of_spatial_nodes)  # d-regular on n nodes
+
+		regular_degree = 8
+		G = generate_regular_expander(regular_degree, number_of_spatial_nodes) ## Can optimize
+		G = from_networkx(G)
+		Ac = G.edge_index.cpu().detach().numpy()
+		edge_type = np.zeros(Ac.shape[1])
+
+		# A_edges_c = from_networkx(A_edges_c)
+
+	np.savez_compressed(path_to_file + 'Grids' + seperator + '%s_seismic_network_expanders_ver_1.npz'%name_of_project, Ac = Ac, edge_type = edge_type)
+
+	compute_graph_properties = True
+	if compute_graph_properties == True:
+		print('\nExpander graph')
+		run_graph_forensics(torch.Tensor(Ac), number_of_spatial_nodes)
+		compute_expansion_statistics(torch.Tensor(Ac), number_of_spatial_nodes)
+
+		print('\nWarped source graph')
+		run_graph_forensics(torch.Tensor(edges[0]), number_of_spatial_nodes)
+		compute_expansion_statistics(torch.Tensor(edges[0]), number_of_spatial_nodes)
+
+		print('\nCartesian source graph')
+		edge_cart_time = sort_edge_index(remove_self_loops(knn(torch.Tensor(np.concatenate((x_grids_cart[0], scale_time*x_grids[0][:,[3]]), axis = 1)), torch.Tensor(np.concatenate((x_grids_cart[0], scale_time*x_grids[0][:,[3]]), axis = 1)), k = k_edges + 1))[0].flip(0)).contiguous().cpu().detach().numpy()
+		run_graph_forensics(torch.Tensor(edge_cart_time), number_of_spatial_nodes)
+		compute_expansion_statistics(torch.Tensor(edge_cart_time), number_of_spatial_nodes)
+
+		print('\nCartesian source graph (only space)')
+		edge_cart = sort_edge_index(remove_self_loops(knn(torch.Tensor(x_grids_cart[0]), torch.Tensor(x_grids_cart[0]), k = k_edges + 1))[0].flip(0)).contiguous().cpu().detach().numpy()
+		run_graph_forensics(torch.Tensor(edge_cart), number_of_spatial_nodes)
+		compute_expansion_statistics(torch.Tensor(edge_cart), number_of_spatial_nodes)
+
+		print('\nLocal metrics\n')
+		compute_local_metrics(torch.Tensor(Ac).long(), x_grids_warped_scaled[0], k_local = int(degree(torch.Tensor(Ac).long()[1]).mean().item()), use_weights = False, name = 'Expander')
+		compute_local_metrics(torch.Tensor(edges[0]).long(), x_grids_warped_scaled[0], k_local = int(degree(torch.Tensor(edges[0]).long()[1]).mean().item()), use_weights = True, name = 'Warped source graph')
+		compute_local_metrics(torch.Tensor(edge_cart_time).long(), np.concatenate((x_grids_cart[0], scale_time*x_grids[0][:,[3]]), axis = 1), k_local = int(degree(torch.Tensor(edge_cart_time).long()[1]).mean().item()), use_weights = True, name = 'Cartesian source graph')
+		compute_local_metrics(torch.Tensor(edge_cart).long(), x_grids_cart[0], k_local = int(degree(torch.Tensor(edge_cart).long()[1]).mean().item()), use_weights = True, name = 'Cartesian source graph (only space)')
 
 
 print("All files saved successfully!")
