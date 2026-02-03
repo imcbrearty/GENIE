@@ -273,7 +273,7 @@ def build_source_graph(srcs, tree_srcs, n_seed, n_neighbors, max_source_pair_dis
 
 	## Must also remove self-loops (or leave in?)
 	if use_efficient_lookup == True: ## If use efficient look-up, have to also delete source pairs of too large of distance
-		irand_neighbors = tree_srcs.query(srcs_cart[isample]*weight_depth_vec, k = int(nk_scale*n_neighbors))[1] ## Random selection of k from within 3*k neighbors
+		irand_neighbors = tree_srcs.query(srcs_cart[isample]*weight_depth_vec, k = min(int(nk_scale*n_neighbors), len(srcs) - 1))[1] ## Random selection of k from within 3*k neighbors
 	else:
 		irand_neighbors = tree_srcs.query_ball_point(srcs_cart[isample]*weight_depth_vec, r = max_source_pair_distance)
 
@@ -289,7 +289,7 @@ def build_source_graph(srcs, tree_srcs, n_seed, n_neighbors, max_source_pair_dis
 	# use_efficient_lookup = True
 	if use_efficient_lookup_next == True: ## If use efficient look-up, have to also delete source pairs of too large of distance
 		# nk_scale = 3 ## Scale the k-nearest neighbor set
-		irand_next_neighbors = tree_srcs.query(srcs_cart[unique_neighbors]*weight_depth_vec, k = int(nk_scale*n_neighbors))[1] ## Random selection of k from within 3*k neighbors
+		irand_next_neighbors = tree_srcs.query(srcs_cart[unique_neighbors]*weight_depth_vec, k = min(int(nk_scale*n_neighbors), len(srcs) - 1))[1] ## Random selection of k from within 3*k neighbors
 	else:
 		irand_next_neighbors = tree_srcs.query_ball_point(srcs_cart[unique_neighbors]*weight_depth_vec, r = max_source_pair_distance)
 
@@ -886,4 +886,5 @@ for n in range(n_samples):
 	z.close()
 
 	print('Saved %d'%inds_save[n])
+
 
