@@ -855,7 +855,7 @@ for n in range(n_samples):
 
 
 	## Save output
-	z = h5py.File(ext_save + seperator + ext_save_dir + 'location_training_sample_%d_ver_1.hdf5'%(inds_save[n]), 'w')
+	z = h5py.File(ext_save_dir + 'location_training_sample_%d_ver_1.hdf5'%(inds_save[n]), 'w')
 	z['srcs'] = srcs
 	z['srcs_ref'] = srcs_ref
 	z['Matches'] = Matches
@@ -886,3 +886,4 @@ for n in range(n_samples):
 	z.close()
 
 	print('Saved %d'%inds_save[n])
+
