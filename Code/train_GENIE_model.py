@@ -137,7 +137,7 @@ src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projec
 src_kernel_mean = np.mean([src_x_kernel, src_x_kernel, src_depth_kernel])
 src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
 
-scale_time = train_config['scale_time']
+# scale_time = train_config['scale_time']
 
 use_adaptive_window = True
 if use_adaptive_window == True:
@@ -288,6 +288,10 @@ z.close()
 # Load templates
 z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
 x_grids = z['x_grids']
+if 'scale_time' in list(z.keys()):
+	scale_time = z['scale_time']/1000.0
+else:
+	scale_time = train_config['scale_time']
 z.close()
 
 # Load stations
@@ -317,10 +321,10 @@ else:
 
 
 if use_time_shift == True:
-	z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
+	# z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
 	# time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
 	time_shifts = x_grids[:,:,[3]]
-	z.close()
+	# z.close()
 else:
 	time_shifts = None # np.zeros((x_grids.shape[0], x_grids.shape[1]))
 
@@ -6483,6 +6487,7 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
