@@ -124,7 +124,7 @@ min_magnitude_ref = train_config['min_magnitude_ref'] # 1.5
 percentile_threshold_ref = train_config['percentile_threshold_ref'] # 0.1
 n_reference_clusters = train_config['n_reference_clusters'] # 10000 ## The amount of "quasi-uniiform" nodes to obtain for representing the source catalog distribution
 n_frac_reference_catalog = train_config['n_frac_reference_catalog'] # 0.8 ## The amount of sources to simulate from the reference catalog coordinates compared to background
-
+n_batches_per_job = train_config['n_batches_per_job']
 
 ## Prediction params
 kernel_sig_t = train_config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
@@ -245,9 +245,20 @@ if (load_subnetworks == True)*(load_training_data == False): ## Only load subnet
 		st1 = glob.glob(path_to_file + 'Picks/19*') ## Assuming years are 1900 and 2000's
 		st2 = glob.glob(path_to_file + 'Picks/20*')
 		st = np.concatenate((st1, st2), axis = 0)
+
+		cnt_files = 0
+		for i in range(len(st)):
+			cnt_files += len(glob.glob(st[i] + '/*.npz'))
+
+		prob_use = 5.0*n_batches_per_job/cnt_files
+		
 		for i in range(len(st)):
 			st1 = glob.glob(st[i] + '/*.npz')
 			for j in range(len(st1)):
+
+				if np.random.rand() > prob_use:
+					continue
+				
 				z = np.load(st1[j])
 				ind_use = np.unique(z['P'][:,1]).astype('int')
 				z.close()
@@ -307,7 +318,8 @@ else:
 
 if use_time_shift == True:
 	z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
-	time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
+	# time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
+	time_shifts = x_grids[:,:,[3]]
 	z.close()
 else:
 	time_shifts = None # np.zeros((x_grids.shape[0], x_grids.shape[1]))
@@ -6471,6 +6483,7 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
+
 
 
 
