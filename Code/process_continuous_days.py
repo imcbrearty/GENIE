@@ -241,9 +241,9 @@ mn_cuda = torch.Tensor(mn).to(device)
 
 
 if use_time_shift == True:
-	z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
-	time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
-	z.close()
+	# z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
+	time_shifts = x_grids[:,:,[3]] ## Shape (n_grids, n_nodes, n_times)
+	# z.close()
 else:
 	time_shifts = None # np.zeros((x_grids.shape[0], x_grids.shape[1]))
 
