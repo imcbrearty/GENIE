@@ -159,7 +159,7 @@ use_time_shift = config['use_time_shift']
 with open('train_config.yaml', 'r') as file:
     train_config = yaml.safe_load(file)
 
-scale_time = train_config['scale_time']
+# scale_time = train_config['scale_time']
 
 
 ## Minimum required picks and stations per event
@@ -210,6 +210,7 @@ z.close()
 z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
 x_grids = z['x_grids']
 x_grids_init = np.copy(x_grids)
+scale_time = z['scale_time']/1000.0
 z.close()
 
 # Load stations
