@@ -194,7 +194,7 @@ use_negative_loss = True ## If True, up-sample the false positive predictions
 use_negative_loss_step = 1
 
 
-use_teleseisim_noise = True
+use_teleseisim_noise = False
 if use_teleseisim_noise == True:
 	z = np.load(path_to_file + 'Grids' + seperator + 'teleseismic_travel_time_grid_ver_1.npz')
 	xx_teleseism, trv_teleseism, phase_types = z['xx_teleseism'], z['trv_teleseism'], z['phase_types']
