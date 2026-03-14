@@ -4920,7 +4920,8 @@ for batch_idx, inputs in enumerate(loader):
 					loss_consistency_flag = True
 
 
-			out_save = [out[1]]
+			# out_save = [out[1]]
+			out_save = [out[1].detach()]
 			Lbls_save = [Lbls_query[i0].cpu().detach().numpy()]
 			iter_loss = [i, inc]
 			X_query_save = [X_query[i0].cpu().detach().numpy()]
@@ -5087,7 +5088,7 @@ for batch_idx, inputs in enumerate(loader):
 
 
 		if inc != (n_batch - 1):
-			loss.backward(retain_graph = True)
+			loss.backward(retain_graph = False)
 		else:
 			loss.backward(retain_graph = False)
 
