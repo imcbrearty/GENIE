@@ -807,7 +807,7 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 		return [A_sta_sta, [A_src_src, Ac_src_src], A_prod_sta_sta, [A_prod_src_src, Ac_prod_src_src], A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 
-def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_offset = 5.0, k_nearest_pairs = 30, k_sta_edges = 10, k_spc_edges = 15, verbose = False, scale_pairwise_sta_in_src_distances = 100e3, scale_deg = 110e3, scale_time = None, Ac = False, device = 'cpu'):
+def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_offset = 5.0, k_nearest_pairs = 30, k_sta_edges = 10, k_spc_edges = 15, verbose = False, scale_pairwise_sta_in_src_distances = 100e3, scale_deg = 110e3, scale_time = None, Ac = False, A_sta_sta = None, A_src_src = None, device = 'cpu'):
 
 	## Connect all source-reciever pairs to their k_nearest_pairs, and those connections within max_deg_offset.
 	## By using the K-nn neighbors as well as epsilon-pairs, this ensures all source nodes are at least
@@ -832,13 +832,18 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	perm_vec[ind_use] = np.arange(len(ind_use))
 
 	## This will put more edges on the longitude or latitude axis, due to the shape of the Earth?
-	A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), k = k_sta_edges + 1).flip(0).long().contiguous())[0]
+
+	if A_sta_sta is None:
+		A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), k = k_sta_edges + 1).flip(0).long().contiguous())[0]
+
 	# A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_spc_edges + 1).flip(0).long().contiguous())[0]
 
-	if scale_time is None:
-		A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
-	else:
-		A_src_src = remove_self_loops(knn(torch.cat((torch.Tensor(ftrns1(x_grid)/1000.0).to(device), scale_time*torch.Tensor(x_grid[:,3].reshape(-1,1)).to(device)), dim = 1), torch.cat((torch.Tensor(ftrns1(x_grid)/1000.0).to(device), scale_time*torch.Tensor(x_grid[:,3].reshape(-1,1)).to(device)), dim = 1), k = k_spc_edges + 1).flip(0).contiguous())[0]
+	if A_src_src is None:
+		
+		if scale_time is None:
+			A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grid)/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
+		else:
+			A_src_src = remove_self_loops(knn(torch.cat((torch.Tensor(ftrns1(x_grid)/1000.0).to(device), scale_time*torch.Tensor(x_grid[:,3].reshape(-1,1)).to(device)), dim = 1), torch.cat((torch.Tensor(ftrns1(x_grid)/1000.0).to(device), scale_time*torch.Tensor(x_grid[:,3].reshape(-1,1)).to(device)), dim = 1), k = k_spc_edges + 1).flip(0).contiguous())[0]
 
 	
 	## Make "incoming" edges for all sources based on epsilon-distance graphs, since these are the nodes that need nearest stations
