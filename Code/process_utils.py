@@ -807,7 +807,7 @@ def extract_inputs_adjacencies(trv, locs, ind_use, x_grid, x_grid_trv, x_grid_tr
 		return [A_sta_sta, [A_src_src, Ac_src_src], A_prod_sta_sta, [A_prod_src_src, Ac_prod_src_src], A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 
-def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_offset = 5.0, k_nearest_pairs = 30, k_sta_edges = 10, k_spc_edges = 15, verbose = False, scale_pairwise_sta_in_src_distances = 100e3, scale_deg = 110e3, scale_time = None, Ac = False, A_sta_sta = None, A_src_src = None, device = 'cpu'):
+def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_offset = 5.0, k_nearest_pairs = 30, k_sta_edges = 10, k_spc_edges = 15, verbose = False, scale_pairwise_sta_in_src_distances = 100e3, scale_deg = 110e3, scale_time = None, Ac = False, A_sta_sta = None, A_src_src = None, A_src_in_sta = None, device = 'cpu'):
 
 	## Connect all source-reciever pairs to their k_nearest_pairs, and those connections within max_deg_offset.
 	## By using the K-nn neighbors as well as epsilon-pairs, this ensures all source nodes are at least
@@ -852,18 +852,20 @@ def extract_inputs_adjacencies_subgraph(locs, x_grid, ftrns1, ftrns2, max_deg_of
 	# dist_pairwise_src_locs[:,:,1] = np.mod(dist_pairwise_src_locs[:,:,1], 360.0) ## Modulus on longitude distance
 	pairwise_src_locs_distances = np.linalg.norm(dist_pairwise_src_locs, axis = 2)
 	ind_src_keep, ind_sta_keep = np.where(pairwise_src_locs_distances < scale_deg*max_deg_offset)
-	A_src_in_sta_epsilon = torch.cat((torch.Tensor(ind_sta_keep.reshape(1,-1)).to(device), torch.Tensor(ind_src_keep.reshape(1,-1)).to(device)), dim = 0).long()
 
-	## Make "incoming" edges for all sources based on knn, since these are the nodes that need nearest stations
-	A_src_in_sta_knn = knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_nearest_pairs).flip(0).long().contiguous()
+	if A_src_in_sta is None:
+		A_src_in_sta_epsilon = torch.cat((torch.Tensor(ind_sta_keep.reshape(1,-1)).to(device), torch.Tensor(ind_src_keep.reshape(1,-1)).to(device)), dim = 0).long()
 
-	## Combine edges to a single source-station pairwise set of edges
-	A_src_in_sta = torch.cat((A_src_in_sta_epsilon, A_src_in_sta_knn), dim = 1)
-	A_src_in_sta = np.unique(A_src_in_sta.cpu().detach().numpy(), axis = 1)
-	isort = np.argsort(A_src_in_sta[1,:]) ## Don't need this sort, if using the one below
-	A_src_in_sta = A_src_in_sta[:,isort]
-	isort = np.lexsort((A_src_in_sta[0], A_src_in_sta[1]))
-	A_src_in_sta = torch.Tensor(A_src_in_sta[:,isort]).long().to(device)
+		## Make "incoming" edges for all sources based on knn, since these are the nodes that need nearest stations
+		A_src_in_sta_knn = knn(torch.Tensor(ftrns1(locs[ind_use])/1000.0).to(device), torch.Tensor(ftrns1(x_grid)/1000.0).to(device), k = k_nearest_pairs).flip(0).long().contiguous()
+
+		## Combine edges to a single source-station pairwise set of edges
+		A_src_in_sta = torch.cat((A_src_in_sta_epsilon, A_src_in_sta_knn), dim = 1)
+		A_src_in_sta = np.unique(A_src_in_sta.cpu().detach().numpy(), axis = 1)
+		isort = np.argsort(A_src_in_sta[1,:]) ## Don't need this sort, if using the one below
+		A_src_in_sta = A_src_in_sta[:,isort]
+		isort = np.lexsort((A_src_in_sta[0], A_src_in_sta[1]))
+		A_src_in_sta = torch.Tensor(A_src_in_sta[:,isort]).long().to(device)
 
 	## Create "subgraph" Cartesian product graph edges
 	## E.g., the "subgraph" Cartesian product is only "nodes" of pairs of sources-recievers in A_src_in_sta, rather than all pairs locs*x_grid.
