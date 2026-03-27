@@ -124,7 +124,7 @@ min_magnitude_ref = train_config['min_magnitude_ref'] # 1.5
 percentile_threshold_ref = train_config['percentile_threshold_ref'] # 0.1
 n_reference_clusters = train_config['n_reference_clusters'] # 10000 ## The amount of "quasi-uniiform" nodes to obtain for representing the source catalog distribution
 n_frac_reference_catalog = train_config['n_frac_reference_catalog'] # 0.8 ## The amount of sources to simulate from the reference catalog coordinates compared to background
-n_batches_per_job = train_config['n_batches_per_job']
+
 
 ## Prediction params
 kernel_sig_t = train_config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
@@ -136,6 +136,51 @@ src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projec
 # t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
 src_kernel_mean = np.mean([src_x_kernel, src_x_kernel, src_depth_kernel])
 src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
+n_batches_per_job = train_config['n_batches_per_job']
+
+use_real_data = train_config.get('use_real_data', False)
+n_real_fraction = train_config.get('n_real_fraction', 0.3)
+
+if use_real_data == True: ## If using real data, mask the labels near the source (don't center window on source, but just center mask; in time, and possibly in space)
+	n_reference_ver = 1
+	# n_real_fraction = 0.5
+	st1 = glob.glob(path_to_file + 'Calibration/19*') ## Assuming years are 1900 and 2000's
+	st2 = glob.glob(path_to_file + 'Calibration/20*')
+	st = np.concatenate((st1, st2), axis = 0)
+	st_calibration = np.hstack([glob.glob(s + '/*ver_%d.npz'%n_reference_ver) for s in st])
+	dates_calibration = np.vstack([[int(j) for j in s.strip().split('/')[-1].split('_')[2:5]] for s in st_calibration])
+	iarg = np.lexsort((dates_calibration[:,0], dates_calibration[:,1], dates_calibration[:,2]))
+	dates_calibration = dates_calibration[iarg]
+	st_calibration = st_calibration[iarg]
+	if len(st_calibration) == 0: 
+		use_real_data = False
+	else:
+		iperm_list = np.random.permutation(len(st_calibration))
+		st_calibration = st_calibration[iperm_list]
+		dates_calibration = dates_calibration[iperm_list]
+
+	st1_picks = glob.glob(path_to_file + 'Picks/19*') ## Assuming years are 1900 and 2000's
+	st2_picks = glob.glob(path_to_file + 'Picks/20*')
+	st_picks = np.concatenate((st1_picks, st2_picks), axis = 0)	
+	st_picks = np.hstack([glob.glob(s + '/*ver_%d.npz'%1) for s in st_picks]) # n_ver_picks = 1
+	dates_picks = np.vstack([[int(j) for j in s.strip().split('/')[-1].split('_')[0:3]] for s in st_picks])
+
+	tree_dates = cKDTree(dates_picks)
+	ifound = np.where(tree_dates.query(dates_calibration)[0] == 0)[0]
+
+	st_calibration = st_calibration[ifound]
+	dates_calibration = dates_calibration[ifound]
+
+
+use_fixed_graphs = True
+if use_fixed_graphs == True:
+	st_graphs = glob.glob('Graphs/*merged_graph*')
+
+	dates_allowed = np.vstack([[int(j) for j in s.strip().split('date_')[1].split('_')[0:3]] for s in st_graphs])
+	tree_dates = cKDTree(dates_allowed)
+	ifound = np.where(tree_dates.query(dates_calibration)[0] == 0)[0]
+	st_calibration = st_calibration[ifound]
+	dates_calibration = dates_calibration[ifound]
 
 # scale_time = train_config['scale_time']
 
@@ -245,20 +290,20 @@ if (load_subnetworks == True)*(load_training_data == False): ## Only load subnet
 		st1 = glob.glob(path_to_file + 'Picks/19*') ## Assuming years are 1900 and 2000's
 		st2 = glob.glob(path_to_file + 'Picks/20*')
 		st = np.concatenate((st1, st2), axis = 0)
-
+		
 		cnt_files = 0
 		for i in range(len(st)):
 			cnt_files += len(glob.glob(st[i] + '/*.npz'))
-
+	
 		prob_use = 5.0*n_batches_per_job/cnt_files
-		
+
 		for i in range(len(st)):
 			st1 = glob.glob(st[i] + '/*.npz')
 			for j in range(len(st1)):
 
 				if np.random.rand() > prob_use:
 					continue
-				
+
 				z = np.load(st1[j])
 				ind_use = np.unique(z['P'][:,1]).astype('int')
 				z.close()
@@ -288,10 +333,7 @@ z.close()
 # Load templates
 z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
 x_grids = z['x_grids']
-if 'scale_time' in list(z.keys()):
-	scale_time = z['scale_time']/1000.0
-else:
-	scale_time = train_config['scale_time']
+scale_time = z['scale_time']/1000.0
 z.close()
 
 # Load stations
@@ -684,7 +726,23 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		imatch = tree_surface.query(src_positions[:,0:2])[1]
 		ifind_match = np.where(src_positions[:,2] > surface_profile[imatch,2])[0]
 		src_positions[ifind_match,2] = np.random.rand(len(ifind_match))*(surface_profile[imatch[ifind_match],2] - depth_range[0]) + depth_range[0]
-		
+
+	use_real_data_sample = True if (use_real_data == True)*(np.random.rand() < n_real_fraction) else False
+
+	if use_real_data_sample == True:
+		# min_magnitude = 2.5
+		ichoose_data = np.random.choice(len(st_calibration))
+		date_choose = dates_calibration[ichoose_data]
+		sdata = st_calibration[ichoose_data]
+		srcs_known = np.load(sdata)['srcs_ref']
+		P_ref = np.load('Picks/%d/%d_%d_%d_ver_1.npz'%(date_choose[0], date_choose[0], date_choose[1], date_choose[2]))['P']
+		n_src = len(srcs_known)
+		src_positions = srcs_known[:,0:3]
+		src_magnitude = srcs_known[:,4]
+		src_times = srcs_known[:,3]
+		T = P_ref[:,0].max()
+		# z.close()
+
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
 	use_uniform_distance_threshold = False
@@ -740,6 +798,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	ikeep_s1, ikeep_s2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_s))
 
 	# arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
+
+	## Use a maximum residual time on associated picks
+	## Iterate the scatter filtering
+	## Possibly use only largest disconnected component of subgraph for associated subset
+	## Force uniqueness of picks between both P and S (e.g., only assigned to at most one P or S)
 
 
 	use_correlated_travel_time_noise = False
@@ -798,129 +861,278 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			# scale_bias_s = 
 			scale_bias = scale_bias + 1.0
 			arrivals_theoretical = arrivals_theoretical*scale_bias
-	
-	arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)
-	arrivals_indices = np.arange(n_sta).reshape(1,-1).repeat(n_src, 0)
-	src_indices = np.arange(n_src).reshape(-1,1).repeat(n_sta, 1)
 
-	## Save the excess noise mask in the fourth column instead of the origin time; after using this mask, can overwrite back to the origin time
-	# arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), arrival_origin_times[ikeep_p1, ikeep_p2].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
-	# arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), arrival_origin_times[ikeep_s1, ikeep_s2].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
-	arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), mask_excess_noise[ikeep_p1, ikeep_p2, 0].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
-	arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), mask_excess_noise[ikeep_s1, ikeep_s2, 1].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
-	arrivals = np.concatenate((arrivals_p, arrivals_s), axis = 0)
+	if use_real_data_sample == False:
+
+		arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)
+		arrivals_indices = np.arange(n_sta).reshape(1,-1).repeat(n_src, 0)
+		src_indices = np.arange(n_src).reshape(-1,1).repeat(n_sta, 1)
+
+		## Save the excess noise mask in the fourth column instead of the origin time; after using this mask, can overwrite back to the origin time
+		# arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), arrival_origin_times[ikeep_p1, ikeep_p2].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
+		# arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), arrival_origin_times[ikeep_s1, ikeep_s2].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
+		arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), mask_excess_noise[ikeep_p1, ikeep_p2, 0].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
+		arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), mask_excess_noise[ikeep_s1, ikeep_s2, 1].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
+		arrivals = np.concatenate((arrivals_p, arrivals_s), axis = 0)
+
+	else:
+
+		# min_time = 45.0 ## Both this time
+		min_rel_error = 0.2 ## and this minimum relative error
+		min_rel_time = 1.0
+		min_ratio_neighbors = 0.2
+		max_abs_error = 5.0
+
+		trv_out_pred_base = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
+		# trv_out_pred_base[trv_out_pred_base > max_t] = np.nan
+		trv_out_pred = trv_out_pred_base + src_times.reshape(-1,1,1)
+		trv_time_p1 = np.concatenate((trv_out_pred[:,:,0].reshape(-1,1), np.arange(len(locs)).reshape(1,-1).repeat(len(src_positions), axis = 0).reshape(-1,1), np.arange(len(src_positions)).reshape(-1, 1).repeat(len(locs), axis = 1).reshape(-1,1)), axis = 1)
+		trv_time_p2 = np.concatenate((trv_out_pred[:,:,1].reshape(-1,1), np.arange(len(locs)).reshape(1,-1).repeat(len(src_positions), axis = 0).reshape(-1,1), np.arange(len(src_positions)).reshape(-1, 1).repeat(len(locs), axis = 1).reshape(-1,1)), axis = 1)
+
+		# trv_time_p1 = np.concatenate((trv_out_pred[:,:,0].reshape(-1,1), np.arange(len(locs)).reshape(1,-1).repeat(len(src_positions), axis = 0).reshape(-1,1), np.arange(len(locs)).reshape(1, -1).repeat(len(src_positions), axis = 0).reshape(-1,1)), axis = 1)
+		# trv_time_p2 = np.concatenate((trv_out_pred[:,:,1].reshape(-1,1), np.arange(len(locs)).reshape(1,-1).repeat(len(src_positions), axis = 0).reshape(-1,1), np.arange(len(locs)).reshape(1, -1).repeat(len(src_positions), axis = 0).reshape(-1,1)), axis = 1)
+
+		## For each simulated travel time, see if a pick exists in the pick dataset P_ref
+		tree_picks = cKDTree(P_ref[:,0:2]*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
+		ip_query1 = tree_picks.query(np.nan_to_num(trv_time_p1[:,0:2], nan = -3600.0*24.0*1.5)*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
+		ip_query2 = tree_picks.query(np.nan_to_num(trv_time_p2[:,0:2], nan = -3600.0*24.0*1.5)*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
+
+		## Should add stable relative error
+		# ifind1 = np.where((ip_query1[0] < min_time)*(np.abs(ip_query1[0]/np.maximum(1.0, trv_out_pred_base[:,:,0].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0))[0]
+		# ifind2 = np.where((ip_query2[0] < min_time)*(np.abs(ip_query2[0]/np.maximum(1.0, trv_out_pred_base[:,:,1].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0))[0]
+		# ifind1 = np.where((np.abs(ip_query1[0]/np.maximum(1.0, trv_out_pred_base[:,:,0].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0))[0]
+		# ifind2 = np.where((np.abs(ip_query2[0]/np.maximum(1.0, trv_out_pred_base[:,:,1].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0))[0]
+		ifind1 = np.where((np.abs(ip_query1[0]/np.maximum(1.0, trv_out_pred_base[:,:,0].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0)*(ip_query1[0] < max_abs_error))[0]
+		ifind2 = np.where((np.abs(ip_query2[0]/np.maximum(1.0, trv_out_pred_base[:,:,1].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0)*(ip_query2[0] < max_abs_error))[0]
+
+
+		ifind11 = np.where((ip_query1[0] < min_rel_time)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0)*(ip_query1[0] < max_abs_error))[0]
+		ifind21 = np.where((ip_query2[0] < min_rel_time)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0)*(ip_query2[0] < max_abs_error))[0]
+		ifind1 = np.unique(np.concatenate((ifind1, ifind11), axis = 0))
+		ifind2 = np.unique(np.concatenate((ifind2, ifind21), axis = 0))
+
+		## Filter the retained stations based on neighbor relationships
+		## E.g., use scatter for each source, for each station, based on neighbors, and only retain those picks that > thresh proportion of neighbors
+		## Can use batching for efficiency
+		ind_unique = np.unique(P_ref[:,1].astype('int'))
+		edges_sta = torch.Tensor(ind_unique).long().to(device)[remove_self_loops(knn(torch.Tensor(ftrns1(locs[ind_unique])/1000.0).to(device), torch.Tensor(ftrns1(locs[ind_unique])/1000.0).to(device), k = k_sta_edges + 1))[0].flip(0).contiguous()]
+		edges_sta_repeat = torch.hstack([edges_sta + j*len(locs) for j in range(len(src_positions))]).to(device)
+
+		converged_pooling, inc_pool = False, 0
+		while (converged_pooling == False)*(inc_pool < 15):
+
+			## Possibly do pooling between both P and S (e.g., mix the phase types)
+			## Since sometimes, multiple adjacent stations will miss S picks, but clearly have P picks
+			## Could also increase k_sta_edges
+
+			n_int_total = len(ifind1) + len(ifind2)
+			feature_vals_p = torch.zeros((len(src_positions)*len(locs)),1).to(device)
+			feature_vals_s = torch.zeros((len(src_positions)*len(locs)),1).to(device)
+			feature_vals_p[ifind1,0] = 1.0
+			feature_vals_s[ifind2,0] = 1.0
+
+			feature_pool_p = (feature_vals_p*scatter(feature_vals_p[edges_sta_repeat[0]], edges_sta_repeat[1], dim = 0, dim_size = len(src_positions)*len(locs), reduce = 'sum')).cpu().detach().numpy() # .reshape(len(src_positions), len(locs))
+			feature_pool_s = (feature_vals_s*scatter(feature_vals_s[edges_sta_repeat[0]], edges_sta_repeat[1], dim = 0, dim_size = len(src_positions)*len(locs), reduce = 'sum')).cpu().detach().numpy() # .reshape(len(src_positions), len(locs))
+
+			ifind1 = np.where(feature_pool_p >= max(1, np.round(k_sta_edges*min_ratio_neighbors)))[0]
+			ifind2 = np.where(feature_pool_s >= max(1, np.round(k_sta_edges*min_ratio_neighbors)))[0]
+			if len(ifind1) + len(ifind2) == n_int_total: converged_pooling = True
+
+			inc_pool += 1
+
+		print('Converged %d'%inc_pool)
+		# print(inc_pool)
+
+		# for j in range(len(Picks_P_perm)):
+
+		# 	iunique_sta = np.unique(np.concatenate((Picks_P_perm[j][:,1], Picks_S_perm[j][:,1]), axis = 0).astype('int'))
+		# 	embed_features = torch.zeros(len(locs_use)).to(device)
+		# 	embed_features[iunique_sta] = 1.0
+		# 	out_val = scatter(embed_features.reshape(-1,1)[knn_sta_edges[0]], knn_sta_edges[1], dim = 0, dim_size = locs_use.shape[0], reduce = 'sum').cpu().detach().numpy().reshape(-1)
+		# 	# out_val = embed_features.cpu().detach().numpy() - out_val ## If less than or equal to zero, at least one neighbor has a pick
+		# 	iallowed = np.sort(np.array(list(set(iunique_sta).intersection( np.where(out_val >= min_neighbor_picks)[0] ))))
+		# 	if len(iallowed) == 0: iallowed = np.array([-1]).astype('int') ## This catches an empty iallowed
+		# 	tree_allowed = cKDTree(iallowed.reshape(-1,1))
+		# 	if len(Picks_P_perm[j]) > 0: Picks_P_perm[j] = Picks_P_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_P_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_P_perm[j][:,1].astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')]
+		# 	if len(Picks_S_perm[j]) > 0: Picks_S_perm[j] = Picks_S_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_S_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_S_perm[j][:,1].astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')]
+
+
+		ikeep_p1, ikeep_p2 = trv_time_p1[ifind1,2].astype('int'), trv_time_p1[ifind1,1].astype('int')
+		ikeep_s1, ikeep_s2 = trv_time_p2[ifind2,2].astype('int'), trv_time_p2[ifind2,1].astype('int')
+
+		## Use only one assignment for each pick (note, should make this an optimal selection)
+		unique_ind1 = np.unique(ip_query1[1][ifind1])
+		tree_ind1 = cKDTree(ip_query1[1][ifind1].reshape(-1,1))
+		imatch_ind1 = tree_ind1.query(unique_ind1.reshape(-1,1))[1]
+		ifind1 = ifind1[imatch_ind1]
+		ikeep_p1, ikeep_p2 = ikeep_p1[imatch_ind1], ikeep_p2[imatch_ind1]
+
+		unique_ind2 = np.unique(ip_query2[1][ifind2])
+		tree_ind2 = cKDTree(ip_query2[1][ifind2].reshape(-1,1))
+		imatch_ind2 = tree_ind2.query(unique_ind2.reshape(-1,1))[1]
+		ifind2 = ifind2[imatch_ind2]
+		ikeep_s1, ikeep_s2 = ikeep_s1[imatch_ind2], ikeep_s2[imatch_ind2]
+
+		arrivals_theoretical = np.nan*np.ones((len(src_positions), len(locs), 2))
+		arrivals_theoretical[ikeep_p1, ikeep_p2, 0] = P_ref[ip_query1[1][ifind1],0]
+		arrivals_theoretical[ikeep_s1, ikeep_s2, 1] = P_ref[ip_query2[1][ifind2],0]
+
+		## Need to add the "relative neighborhood" check to keep positive labels. E.g., within time buffer, within relative error, and with enough of nearest neighbor stations with positive associations
+		## Note that the neighbrhood check might have to be iterative, or a integer linear programming problem must be solved (e.g., if removing some picks, might impy other picks also need to be removed, e.g., constraints)
+
+		# arrivals_indices = np.nan*np.ones((len(src_positions), len(locs), 2))
+		# arrivals_theoretical[ikeep_p1, ikeep_p2, 0] = P_ref[ip_query1[0][ifind1],0]
+		# arrivals_theoretical[ikeep_s1, ikeep_s2, 1] = P_ref[ip_query2[0][ifind2],0]
+
+		mask_excess_noise = np.expand_dims(src_times.reshape(-1,1).repeat(len(locs), axis = 1), axis = 2).repeat(2, axis = 2)
+
+		## Note, removing origin times here, but they'll be added back
+		arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1) - src_times[ikeep_p1].reshape(-1,1), ikeep_p2.reshape(-1,1), ikeep_p1.reshape(-1,1), mask_excess_noise[ikeep_p1, ikeep_p2, 0].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
+		arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1) - src_times[ikeep_s1].reshape(-1,1), ikeep_s2.reshape(-1,1), ikeep_s1.reshape(-1,1), mask_excess_noise[ikeep_s1, ikeep_s2, 1].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
+		# pdb.set_trace()
+		arrivals = np.concatenate((arrivals_p, arrivals_s), axis = 0)
+		# false_arrivals = 
+		inoise = np.delete(np.arange(len(P_ref)), np.unique(np.concatenate((ip_query1[1][ifind1], ip_query2[1][ifind2]), axis = 0)))
+
+		print('Assigned %d real picks in %d sources (%d average) of all %d picks'%(len(arrivals), len(src_times), (len(arrivals)/len(src_times))/2.0, len(P_ref)))
+
+		# if len(src_times) > 5:
+			# iarg = np.argsort(src_magnitude)[cKDTree(np.logspace(0, 1, 10))]
+		
+
+		# pdb.set_trace()
+
+		# trv_out_pred[:,:,1] = np.nan
+
+
 
 	if len(arrivals) == 0:
 		arrivals = -1*np.zeros((1,5))
 		arrivals[0,0] = np.random.rand()*T
 		arrivals[0,1] = int(np.floor(np.random.rand()*(locs.shape[0] - 1)))
 	
-	# s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
-	t_inc = np.floor(arrivals[:,3]/dt).astype('int')
-	p_miss_rate = 0.5*station_miss_rate[arrivals[:,1].astype('int'), t_inc] + 0.5*global_miss_rate[t_inc]
+	# n_events = len()
 
-	if miss_pick_fraction is not False: ## Scale random delete rates to min and max values (times inflate)
-		inflate = 1.5
-		p_miss_rate1 = np.copy(p_miss_rate)
-		low_val, high_val = np.quantile(p_miss_rate, 0.1), np.quantile(p_miss_rate, 0.9)
-		p_miss_rate1 = (p_miss_rate - low_val)/(high_val - low_val) # approximate min-max normalization with quantiles
-		p_miss_rate1 = inflate*p_miss_rate1*(miss_pick_fraction[1] - miss_pick_fraction[0]) + miss_pick_fraction[0]
-		p_miss_rate1 = p_miss_rate1 + 0.5*(np.random.rand() - 0.5)*(miss_pick_fraction[1] - miss_pick_fraction[0]) ## Random shift of 25% of range
-		idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < p_miss_rate1)[0]
-		print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
-	else:
-		## Previous delete random pick version
-		idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < dt*p_miss_rate/T)[0]
-		print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
-
-	arrivals = np.delete(arrivals, idel, axis = 0)
 	n_events = len(src_times)
 
-	icoda = np.where(np.random.rand(arrivals.shape[0]) < coda_rate)[0]
-	if len(icoda) > 0:
-		false_coda_arrivals = np.random.rand(len(icoda))*(coda_win[1] - coda_win[0]) + coda_win[0] + arrivals[icoda,0] + arrivals[icoda,3]
-		false_coda_arrivals = np.concatenate((false_coda_arrivals.reshape(-1,1), arrivals[icoda,1].reshape(-1,1), -1.0*np.ones((len(icoda),1)), np.zeros((len(icoda),1)), -1.0*np.ones((len(icoda),1))), axis = 1)
-		arrivals = np.concatenate((arrivals, false_coda_arrivals), axis = 0)
+	if use_real_data_sample == False:
 
-	## Base false events
-	station_false_rate_eval = 0.5*station_false_rate + 0.5*global_false_rate
+		# s_extra = 0.0 ## If this is non-zero, it can increase (or decrease) the total rate of missed s waves compared to p waves
+		t_inc = np.floor(arrivals[:,3]/dt).astype('int')
+		p_miss_rate = 0.5*station_miss_rate[arrivals[:,1].astype('int'), t_inc] + 0.5*global_miss_rate[t_inc]
 
-	# if use_false_ratio_value == True: ## If true, use the ratio of real events to guide false picks
-	# 	station_false_rate_eval = max_false_events*np.mean(miss_pick_fraction)*station_false_rate_eval*(global_event_rate.mean()/station_false_rate_eval.mean()) # station_false_rate_eval
+		if miss_pick_fraction is not False: ## Scale random delete rates to min and max values (times inflate)
+			inflate = 1.5
+			p_miss_rate1 = np.copy(p_miss_rate)
+			low_val, high_val = np.quantile(p_miss_rate, 0.1), np.quantile(p_miss_rate, 0.9)
+			p_miss_rate1 = (p_miss_rate - low_val)/(high_val - low_val) # approximate min-max normalization with quantiles
+			p_miss_rate1 = inflate*p_miss_rate1*(miss_pick_fraction[1] - miss_pick_fraction[0]) + miss_pick_fraction[0]
+			p_miss_rate1 = p_miss_rate1 + 0.5*(np.random.rand() - 0.5)*(miss_pick_fraction[1] - miss_pick_fraction[0]) ## Random shift of 25% of range
+			idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < p_miss_rate1)[0]
+			print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
+		else:
+			## Previous delete random pick version
+			idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < dt*p_miss_rate/T)[0]
+			print('Deleting %d of %d (%0.2f) picks \n'%(len(idel), len(arrivals), len(idel)/len(arrivals)))
 
-	use_clean_data_interval = True
-	if use_clean_data_interval == True:
-		## Remove a section of false picks completely, so very clean events are also shown in training (to stabalize the single input pick per station per phase type case with the attention mechanism)
-		frac_interval = [0.1, 0.3] ## Between 0.1 and 0.3 of the full time window
-		frac_length_sample = np.random.rand()*(frac_interval[1] - frac_interval[0]) + frac_interval[0]
-		interval_length = int(np.floor(station_false_rate_eval.shape[1]*frac_length_sample))
-		ichoose_start = np.random.choice(station_false_rate_eval.shape[1] - interval_length)
-		station_false_rate_eval[:,ichoose_start:(ichoose_start + interval_length)] = 0.0 ## Set false pick rate to zero during this interval, for all stations
-	
-	
-	vals = np.random.poisson(dt*station_false_rate_eval/T) # This scaling, assigns to each bin the number of events to achieve correct, on averge, average
+		arrivals = np.delete(arrivals, idel, axis = 0)
+		n_events = len(src_times)
 
-	# How to speed up this part?
-	i1, i2 = np.where(vals > 0)
-	v_val, t_val = vals[i1,i2], tsteps[i2]
-	false_times = np.repeat(t_val, v_val) + np.random.rand(vals.sum())*dt
-	false_indices = np.hstack([k*np.ones(vals[k,:].sum()) for k in range(n_sta)])
-	n_false = len(false_times)
-	false_arrivals = np.concatenate((false_times.reshape(-1,1), false_indices.reshape(-1,1), -1.0*np.ones((n_false,1)), np.zeros((n_false,1)), -1.0*np.ones((n_false,1))), axis = 1)
-	arrivals = np.concatenate((arrivals, false_arrivals), axis = 0)
+		icoda = np.where(np.random.rand(arrivals.shape[0]) < coda_rate)[0]
+		if len(icoda) > 0:
+			false_coda_arrivals = np.random.rand(len(icoda))*(coda_win[1] - coda_win[0]) + coda_win[0] + arrivals[icoda,0] + arrivals[icoda,3]
+			false_coda_arrivals = np.concatenate((false_coda_arrivals.reshape(-1,1), arrivals[icoda,1].reshape(-1,1), -1.0*np.ones((len(icoda),1)), np.zeros((len(icoda),1)), -1.0*np.ones((len(icoda),1))), axis = 1)
+			arrivals = np.concatenate((arrivals, false_coda_arrivals), axis = 0)
 
-	# n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
-	if int(max_num_spikes*T/(3600*24)) > 0:
-		n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
-		n_spikes_extent = np.random.randint(int(np.floor(n_sta*0.35)), high = n_sta, size = n_spikes) ## This many stations per spike
-		time_spikes = np.random.rand(n_spikes)*T
-		sta_ind_spikes = [np.random.choice(n_sta, size = n_spikes_extent[j], replace = False) for j in range(n_spikes)]
-		if len(sta_ind_spikes) > 0: ## Add this catch, to avoid error of np.hstack if len(sta_ind_spikes) == 0
-			sta_ind_spikes = np.hstack(sta_ind_spikes)
-			sta_time_spikes = np.hstack([time_spikes[j] + np.random.randn(n_spikes_extent[j])*spike_time_spread for j in range(n_spikes)])
-			false_arrivals_spikes = np.concatenate((sta_time_spikes.reshape(-1,1), sta_ind_spikes.reshape(-1,1), -1.0*np.ones((len(sta_ind_spikes),1)), np.zeros((len(sta_ind_spikes),1)), -1.0*np.ones((len(sta_ind_spikes),1))), axis = 1)
-			arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) ## Concatenate on spikes
+		## Base false events
+		station_false_rate_eval = 0.5*station_false_rate + 0.5*global_false_rate
+
+		# if use_false_ratio_value == True: ## If true, use the ratio of real events to guide false picks
+		# 	station_false_rate_eval = max_false_events*np.mean(miss_pick_fraction)*station_false_rate_eval*(global_event_rate.mean()/station_false_rate_eval.mean()) # station_false_rate_eval
+
+		use_clean_data_interval = True
+		if use_clean_data_interval == True:
+			## Remove a section of false picks completely, so very clean events are also shown in training (to stabalize the single input pick per station per phase type case with the attention mechanism)
+			frac_interval = [0.1, 0.3] ## Between 0.1 and 0.3 of the full time window
+			frac_length_sample = np.random.rand()*(frac_interval[1] - frac_interval[0]) + frac_interval[0]
+			interval_length = int(np.floor(station_false_rate_eval.shape[1]*frac_length_sample))
+			ichoose_start = np.random.choice(station_false_rate_eval.shape[1] - interval_length)
+			station_false_rate_eval[:,ichoose_start:(ichoose_start + interval_length)] = 0.0 ## Set false pick rate to zero during this interval, for all stations
+		
+		
+		vals = np.random.poisson(dt*station_false_rate_eval/T) # This scaling, assigns to each bin the number of events to achieve correct, on averge, average
+
+		# How to speed up this part?
+		i1, i2 = np.where(vals > 0)
+		v_val, t_val = vals[i1,i2], tsteps[i2]
+		false_times = np.repeat(t_val, v_val) + np.random.rand(vals.sum())*dt
+		false_indices = np.hstack([k*np.ones(vals[k,:].sum()) for k in range(n_sta)])
+		n_false = len(false_times)
+		false_arrivals = np.concatenate((false_times.reshape(-1,1), false_indices.reshape(-1,1), -1.0*np.ones((n_false,1)), np.zeros((n_false,1)), -1.0*np.ones((n_false,1))), axis = 1)
+		arrivals = np.concatenate((arrivals, false_arrivals), axis = 0)
+
+		# n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
+		if int(max_num_spikes*T/(3600*24)) > 0:
+			n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
+			n_spikes_extent = np.random.randint(int(np.floor(n_sta*0.35)), high = n_sta, size = n_spikes) ## This many stations per spike
+			time_spikes = np.random.rand(n_spikes)*T
+			sta_ind_spikes = [np.random.choice(n_sta, size = n_spikes_extent[j], replace = False) for j in range(n_spikes)]
+			if len(sta_ind_spikes) > 0: ## Add this catch, to avoid error of np.hstack if len(sta_ind_spikes) == 0
+				sta_ind_spikes = np.hstack(sta_ind_spikes)
+				sta_time_spikes = np.hstack([time_spikes[j] + np.random.randn(n_spikes_extent[j])*spike_time_spread for j in range(n_spikes)])
+				false_arrivals_spikes = np.concatenate((sta_time_spikes.reshape(-1,1), sta_ind_spikes.reshape(-1,1), -1.0*np.ones((len(sta_ind_spikes),1)), np.zeros((len(sta_ind_spikes),1)), -1.0*np.ones((len(sta_ind_spikes),1))), axis = 1)
+				arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) ## Concatenate on spikes
 
 
-	if use_teleseisim_noise == True:
-		max_num_teleseisms = 10
+		if use_teleseisim_noise == True:
+			max_num_teleseisms = 10
 
-		n_teleseisms = np.random.randint(0, high = int(max_num_spikes*T/(3600*24)))
-		n_teleseisms_extent = np.random.randint(int(np.floor(n_sta*0.35)), high = n_sta, size = n_teleseisms)
-		sta_ind_teleseisms = [np.random.choice(n_sta, size = n_teleseisms_extent[j], replace = False) for j in range(n_teleseisms)]
+			n_teleseisms = np.random.randint(0, high = int(max_num_spikes*T/(3600*24)))
+			n_teleseisms_extent = np.random.randint(int(np.floor(n_sta*0.35)), high = n_sta, size = n_teleseisms)
+			sta_ind_teleseisms = [np.random.choice(n_sta, size = n_teleseisms_extent[j], replace = False) for j in range(n_teleseisms)]
 
-		picks_teleseism = []
-		if n_teleseisms > 0:
+			picks_teleseism = []
+			if n_teleseisms > 0:
 
-			n_trial_point = int(100*n_teleseisms)
-			ichoose = np.random.choice(len(xx_teleseism), size = n_trial_point)
-			x_base = np.hstack([np.random.uniform(lat_range_extend[0], lat_range_extend[1], size = n_trial_point).reshape(-1,1), np.random.uniform(lon_range_extend[0], lon_range_extend[1], size = n_trial_point).reshape(-1,1)]) 
-			rand_vec = np.random.randn(n_trial_point, 2)
-			deg_dist = 0.75*np.random.uniform(xx_teleseism[:,0].min(), xx_teleseism[:,0].max(), size = n_trial_point)
+				n_trial_point = int(100*n_teleseisms)
+				ichoose = np.random.choice(len(xx_teleseism), size = n_trial_point)
+				x_base = np.hstack([np.random.uniform(lat_range_extend[0], lat_range_extend[1], size = n_trial_point).reshape(-1,1), np.random.uniform(lon_range_extend[0], lon_range_extend[1], size = n_trial_point).reshape(-1,1)]) 
+				rand_vec = np.random.randn(n_trial_point, 2)
+				deg_dist = 0.75*np.random.uniform(xx_teleseism[:,0].min(), xx_teleseism[:,0].max(), size = n_trial_point)
 
-			x_base = x_base + deg_dist.reshape(-1,1)*(rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True))
-			ifind = np.where((x_base[:,0] > lat_range_extend[0])*(x_base[:,0] < lat_range_extend[1])*(x_base[:,1] > lon_range_extend[0])*(x_base[:,1] < lon_range_extend[1]))[0]
-			x_base = x_base[np.random.choice(np.delete(np.arange(len(x_base)), ifind, axis = 0), size = n_teleseisms)]
-			x_depth = np.random.choice(np.unique(xx_teleseism[:,1]), size = len(x_base))
-			x_time = np.random.rand(len(x_base))*T
+				x_base = x_base + deg_dist.reshape(-1,1)*(rand_vec/np.linalg.norm(rand_vec, axis = 1, keepdims = True))
+				ifind = np.where((x_base[:,0] > lat_range_extend[0])*(x_base[:,0] < lat_range_extend[1])*(x_base[:,1] > lon_range_extend[0])*(x_base[:,1] < lon_range_extend[1]))[0]
+				x_base = x_base[np.random.choice(np.delete(np.arange(len(x_base)), ifind, axis = 0), size = n_teleseisms)]
+				x_depth = np.random.choice(np.unique(xx_teleseism[:,1]), size = len(x_base))
+				x_time = np.random.rand(len(x_base))*T
 
-			for j in range(n_teleseisms):
-				k_use = np.random.choice(trv_teleseism.shape[1])
-				isubset = np.where(xx_teleseism[:,1] == x_depth[j])[0]
-				dist_deg = np.linalg.norm(locs[sta_ind_teleseisms[j],0:2] - x_base[j,0:2].reshape(1,-1), axis = 1)
-				inearest = cKDTree(xx_teleseism[isubset,0].reshape(-1,1)).query(dist_deg.reshape(-1,1))[1]
-				trv_estimate = trv_teleseism[isubset[inearest],k_use]
-				inot_nan = np.where(np.isnan(trv_estimate) == 0)[0]
-				trv_noise = np.random.randn(len(inot_nan))*sig_t*trv_estimate[inot_nan]
+				for j in range(n_teleseisms):
+					k_use = np.random.choice(trv_teleseism.shape[1])
+					isubset = np.where(xx_teleseism[:,1] == x_depth[j])[0]
+					dist_deg = np.linalg.norm(locs[sta_ind_teleseisms[j],0:2] - x_base[j,0:2].reshape(1,-1), axis = 1)
+					inearest = cKDTree(xx_teleseism[isubset,0].reshape(-1,1)).query(dist_deg.reshape(-1,1))[1]
+					trv_estimate = trv_teleseism[isubset[inearest],k_use]
+					inot_nan = np.where(np.isnan(trv_estimate) == 0)[0]
+					trv_noise = np.random.randn(len(inot_nan))*sig_t*trv_estimate[inot_nan]
 
-				if len(inot_nan) > 0:
-					picks_teleseism.append(np.concatenate((x_time[j] + trv_estimate[inot_nan].reshape(-1,1) + trv_noise.reshape(-1,1), sta_ind_teleseisms[j][inot_nan].reshape(-1,1), np.array([-1, 0, -1]).reshape(1,-1).repeat(len(inot_nan), axis = 0)), axis = 1))
+					if len(inot_nan) > 0:
+						picks_teleseism.append(np.concatenate((x_time[j] + trv_estimate[inot_nan].reshape(-1,1) + trv_noise.reshape(-1,1), sta_ind_teleseisms[j][inot_nan].reshape(-1,1), np.array([-1, 0, -1]).reshape(1,-1).repeat(len(inot_nan), axis = 0)), axis = 1))
 
-				# print(trv_estimate[inot_nan])
+					# print(trv_estimate[inot_nan])
 
-		if len(picks_teleseism) > 0:
-			picks_teleseism = np.vstack(picks_teleseism)
-			arrivals = np.concatenate((arrivals, picks_teleseism), axis = 0)
+			if len(picks_teleseism) > 0:
+				picks_teleseism = np.vstack(picks_teleseism)
+				arrivals = np.concatenate((arrivals, picks_teleseism), axis = 0)
+
+
+	else:
+
+		n_false = len(inoise)
+		init_false_phase = np.copy(P_ref[inoise,4])
+		false_arrivals = np.concatenate((P_ref[inoise,0].reshape(-1,1), P_ref[inoise,1].reshape(-1,1), -1.0*np.ones((n_false,1)), np.zeros((n_false,1)), -1.0*np.ones((n_false,1))), axis = 1)
+		ind_false_phase = np.arange(len(inoise)) + len(arrivals)
+		arrivals = np.concatenate((arrivals, false_arrivals), axis = 0)	
+
 
 		# pdb.set_trace()
 
@@ -965,9 +1177,25 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			arrivals[iz,3] = src_times[arrivals[iz,2].astype('int')] ## Write real picks fourth column back to origin times, for consistency with previous approach
 		
 		else:
-			noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-			iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
-			arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+
+
+			if use_real_data_sample == False:
+				noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+				iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+				arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+
+			else:
+				noise_values = 0.0*np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+				iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+				arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] # + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise				
+				assert(len(iexcess_noise) == 0)
+
+				# pdb.set_trace()
+
+
+			# noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+			# iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+			# arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
 		
 		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
 			init_phase_type = arrivals[iz[iexcess_noise],4]
@@ -1003,7 +1231,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	## If true, return only the synthetic arrivals
 	if return_only_data == True:
 		srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitude.reshape(-1,1)), axis = 1)
-		data = [arrivals, srcs, active_sources]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
+		data = [arrivals, srcs, active_sources, int(use_real_data_sample)]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
 		return data
 	
 	inside_interior = ((src_positions[:,0] < lat_range[1])*(src_positions[:,0] > lat_range[0])*(src_positions[:,1] < lon_range[1])*(src_positions[:,1] > lon_range[0]))
@@ -1013,12 +1241,19 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	phase_observed = np.copy(arrivals[:,-1]).astype('int')
 
 	if len(iwhere_false) > 0: # For false picks, assign a random phase type
-		phase_observed[iwhere_false] = np.random.randint(0, high = 2, size = len(iwhere_false))
+
+		if use_real_data_sample == True:
+			phase_observed[ind_false_phase] = init_false_phase
+
+		else:
+			phase_observed[iwhere_false] = np.random.randint(0, high = 2, size = len(iwhere_false))
+	
+
 	if len(iexcess_noise) > 0:
 		phase_observed[iz[iexcess_noise]] = init_phase_type ## These "false" picks are only false because they have unusually high travel time error, but the phase type should not be randomly chosen 
 
 	perturb_phases = True # For true picks, randomly flip a fraction of phases
-	if (len(phase_observed) > 0)*(perturb_phases == True):
+	if (len(phase_observed) > 0)*(perturb_phases == True)*(use_real_data_sample == False):
 		frac_perturb_interval = [0.1, 0.3]
 		frac_perturb_sample = np.random.rand()*(frac_perturb_interval[1] - frac_perturb_interval[0]) + frac_perturb_interval[0]
 		if len(iexcess_noise) > 0:
@@ -1038,7 +1273,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	l_src_times_active = len(src_times_active)
 	if (use_preferential_sampling == True)*(len(src_times_active) > 1): # Should the second condition just be (len(src_times_active) > 0) ?
 		for j in range(n_batch):
-			if np.random.rand() > 0.5: # 30% of samples, re-focus time. # 0.7
+			if (np.random.rand() > 0.5) or (use_real_data_sample == True): # 30% of samples, re-focus time. # 0.7
 				# time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*src_t_kernel*np.random.laplace()
 				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*(time_shift_range/2.0)*np.random.laplace()
 
@@ -1077,12 +1312,28 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	arrivals_select = arrivals[lp_concat]
 	phase_observed_select = phase_observed[lp_concat]
 
+	# Trv_subset_p = []
+	# Trv_subset_s = []
+	# Station_indices = []
+	# Grid_indices = []
+	# Batch_indices = []
+	# Sample_indices = []
+	# sc = 0
+
 	Trv_subset_p = []
 	Trv_subset_s = []
 	Station_indices = []
 	Grid_indices = []
 	Batch_indices = []
 	Sample_indices = []
+	A_src_src_l = []
+	A_sta_sta_l = []
+	A_prod_src_src_l = []
+	A_prod_sta_sta_l = []
+	A_src_in_sta_l = []
+	A_src_in_prod_l = []
+	A_prod_src_src_weights_l = []
+	A_prod_sta_sta_weights_l = []
 	sc = 0
 
 	if (fixed_subnetworks != False):
@@ -1103,33 +1354,87 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		# 	i0 = Grid_indices[i - 1] ## Use repeated grid if use_consistency_loss = True
 		# else:
 		
-		i0 = np.random.randint(0, high = len(x_grids))
+		# i0 = np.random.randint(0, high = len(x_grids))
 
 		# i0 = np.random.randint(0, high = len(x_grids))
-		n_spc = x_grids[i0].shape[0]
+		# n_spc = x_grids[i0].shape[0]
 		if use_full_network == True:
 			n_sta_select = n_sta
 			ind_sta_select = np.arange(n_sta)
 
-		else:
-			if (fixed_subnetworks_flag == 1)*(np.random.rand() < 0.5): # 50 % networks are one of fixed networks.
-				isub_network = np.random.randint(0, high = len(fixed_subnetworks))
-				n_sta_select = len(fixed_subnetworks[isub_network])
-				ind_sta_select = np.copy(fixed_subnetworks[isub_network]) ## Choose one of specific networks.
+
+		elif use_real_data_sample == True:
+
+			n_sta_select = len(np.unique(P_ref[:,1]))
+			ind_sta_select = np.unique(P_ref[:,1]).astype('int')
+
+			if use_fixed_graphs == True:
+
+				ifile = np.where(['%d_%d_%d'%(date_choose[0], date_choose[1], date_choose[2]) in s for s in st_graphs])[0]
+
+				# ifile = np.random.choice(len(st_graphs))
+				z = np.load(st_graphs[ifile[0]])
+				ind_sta_select = z['ind_use']
+				n_sta_select = len(ind_sta_select)
+				A_sta_sta_l.append(np.ascontiguousarray(np.flip(z['A_sta'][0:2].astype('int'), axis = 0)))
+				# z.close()
+
+				i0 = z['ichoose_grid']
+				A_src_in_sta_l.append(z['A_src_in_sta'][0:2].astype('int'))
+				n_spc = x_grids[i0].shape[0]
+
+				# z = np.load('Grids/Spatial_graph_%d.npz'%i0)
+				A_src_src_l.append(np.ascontiguousarray(np.flip(z['A_src'][0:2].astype('int'), axis = 0)))
+				z.close()
 
 			else:
-				n_sta_select = int(n_sta*(np.random.rand()*(n_sta_range[1] - n_sta_range[0]) + n_sta_range[0]))
-				ind_sta_select = np.sort(np.random.choice(n_sta, size = n_sta_select, replace = False))
 
-			min_spc_allowed = None
-			if min_spc_allowed is not None:
-				mp = LocalMarching(device = device)
-				locs_out = mp(np.concatenate((locs[ind_sta_select], np.zeros((len(ind_sta_select),1)), np.ones((len(ind_sta_select),1)) + 0.1*np.random.rand(len(ind_sta_select),1)), axis = 1), ftrns1, tc_win = 1.0, sp_win = min_spc_allowed)[:,0:3]					
-				tree_locs = cKDTree(ftrns1(locs[ind_sta_select]))
-				ip_retained = tree_locs.query(ftrns1(locs_out))[1]
-				ind_sta_select = ind_sta_select[ip_retained]
+				i0 = np.random.randint(0, high = len(x_grids))
+				n_spc = x_grids[i0].shape[0]
+
+
+		else:
+
+			if use_fixed_graphs == True:
+
+				ifile = np.random.choice(len(st_graphs))
+				z = np.load(st_graphs[ifile])
+				ind_sta_select = z['ind_use']
 				n_sta_select = len(ind_sta_select)
-				
+				A_sta_sta_l.append(np.ascontiguousarray(np.flip(z['A_sta'][0:2].astype('int'), axis = 0)))
+				# z.close()
+
+				i0 = z['ichoose_grid']
+				A_src_in_sta_l.append(z['A_src_in_sta'][0:2].astype('int'))
+				n_spc = x_grids[i0].shape[0]
+
+				# z = np.load('Grids/Spatial_graph_%d.npz'%i0)
+				A_src_src_l.append(np.ascontiguousarray(np.flip(z['A_src'][0:2].astype('int'), axis = 0)))
+				z.close()
+
+			else:
+
+				if (fixed_subnetworks_flag == 1)*(np.random.rand() < 0.5): # 50 % networks are one of fixed networks.
+					isub_network = np.random.randint(0, high = len(fixed_subnetworks))
+					n_sta_select = len(fixed_subnetworks[isub_network])
+					ind_sta_select = np.copy(fixed_subnetworks[isub_network]) ## Choose one of specific networks.
+
+				else:
+					n_sta_select = int(n_sta*(np.random.rand()*(n_sta_range[1] - n_sta_range[0]) + n_sta_range[0]))
+					ind_sta_select = np.sort(np.random.choice(n_sta, size = n_sta_select, replace = False))
+
+				min_spc_allowed = None
+				if min_spc_allowed is not None:
+					mp = LocalMarching(device = device)
+					locs_out = mp(np.concatenate((locs[ind_sta_select], np.zeros((len(ind_sta_select),1)), np.ones((len(ind_sta_select),1)) + 0.1*np.random.rand(len(ind_sta_select),1)), axis = 1), ftrns1, tc_win = 1.0, sp_win = min_spc_allowed)[:,0:3]					
+					tree_locs = cKDTree(ftrns1(locs[ind_sta_select]))
+					ip_retained = tree_locs.query(ftrns1(locs_out))[1]
+					ind_sta_select = ind_sta_select[ip_retained]
+					n_sta_select = len(ind_sta_select)
+
+				i0 = np.random.randint(0, high = len(x_grids))
+				n_spc = x_grids[i0].shape[0]
+
 		# if use_time_shift == False:
 
 		Trv_subset_p.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
@@ -1259,11 +1564,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	Locs = []
 	Trv_out = []
 
-	A_sta_sta_l = []
-	A_src_src_l = []
-	A_prod_sta_sta_l = []
-	A_prod_src_src_l = []
-	A_src_in_prod_l = []
+	# A_sta_sta_l = []
+	# A_src_src_l = []
+	# A_prod_sta_sta_l = []
+	# A_prod_src_src_l = []
+	# A_src_in_prod_l = []
 	A_edges_time_p_l = []
 	A_edges_time_s_l = []
 	A_edges_ref_l = []
@@ -1415,8 +1720,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 		else:
 			
-			A_sta_sta_l.append([])
-			A_src_src_l.append([])
+			if use_fixed_graphs == False:
+				A_sta_sta_l.append([])
+				A_src_src_l.append([])
+				A_src_in_sta_l.append([])				
+
 			A_prod_sta_sta_l.append([])
 			A_prod_src_src_l.append([])
 			A_src_in_prod_l.append([])
@@ -1556,18 +1864,18 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		Lbls_query.append(lbls_query)
 
 	srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitude.reshape(-1,1)), axis = 1)
-	data = [arrivals, srcs, active_sources]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
+	data = [arrivals, srcs, active_sources, int(use_real_data_sample)]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
 
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
 
 	if (use_expanded == False) or (skip_graphs == True):
 
-		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 	else:
 
-		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, [A_src_src_l, Ac_src_src_l], A_prod_sta_sta_l, A_prod_src_src_l, [A_src_in_prod_l, Ac_src_in_prod_l], A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, [A_src_src_l, Ac_src_src_l], A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, [A_src_in_prod_l, Ac_src_in_prod_l], A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 
 
@@ -3600,13 +3908,13 @@ if build_training_data == True:
 		file_index = n_repeat*job_number + n ## Unique file index
 
 		if use_subgraph == True:
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
 			if use_expanded == True:
 				Ac_src_src_l = [[] for j in range(len(A_src_src_l))]
 				Ac_prod_src_src_l = [[] for j in range(len(A_prod_src_src_l))]
 
 		else:
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = False)
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = False)
 			if use_expanded == True:
 				A_src_src_l, Ac_src_src_l = A_src_src_l
 				A_prod_src_src_l, Ac_prod_src_src_l = A_prod_src_src_l
@@ -3627,12 +3935,23 @@ if build_training_data == True:
 		h['data'] = data[0]
 		h['srcs'] = data[1]
 		h['srcs_active'] = data[2]
-		A_src_in_sta_l = [[] for i in range(n_batch)]
+		h['real_data'] = data[3]
+
+		if use_fixed_graphs == False:
+			A_src_in_sta_l = [[] for i in range(n_batch)]
 
 		for i in range(n_batch):
 
 			if use_subgraph == True:
-				A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac, device = device)
+
+				if use_fixed_graphs == False:
+					A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac, device = device)
+
+				else:
+					# A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac, A_sta_sta = torch.Tensor(A_sta_sta_l[i]).long().to(device), A_src_src = torch.Tensor(A_src_src_l[i]).long().to(device), device = device)
+					A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac, A_sta_sta = torch.Tensor(A_sta_sta_l[i]).long().to(device), A_src_src = torch.Tensor(A_src_src_l[i]).long().to(device), A_src_in_sta = torch.Tensor(A_src_in_sta_l[i]).long().to(device),  device = device)
+
+
 				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[i], X_fixed[i], A_src_in_sta, max_t, min_t = min_t, time_shift = X_fixed[i][:,3], dt_res = kernel_sig_t/5.0, t_win = kernel_sig_t*2.0, device = device)
 				if use_expanded == True:
 					A_src_src, Ac_src_src = A_src_src
@@ -3806,6 +4125,7 @@ class TrainingDataset(Dataset):
 			pick_lbls_l = []
 			spatial_vals_l = []
 			x_src_query_cart_l = []
+			# tq_sample = []
 			input_tensors_l = []
 
 			if self.use_gradient_loss == True:
@@ -3877,14 +4197,21 @@ class TrainingDataset(Dataset):
 				## Could possibly map to cuda here (note: possible ragged list for A_prod_src_tensor)
 				input_tensors_l.append(input_tensors)
 
+			real_data = f['real_data'][()]
+			data = [f['srcs'][:][f['srcs_active'][:].astype('int')], real_data]
+
+		# if real_data == True:
+		# h['srcs'] = data[1]
+		# h['srcs_active'] = data[2]
+		# # h['real_data'] = data[3]
 
 		if self.use_gradient_loss == False:
 
-			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l]
+			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l], data
 
 		else:
 
-			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t]
+			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t], data
 
 
 
@@ -4326,6 +4653,98 @@ for batch_idx, inputs in enumerate(loader):
 	for j in range(n_batch): input_tensors_l[j][5] = Data(x = spatial_vals_l[j], edge_index = input_tensors_l[j][5])
 	input_tensors_l = to_gpu(inputs[0]) if device.type == 'cuda' else inputs[0]
 	if device.type == 'cuda': pick_lbls_l = to_gpu(pick_lbls_l)
+	tq_sample = [inputs[0][j][-2] for j in range(n_batch)]
+
+	# input_tensors = [
+	# 	torch.from_numpy(f['input_tensor_1_%d'%i][:]), 
+	# 	torch.from_numpy(f['input_tensor_2_%d'%i][:]), 
+	# 	torch.from_numpy(f['A_prod_sta_tensor_%d'%i][:]).long(), 
+	# 	A_prod_src_tensor, # torch.from_numpy(f['A_prod_src_tensor_%d'%i]).long()
+	# 	torch.from_numpy(f['data_1_edges_%d'%i][:]).long(), 
+	# 	torch.from_numpy(f['data_2_edges_%d'%i][:]).long(),
+	# 	# Data(x = spatial_vals, edge_index = torch.from_numpy(f['data_1_edges_%d'%i][:]).long()), 
+	# 	# Data(x = spatial_vals, edge_index = torch.from_numpy(f['data_2_edges_%d'%i][:]).long()),
+	# 	torch.from_numpy(f['A_src_in_sta_%d'%i][:]).long(),
+	# 	torch.from_numpy(f['A_src_src_%d'%i][:]).long(),
+	# 	torch.zeros(1), # torch.Tensor(A_edges_time_p_l[i0]).long().to(device)
+	# 	torch.zeros(1), # torch.Tensor(A_edges_time_s_l[i0]).long().to(device)
+	# 	torch.zeros(1), # torch.Tensor(A_edges_ref_l[i0]).to(device)
+	# 	torch.from_numpy(f['trv_out_%d'%i][:]),
+	# 	torch.from_numpy(f['lp_times_%d'%i][:]),
+	# 	torch.from_numpy(f['lp_stations_%d'%i][:]).long(),
+	# 	torch.from_numpy(f['lp_phases_%d'%i][:].reshape(-1,1)).float(),
+	# 	torch.from_numpy(f['Locs_cart_%d'%i][:]),
+	# 	torch.from_numpy(f['X_fixed_cart_%d'%i][:]),
+	# 	torch.from_numpy(f['X_fixed_%d'%i][:,3][:]),
+	# 	torch.from_numpy(f['X_query_cart_%d'%i][:]),
+	# 	torch.from_numpy(f['x_src_query_cart_%d'%i][:]),
+	# 	torch.from_numpy(f['X_query_%d'%i][:,3]), 
+	# 	torch.from_numpy(f['tq_sample_%d'%i][:]), 
+	# 	torch.from_numpy(f['trv_out_src_%d'%i][:])
+	# ]
+
+
+	lbl_srcs = inputs[2][0]
+	use_real_data_sample = inputs[2][1]
+	X_fixed_cart = [inputs[0][j][-7] for j in range(n_batch)]
+	X_fixed_t = [inputs[0][j][-6] for j in range(n_batch)]
+	num_fixed = [X_fixed_cart[j].shape[0] for j in range(n_batch)]
+
+	mask_lbls_lv = []
+	mask_lbls_query_lv = []
+	mask_lbls_assoc_query_lv = []
+
+	mask_lbls_l = [[] for j in range(n_batch)]
+	mask_lbls_query_l = [[] for j in range(n_batch)]
+	mask_lbls_assoc_query_l = [[] for j in range(n_batch)]
+
+	if use_real_data_sample == True:
+		weight_assoc = 0.5 # else 1.0
+		## Only use labels within ~3 std of the sources
+
+		for j in range(n_batch):
+
+			mask_lbls = torch.zeros(num_fixed[j],1).to(device)
+			mask_lbls_query = torch.zeros(X_query[j].shape[0],1).to(device)
+			mask_lbls_assoc_query = torch.zeros(x_src_query_cart_l[j].shape[0],1).to(device)
+
+			if len(lp_srcs[j]) > 0:
+
+				dist_srcs = ((np.linalg.norm(np.expand_dims(X_fixed_cart[j].cpu().detach().numpy()[:,0:3], axis = 0) - np.expand_dims(ftrns1(lp_srcs[j].cpu().detach().numpy()[:,0:3]), axis = 1), axis = 2) / src_x_kernel) < 5)
+				dist_srcs_t = ((np.abs(np.expand_dims(X_fixed_t[j].cpu().detach().numpy().reshape(-1,1), axis = 0) - np.expand_dims(lp_srcs[j].cpu().detach().numpy()[:,[3]], axis = 1)) / src_t_kernel) < 3)[:,:,0]
+				mask_lbls[np.where((dist_srcs*dist_srcs_t).max(0) > 0)[0]] = 1.0
+
+				dist_srcs = ((np.linalg.norm(np.expand_dims(ftrns1(X_query[j].cpu().detach().numpy()[:,0:3]), axis = 0) - np.expand_dims(ftrns1(lp_srcs[j].cpu().detach().numpy()[:,0:3]), axis = 1), axis = 2) / src_x_kernel) < 5)
+				dist_srcs_t = ((np.abs(np.expand_dims(X_query[j].cpu().detach().numpy()[:,[3]], axis = 0) - np.expand_dims(lp_srcs[j].cpu().detach().numpy()[:,[3]], axis = 1)) / src_t_kernel) < 3)[:,:,0]
+				mask_lbls_query[np.where((dist_srcs*dist_srcs_t).max(0) > 0)[0]] = 1.0
+			
+				dist_srcs = ((np.linalg.norm(np.expand_dims(x_src_query_cart_l[j].cpu().detach().numpy()[:,0:3], axis = 0) - np.expand_dims(ftrns1(lp_srcs[j].cpu().detach().numpy()[:,0:3]), axis = 1), axis = 2) / src_x_kernel) < 5)
+				dist_srcs_t = ((np.abs(np.expand_dims(tq_sample[j].reshape(-1,1), axis = 0) - np.expand_dims(lp_srcs[j].cpu().detach().numpy()[:,[3]], axis = 1)) / src_t_kernel) < 3)[:,:,0]
+				mask_lbls_assoc_query[np.where((dist_srcs*dist_srcs_t).max(0) > 0)[0]] = 1.0
+
+			mask_lbls_lv.append(mask_lbls)
+			mask_lbls_query_lv.append(mask_lbls_query)
+			mask_lbls_assoc_query_lv.append(mask_lbls_assoc_query)
+
+
+	else:
+
+		weight_assoc = 1.0
+		mask_lbls_lv = [torch.ones(num_fixed[j],1).to(device) for j in range(n_batch)]
+		mask_lbls_query_lv = [torch.ones(X_query[j].shape[0],1).to(device) for j in range(n_batch)]
+		mask_lbls_assoc_query_lv = [torch.ones(x_src_query_cart_l[j].shape[0],1).to(device) for j in range(n_batch)]
+
+
+	for j in range(n_batch):
+		mask_lbls_l[j] = torch.where(mask_lbls_lv[j][:,0] > 0)[0]
+		mask_lbls_query_l[j] = torch.where(mask_lbls_query_lv[j][:,0] > 0)[0]
+		mask_lbls_assoc_query_l[j] = torch.where(mask_lbls_assoc_query_lv[j][:,0] > 0)[0]
+
+
+	# moi
+
+
+	## If using real data, down-weight association losses, and "mask" the spatio-temporal source labels near sources
 
 
 	# ## Generate batch of synthetic inputs. Note, if this is too slow to interleave with model updates, 
@@ -4659,10 +5078,21 @@ for batch_idx, inputs in enumerate(loader):
 		if use_dice_loss == True:
 
 
-			loss_base1 = DiceLoss(out[0], torch.Tensor(Lbls[i0]).to(device))
-			loss_dice2 = DiceLoss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-			loss_dice3 = DiceLoss(out[2][:,:,0], pick_lbls[:,:,0])
-			loss_dice4 = DiceLoss(out[3][:,:,0], pick_lbls[:,:,1])
+			# loss_base1 = DiceLoss(out[0], torch.Tensor(Lbls[i0]).to(device))
+			# loss_dice2 = DiceLoss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
+			# loss_dice3 = DiceLoss(out[2][:,:,0], pick_lbls[:,:,0])
+			# loss_dice4 = DiceLoss(out[3][:,:,0], pick_lbls[:,:,1])
+
+			# moi
+
+			loss_base1 = DiceLoss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
+			loss_dice2 = DiceLoss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
+
+			# moi
+
+			loss_dice3 = DiceLoss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0])
+			loss_dice4 = DiceLoss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])
+
 			# loss_dice = (loss_dice1 + loss_dice2 + loss_dice3 + loss_dice4)/4.0
 
 			# loss_src_val += (loss_dice1.item() + loss_dice2.item())/n_batch
@@ -4680,8 +5110,8 @@ for batch_idx, inputs in enumerate(loader):
 
 				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-				loss_mse1 = weights[0]*mse_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*mse_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-				loss_mse2 = (weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				loss_mse1 = weights[0]*mse_loss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0][mask_lbls_l[i0]]).to(device)) + weights[1]*mse_loss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0][mask_lbls_query_l[i0]]).to(device))
+				loss_mse2 = weight_assoc*(weights[2]*mse_loss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*mse_loss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
 				# loss = loss_mse1 + 2.0*loss_mse2
 
 			else:
@@ -4692,7 +5122,7 @@ for batch_idx, inputs in enumerate(loader):
 
 				loss_bce = weights[0]*bce_loss(out[0][:,1], ifind_mask1.float()) + weights[1]*bce_loss(out[1][:,1], ifind_mask2.float())
 				loss_mse1 = weights[0]*mse_loss(out[0][ifind_mask1,0].reshape(-1,1), torch.Tensor(Lbls[i0]).to(device)[ifind_mask1]) + weights[1]*mse_loss(out[1][ifind_mask2,0].reshape(-1,1), torch.Tensor(Lbls_query[i0]).to(device)[ifind_mask2])
-				loss_mse2 = (weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				loss_mse2 = weight_assoc*(weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 
 				# loss = loss_mse1 + loss_mse2 + (1/100.0)*loss_bce
 				# loss_bce_val += 0.1*loss_bce.item()
@@ -4705,8 +5135,8 @@ for batch_idx, inputs in enumerate(loader):
 
 				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-				loss_huber1 = weights[0]*huber_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*huber_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-				loss_huber2 = (weights[2]*huber_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*huber_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				loss_huber1 = weights[0]*huber_loss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0][mask_lbls_l[i0]]).to(device)) + weights[1]*huber_loss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0][mask_lbls_query_l[i0]]).to(device))
+				loss_huber2 = weight_assoc*(weights[2]*huber_loss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*huber_loss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
 				# loss = loss_mse1 + 2.0*loss_mse2
 
 			else:
@@ -4717,7 +5147,7 @@ for batch_idx, inputs in enumerate(loader):
 
 				loss_bce = weights[0]*bce_loss(out[0][:,1], ifind_mask1.float()) + weights[1]*bce_loss(out[1][:,1], ifind_mask2.float())
 				loss_huber1 = weights[0]*mse_loss(out[0][ifind_mask1,0].reshape(-1,1), torch.Tensor(Lbls[i0]).to(device)[ifind_mask1]) + weights[1]*mse_loss(out[1][ifind_mask2,0].reshape(-1,1), torch.Tensor(Lbls_query[i0]).to(device)[ifind_mask2])
-				loss_huber2 = (weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				loss_huber2 = weight_assoc*(weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 
 				# loss = loss_mse1 + loss_mse2 + (1/100.0)*loss_bce
 				# loss_bce_val += 0.1*loss_bce.item()
@@ -4732,8 +5162,8 @@ for batch_idx, inputs in enumerate(loader):
 
 					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-					loss_smooth_l1 = weights[0]*gaussian_heatmap_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*gaussian_heatmap_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-					loss_smooth_l2 = (weights[2]*gaussian_heatmap_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*gaussian_heatmap_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+					loss_smooth_l1 = weights[0]*gaussian_heatmap_loss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]]) + weights[1]*gaussian_heatmap_loss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
+					loss_smooth_l2 = weight_assoc*(weights[2]*gaussian_heatmap_loss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*gaussian_heatmap_loss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
 					# loss = loss_mse1 + 2.0*loss_mse2
 
 				else:
@@ -4741,8 +5171,8 @@ for batch_idx, inputs in enumerate(loader):
 					## Note: assuming up weighting of cap by 10.0
 					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-					loss_smooth_l1 = weights[0]*gaussian_heatmap_loss_with_cap(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*gaussian_heatmap_loss_with_cap(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-					loss_smooth_l2 = (weights[2]*gaussian_heatmap_loss_with_cap(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*gaussian_heatmap_loss_with_cap(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+					loss_smooth_l1 = weights[0]*gaussian_heatmap_loss_with_cap(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]]) + weights[1]*gaussian_heatmap_loss_with_cap(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
+					loss_smooth_l2 = weight_assoc*(weights[2]*gaussian_heatmap_loss_with_cap(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*gaussian_heatmap_loss_with_cap(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
 					# loss = loss_mse1 + 2.0*loss_mse2					
 
 
@@ -4754,7 +5184,7 @@ for batch_idx, inputs in enumerate(loader):
 
 				loss_bce = weights[0]*bce_loss(out[0][:,1], ifind_mask1.float()) + weights[1]*bce_loss(out[1][:,1], ifind_mask2.float())
 				loss_huber1 = weights[0]*mse_loss(out[0][ifind_mask1,0].reshape(-1,1), torch.Tensor(Lbls[i0]).to(device)[ifind_mask1]) + weights[1]*mse_loss(out[1][ifind_mask2,0].reshape(-1,1), torch.Tensor(Lbls_query[i0]).to(device)[ifind_mask2])
-				loss_huber2 = (weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				loss_huber2 = weight_assoc*(weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 
 				# loss = loss_mse1 + loss_mse2 + (1/100.0)*loss_bce
 				# loss_bce_val += 0.1*loss_bce.item()
@@ -4767,10 +5197,15 @@ for batch_idx, inputs in enumerate(loader):
 			scale_cap = 1.0
 			cap_limit = 0.7
 
-			ifind_cap1 = np.where(Lbls[i0] > cap_limit)[0]
-			ifind_cap2 = np.where(Lbls_query[i0] > cap_limit)[0]
-			ifind_cap11, ifind_cap12 = torch.where(pick_lbls[:,:,0] > cap_limit) # [0]
-			ifind_cap21, ifind_cap22 = torch.where(pick_lbls[:,:,1] > cap_limit) # [0]
+			# ifind_cap1 = np.where(Lbls[i0] > cap_limit)[0]
+			# ifind_cap2 = np.where(Lbls_query[i0] > cap_limit)[0]
+			# ifind_cap11, ifind_cap12 = torch.where(pick_lbls[:,:,0] > cap_limit) # [0]
+			# ifind_cap21, ifind_cap22 = torch.where(pick_lbls[:,:,1] > cap_limit) # [0]
+
+			ifind_cap1 = np.where((Lbls[i0] > cap_limit)*(mask_lbls_lv[i0].cpu() > 0))[0]
+			ifind_cap2 = np.where((Lbls_query[i0] > cap_limit)*(mask_lbls_query_lv[i0].cpu() > 0))[0]
+			ifind_cap11, ifind_cap12 = torch.where((pick_lbls[:,:,0] > cap_limit)*(mask_lbls_assoc_query_lv[i0] > 0)) # [0]
+			ifind_cap21, ifind_cap22 = torch.where((pick_lbls[:,:,1] > cap_limit)*(mask_lbls_assoc_query_lv[i0] > 0)) # [0]
 
 			# 8.0 * F.smooth_l1_loss(pred[cap_mask], target[cap_mask], beta=0.5)
 
@@ -4783,8 +5218,8 @@ for batch_idx, inputs in enumerate(loader):
 			if len(ifind_cap2) > 0: loss_cap1 += scale_cap*(weights[1]*F.smooth_l1_loss(out[1][ifind_cap2], torch.Tensor(Lbls_query[i0][ifind_cap2]).to(device), beta = 0.5))
 
 
-			if len(ifind_cap11) > 0: loss_cap2 += scale_cap*(weights[2]*F.smooth_l1_loss(out[2][ifind_cap11,ifind_cap12,0], pick_lbls[ifind_cap11,ifind_cap12,0], beta = 0.4)) # 0.5
-			if len(ifind_cap21) > 0: loss_cap2 += scale_cap*(weights[3]*F.smooth_l1_loss(out[3][ifind_cap21,ifind_cap22,0], pick_lbls[ifind_cap21,ifind_cap22,1], beta = 0.4)) # 0.5
+			if len(ifind_cap11) > 0: loss_cap2 += weight_assoc*scale_cap*(weights[2]*F.smooth_l1_loss(out[2][ifind_cap11,ifind_cap12,0], pick_lbls[ifind_cap11,ifind_cap12,0], beta = 0.4)) # 0.5
+			if len(ifind_cap21) > 0: loss_cap2 += weight_assoc*scale_cap*(weights[3]*F.smooth_l1_loss(out[3][ifind_cap21,ifind_cap22,0], pick_lbls[ifind_cap21,ifind_cap22,1], beta = 0.4)) # 0.5
 
 			loss_cap_val += (loss_cap1 + loss_cap2)/n_batch
 
@@ -4792,7 +5227,7 @@ for batch_idx, inputs in enumerate(loader):
 			# 	loss_cap2 = torch.tensor(0).to(device)
 
 
-		if (use_negative_loss == True)*(i > n_burn_in):
+		if (use_negative_loss == True)*(i > n_burn_in)*(use_real_data_sample == False):
 
 
 			min_up_sample = 0.1
@@ -4901,7 +5336,7 @@ for batch_idx, inputs in enumerate(loader):
 
 
 						# weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
-						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::].cpu().detach().numpy() - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
+						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::].cpu().detach().numpy() - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()*(mask_lbls_query_lv[i0][ind_consistency::] > 0)  # .float()
 						# loss_consistency = l1_gradient_loss(out[1][ind_consistency::][mask_loss.long()], out_save[0][ind_consistency::][mask_loss.long()]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
 						# loss = 0.9*loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
 						# loss_consistency_val += 0.1*loss_consistency.item()/n_batch
@@ -4920,7 +5355,6 @@ for batch_idx, inputs in enumerate(loader):
 					loss_consistency_flag = True
 
 
-			# out_save = [out[1]]
 			out_save = [out[1].detach()]
 			Lbls_save = [Lbls_query[i0].cpu().detach().numpy()]
 			iter_loss = [i, inc]
@@ -5061,7 +5495,8 @@ for batch_idx, inputs in enumerate(loader):
 
 		if i > n_burn_in:
 
-			loss_dict.update({'loss_negative': loss_negative*pre_scale_weights2[0]})
+			if use_real_data_sample == False:
+				loss_dict.update({'loss_negative': loss_negative*pre_scale_weights2[0]})
 
 			if loss_consistency_flag == True:
 				loss_dict.update({'loss_consistency': loss_consistency*pre_scale_weights2[1]})
@@ -6488,7 +6923,6 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 # 		Lbls_query.append(lbls_query)
 
 # 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
-
 
 
 
