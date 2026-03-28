@@ -80,14 +80,14 @@ if len(argvs) < 3:
 # to increment argvs[1], and seperate sbatch scripts incrementing argvs[2]
 
 day_select = int(argvs[1])
-offset_select = int(argvs[2])
+offset_select = 0 # int(argvs[2])
 
 print('name of program is %s'%argvs[0])
 print('day is %s'%argvs[1])
 
 ### Settings: ###
 
-with open('process_config.yaml', 'r') as file:
+with open('process_config%d.yaml'%(int(argvs[2])), 'r') as file:
     process_config = yaml.safe_load(file)
 
 ## Load Processing settings
@@ -243,7 +243,7 @@ mn_cuda = torch.Tensor(mn).to(device)
 
 if use_time_shift == True:
 	# z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
-	time_shifts = x_grids[:,:,[3]] ## Shape (n_grids, n_nodes, n_times)
+	time_shifts = x_grids[:,:,[3]]  ## Shape (n_grids, n_nodes, n_times)
 	# z.close()
 else:
 	time_shifts = None # np.zeros((x_grids.shape[0], x_grids.shape[1]))
@@ -357,10 +357,13 @@ min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv)
 
 # if (use_only_one_grid == True)*(1 == 0): ## Speeds up the initilization of the code by only loading one grid
 if use_only_one_grid == True: ## Speeds up the initilization of the code by only loading one grid
-	grid_choose = np.random.choice(len(x_grids))
+	
+	z = np.load('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2]))
+	grid_choose = z['ichoose_grid'] # np.random.choice(len(x_grids))
 	x_grids = np.expand_dims(x_grids[grid_choose], axis = 0)
 	x_grids_trv = [x_grids_trv[grid_choose]]
 	time_shifts = np.expand_dims(time_shifts[grid_choose], axis = 0)
+	z.close()
 
 x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t_ = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = max_t, min_t = min_t, time_shifts = time_shifts, dt_embed = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device) ## Note: setting time embedding vectors with respect to kernel_sig_t
 
@@ -670,6 +673,33 @@ cnt_isolated_picks = 0
 use_updated_input = True
 dt_embed_discretize = np.round(pred_params[1]/10.0, 2) # 0.05 ## Picks are discretized to this amount if using updated input to speed up input
 
+
+
+## Pre load the adjacencies for this day
+print('Using fixed station graph') # date_2002_8_25_merged_graphs.npz
+z = np.load('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2]))
+# z = np.load(st_graphs[np.random.choice(len(st_graphs))])
+# A_src_in_sta = torch.Tensor(z['A_src_in_sta'][0:2,:]).long().to(device)
+# A_src_in_sta_weights = torch.Tensor(z['A_src_in_sta'][2,:]).to(device)
+# A_prod_src_src = torch.Tensor(z['A_prod_src_src'][0:2,:]).long().to(device)
+# A_prod_sta_sta = torch.Tensor(z['A_prod_sta_sta'][0:2,:]).long().to(device)
+# A_prod_src_src_weights = torch.Tensor(z['A_prod_src_src_weights']).to(device)
+# A_prod_sta_sta_weights = torch.Tensor(z['A_prod_sta_sta_weights']).to(device)
+# A_src_src = torch.Tensor(z['A_src'][0:2,:]).long().to(device)
+A_sta_sta = torch.Tensor(np.ascontiguousarray(np.flip(z['A_sta'][0:2,:], axis = 0))).long().to(device)
+A_src_src = torch.Tensor(np.ascontiguousarray(np.flip(z['A_src'][0:2,:], axis = 0))).long().to(device)
+A_src_in_sta = torch.Tensor(z['A_src_in_sta'][0:2,:]).long().to(device)
+# A_src_in_prod = torch.Tensor(z['A_src_in_prod'][0:2,:]).long().to(device)
+# i0 = z['ichoose_grid']
+ind_sta_select = z['ind_use']
+assert(np.allclose(ind_use, ind_sta_select))
+# ind_use = z['ind_use']
+z.close()
+assert(use_subgraph == True)
+
+
+
+
 if process_known_events == True: ## If true, only process around times of known events
 	t0 = UTCDateTime(date[0], date[1], date[2])
 	min_magnitude = 0.1
@@ -706,7 +736,7 @@ for cnt, strs in enumerate([0]):
 		else:
 
 			# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
-			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(locs_use, x_grids[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, scale_time = scale_time, Ac = Ac, device = device)
+			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(locs_use, x_grids[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, scale_time = scale_time, Ac = Ac, A_sta_sta = A_sta_sta, A_src_src = A_src_src, A_src_in_sta = A_src_in_sta, device = device)
 			A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, locs_use, x_grids[i], A_src_in_sta, max_t, dt_res = pred_params[1]/5.0, t_win = pred_params[1]*2.0, min_t = min_t, time_shift = time_shifts[i], device = device)
 			
 			if use_time_shift == False:
