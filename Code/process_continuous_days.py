@@ -80,14 +80,14 @@ if len(argvs) < 3:
 # to increment argvs[1], and seperate sbatch scripts incrementing argvs[2]
 
 day_select = int(argvs[1])
-offset_select = 0 # int(argvs[2])
+offset_select = int(argvs[2])
 
 print('name of program is %s'%argvs[0])
 print('day is %s'%argvs[1])
 
 ### Settings: ###
 
-with open('process_config%d.yaml'%(int(argvs[2])), 'r') as file:
+with open('process_config.yaml', 'r') as file:
     process_config = yaml.safe_load(file)
 
 ## Load Processing settings
