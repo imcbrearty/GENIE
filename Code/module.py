@@ -24,6 +24,7 @@ from torch_geometric.utils import softmax
 from torch.autograd import Variable
 from torch_scatter import scatter
 from numpy.matlib import repmat
+import pathlib
 # from torch_geometric.pool import radius
 import itertools
 import pdb
@@ -39,18 +40,34 @@ with open('config.yaml', 'r') as file:
 with open('train_config.yaml', 'r') as file:
     train_config = yaml.safe_load(file)
 
+with open('process_config.yaml', 'r') as file:
+    process_config = yaml.safe_load(file)
+
+path_to_file = str(pathlib.Path().absolute())
+seperator = '\\' if '\\' in path_to_file else '/'
+path_to_file += seperator
+
 use_updated_model_definition = config['use_updated_model_definition']
+name_of_project = config['name_of_project']
 scale_rel = config['scale_rel'] # 30e3
 k_sta_edges = config['k_sta_edges']
 k_spc_edges = config['k_spc_edges']
+template_ver = process_config['template_ver']
 
 ## Removing scale_t and eps as free variables. Instead set proportionally to kernel_sig_t
 # scale_t = config['scale_t'] # 10.0
 # eps = config['eps'] # 15.0
 scale_t = train_config['kernel_sig_t']*3.0
 eps = train_config['kernel_sig_t']*5.0
-scale_time = train_config['scale_time']
+# scale_time = train_config['scale_time']
 kernel_sig_t = train_config['kernel_sig_t']
+
+# Load templates
+z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
+# x_grids = z['x_grids']
+# x_grids_init = np.copy(x_grids)
+scale_time = z['scale_time']/1000.0
+z.close()
 
 # use_updated_model_definition = True
 use_phase_types = config['use_phase_types']
