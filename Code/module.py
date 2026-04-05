@@ -757,7 +757,10 @@ class DataAggregationAssociationPhaseExpanded(MessagePassing): # make equivelent
 		tr = self.activate3(torch.cat((tr1, tr2), dim = 1))
 
 		return tr # the new embedding.
-			
+
+
+## Note: can maybe reduce dilate scale and scale_misfit, as the default kernel_sig_t is likely larger
+## Can also maybe reduce the scaling of eps
 
 class ArrivalEmbedding(MessagePassing):
 	def __init__(self, ndim_arv_in, ndim_out, n_hidden = 20, n_dim_embed = 30, n_phase_embed = 5, scale_rel = scale_rel, k_spc_edges = k_spc_edges, kernel_sig_t = kernel_sig_t, use_phase_types = use_phase_types, scale_time = scale_time, min_thresh = 0.01, trv = None, ftrns2 = None, device = 'cuda'):
