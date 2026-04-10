@@ -355,11 +355,18 @@ time_shift_range = np.max([time_shifts[j].max() - time_shifts[j].min() for j in 
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
 min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
 
+use_fixed_graphs = False
 # if (use_only_one_grid == True)*(1 == 0): ## Speeds up the initilization of the code by only loading one grid
 if use_only_one_grid == True: ## Speeds up the initilization of the code by only loading one grid
+
+	if use_fixed_graphs == True:
+		z = np.load('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2]))
+		grid_choose = z['ichoose_grid'] # np.random.choice(len(x_grids))
+		z.close()
+
+	else:
+		grid_choose = np.random.choice(len(x_grids))
 	
-	z = np.load('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2]))
-	grid_choose = z['ichoose_grid'] # np.random.choice(len(x_grids))
 	x_grids = np.expand_dims(x_grids[grid_choose], axis = 0)
 	x_grids_trv = [x_grids_trv[grid_choose]]
 	time_shifts = np.expand_dims(time_shifts[grid_choose], axis = 0)
@@ -674,28 +681,29 @@ use_updated_input = True
 dt_embed_discretize = np.round(pred_params[1]/10.0, 2) # 0.05 ## Picks are discretized to this amount if using updated input to speed up input
 
 
+if use_fixed_graphs == True:
 
-## Pre load the adjacencies for this day
-print('Using fixed station graph') # date_2002_8_25_merged_graphs.npz
-z = np.load('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2]))
-# z = np.load(st_graphs[np.random.choice(len(st_graphs))])
-# A_src_in_sta = torch.Tensor(z['A_src_in_sta'][0:2,:]).long().to(device)
-# A_src_in_sta_weights = torch.Tensor(z['A_src_in_sta'][2,:]).to(device)
-# A_prod_src_src = torch.Tensor(z['A_prod_src_src'][0:2,:]).long().to(device)
-# A_prod_sta_sta = torch.Tensor(z['A_prod_sta_sta'][0:2,:]).long().to(device)
-# A_prod_src_src_weights = torch.Tensor(z['A_prod_src_src_weights']).to(device)
-# A_prod_sta_sta_weights = torch.Tensor(z['A_prod_sta_sta_weights']).to(device)
-# A_src_src = torch.Tensor(z['A_src'][0:2,:]).long().to(device)
-A_sta_sta = torch.Tensor(np.ascontiguousarray(np.flip(z['A_sta'][0:2,:], axis = 0))).long().to(device)
-A_src_src = torch.Tensor(np.ascontiguousarray(np.flip(z['A_src'][0:2,:], axis = 0))).long().to(device)
-A_src_in_sta = torch.Tensor(z['A_src_in_sta'][0:2,:]).long().to(device)
-# A_src_in_prod = torch.Tensor(z['A_src_in_prod'][0:2,:]).long().to(device)
-# i0 = z['ichoose_grid']
-ind_sta_select = z['ind_use']
-assert(np.allclose(ind_use, ind_sta_select))
-# ind_use = z['ind_use']
-z.close()
-assert(use_subgraph == True)
+	## Pre load the adjacencies for this day
+	print('Using fixed station graph') # date_2002_8_25_merged_graphs.npz
+	z = np.load('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2]))
+	# z = np.load(st_graphs[np.random.choice(len(st_graphs))])
+	# A_src_in_sta = torch.Tensor(z['A_src_in_sta'][0:2,:]).long().to(device)
+	# A_src_in_sta_weights = torch.Tensor(z['A_src_in_sta'][2,:]).to(device)
+	# A_prod_src_src = torch.Tensor(z['A_prod_src_src'][0:2,:]).long().to(device)
+	# A_prod_sta_sta = torch.Tensor(z['A_prod_sta_sta'][0:2,:]).long().to(device)
+	# A_prod_src_src_weights = torch.Tensor(z['A_prod_src_src_weights']).to(device)
+	# A_prod_sta_sta_weights = torch.Tensor(z['A_prod_sta_sta_weights']).to(device)
+	# A_src_src = torch.Tensor(z['A_src'][0:2,:]).long().to(device)
+	A_sta_sta = torch.Tensor(np.ascontiguousarray(np.flip(z['A_sta'][0:2,:], axis = 0))).long().to(device)
+	A_src_src = torch.Tensor(np.ascontiguousarray(np.flip(z['A_src'][0:2,:], axis = 0))).long().to(device)
+	A_src_in_sta = torch.Tensor(z['A_src_in_sta'][0:2,:]).long().to(device)
+	# A_src_in_prod = torch.Tensor(z['A_src_in_prod'][0:2,:]).long().to(device)
+	# i0 = z['ichoose_grid']
+	ind_sta_select = z['ind_use']
+	assert(np.allclose(ind_use, ind_sta_select))
+	# ind_use = z['ind_use']
+	z.close()
+	assert(use_subgraph == True)
 
 
 
