@@ -835,10 +835,18 @@ def compute_travel_times(trv, locs, x_grids, n_max_chunks = int(50e3), device = 
 	# locs_cuda = torch.Tensor(locs).to(device)
 	for i in range(len(x_grids)):
 		
+		# n_sta, n_temp = len(locs), len(x_grids[i])
+		# n_chunks = int(np.maximum(1, int((n_sta*n_temp)/n_max_chunks)))
+		# n_int = int(len(locs)/n_chunks)
+		# inds = [np.arange(n_int) + n_int*j for j in range(n_chunks)]
+
 		n_sta, n_temp = len(locs), len(x_grids[i])
 		n_chunks = int(np.maximum(1, int((n_sta*n_temp)/n_max_chunks)))
-		n_int = int(len(locs)/n_chunks)
+		n_int = max(int(len(locs)/n_chunks), 1)
+		n_chunks = np.minimum(n_chunks, len(locs))
 		inds = [np.arange(n_int) + n_int*j for j in range(n_chunks)]
+		
+		
 		if len(inds) == 0: inds = np.arange(len(locs))
 		if (inds[-1][-1] < len(locs))*(len(inds) > 1): inds[-1] = np.arange(inds[-2][-1] + 1, len(locs))
 		if (inds[-1][-1] < len(locs))*(len(inds) == 1): inds[-1] = np.arange(0, len(locs))
