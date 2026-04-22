@@ -778,8 +778,8 @@ class ArrivalEmbedding(MessagePassing):
 		self.scale_rel = scale_rel
 		self.k_spc_edges = k_spc_edges
 		self.device = device
-		self.dilate_scale = 3.0
-		self.scale_misfit = 3.0
+		self.dilate_scale = 2.0 # 3.0
+		self.scale_misfit = 2.0 # 3.0
 		# self.null_embed = nn.Parameter(torch.randn(1, 1, n_hidden).to(device) * 0.01) # .to(device)
 		# self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden).to(device)) # .to(device)
 		self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden)) # .to(device)
