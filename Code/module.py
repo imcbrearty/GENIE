@@ -58,7 +58,7 @@ template_ver = process_config['template_ver']
 # scale_t = config['scale_t'] # 10.0
 # eps = config['eps'] # 15.0
 scale_t = train_config['kernel_sig_t']*3.0
-eps = train_config['kernel_sig_t']*5.0
+eps = train_config['kernel_sig_t']*3.0
 # scale_time = train_config['scale_time']
 kernel_sig_t = train_config['kernel_sig_t']
 
