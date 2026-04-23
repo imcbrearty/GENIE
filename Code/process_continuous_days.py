@@ -1647,14 +1647,49 @@ for cnt, strs in enumerate([0]):
 						pairwise_similarity = np.dot(vec_w, vec_w1)/(norm_vec_w*norm_vec_w1)
 						if pairwise_similarity > thresh_restrict:
 							restrict.append(np.array([jj, kk]))
-			if len(restrict) == 0: restrict = None
+
+			use_restrict_trv_times = True
+			if use_restrict_trv_times == True:
+				trv_out_srcs_pairs = trv(torch.Tensor(locs).to(device), torch.Tensor(srcs_refined[arv_src_slice][:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[arv_src_slice][:,3].reshape(-1,1,1)
+				for jj in range(len(wp_slice)):
+					for kk in range(len(ws_slice)):
+
+						if (jj == kk): continue
+
+						ifind_p = np.unique(np.concatenate((np.where(wp_slice[jj,:] > 0)[0], np.where(wp_slice[kk,:] > 0)[0]), axis = 0), axis = 0)
+						ifind_s = np.unique(np.concatenate((np.where(ws_slice[jj,:] > 0)[0], np.where(ws_slice[kk,:] > 0)[0]), axis = 0), axis = 0)
+
+						ifind_p = unique_picks[arv_ind_slice][ifind_p,1].astype('int')
+						ifind_s = unique_picks[arv_ind_slice][ifind_s,1].astype('int')						
+						
+						trv_vec1 = np.concatenate((trv_out_srcs_pairs[jj,ifind_p,0], trv_out_srcs_pairs[jj,ifind_s,1]), axis = 0)
+						trv_vec2 = np.concatenate((trv_out_srcs_pairs[kk,ifind_p,0], trv_out_srcs_pairs[kk,ifind_s,1]), axis = 0)
+
+						rms_residual = np.linalg.norm(trv_vec1 - trv_vec2)/np.sqrt(len(trv_vec1))
+
+						if rms_residual < 2.0*kernel_sig_t:
+							restrict.append(np.array([jj, kk]))	
+
 			
+			
+			if len(restrict) == 0:
+				restrict = None
+			else:
+				restrict = list(np.unique(np.vstack(restrict), axis = 0))
 
-			# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
-			assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
-			assignments1, srcs_active1 = competitive_assignment([wp_slice, ws_slice], ipick, cost_value, restrict = restrict) ## force 1 source?
-			n_remove += len(srcs_active) - len(srcs_active1)
+			if process_config.get('use_restrict', False) == False:
+				# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
+				assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
+				assignments1, srcs_active1 = competitive_assignment([wp_slice, ws_slice], ipick, cost_value, restrict = restrict) ## force 1 source?
+				n_remove += len(srcs_active) - len(srcs_active1)
 
+			else:
+				# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
+				assignments1, srcs_active1 = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
+				assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value, restrict = restrict) ## force 1 source?
+				n_remove += len(srcs_active) - len(srcs_active1)
+				if np.abs(len(srcs_active) - len(srcs_active1)) > 0:
+					print('Using restrict: %d paired (%d diff)'%(len(np.unique(np.vstack(restrict).reshape(-1))) if restrict is not None else 0, n_remove))
 
 			
 			# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
