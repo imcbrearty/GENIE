@@ -937,7 +937,7 @@ for cnt, strs in enumerate([0]):
 					print('%d %d %0.2f'%(n, i0, out[1].max().item()))
 					# out_cumulative_max = 0.0 # Reset moving detection metric print output
 	
-	iz1, iz2 = np.where(Out_2 > 0.01) # Zeros out all values less than this
+	iz1, iz2 = np.where(Out_2 > thresh/3.0) # Zeros out all values less than this
 	Out_2_sparse = np.concatenate((iz1.reshape(-1,1), iz2.reshape(-1,1), Out_2[iz1,iz2].reshape(-1,1)), axis = 1)
 
 	print('Continuous processing time %0.4f'%(time.time() - st_process))
