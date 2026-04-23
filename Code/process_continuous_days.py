@@ -1667,7 +1667,7 @@ for cnt, strs in enumerate([0]):
 
 						rms_residual = np.linalg.norm(trv_vec1 - trv_vec2)/np.sqrt(len(trv_vec1))
 
-						if rms_residual < 2.0*kernel_sig_t:
+						if rms_residual < 3.0*kernel_sig_t:
 							restrict.append(np.array([jj, kk]))	
 
 			
