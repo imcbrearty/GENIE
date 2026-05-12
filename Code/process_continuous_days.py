@@ -1224,8 +1224,13 @@ for cnt, strs in enumerate([0]):
 	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
 	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = 2.5*dt_win, sp_win = 2.5*dist_grid, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False)
 	
-	tree_refined = cKDTree(ftrns1(srcs_refined))
-	ip_retained = tree_refined.query(ftrns1(srcs_refined_1))[1]
+	# tree_refined = cKDTree(ftrns1(srcs_refined))
+	# ip_retained = tree_refined.query(ftrns1(srcs_refined_1))[1]
+	## Rather than this matching, use bipartite assignment (however this can have memory issues)
+	tree_refined = cKDTree(np.concatenate((ftrns1(srcs_refined), scale_time*srcs_refined[:,[3]]), axis = 1))
+	ip_retained = tree_refined.query(np.concatenate((ftrns1(srcs_refined_1), scale_time*srcs_refined_1[:,[3]]), axis = 1))[1]
+	ip_retained = np.unique(ip_retained)
+	
 
 	Out_p_save = [Out_p_save_l[i] for i in ip_retained]
 	Out_s_save = [Out_s_save_l[i] for i in ip_retained]
