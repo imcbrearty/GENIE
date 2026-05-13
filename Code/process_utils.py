@@ -1559,6 +1559,97 @@ def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, in
 
 	return x0_max, x0_max_val
 
+def merge_nearby_stations(P, locs, spatial_win = 250.0, merge_picks = True, merge_ratio = 0.5, use_depths = True, merge_window = 1.5, verbose = True):
+
+	ind_unique = np.unique(P[:,1].astype('int'))
+	locs_use = locs[ind_unique]
+	perm_vec = (-1*np.ones(len(locs))).astype('int')
+	perm_vec[ind_unique] = np.arange(len(ind_unique))
+	P_perm = np.copy(P)
+	P_perm[:,1] = perm_vec[P[:,1].astype('int')]
+
+
+	cnt = np.bincount(P_perm[:,1].astype('int'), minlength = len(locs_use))
+	mask_vec = np.ones((1,3)) if use_depths == True else np.array([1.0, 1.0, 0.0]).reshape(1, -1)
+	# tree_t = cKDTree(srcs[:,3].reshape(-1,1))
+
+	tree_s = cKDTree(ftrns1(mask_vec*locs_use[:,0:3]))
+
+	# lp_t = tree_t.query_ball_point(cat[:,3].reshape(-1,1), r = temporal_win)
+	lp_s = tree_s.query_ball_point(ftrns1(mask_vec*locs_use[:,0:3]), r = spatial_win)
+	inot_zero = np.where([len(lp_s[j]) > 0 for j in range(len(locs_use))])[0]
+	edges_locs = np.hstack([np.concatenate((j*np.ones(len(lp_s[j])).reshape(1,-1), np.array(lp_s[j]).reshape(1,-1)), axis = 0) for j in inot_zero]).astype('int')
+
+	## Optimization variable : The "active" or "inactive" of each station (weights: number of picks; maximize)
+	weights = np.copy(cnt)
+	weights[weights <= 0.0] = -0.1
+
+	## Constraint [1] : At most one of each "pairwise similar" entry > 0
+	A = []
+	for i in range(edges_locs.shape[1]):
+		vec = np.zeros(len(locs_use))
+		vec[edges_locs[0,i]] = 1
+		vec[edges_locs[1,i]] = 1
+		A.append(vec.reshape(1,-1))
+	A = np.vstack(A)
+	b = np.ones((A.shape[0],1))
+
+
+	## Solve optimization
+	x = cp.Variable(A.shape[1], integer = True)
+	prob = cp.Problem(cp.Minimize(-weights.T@x), constraints = [A@x <= b.reshape(-1), 0 <= x, x <= 1])
+	prob.solve()
+	assert prob.status == 'optimal', 'competitive assignment solution is not optimal'
+	solution = np.round(x.value)
+
+	## Assign picks and stations
+	ind_keep = np.where(solution == 1)[0]
+	ind_remove = np.delete(np.arange(len(locs_use)), ind_keep, axis = 0)
+	locs_keep = locs_use[ind_keep]
+	locs_remove = locs_use[ind_remove]
+
+	tree = cKDTree(ind_keep.reshape(-1,1))
+	ikeep_picks = np.where(tree.query(P_perm[:,1].reshape(-1,1))[0] == 0)[0]
+	iremove_picks = np.delete(np.arange(len(P_perm)), ikeep_picks, axis = 0)
+
+	if verbose == True:
+		print('Merged %d stations into %d (%0.3f)'%(len(locs_use), len(ind_keep), len(ind_keep)/len(locs_use)))
+		print('Retained %d picks of %d (%0.3f)'%(len(ikeep_picks), len(P), len(ikeep_picks)/len(P)))
+
+
+	P_keep = P_perm[ikeep_picks]
+	P_remove = P_perm[iremove_picks]
+
+	assert(merge_picks == False)
+	if (merge_picks == False) or (len(ind_remove) == 0):
+
+		## Convert back to absolute list
+		P_perm[:,1] = ind_unique[P_perm[:,1].astype('int')]
+		P_keep[:,1] = ind_unique[P_keep[:,1].astype('int')]
+		P_remove[:,1] = ind_unique[P_remove[:,1].astype('int')]
+		ind_keep = ind_unique[ind_keep]
+		assert(np.abs(locs_keep - locs[ind_keep]).max() < 1e-2)
+		assert(len(set(np.unique(P_keep[:,1])).intersection(np.unique(P_remove[:,1]))) == 0)
+		# assert(cKDTree(np.unique(P_keep[:,1]).reshape(-1,1)).query(P_remove[:,1].reshape(-1,1))[0].min() > 0)
+		# assert(cKDTree(np.unique(P_remove[:,1]).reshape(-1,1)).query(P_keep[:,1].reshape(-1,1))[0].min() > 0)
+
+		return P_keep, P_remove, ind_keep, locs_keep
+
+	else:
+
+		## Not implemented
+		## If merge, then for all "removed" stations, map these stations picks to their 
+		## assigned station based on a majority voting stratgey within a time window
+		tree_subset = cKDTree(ftrns1(mask_vec*locs_keep))
+		ip_match = tree_subset.query(ftrns1(mask_vec*locs_remove))
+		ip_assign = np.where(ip_match[0] <= spatial_win)[0]
+		ip_remove, ip_assign = ind_remove[ip_assign], ind_keep[ind_match[1][ip_assign]]
+		## Absolute station indices of removed, and of their matched station
+
+		## Now for each disjoint group (use disjoint graphs)
+
+		return P_keep, ind_keep, locs_keep
+
 def maximize_bipartite_assignment(cat, srcs, ftrns1, ftrns2, temporal_win = 10.0, spatial_win = 75e3, verbose = True):
 
 	tree_t = cKDTree(srcs[:,3].reshape(-1,1))
