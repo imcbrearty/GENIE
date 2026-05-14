@@ -1374,7 +1374,7 @@ def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, l
 
 	return optim.x.reshape(1,-1), likelihood_estimate(optim.x.reshape(-1,1))
 
-def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, time_range, sig_t = 1.5, weight = [1.0, 0.85], popsize = 75, maxiter = 1000, trim = 0.2, min_picks = 5, device = 'cpu', surface_profile = None, disp = True, vectorized = True):
+def differential_evolution_location_trim1(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, time_range, sig_t = 1.5, weight = [1.0, 0.85], popsize = 75, maxiter = 1000, trim = 0.2, min_picks = 5, device = 'cpu', surface_profile = None, disp = True, vectorized = True):
 
 	if (len(arv_p) + len(arv_s)) == 0:
 		return np.nan*np.ones((1,3)), np.nan
@@ -1452,6 +1452,138 @@ def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind
 	optim = scipy.optimize.differential_evolution(likelihood_estimate, bounds, popsize = popsize, maxiter = maxiter, disp = disp, vectorized = vectorized)
 
 	return optim.x[0:3].reshape(1,-1), optim.x[3].reshape(-1), likelihood_estimate(optim.x.reshape(-1,1))
+
+
+def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
+                                        lat_range, lon_range, depth_range, time_range, 
+                                        x0=None, sig_t=1.5, weight=[1.0, 0.85], 
+                                        popsize=50, maxiter=1000, trim=0.2, mutation = (0.3, 0.8),
+                                        min_picks=5, tol=0.001, device='cpu', surface_profile=None, 
+                                        disp=True, vectorized=True):
+
+    if (len(arv_p) + len(arv_s)) == 0:
+        return np.nan * np.ones((1, 3)), np.nan, np.nan
+
+    # --- 1. Pre-processing & Device Transfer ---
+    dev = torch.device(device)
+    n_picks = len(ind_p) + len(ind_s)
+    num_trim = int(np.floor(trim * n_picks))
+    if n_picks - num_trim < min_picks: 
+        num_trim = max(0, n_picks - min_picks)
+
+    # Prepare targets and weights once
+    trgt = np.concatenate((arv_p, arv_s), axis=0).reshape(1, -1)
+    if len(weight) == n_picks:
+        weight_vec = np.array(weight).reshape(1, -1)
+    else:
+        weight_vec = np.concatenate((weight[0] * np.ones(len(ind_p)), 
+                                     weight[1] * np.ones(len(ind_s))), axis=0).reshape(1, -1)
+
+    trgt_gpu = torch.as_tensor(trgt, dtype=torch.float32, device=dev)
+    weight_gpu = torch.as_tensor(weight_vec, dtype=torch.float32, device=dev)
+    locs_gpu = torch.as_tensor(locs_use, dtype=torch.float32, device=dev)
+    
+    # Pre-calculate surface constants if they exist
+    surf_data = None
+    if surface_profile is not None:
+        x1_dim = np.unique(surface_profile[:, 0])
+        x2_dim = np.unique(surface_profile[:, 1])
+        surf_data = {
+            'x1_min': x1_dim[0], 'x2_min': x2_dim[0],
+            'dx1': np.diff(x1_dim)[0], 'dx2': np.diff(x2_dim)[0],
+            'n1': len(x1_dim), 'n2': len(x2_dim),
+            'elev': torch.as_tensor(surface_profile[:, 2], dtype=torch.float32, device=dev)
+        }
+
+    # --- 2. Objective Function (Vectorized) ---
+    def likelihood_estimate(x):
+        # x arrives as (4, PopSize)
+
+        if x.ndim == 1:
+            x = x.reshape(-1,1)
+
+        x_gpu = torch.as_tensor(x, dtype=torch.float32, device=dev)
+        coords = x_gpu[0:3, :].T  # (PopSize, 3)
+        t0 = x_gpu[3, :].reshape(-1, 1, 1) # (PopSize, 1, 1)
+
+        # Predict travel times
+        # Expected trv output: (PopSize, Stations, 2)
+        pred = trv(locs_gpu, coords) + t0
+        
+        # Select P and S phases
+        p_vals = pred[:, ind_p, 0]
+        s_vals = pred[:, ind_s, 1]
+        pred_vals = torch.cat((p_vals, s_vals), dim=1) # (PopSize, n_picks)
+
+        sq_err = ((trgt_gpu - pred_vals)**2) * weight_gpu / (sig_t**2)
+
+        # Trimming logic on GPU
+        if num_trim > 0:
+            # Sort residuals for each population member
+            sorted_err, _ = torch.sort(sq_err, dim=1)
+            keep_count = n_picks - num_trim
+            logprob = -0.5 * sorted_err[:, :keep_count].sum(dim=1) / keep_count
+        else:
+            logprob = -0.5 * sq_err.mean(dim=1)
+
+        # Surface Constraint
+        if surf_data:
+            # Map lat/lon to grid indices
+            i1 = torch.clamp(((x_gpu[0, :] - surf_data['x1_min']) / surf_data['dx1']).long(), 0, surf_data['n1'] - 1)
+            i2 = torch.clamp(((x_gpu[1, :] - surf_data['x2_min']) / surf_data['dx2']).long(), 0, surf_data['n2'] - 1)
+            surf_elev = surf_data['elev'][i1 + i2 * surf_data['n1']]
+            
+            air_mask = (x_gpu[2, :] < surf_elev) 
+            logprob[air_mask] -= 1e5 
+
+        return -1.0 * logprob.detach().cpu().numpy()
+
+    # --- 3. Optimization Setup ---
+    bounds = [lat_range, lon_range, depth_range, time_range]
+
+    # --- 4. Execute ---
+    optim = scipy.optimize.differential_evolution(
+        likelihood_estimate, 
+        bounds, 
+        popsize=popsize, 
+        maxiter=maxiter, 
+        disp=disp, 
+        vectorized=True,
+        mutation = mutation,
+        tol = tol,
+        x0 = x0,
+        polish=True # Snaps to the local peak after DE finishes
+    )
+
+    final_coords = optim.x[0:3].reshape(1, -1)
+    final_time = optim.x[3]
+    final_prob = -optim.fun # optim.fun is the minimized value (negative logprob)
+
+    # --- 4. Identify SKIPPED Indices ---
+    skipped_indices = []
+    skipped_p, skipped_s = [], []
+    if num_trim > 0:
+        best_x = torch.as_tensor(optim.x, dtype=torch.float32, device=dev).reshape(-1, 1)
+        with torch.no_grad():
+            coords_f = best_x[0:3, :].T
+            t0_f = best_x[3, :].reshape(-1, 1, 1)
+            pred_f = trv(locs_gpu, coords_f) + t0_f
+            pred_v_f = torch.cat((pred_f[:, ind_p, 0], pred_f[:, ind_s, 1]), dim=1)
+            
+            # Find which indices had the highest error
+            sq_err_f = ((trgt_gpu - pred_v_f)**2) * weight_gpu / (sig_t**2)
+            sort_idx = torch.argsort(sq_err_f, dim=1)
+            
+            # The "skipped" ones are at the end of the sorted index list
+            skipped_indices = sort_idx[0, -num_trim:].cpu().numpy().tolist()
+            # Map global indices back to P and S subsets
+
+            n_p = len(ind_p)
+            skipped_p = np.array([idx for idx in skipped_indices if idx < n_p])
+            skipped_s = np.array([idx - n_p for idx in skipped_indices if idx >= n_p])
+
+
+    return final_coords, final_time, final_prob, skipped_p, skipped_s
 
 
 def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
