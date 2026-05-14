@@ -3044,6 +3044,38 @@ class GCN_Detection_Network_extended(nn.Module):
 		# self.pos_rel_src = pos_rel_src
 
 
+	def set_scale_coefficients(self, scale_rel, scale_time, kernel_sig_t, eps, src_x_kernel, src_t_kernel, time_shift_range):
+
+		self.scale_rel = scale_rel
+		self.scale_time = scale_time
+
+		if self.use_embedding == True:
+			self.DataAggregationEmbedding.scale_rel = scale_rel
+			self.DataAggregationEmbedding.scale_time = scale_time
+
+		self.SpatialAggregation1.scale_rel = scale_rel
+		self.SpatialAggregation1.scale_time = scale_time
+		self.SpatialAggregation2.scale_rel = scale_rel
+		self.SpatialAggregation2.scale_time = scale_time
+		self.SpatialAggregation3.scale_rel = scale_rel
+		self.SpatialAggregation3.scale_time = scale_time
+
+		self.SpaceTimeAttention.scale_rel = scale_rel
+		self.SpaceTimeAttention.scale_time = scale_time
+
+		# self.SpaceTimeAttentionQuery.scale_rel = scale_rel
+		# self.SpaceTimeAttentionQuery.scale_time = scale_time
+		# self.SpaceTimeAttentionQuery.kernel_sig_t = kernel_sig_t
+
+		self.ArrivalEmbedding.scale_rel = scale_rel
+		self.ArrivalEmbedding.scale_time = scale_time
+		self.ArrivalEmbedding.kernel_sig_t = kernel_sig_t
+
+		self.Arrivals.eps = eps
+
+		self.embedding_vector = torch.tensor([np.log(scale_rel)/5.0, np.log(scale_time), np.log(kernel_sig_t), np.log(src_x_kernel)/3.0, np.log(src_t_kernel), np.log(time_shift_range)/2.0], device = self.device).reshape(1,-1).float()
+		
+
 	def set_internal_state(self, x_spatial, x_temp_cuda_cart, x_temp_cuda_t): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 		## Use this to set state for rapid queries of attention layer
 		self.x_spatial = x_spatial
