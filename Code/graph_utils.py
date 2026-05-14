@@ -2381,7 +2381,7 @@ def get_domain_bounds(points_lla, scale=1.05):
         "is_wrapped": final_start > final_end or is_wrapped
     }
 
-def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 1500, n_trgt_nodes = 100e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], use_paths = False, rbest = None, mn = None, optimize_station_graph = False, optimize_source_graph = False, use_domain_approximate = True, device = 'cpu'):
+def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], use_paths = False, rbest = None, mn = None, optimize_station_graph = False, optimize_source_graph = False, use_domain_approximate = True, device = 'cpu'):
 
 
     domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -2741,7 +2741,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
 
 
-def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 1500, n_trgt_nodes = 100e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, device = 'cpu'):
+def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = True, device = 'cpu'):
 
     if domain is None:
         domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -2805,9 +2805,18 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 
 
     ## Run the auto tuning strategy to refine some scale parameters
-    m = SamplingTuner(final_N, lat_range_extend, lon_range_extend, depth_range, time_shift_range, scale_time_effective = final_scale_time)
-    params = m.optimize()
-    scale_time, depth_boost, buffer_scale = params['scale_t'], params['depth_boost'], params['buffer_scale']
+
+    if use_tuner == True:
+        m = SamplingTuner(final_N, lat_range_extend, lon_range_extend, depth_range, time_shift_range, scale_time_effective = final_scale_time)
+        params = m.optimize()
+        scale_time, depth_boost, buffer_scale = params['scale_t'], params['depth_boost'], params['buffer_scale']
+
+    else:
+
+        depth_boost = 2.0
+        buffer_scale = 2.0
+        scale_time = final_scale_time
+
 
     # 2. Final Metric Pass (Ground Truth)
     metrics = compute_warped_expected_spacing(
