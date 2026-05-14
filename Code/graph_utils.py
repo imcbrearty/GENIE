@@ -284,6 +284,7 @@ def get_warped_metric_space(x_grid, depth_boost, scale_t, scale_val=10000.0,
 
     return p4d_scaled
 
+
 def regular_sobolov(N, lat_range = None, lon_range = None, depth_range = None, time_range = None, use_time = True, use_global = None, scale_time = None, depth_boost = 1.0, N_target = None, use_station_density = False, buffer_scale = 0.0, r_min = None, r_max = None, use_spherical = False, run_checks = False):
 
     if use_spherical == False:
@@ -406,7 +407,7 @@ def regular_sobolov(N, lat_range = None, lon_range = None, depth_range = None, t
                               (x_grid[:,3] <= time_range) & (x_grid[:,3] >= (-time_range)) 
 
 
-      
+
         ## Now retain only the fraction of boundary nodes that will emulate the right density of the target number of nodes
         if N_target is not None:
             ratio = (Volume_expanded - Volume)/Volume
@@ -512,7 +513,8 @@ def regular_sobolov(N, lat_range = None, lon_range = None, depth_range = None, t
 
 
         return x_grid
-      
+
+
 
 def farthest_point_sampling(points_candidates, target_N, scale_time = None, depth_boost = 1.0, use_station_density = False, mask_candidates = None, device = device):
     
@@ -542,6 +544,8 @@ def farthest_point_sampling(points_candidates, target_N, scale_time = None, dept
 
 
     # points = get_fps_specific_space(points, depth_boost, scale_time)
+
+
     # if points.shape[1] == 4: points[:, 3] *= scale_time
     # if depth_boost != 1.0: points = ftrns1_abs(ftrns2_abs(points) * np.array([1.0, 1.0, depth_boost, 1.0]))
     # origin = points[:, :3].mean(axis = 0, keepdims = True)
@@ -779,6 +783,7 @@ def compute_cdf_analysis(x_grid, ranges):
         cdf_loss += np.mean(np.abs(sorted_vals - empirical_cdf))
 
     return cdf_loss / x_grid.shape[1]
+
 
 def fit_domain_budget_aware(W_phys_min, W_t_min, lat_range, lon_range, depth_range, time_range, 
                             N_max=6500, N_min=150, depth_boost = 1.0, use_global=False):
@@ -1550,6 +1555,7 @@ def compute_local_metrics(G, pos, k_local = 20, use_weights = False, num_samples
     
     
     # 1. Average clustering coefficient
+
     k_local = int(np.mean([v for n,v in G.degree()]))
     clustering = nx.average_clustering(G, weight='weight' if use_weights else None)
     
@@ -1717,10 +1723,6 @@ def extract_inputs_subgraph(locs, x_grid, A_src_in_sta, A_src_src, A_sta_sta, Ac
 
     return [A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_prod_sta_sta_weights, A_prod_src_src_weights, A_src_in_prod, A_src_in_sta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
-    # else:
-
-        # return [A_sta_sta, [A_src_src, Ac_src_src], A_prod_sta_sta, [A_prod_src_src, Ac_prod_src_src], A_src_in_prod, A_src_in_sta] ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
-
 
 def compute_local_sigma(coords, k=7):
     tree = cKDTree(coords)
@@ -1874,7 +1876,6 @@ def initialize_sensor_graph(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt
         print(f"Final scale length: {scale_length:0.3f} | Components: {nx.number_connected_components(G)}")
 
 
-
     # components = list(nx.connected_components(G))
     components = sorted(nx.connected_components(G), key=len, reverse=True)
     scale_length = G.graph['scale_length']
@@ -1892,7 +1893,9 @@ def initialize_sensor_graph(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt
 
             L = nx.laplacian_matrix(subG, weight='weight').astype(float)
 
-          
+
+            # pdb.set_trace()
+            # vals, vecs = lobpcg(L, X, largest=False, tol=1e-2)
             fiedler_vector, fiedler_value, flag = robust_fiedler_solver(L)
             if comp_id == 0: G.graph['fiedler_value'] = fiedler_value
 
@@ -1911,7 +1914,9 @@ def initialize_sensor_graph(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt
 
             if comp_id == 0: 
                 fiedler_graph = fiedler_value
-              
+
+            # except:
+            #     for node_idx in nodes_sorted: G.nodes[node_idx]['fiedler'] = 0.0
         else:
             for node_idx in nodes_sorted: G.nodes[node_idx]['fiedler'] = 0.0
 
@@ -2398,17 +2403,23 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
             lat_range_extend, lon_range_extend = [lat_range[0] - deg_padding, lat_range[1] + deg_padding], [lon_range[0] - deg_padding, lon_range[1] + deg_padding] # extend_geo_range(lat_range, lon_range, domain_scale['W_phys_m'], multiplier = 2.0)
             k_inpts_model = [lat_range, lon_range, lat_range_extend, lon_range_extend, np.array([deg_padding])]
 
+        # pdb.set_trace()
 
-      
         inpt_domain = np.hstack([np.diff(k) if len(k) > 1 else k for k in k_inpts_model]).reshape(1,-1)
         inpt_domain = torch.tensor(np.concatenate((inpt_domain, np.array([len(locs_use)]).reshape(1,1)), axis = 1), device = device) # .float()
         inpt_domain = (inpt_domain - m_domain.offset_inpt)/m_domain.scale_inpt
         scale_params = (m_domain(inpt_domain.float())*m_domain.scale_trgt + m_domain.offset_trgt).cpu().detach().numpy().reshape(-1)
-      
+
+
+        # for k in k_inpts_model:
+        #     print('%0.4f'%(z[k] if len(np.array(z[k]).reshape(-1)) == 1 else np.diff(z[k])))
+        # print('\n')
         for inc, k in enumerate(k_trgts_model):
             print('%s %0.4f'%(k, scale_params[inc]))
             # print(scale_params[inc])
-      
+            # print('\n')
+        # z.close()
+
         earth_radius = 6378137.0
         ftrns1_abs = lambda x: lla2ecef(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((lla2ecef(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
         ftrns2_abs = lambda x: ecef2lla(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((ecef2lla(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # invert ftrns1
@@ -2716,7 +2727,8 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
     else:
         Ac = None
 
-  
+
+
     # folder_path = "path/to/your/folder"
     os.makedirs('Domains', exist_ok=True)
     np.savez_compressed('Domains/domain_file_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]), A_src_in_sta = A_src_in_sta, A_sta = A_sta, A_src = A_src, Ac = Ac, A_prod_sta_sta = A_prod_sta_sta, A_prod_src_src = A_prod_src_src, A_prod_sta_sta_weights = A_prod_sta_sta_weights, A_prod_src_src_weights = A_prod_src_src_weights, A_src_in_prod = A_src_in_prod, x_grid = x_grid, scale_time = scale_time, depth_boost = depth_boost, ichoose_grid = 0, locs_use = locs_use, stas_use = stas_use, srcs_cart = x_grid_cart, locs_cart = locs_cart, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, rbest = rbest, mn = mn) # ind_use = np.arange(len(locs_use)) # metrics_product = metrics_product
@@ -2728,12 +2740,15 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
 
 
+
 def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 1500, n_trgt_nodes = 100e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, device = 'cpu'):
 
     if domain is None:
         domain = get_domain_bounds(locs_use, scale = scale_domain)
 
     # domain = get_domain_bounds(locs_use, scale = scale_domain)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20)
 
@@ -2751,8 +2766,8 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
         dt_sort = np.sort(np.abs(np.array([s['dt_offset'] for s in side_lobes])))
         Dt_offsets.append(np.quantile(dt_sort, quantile_times))
 
-        trv_out = trv(locs_use[t_obs_picks[:,1].astype('int')], src_true)
-        trv_out_sidelobes = np.vstack([trv(locs_use[t_obs_picks[:,1].astype('int')], s['pos_src'].reshape(1,-1)) + s['dt_offset'] for s in side_lobes])
+        trv_out = trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(src_true).to(device)).cpu().detach().numpy()
+        trv_out_sidelobes = np.vstack([trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(s['pos_src'].reshape(1,-1)).to(device)).cpu().detach().numpy() + s['dt_offset'] for s in side_lobes])
 
 
     Dt_offsets = np.array(Dt_offsets)
@@ -2954,6 +2969,7 @@ def optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio 
     return G_src, edges_src
 
 
+
 def get_most_impactful_edges_balanced(G, scale_length, cnt = 0, top_k=5, degree_p=1.0, greedy_regularize = 0.9, greedy_regularize_extra = 0.1, alpha_scale = 0.75, beta_scale = 0.1, min_weight = 0.05, exclusion_scale = 1.0, mode = 'univariate', use_triangles = False, update = False): # tracked_values = None, track_resistance = True
 
     nodes = list(G.nodes(data=True))
@@ -2977,9 +2993,7 @@ def get_most_impactful_edges_balanced(G, scale_length, cnt = 0, top_k=5, degree_
     if greedy_regularize != 1.0:
         L = nx.laplacian_matrix(G, weight='weight').astype(float)
         solve = spla.factorized((L + 1e-4 * sp.eye(n)).tocsc())
-        # solve = spla.factorized(L_s.tocsc())
-        # from sksparse.cholmod import cholesky
-        # factor = cholesky(L_reg, ordering_method='amd')  # or 'colamd'
+
 
     # Before the loop starts, create a mapping of component IDs to their sizes
     comp_ids = np.array([du.get('comp_id', 0) for _, du in nodes])
@@ -3142,13 +3156,10 @@ def get_most_impactful_edges_balanced(G, scale_length, cnt = 0, top_k=5, degree_
         precomputed_data=pre_compute)  # Dict from precompute_large_graph
 
 
-
     # pdb.set_trace()
     igrab_optimal = np.flip(np.argsort(score_approx*(use_greedy == 0))[-top_k_approx::]).astype('int')
     igrab_greedy = np.flip(np.argsort(score_approx*(use_greedy == 1))[-top_k_approx::]).astype('int')
     igrab_optimal = np.array(list(set(igrab_optimal).union(igrab_greedy))).astype('int')
-
-
 
 
     score_approx = score_approx[igrab_optimal]
@@ -3393,19 +3404,18 @@ def calculate_ricci_delta(u, v, w_new, deg_u, deg_v, curv_u, curv_v, u_neigh, v_
     Supports both normalized (vertex weights=1, with mean node curvature) and non-normalized (vertex weights=strength, with sum node curvature) modes.
     """
 
+    ## This check should already be done
+    # if G.has_edge(u, v):
+    #     return -float('inf'), 0
+    
+
     local_debt = abs(min(0, patch_curv[np.argsort(patch_curv)[int(min_debt_thresh*len(patch_curv))]]))
 
     if skip_low_debt and local_debt <= 1e-5:
         return 0.0, local_debt
     
     if use_normalized:
-        # Normalized mode: vertex weights=1, total_curvature=mean incident Ric
-        # Pre: node_inv_sqrt_sum[u] = sum_{n~u} 1 / sqrt(G[u][n]['weight'])
-        
-        # Get unweighted degrees
-        # deg_u = G.degree(u)
-        # deg_v = G.degree(v)
-        
+
         old_mean_u = curv_u # curvature[u]
         old_mean_v = curv_v # curvature[v]
 
@@ -3455,7 +3465,8 @@ def calculate_ricci_delta(u, v, w_new, deg_u, deg_v, curv_u, curv_v, u_neigh, v_
             # deg_nbr = deg_v_neigh # degrees[v_neighs]
             delta_means_nbrs_v = ((deg_v_neigh > 0)*(delta_ric / np.maximum(1, deg_v_neigh))).sum() # if deg_nbr > 0 else 0
 
-      
+
+
         # Updates for u and v means (account for +deg and ric updates)
         new_sum_ric_u = old_sum_ric_u + ric_uv_new + delta_incident_u
         new_deg_u = deg_u + 1
@@ -3470,6 +3481,7 @@ def calculate_ricci_delta(u, v, w_new, deg_u, deg_v, curv_u, curv_v, u_neigh, v_
         # Total gain: sum of delta_means over all affected nodes (u, v, nbrs_u, nbrs_v)
         # Handles shared nbrs correctly (additive deltas if connected to both)
         total_ricci_gain = delta_mean_u + delta_mean_v + delta_means_nbrs_u + delta_means_nbrs_v
+    
 
     else:
 
@@ -3520,9 +3532,10 @@ def calculate_ricci_delta(u, v, w_new, deg_u, deg_v, curv_u, curv_v, u_neigh, v_
                 # Ricci change for this existing edge
                 delta_ric = w_ce * ((w_next - w_old) / w_ce - (s_new - s_old))
                 delta_incident += delta_ric
-              
+        
         # Each Ricci (new + changes) contributes to two nodes' total_curvature (sum)
         total_ricci_gain = 2 * (ric_uv_new + delta_incident)
+
     
     return total_ricci_gain, local_debt
 
@@ -3758,7 +3771,6 @@ def optimized_normalized_scores_large(
     return score_approx
 
 
-
 def fit_domain_model(dir_ext = 'Domains', n_ver_load = 1, n_save_ver = 1):
 
     import numpy as np
@@ -3801,7 +3813,9 @@ def fit_domain_model(dir_ext = 'Domains', n_ver_load = 1, n_save_ver = 1):
     offset_trgt = Trgts.min(0, keepdims = True)
 
     m = nn.Sequential(nn.Linear(Inpts.shape[1], 30), nn.ReLU(), nn.Linear(30, 30), nn.ReLU(), nn.Linear(30, Trgts.shape[1])).to(device)
+
     optimizer = optim.Adam(m.parameters(), lr = 0.001)
+
     loss_func = nn.MSELoss()
 
     n_batch = 300
@@ -3817,7 +3831,6 @@ def fit_domain_model(dir_ext = 'Domains', n_ver_load = 1, n_save_ver = 1):
         i0 = np.sort(np.random.choice(int(n_size*(1.0 - n_vald)), size = n_batch, replace = False))
         inpt_slice = torch.Tensor((Inpts[i0] - offset_inpt)/scale_inpt).to(device)
         trgt_slice = torch.Tensor((Trgts[i0] - offset_trgt)/scale_trgt).to(device)
-
         out = m(inpt_slice)
         loss = loss_func(out, trgt_slice)
         loss.backward()
@@ -3830,11 +3843,15 @@ def fit_domain_model(dir_ext = 'Domains', n_ver_load = 1, n_save_ver = 1):
                 trgt_slice = torch.Tensor((Trgts[i0] - offset_trgt)/scale_trgt).to(device)
                 out = m(inpt_slice)
                 loss_vald = loss_func(out, trgt_slice)
+
             print('%d %0.8f (%0.8f)'%(i, loss.item(), loss_vald.item()))
+
         else:
+
             print('%d %0.8f'%(i, loss.item()))
-          
+
     ## Compute residuals
+
     Res = []
     Res_vald = []
 
@@ -3846,13 +3863,14 @@ def fit_domain_model(dir_ext = 'Domains', n_ver_load = 1, n_save_ver = 1):
             trgt_slice = Trgts[i0] #  - offset_trgt)/scale_trgt).to(device)
             out = scale_trgt*m(inpt_slice).cpu().detach().numpy() + offset_trgt
             Res.append(out - trgt_slice)
-          
+
             i0 = np.sort(np.random.choice(np.arange(int(n_size*(1.0 - n_vald)), n_size), size = n_batch, replace = False))
             inpt_slice = torch.Tensor((Inpts[i0] - offset_inpt)/scale_inpt).to(device)
             # trgt_slice = torch.Tensor((Trgts[i0] - offset_trgt)/scale_trgt).to(device)
             trgt_slice = Trgts[i0] #  - offset_trgt)/scale_trgt).to(device)
             out = scale_trgt*m(inpt_slice).cpu().detach().numpy() + offset_trgt
             Res_vald.append(out - trgt_slice)
+
 
     Res = np.vstack(Res)
     Res_vald = np.vstack(Res_vald)
@@ -3871,8 +3889,6 @@ def fit_domain_model(dir_ext = 'Domains', n_ver_load = 1, n_save_ver = 1):
     m.register_buffer('scale_inpt', torch.tensor(scale_inpt, device = device))
     m.register_buffer('offset_inpt', torch.tensor(offset_inpt, device = device))
 
-    # m.register_buffer('k_inpts', torch.tensor(k_inpts, device = device))
-    # m.register_buffer('k_trgts', torch.tensor(k_trgts, device = device))
 
     def strings_to_tensor(string_list):
         # Join strings with a null character and convert to bytes
@@ -3887,7 +3903,6 @@ def fit_domain_model(dir_ext = 'Domains', n_ver_load = 1, n_save_ver = 1):
     m.register_buffer('k_trgts', strings_to_tensor(k_trgts))
 
     torch.save(m.state_dict(), 'model_scale_parameters_ver_%d.h5'%(n_save_ver)) # trained_gnn_model_step_%d_ver_%d.h5
-
 
 
 def load_model_domain(n_ver, device = 'cpu'):
@@ -3918,7 +3933,6 @@ def load_model_domain(n_ver, device = 'cpu'):
     return m_domain
 
 
-
 def build_sampling_grid(lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, time_shift_range, scale_time, number_of_spatial_nodes, ftrns1, ftrns2, buffer_scale = 2.0, depth_upscale_factor = 2.0, use_global = False, rbest = None, mn = None, verbose = True, device = 'cpu'):
 
     earth_radius = 6378137.0
@@ -3939,9 +3953,6 @@ def build_sampling_grid(lat_range, lon_range, lat_range_extend, lon_range_extend
         return -r_val
 
 
-    # if len(k_inpts_model) == 2:
-    #     deg_padding = scale_params[7]
-    #     lat_range_extend, lon_range_extend = [lat_range[0] - deg_padding, lat_range[1] + deg_padding], [lon_range[0] - deg_padding, lon_range[1] + deg_padding] # extend_geo_range(lat_range, lon_range, domain_scale['W_phys_m'], multiplier = 2.0)
 
     bounds = [(lat_range_extend[0], lat_range_extend[1])]
     soln = differential_evolution(optimize_r_min, bounds, popsize = 50, maxiter = 1000, disp = True if verbose == True else False)
@@ -4004,6 +4015,8 @@ def estimate_kernel_widths(domain, station_locs, z_range = (-40000, 2000), Vs = 
     # 1. Coordinate & Aperture Setup
     lat_r, lon_r = domain['lat_range'], domain['lon_range']
     
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
     # Calculate representative aperture for sanity check (Corner-to-Corner ECEF)
     c1 = lla2ecef(np.array([[lat_r[0], lon_r[0], 0]]))
     c2 = lla2ecef(np.array([[lat_r[1], lon_r[1], 0]]))
@@ -4061,12 +4074,12 @@ def estimate_kernel_widths(domain, station_locs, z_range = (-40000, 2000), Vs = 
     for s in range(n_srcs):
         s_stas = station_locs[nearest_idx[s]]
         # Observed (Reference) travel times: (1, 20, P)
-        t_r = trv(s_stas, src_refs_lla[s:s+1], Vs = Vs)
+        t_r = trv(torch.Tensor(s_stas).to(device), torch.Tensor(src_refs_lla[s:s+1]).to(device)).cpu().detach().numpy() # Vs = Vs
         # Add pick noise to simulate real-world uncertainty
         t_obs_list.append(t_r + np.random.normal(0, t_r * noise_level))
         
         # Test (Perturbed) travel times: (T, 20, P)
-        t_t = trv(s_stas, test_lla_flat[s*n_test_per_src : (s+1)*n_test_per_src], Vs = Vs)
+        t_t = trv(torch.Tensor(s_stas).to(device), torch.Tensor(test_lla_flat[s*n_test_per_src : (s+1)*n_test_per_src]).to(device)).cpu().detach().numpy() # Vs = Vs
         t_test_list.append(t_t)
 
     t_obs = np.concatenate(t_obs_list, axis=0) # (S, 20, P)
@@ -4117,7 +4130,8 @@ def estimate_kernel_widths(domain, station_locs, z_range = (-40000, 2000), Vs = 
             "Vs": Vs
         }
     }
-  
+
+
 
 def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range,
                                      k_stations=20, vel_avg=3500.0, vel_min=2500.0,
@@ -4177,12 +4191,14 @@ def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_l
 
     t_calc = torch.cdist(grid_xyz, active_stas_xyz) / vel_avg
     residuals = t_obs.unsqueeze(0) - t_calc
-  
-    w_t_m = W_t * vel_avg
-                                       
+    
+
+    w_t_m = W_t * vel_avg 
+
     # The 4D suppression radius is the hypotenuse of the physical 'bowl' widths
     # We use a 1.5x multiplier to ensure we clear the 'shoulders' of the main peak
     suppress_r_4d = torch.sqrt(torch.tensor(W_phys_m**2 + w_t_m**2)) * 1.5
+
 
     time_step = max(0.01, max_dt / 100.0)
     dt_range = torch.arange(-max_dt, max_dt + time_step, time_step, device=device, dtype=torch.float32)
@@ -4243,6 +4259,7 @@ def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_l
         
         if len(peaks) >= 10: break
 
+
     return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
 
 
@@ -4255,15 +4272,5 @@ def strings_to_tensor(string_list):
 def tensor_to_strings(tensor):
     # Convert bytes back to string and split
     return bytes(tensor.tolist()).decode('utf-8').split("\0")
-
-
-
-
-
-
-
-
-
-
 
     
