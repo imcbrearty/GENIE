@@ -1691,7 +1691,7 @@ def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, in
 
 	return x0_max, x0_max_val
 
-def merge_nearby_stations(P, locs, spatial_win = 250.0, merge_picks = True, merge_ratio = 0.5, use_depths = True, merge_window = 1.5, verbose = True):
+def merge_nearby_stations(P, locs, ftrns1, spatial_win = 250.0, merge_picks = True, merge_ratio = 0.5, use_depths = True, merge_window = 1.5, verbose = True):
 
 	ind_unique = np.unique(P[:,1].astype('int'))
 	locs_use = locs[ind_unique]
