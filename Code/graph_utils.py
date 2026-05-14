@@ -2748,9 +2748,14 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 
     # domain = get_domain_bounds(locs_use, scale = scale_domain)
 
+    ## Temporarily define this for simplicity
+    def trv(locs, srcs, Vs = 3500.0):
+        return torch.Tensor(np.linalg.norm(np.expand_dims(lla2ecef(srcs.cpu().detach().numpy()), axis = 1) - np.expand_dims(lla2ecef(locs.cpu().detach().numpy()), axis = 0), axis = 2, keepdims = True)/Vs).to(srcs.device)
+
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20)
+    domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20, device = device)
 
     lat_range, lon_range = domain['lat_range'], domain['lon_range']
     lat_range_extend, lon_range_extend = extend_geo_range(lat_range, lon_range, domain_scale['W_phys_m'], multiplier = 2.0)
@@ -2759,7 +2764,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
     Dt_offsets = []
     for i in range(n_rand_srcs):
 
-        src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(locs_use, lat_range_extend, lon_range_extend, depth_range,
+        src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
                                          k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))), vel_avg=Vc, vel_min=Vc*0.75,
                                          scan_step_m=domain_scale['W_phys_m']/2.0, W_phys_m = domain_scale['W_phys_m'], W_t = domain_scale['W_t_s'], device=device)
 
@@ -4010,7 +4015,7 @@ def build_sampling_grid(lat_range, lon_range, lat_range_extend, lon_range_extend
     return x_grid
 
 
-def estimate_kernel_widths(domain, station_locs, z_range = (-40000, 2000), Vs = 3500.0, noise_level = 0.02, n_srcs = 250, n_test_per_src = 10000, n_neighbors_trgt = 20):
+def estimate_kernel_widths(domain, station_locs, z_range = (-40000, 2000), Vs = 3500.0, noise_level = 0.02, n_srcs = 250, n_test_per_src = 10000, n_neighbors_trgt = 20, device = 'cpu'):
     """
     Computes Gaussian coherency widths (W_phys, W_t) using a vectorized batch approach.
     Adaptive for any scale (Borehole to Global) with zero hard-coded temporal floors.
@@ -4023,6 +4028,12 @@ def estimate_kernel_widths(domain, station_locs, z_range = (-40000, 2000), Vs = 
     """
     # 1. Coordinate & Aperture Setup
     lat_r, lon_r = domain['lat_range'], domain['lon_range']
+    device = torch.device('cpu')
+
+    ## Temporarily define this for simplicity
+    def trv(locs, srcs, Vs = 3500.0):
+        return torch.Tensor(np.linalg.norm(np.expand_dims(lla2ecef(srcs.cpu().detach().numpy()), axis = 1) - np.expand_dims(lla2ecef(locs.cpu().detach().numpy()), axis = 0), axis = 2, keepdims = True)/Vs).to(device)
+
     
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
@@ -4142,16 +4153,22 @@ def estimate_kernel_widths(domain, station_locs, z_range = (-40000, 2000), Vs = 
 
 
 
-def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range,
+def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
                                      k_stations=20, vel_avg=3500.0, vel_min=2500.0,
                                      scan_step_m=1000.0, W_phys_m = 1000.0, W_t = 3.0, device=device):
     
+    device = torch.device('cpu')
     # --- 1. Project Stations to 3D for Aperture Check ---
     # station_latlonz: [Lat, Lon, Depth]
     station_xyz = torch.tensor(ftrns1(station_latlonz), device = device) # torch.cat((station_latlonz[:, 0].reshape(-1,1), station_latlonz[:, 1], station_latlonz[:, 2])
     
     dist_matrix = torch.cdist(station_xyz, station_xyz)
     d_array = torch.max(dist_matrix).item()
+
+    ## Temporarily define this for simplicity
+    def trv(locs, srcs, Vs = 3500.0):
+        return torch.Tensor(np.linalg.norm(np.expand_dims(lla2ecef(srcs.cpu().detach().numpy()), axis = 1) - np.expand_dims(lla2ecef(locs.cpu().detach().numpy()), axis = 0), axis = 2, keepdims = True)/Vs).to(srcs.device)
+
     
     # Limits in meters
     max_radius_m = d_array / 2.0
