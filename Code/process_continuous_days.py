@@ -635,7 +635,7 @@ tq = torch.Tensor(np.copy(X_query[:,3])).reshape(-1,1).to(device)
         ############### Load Picks ###############
 ############### ############### ############### ###############
 
-if use_fixed_domain == False:
+if use_fixed_domain == True:
 	P, ind_use = load_picks(path_to_file, date, spr_picks = spr_picks, n_ver = n_ver_picks)
 
 min_spc_allowed = process_config.get('min_spc_allowed', None) ## Can remove nearby overlapping stations using min_spc_allowed
