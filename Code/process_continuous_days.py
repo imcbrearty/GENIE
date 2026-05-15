@@ -95,6 +95,9 @@ offset_select = int(argvs[2])
 ## Add disconnected components search to minimize cost of matched events
 
 
+## Make more efficient compute_travel_times
+
+
 ### Settings: ###
 
 with open('process_config.yaml', 'r') as file:
@@ -664,8 +667,8 @@ locs_use = locs[ind_use]
 stas_use = stas[ind_use]
 
 
-if use_fixed_domain == False:
-	assert(np.abs(ind_use - np.arange(len(locs))).max() == 0)
+# if use_fixed_domain == False:
+# 	assert(np.abs(ind_use - np.arange(len(locs))).max() == 0)
 
 
 print('\nPicks: %d, Sta: %d (%d Avg. per station)'%(len(P), len(locs_use), np.bincount(P_perm[P_perm[:,1] > -1,1].astype('int')).mean()))
@@ -1689,6 +1692,7 @@ for cnt, strs in enumerate([0]):
 		st_process = time.time()
 		srcs_trv, srcs_sigma = [], []
 		del_arv_p, del_arv_s = [], []
+		iwhere_cnts = np.zeros(0)
 		torch.set_grad_enabled(False)
 
 
@@ -1837,8 +1841,8 @@ for cnt, strs in enumerate([0]):
 						
 						if ((len(ind_unique_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
 							srcs_trv.append(np.nan*np.ones((1, 4)))
-							del_arv_p.append(0)
-							del_arv_s.append(0)
+							# del_arv_p.append(0)
+							# del_arv_s.append(0)
 							# srcs_sigma.append(np.nan)
 							continue
 		
@@ -1846,8 +1850,8 @@ for cnt, strs in enumerate([0]):
 		
 						if len(ind_unique_arrivals) == 0:
 							srcs_trv.append(np.nan*np.ones((1, 4)))
-							del_arv_p.append(0)
-							del_arv_s.append(0)
+							# del_arv_p.append(0)
+							# del_arv_s.append(0)
 							# srcs_sigma.append(np.nan)
 							continue
 					
