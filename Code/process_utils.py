@@ -1374,7 +1374,7 @@ def differential_evolution_location(trv, locs_use, arv_p, ind_p, arv_s, ind_s, l
 
 	return optim.x.reshape(1,-1), likelihood_estimate(optim.x.reshape(-1,1))
 
-def differential_evolution_location_trim2(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, time_range, sig_t = 1.5, weight = [1.0, 0.85], popsize = 75, maxiter = 1000, trim = 0.2, min_picks = 5, device = 'cpu', surface_profile = None, disp = True, vectorized = True):
+def differential_evolution_location_trim3(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, time_range, sig_t = 1.5, weight = [1.0, 0.85], popsize = 75, maxiter = 1000, trim = 0.2, min_picks = 5, device = 'cpu', surface_profile = None, disp = True, vectorized = True):
 
 	if (len(arv_p) + len(arv_s)) == 0:
 		return np.nan*np.ones((1,3)), np.nan
@@ -1454,7 +1454,7 @@ def differential_evolution_location_trim2(trv, locs_use, arv_p, ind_p, arv_s, in
 	return optim.x[0:3].reshape(1,-1), optim.x[3].reshape(-1), likelihood_estimate(optim.x.reshape(-1,1))
 
 
-def differential_evolution_location_trim1(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
+def differential_evolution_location_trim2(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
                                         lat_range, lon_range, depth_range, time_range, 
                                         x0=None, sig_t=1.5, weight=[1.0, 0.85], 
                                         popsize=75, maxiter=1000, trim=0.2, mutation = (0.4, 0.9),
@@ -1586,7 +1586,7 @@ def differential_evolution_location_trim1(trv, locs_use, arv_p, ind_p, arv_s, in
     return final_coords, final_time, final_prob, skipped_p, skipped_s
 
 
-def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
+def differential_evolution_location_trim1(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
                                         lat_range, lon_range, depth_range, time_range, 
                                         x0=None, sig_t=1.5, weight=[1.0, 0.85], 
                                         popsize=75, maxiter=1000, trim=0.2, mutation=(0.4, 0.9),
@@ -1730,6 +1730,96 @@ def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind
             skipped_s = np.array([idx - n_p for idx in skipped_indices if idx >= n_p])
 
     return final_coords, final_time, final_prob, skipped_p, skipped_s
+
+
+
+
+def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
+                                        lat_range, lon_range, depth_range, time_range, 
+                                        x0=None, sig_t=1.5, weight=[1.0, 0.85], 
+                                        popsize=75, maxiter=1000, trim=0.2, mutation=(0.4, 0.9),
+                                        min_picks=5, tol=0.001, z_score=2.5, z_thresh = 3.5, device='cpu', 
+                                        surface_profile=None, disp=True, vectorized=True):
+
+    if (len(arv_p) + len(arv_s)) == 0:
+        return np.nan * np.ones((1, 3)), np.nan, np.nan, np.array([]), np.array([]), np.array([]), np.array([])
+
+    # --- 1. Pre-processing ---
+    dev = torch.device(device)
+    n_p, n_s = len(ind_p), len(ind_s)
+    n_picks = n_p + n_s
+    num_trim = max(0, min(int(np.floor(trim * n_picks)), n_picks - min_picks))
+
+    trgt = np.concatenate((arv_p, arv_s)).reshape(1, -1)
+    w_vec = np.array(weight) if len(weight) == n_picks else np.concatenate((weight[0]*np.ones(n_p), weight[1]*np.ones(n_s)))
+    
+    trgt_gpu = torch.as_tensor(trgt, dtype=torch.float32, device=dev)
+    weight_gpu = torch.as_tensor(w_vec, dtype=torch.float32, device=dev).reshape(1, -1)
+    locs_gpu = torch.as_tensor(locs_use, dtype=torch.float32, device=dev)
+    
+    surf_data = None
+    if surface_profile is not None:
+        x1, x2 = np.unique(surface_profile[:,0]), np.unique(surface_profile[:,1])
+        surf_data = {'x1_min': x1[0], 'x2_min': x2[0], 'dx1': np.diff(x1)[0], 'dx2': np.diff(x2)[0],
+                     'n1': len(x1), 'elev': torch.as_tensor(surface_profile[:,2], dtype=torch.float32, device=dev)}
+
+    # --- 2. Objective Function ---
+    def likelihood_estimate(x):
+        x_gpu = torch.as_tensor(x, dtype=torch.float32, device=dev).reshape(-1, x.shape[-1])
+        coords, t0 = x_gpu[0:3, :].T, x_gpu[3, :].reshape(-1, 1, 1)
+
+        pred = trv(locs_gpu, coords) + t0
+        pred_vals = torch.cat((pred[:, ind_p, 0], pred[:, ind_s, 1]), dim=1)
+        res_w = torch.abs(trgt_gpu - pred_vals) * torch.sqrt(weight_gpu) / sig_t
+
+        if num_trim > 0:
+            med = torch.median(res_w, dim=1, keepdim=True).values
+            mad = torch.clamp(torch.median(torch.abs(res_w - med), dim=1, keepdim=True).values, min=1e-4)
+            
+            outlier_mask = (0.6745 * (res_w - med) / mad) > z_score
+            cutoff = torch.sort(res_w, dim=1)[0][:, max(0, n_picks - num_trim - 1)].view(-1, 1)
+            trim_mask = outlier_mask & (res_w >= cutoff)
+            
+            sq_err = torch.where(trim_mask, torch.tensor(0.0, device=dev), res_w**2)
+            logprob = -0.5 * sq_err.sum(dim=1) / torch.clamp((~trim_mask).sum(dim=1), min=min_picks)
+        else:
+            logprob = -0.5 * (res_w**2).mean(dim=1)
+
+        if surf_data:
+            i1 = torch.clamp(((x_gpu[0,:] - surf_data['x1_min'])/surf_data['dx1']).long(), 0, surf_data['n1']-1)
+            i2 = torch.clamp(((x_gpu[1,:] - surf_data['x2_min'])/surf_data['dx2']).long(), 0, (len(surface_profile)//surf_data['n1'])-1)
+            logprob[x_gpu[2,:] < surf_data['elev'][i1 + i2*surf_data['n1']]] -= 1e5
+
+        return -1.0 * logprob.detach().cpu().numpy()
+
+    # --- 3. Optimization ---
+    bounds = [lat_range, lon_range, depth_range, time_range]
+    optim = scipy.optimize.differential_evolution(likelihood_estimate, bounds, popsize=popsize, 
+                                                 maxiter=maxiter, disp=disp, vectorized=True, 
+                                                 mutation=mutation, tol=tol, x0=x0, polish=True)
+
+    # --- 4. Identify Trimmed (Search) and Deleted (QC) Indices ---
+    with torch.no_grad():
+        best_x = torch.as_tensor(optim.x, dtype=torch.float32, device=dev).view(-1, 1)
+        pred_f = trv(locs_gpu, best_x[0:3].T) + best_x[3].view(-1, 1, 1)
+        pred_v_f = torch.cat((pred_f[:, ind_p, 0], pred_f[:, ind_s, 1]), dim=1)
+        res_w_f = torch.abs(trgt_gpu - pred_v_f) * torch.sqrt(weight_gpu) / sig_t
+        
+        med_f = torch.median(res_w_f)
+        mad_f = torch.clamp(torch.median(torch.abs(res_w_f - med_f)), min=1e-4)
+        z_f = 0.6745 * (res_w_f - med_f) / mad_f
+        
+        cutoff_f = np.partition(res_w_f[0].cpu().numpy(), max(0, n_picks - num_trim - 1))[max(0, n_picks - num_trim - 1)]
+        
+        # Binary masks
+        trim_idx = torch.where((z_f[0] > z_score) & (res_w_f[0] >= cutoff_f))[0].cpu().numpy()
+        del_idx = torch.where(z_f[0] > z_thresh)[0].cpu().numpy()
+
+        # Split directly
+        skipped_p, skipped_s = trim_idx[trim_idx < n_p], trim_idx[trim_idx >= n_p] - n_p
+        idel_p, idel_s = del_idx[del_idx < n_p], del_idx[del_idx >= n_p] - n_p
+
+    return optim.x[0:3].reshape(1,-1), optim.x[3], -optim.fun, skipped_p, skipped_s, idel_p, idel_s
 
 
 def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
