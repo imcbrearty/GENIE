@@ -1457,9 +1457,9 @@ def differential_evolution_location_trim1(trv, locs_use, arv_p, ind_p, arv_s, in
 def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
                                         lat_range, lon_range, depth_range, time_range, 
                                         x0=None, sig_t=1.5, weight=[1.0, 0.85], 
-                                        popsize=50, maxiter=1000, trim=0.2, mutation = (0.3, 0.8),
+                                        popsize=75, maxiter=1000, trim=0.2, mutation = (0.4, 0.9),
                                         min_picks=5, tol=0.001, device='cpu', surface_profile=None, 
-                                        disp=True, vectorized=True):
+                                        disp=True, vectorized=True): # mutation = (0.3, 0.8)
 
     if (len(arv_p) + len(arv_s)) == 0:
         return np.nan * np.ones((1, 3)), np.nan, np.nan
