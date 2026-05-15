@@ -1734,9 +1734,10 @@ def differential_evolution_location_trim1(trv, locs_use, arv_p, ind_p, arv_s, in
 
 
 
+
 def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
                                         lat_range, lon_range, depth_range, time_range, 
-                                        x0=None, sig_t=1.5, weight=[1.0, 0.85], 
+                                        x0=None, sig_rel = 0.05, sig_min = 0.2, sig_max = 2.0, weight=[1.0, 0.85], 
                                         popsize=75, maxiter=1000, trim=0.2, mutation=(0.4, 0.9),
                                         min_picks=5, tol=0.001, z_score=2.5, z_thresh = 3.5, device='cpu', 
                                         surface_profile=None, disp=True, vectorized=True):
@@ -1762,6 +1763,9 @@ def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind
         x1, x2 = np.unique(surface_profile[:,0]), np.unique(surface_profile[:,1])
         surf_data = {'x1_min': x1[0], 'x2_min': x2[0], 'dx1': np.diff(x1)[0], 'dx2': np.diff(x2)[0],
                      'n1': len(x1), 'elev': torch.as_tensor(surface_profile[:,2], dtype=torch.float32, device=dev)}
+
+    # sig_t = np.clip(trgt * 0.05, 0.1, 1.5)
+    sig_t = np.clip(trgt * sig_rel, sig_min, sig_max)
 
     # --- 2. Objective Function ---
     def likelihood_estimate(x):
@@ -1820,6 +1824,9 @@ def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind
         idel_p, idel_s = del_idx[del_idx < n_p], del_idx[del_idx >= n_p] - n_p
 
     return optim.x[0:3].reshape(1,-1), optim.x[3], -optim.fun, skipped_p, skipped_s, idel_p, idel_s
+
+
+
 
 
 def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
