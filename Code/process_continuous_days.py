@@ -236,6 +236,9 @@ if use_fixed_domain == True:
 	else:
 		Ac = False
 
+	A_src_in_sta = None ## Need to define subgraph
+	A_sta_sta, A_src_src = None, None
+
 
 else:
 
@@ -676,7 +679,9 @@ print('Num %d P picks; %d S picks \n'%(len(np.where(P[:,4] == 0)[0]), len(np.whe
 n_batch = 1 ## Rather than process full day, process window around available picks; ## Even more efficient, only around times of picks - max_moveout.
 use_subset_window = True
 if use_subset_window == True:
+	# tsteps = np.arange(P[:,0].min(), P[:,0].max() + step, step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
 	tsteps = np.arange(np.maximum(0.0, P[:,0].min() - max_t), np.minimum(day_len, P[:,0].max()), step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
+	## Can process longer than 1 day with this approach
 	# tsteps = np.arange(np.round(np.maximum(0.0, P[:,0].min() - max_t)), np.round(np.minimum(day_len, P[:,0].max())), step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
 else:
 	tsteps = np.arange(0.0, day_len, step) ## Make step any of 3 options for efficiency... (a full step, a hald step, and a fifth step?)
@@ -710,6 +715,7 @@ cnt_isolated_picks = 0
 ## Input settings
 use_updated_input = True
 dt_embed_discretize = np.round(pred_params[1]/15.0, 2) # 0.05 ## Picks are discretized to this amount if using updated input to speed up input
+
 
 
 
@@ -1680,6 +1686,26 @@ for cnt, strs in enumerate([0]):
 		srcs_trv, srcs_sigma = [], []
 		del_arv_p, del_arv_s = [], []
 		torch.set_grad_enabled(False)
+
+
+		use_overwrite_locations = True
+		if (inc_repeat == (repeat_iters - 1))*(inc_repeat > 0):
+
+			## Check if any current pick sets are same as a previously located event
+			len_p_picks = np.array([len(Picks_P[j]) for j in range(len(Picks_P))])
+			len_s_picks = np.array([len(Picks_S[j]) for j in range(len(Picks_S))])
+			id_picks = np.array([np.concatenate((Picks_P[j][np.argort(Picks_P[j][:,0]),0:2], Picks_S[j][np.argort(Picks_S[j][:,0]),0:2]), axis = 0) for j in range(len(Picks_P))])
+
+			tree_cnts = cKDTree(np.concatenate((len_p_picks_.reshape(-1,1), len_s_picks_.reshape(-1,1)), axis = 1))
+			query_cnts = tree_cnts.query_ball_point(np.concatenate((len_p_picks.reshape(-1,1), len_s_picks.reshape(-1,1)), axis = 1), r = 0)
+			iwhere_cnts = np.where([len(query_cnts[j]) > 0 for j in range(len(Picks_P))])[0] # np.where([np.abs(id_picks[])])
+			iwhere_cnts = iwhere_cnts[np.where([np.abs(np.concatenate([np.expand_dims(id_picks_[j], axis = 0) for j in query_cnts[k]], axis = 0) - np.expand_dims(id_picks[k], axis = 0)).max(2).max(1).min(0) < 1e-2 for k in iwhere_cnts])[0]]
+
+			## Now for these sources find the location of matched previous events
+			imatched_ind = np.array([query_cnts[k][np.where(np.abs(np.concatenate([np.expand_dims(id_picks_[j], axis = 0) for j in query_cnts[k]], axis = 0) - np.expand_dims(id_picks[k], axis = 0)).max(2).max(1) < 1e-2)[0][0]] for k in iwhere_cnts])
+			src_matched = np.copy(src_location_[imatched_ind])
+
+
 		for i in range(srcs_refined.shape[0]):
 
 			arv_p, ind_p, arv_s, ind_s = Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int')
@@ -1703,7 +1729,19 @@ for cnt, strs in enumerate([0]):
 			if len(ind_s_perm_slice) > 0:
 				assert(ind_s_perm_slice.min() > -1)
 
-			xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
+
+			overwrite_val = False ## Use previous location (since picks are the same)
+			if (inc_repeat == (repeat_iters - 1))*(inc_repeat > 0)*(use_overwrite_locations == True)*(i in iwhere_cnts):
+				xmle = src_matched[np.where(i == iwhere_cnts)[0][0]]
+				xmle, origin = xmle[0:3], xmle[3]
+				logprob, skipped_p_ind, skipped_s_ind = np.nan, [], []
+				overwrite_val = True
+
+			else:
+
+				# xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
+				xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
+
 
 			if use_offset_quality_control == True:
 				offset_dist = np.linalg.norm(ftrns1(xmle.reshape(1,-1)) - ftrns1(srcs_refined[i,:].reshape(1,-1)), axis = 1)
@@ -1732,7 +1770,7 @@ for cnt, strs in enumerate([0]):
 			# use_quality_check = process_config['use_quality_check'] ## If True, check all associated picks and set a maximum allowed relative error after obtaining initial location
 			# max_relative_error = process_config['max_relative_error'] ## 0.15 corresponds to 15% maximum relative error allowed
 			# min_time_buffer = process_config['min_time_buffer'] ## Uses this time (seconds) as a minimum residual time, beneath which, the relative error criterion is ignored (i.e., an associated pick is removed if both the relative error > max_relative_error and the residual > min_time_buffer)
-			if use_quality_check == True:
+			if (use_quality_check == True)*(overwrite_val == False):
 				tval_p = pred_out[0,ind_p_perm_slice,0] - origin
 				tval_s = pred_out[0,ind_s_perm_slice,1] - origin
 				tval_p[tval_p <= 0] = 0.01
@@ -1779,13 +1817,24 @@ for cnt, strs in enumerate([0]):
 				# if len(ind_unique_arrivals) == 0:
 				# 	srcs_trv.append(np.nan*np.ones((1, 4)))
 				# 	continue				
-									
+				
+				## For picks not removed by quality control in first location
+				## Can "force" trim to use the retained picks within trim
+				## in second location (e.g., relax trim for allowed picks)
+
+				## Alternatively: adapt location - apply twice with first pass identifying outliers with trim
+				## Then second (warm start and narrowed) and re-add trimmed picks with low errors
+
+				## Note: this would reduce "skip" criteria
+
 				if ((len(idel_p) > 0) + (len(idel_s) > 0)) > 0: ## If arrivals have been removed, re-locate
 
 					if (min_required_picks is not False)*(min_required_sta is not False):
 						
 						if ((len(ind_unique_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
 							srcs_trv.append(np.nan*np.ones((1, 4)))
+							del_arv_p.append(0)
+							del_arv_s.append(0)
 							# srcs_sigma.append(np.nan)
 							continue
 		
@@ -1793,6 +1842,8 @@ for cnt, strs in enumerate([0]):
 		
 						if len(ind_unique_arrivals) == 0:
 							srcs_trv.append(np.nan*np.ones((1, 4)))
+							del_arv_p.append(0)
+							del_arv_s.append(0)
 							# srcs_sigma.append(np.nan)
 							continue
 					
@@ -1883,6 +1934,16 @@ for cnt, strs in enumerate([0]):
 		print('Number sources (after minimum number of picks and stations): %d'%len(srcs_trv))
 		
 		####################################################################################
+
+
+		## Save pick data for check
+		if inc_repeat != (repeat_iters - 1): ## On first iteration
+			len_p_picks_ = np.array([len(Picks_P[j]) for j in range(len(Picks_P))])
+			len_s_picks_ = np.array([len(Picks_S[j]) for j in range(len(Picks_S))])
+			id_picks_ = np.array([np.concatenate((Picks_P[j][np.argort(Picks_P[j][:,0]),0:2], Picks_S[j][np.argort(Picks_S[j][:,0]),0:2]), axis = 0) for j in range(len(Picks_P))])
+			src_location_ = np.copy(srcs_trv)
+			# id_picks_p = np.array([Picks_P[j][np.argort(Picks_P[j][:,0]),0:2] for j in range(len(Picks_P))])
+			# id_picks_s = np.array([Picks_S[j][np.argort(Picks_S[j][:,0]),0:2] for j in range(len(Picks_S))])
 
 
 		if inc_repeat == (repeat_iters - 1):
@@ -2063,6 +2124,12 @@ for cnt, strs in enumerate([0]):
 		srcs_trv[:,0:3] = srcs_trv[:,0:3] + corr1 - corr2
 
 
+		# id_picks_p_ = np.array([Picks_P[j][np.argort(Picks_P[j][:,0]),0:2] for j in range(len(Picks_P))])
+		# id_picks_s_ = np.array([Picks_S[j][np.argort(Picks_S[j][:,0]),0:2] for j in range(len(Picks_S))])
+		# id_picks_p_ = np.array([Picks_P[j][:,0:2] for j in range(len(Picks_P))])
+		# id_picks_s_ = np.array([Picks_S[j][:,0:2] for j in range(len(Picks_S))])
+
+
 	############### ############### ############### ###############
 	     ############### Find Matched Events ###############
 	############### ############### ############### ###############
@@ -2111,6 +2178,7 @@ for cnt, strs in enumerate([0]):
 		file_save['locs'] = locs
 		file_save['locs_use'] = locs_use
 		file_save['ind_use'] = ind_use
+		file_save['stas'] = stas
 		file_save['date'] = np.array([date[0], date[1], date[2], julday])
 		# file_save['%d_%d_%d_%d_res1'%(date[0], date[1], date[2], julday)] = res1
 		# file_save['%d_%d_%d_%d_res2'%(date[0], date[1], date[2], julday)] = res2
@@ -2119,7 +2187,6 @@ for cnt, strs in enumerate([0]):
 		file_save['del_arv_p'] = del_arv_p ## Number of deleted P picks during quality check
 		file_save['del_arv_s'] = del_arv_s ## Number of deleted S picks during quality check
 		# file_save['tsteps_abs'] = tsteps_abs
-		file_save['X_query'] = X_query
 		file_save['mag_r'] = mag_r
 		file_save['mag_trv'] = mag_trv
 		file_save['x_grid_ind_list'] = x_grid_ind_list
@@ -2133,7 +2200,13 @@ for cnt, strs in enumerate([0]):
 		file_save['n_remove'] = n_remove
 		file_save['time'] = st_time - time.time()
 		file_save['cnt_isolated_picks'] = cnt_isolated_picks
-		
+		file_save['rbest'] = rbest
+		file_save['mn'] = mn
+		file_save['pred_prams'] = pred_params
+		file_save['srcs_init'] = srcs ## These are initial local maxima after Local Marching
+		file_save['X_query'] = X_query
+
+		# file_save['X_query'] = X_query
 		
 		if (process_known_events == True):
 			if len(srcs_known) > 0:
