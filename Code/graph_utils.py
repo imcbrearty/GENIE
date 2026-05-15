@@ -2399,7 +2399,7 @@ def get_domain_bounds(points_lla, scale=1.05):
         "is_wrapped": final_start > final_end or is_wrapped
     }
 
-def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], use_paths = False, rbest = None, mn = None, optimize_station_graph = False, optimize_source_graph = False, use_domain_approximate = True, device = 'cpu'):
+def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], use_paths = False, rbest = None, mn = None, optimize_station_graphs = False, optimize_source_graphs = False, use_domain_approximate = True, use_tuner = True, device = 'cpu'):
 
 
     domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -2579,7 +2579,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
     else:
 
         ## Call fit domain
-        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, assign_based_on_grid = False, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, device = 'cpu')
+        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, assign_based_on_grid = False, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = use_tuner, device = 'cpu')
 
         z = np.load('Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]))
         # scale_time = scale_time, depth_boost = depth_upscale_factor, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input)
@@ -2610,7 +2610,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
     k_sta_edges = min(k_sta_edges, len(locs_use) - 1)
 
-    if optimize_station_graph == True:
+    if optimize_station_graphs == True:
         G_sta, edges_sta = optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3)
 
     else:
@@ -2620,7 +2620,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
         edges_sta = np.flip(edges_sta, axis = 0)
 
 
-    if optimize_source_graph == True:
+    if optimize_source_graphs == True:
         G_src, edges_src = optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio = 0.8)
 
     else:
