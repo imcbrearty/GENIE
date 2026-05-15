@@ -326,13 +326,14 @@ else:
 	n_trgt_nodes = process_config.get('n_trgt_nodes', int(200e3))
 	number_of_spatial_nodes = process_config.get('number_of_spatial_nodes', 3000)
 	use_approximate_domain = process_config.get('use_approximate_domain', True)
-	optimize_station_graph = process_config.get('optimize_station_graph', False) # False
-	optimize_source_graph = process_config.get('optimize_source_graph', False) # False
+	optimize_station_graphs = process_config.get('optimize_station_graphs', False) # False
+	optimize_source_graphs = process_config.get('optimize_source_graphs', False) # False
 	use_paths = process_config.get('use_paths', False) # False
 	use_global = process_config.get('use_global', False) # False
+	use_tuner = process_config.get('use_tuner', True) # False
 
 
-	build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, assign_based_on_grid = False, max_nodes = number_of_spatial_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, rbest = rbest, mn = mn, file_index = day_select, date = date, use_paths = use_paths, optimize_station_graph = optimize_station_graph, optimize_source_graph = optimize_source_graph, use_domain_approximate = use_approximate_domain, device = device)
+	build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, assign_based_on_grid = False, max_nodes = number_of_spatial_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, rbest = rbest, mn = mn, file_index = day_select, date = date, use_paths = use_paths, optimize_station_graphs = optimize_station_graphs, optimize_source_graphs = optimize_source_graphs, use_domain_approximate = use_approximate_domain, use_tuner = use_tuner, device = device)
 	z = np.load('Domains/domain_file_%d_%d_%d_%d_ver_1.npz'%(day_select, date[0], date[1], date[2]))
 	# z = np.load('Domains/domain_file_%d_%d_%d_%d_ver_1.npz'%(day_select, date[0], date[1], date[2]))
 	x_grids = np.expand_dims(z['x_grid'], axis = 0)
@@ -485,6 +486,7 @@ time_shift_range = np.max([time_shifts[j].max() - time_shifts[j].min() for j in 
 
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
 min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
+
 
 
 # x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t_ = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = max_t, min_t = min_t, time_shifts = time_shifts, dt_embed = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device) ## Note: setting time embedding vectors with respect to kernel_sig_t
@@ -715,6 +717,8 @@ cnt_isolated_picks = 0
 ## Input settings
 use_updated_input = True
 dt_embed_discretize = np.round(pred_params[1]/15.0, 2) # 0.05 ## Picks are discretized to this amount if using updated input to speed up input
+
+
 
 
 
