@@ -140,7 +140,7 @@ use_topography = process_config['use_topography']
 process_known_events = process_config['process_known_events']
 use_fixed_domain = process_config.get('use_fixed_domain', True)
 use_offset_quality_control = process_config.get('use_offset_quality_control', True)
-offset_ratio_quality_control = process_config.get('offset_ratio_quality_control', 3.0)
+offset_ratio_quality_control = process_config.get('offset_ratio_quality_control', 4.5) # 3.0
 
 ## Minimum required picks and stations per event
 min_required_picks = process_config['min_required_picks']
@@ -490,7 +490,14 @@ time_shift_range = np.max([time_shifts[j].max() - time_shifts[j].min() for j in 
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
 min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
 
-
+# if (use_only_one_grid == True)*(1 == 0): ## Speeds up the initilization of the code by only loading one grid
+if use_only_one_grid == True: ## Speeds up the initilization of the code by only loading one grid	
+	z = np.load('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2]))
+	grid_choose = z['ichoose_grid'] # np.random.choice(len(x_grids))
+	x_grids = np.expand_dims(x_grids[grid_choose], axis = 0)
+	x_grids_trv = [x_grids_trv[grid_choose]]
+	time_shifts = np.expand_dims(time_shifts[grid_choose], axis = 0)
+	z.close()
 
 # x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t_ = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = max_t, min_t = min_t, time_shifts = time_shifts, dt_embed = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device) ## Note: setting time embedding vectors with respect to kernel_sig_t
 ## Check subsetting of grids was correct
@@ -723,6 +730,33 @@ dt_embed_discretize = np.round(pred_params[1]/15.0, 2) # 0.05 ## Picks are discr
 
 
 
+if os.path.isfile('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2])) == True:
+
+	## Pre load the adjacencies for this day
+	print('Using fixed station graph') # date_2002_8_25_merged_graphs.npz
+	z = np.load('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2]))
+	# z = np.load(st_graphs[np.random.choice(len(st_graphs))])
+	# A_src_in_sta = torch.Tensor(z['A_src_in_sta'][0:2,:]).long().to(device)
+	# A_src_in_sta_weights = torch.Tensor(z['A_src_in_sta'][2,:]).to(device)
+	# A_prod_src_src = torch.Tensor(z['A_prod_src_src'][0:2,:]).long().to(device)
+	# A_prod_sta_sta = torch.Tensor(z['A_prod_sta_sta'][0:2,:]).long().to(device)
+	# A_prod_src_src_weights = torch.Tensor(z['A_prod_src_src_weights']).to(device)
+	# A_prod_sta_sta_weights = torch.Tensor(z['A_prod_sta_sta_weights']).to(device)
+	# A_src_src = torch.Tensor(z['A_src'][0:2,:]).long().to(device)
+	A_sta_sta = torch.Tensor(np.ascontiguousarray(np.flip(z['A_sta'][0:2,:], axis = 0))).long().to(device)
+	A_src_src = torch.Tensor(np.ascontiguousarray(np.flip(z['A_src'][0:2,:], axis = 0))).long().to(device)
+	A_src_in_sta = torch.Tensor(z['A_src_in_sta'][0:2,:]).long().to(device)
+	# A_src_in_prod = torch.Tensor(z['A_src_in_prod'][0:2,:]).long().to(device)
+	# i0 = z['ichoose_grid']
+	ind_sta_select = z['ind_use']
+	assert(np.allclose(ind_use, ind_sta_select))
+	# ind_use = z['ind_use']
+	z.close()
+	assert(use_subgraph == True)
+
+else:
+	print('Build graphs')
+	moi
 
 
 
@@ -1702,7 +1736,7 @@ for cnt, strs in enumerate([0]):
 			## Check if any current pick sets are same as a previously located event
 			len_p_picks = np.array([len(Picks_P[j]) for j in range(len(Picks_P))])
 			len_s_picks = np.array([len(Picks_S[j]) for j in range(len(Picks_S))])
-			id_picks = np.array([np.concatenate((Picks_P[j][np.argort(Picks_P[j][:,0]),0:2], Picks_S[j][np.argort(Picks_S[j][:,0]),0:2]), axis = 0) for j in range(len(Picks_P))])
+			id_picks = [np.concatenate((Picks_P[j][np.argsort(Picks_P[j][:,0]),0:2], Picks_S[j][np.argsort(Picks_S[j][:,0]),0:2]), axis = 0) for j in range(len(Picks_P))]
 
 			tree_cnts = cKDTree(np.concatenate((len_p_picks_.reshape(-1,1), len_s_picks_.reshape(-1,1)), axis = 1))
 			query_cnts = tree_cnts.query_ball_point(np.concatenate((len_p_picks.reshape(-1,1), len_s_picks.reshape(-1,1)), axis = 1), r = 0)
@@ -1741,7 +1775,7 @@ for cnt, strs in enumerate([0]):
 			overwrite_val = False ## Use previous location (since picks are the same)
 			if (inc_repeat == (repeat_iters - 1))*(inc_repeat > 0)*(use_overwrite_locations == True)*(i in iwhere_cnts):
 				xmle = src_matched[np.where(i == iwhere_cnts)[0][0]]
-				xmle, origin = xmle[0:3], xmle[3]
+				xmle, origin = xmle[0:3].reshape(1,-1), xmle[3]
 				logprob, skipped_p_ind, skipped_s_ind = np.nan, [], []
 				overwrite_val = True
 
@@ -1749,6 +1783,7 @@ for cnt, strs in enumerate([0]):
 
 				# xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
 				xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
+				origin = srcs_refined[i,3] + origin
 
 
 			if use_offset_quality_control == True:
@@ -1769,7 +1804,6 @@ for cnt, strs in enumerate([0]):
 				del_arv_s.append(0)
 				continue
 
-			origin = srcs_refined[i,3] + origin
 			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + origin
 
 			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
@@ -1948,7 +1982,7 @@ for cnt, strs in enumerate([0]):
 		if inc_repeat != (repeat_iters - 1): ## On first iteration
 			len_p_picks_ = np.array([len(Picks_P[j]) for j in range(len(Picks_P))])
 			len_s_picks_ = np.array([len(Picks_S[j]) for j in range(len(Picks_S))])
-			id_picks_ = np.array([np.concatenate((Picks_P[j][np.argort(Picks_P[j][:,0]),0:2], Picks_S[j][np.argort(Picks_S[j][:,0]),0:2]), axis = 0) for j in range(len(Picks_P))])
+			id_picks_ = [np.concatenate((Picks_P[j][np.argsort(Picks_P[j][:,0]),0:2], Picks_S[j][np.argsort(Picks_S[j][:,0]),0:2]), axis = 0) for j in range(len(Picks_P))]
 			src_location_ = np.copy(srcs_trv)
 			# id_picks_p = np.array([Picks_P[j][np.argort(Picks_P[j][:,0]),0:2] for j in range(len(Picks_P))])
 			# id_picks_s = np.array([Picks_S[j][np.argort(Picks_S[j][:,0]),0:2] for j in range(len(Picks_S))])
@@ -2186,7 +2220,7 @@ for cnt, strs in enumerate([0]):
 		file_save['locs'] = locs
 		file_save['locs_use'] = locs_use
 		file_save['ind_use'] = ind_use
-		file_save['stas'] = stas
+		file_save['stas'] = stas.astype('S')
 		file_save['date'] = np.array([date[0], date[1], date[2], julday])
 		# file_save['%d_%d_%d_%d_res1'%(date[0], date[1], date[2], julday)] = res1
 		# file_save['%d_%d_%d_%d_res2'%(date[0], date[1], date[2], julday)] = res2
