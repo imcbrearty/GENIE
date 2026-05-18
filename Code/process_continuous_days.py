@@ -545,22 +545,6 @@ else:
 	dt_win = 1.0 ## Default version
 	t_win = 10.0
 
-# # step_size = process_config['step_size'] # 'full'
-# step_size = process_config['step_size']
-# if step_size == 'full':
-# 	# step = n_resolution*dt_win
-# 	step = (1/3)*t_win + 0.0
-# 	n_overlap = 1.0
-# elif step_size == 'partial':
-# 	step = (n_resolution/3)*dt_win
-# 	n_overlap = 3.0 ## Check this
-# 	assert(use_adaptive_window == True)
-# 	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
-# elif step_size == 'half':
-# 	step = int(np.floor((n_resolution/2)))*dt_win
-# 	n_overlap = 2.0 ## Check this
-# 	assert(use_adaptive_window == True)
-# 	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
 
 # step_size = process_config['step_size'] # 'full'
 step_size = process_config['step_size']
