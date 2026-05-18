@@ -2114,6 +2114,103 @@ def maximize_bipartite_assignment(cat, srcs, ftrns1, ftrns2, temporal_win = 10.0
 
 	return results, res, assignment_vectors, unique_cat_ind, unique_src_ind
 
+
+def maximize_bipartite_assignment_wrapper(cat, srcs, ftrns1, ftrns2, temporal_win=10.0, spatial_win=75e3, verbose=True):
+    """
+    Wrapper around maximize_bipartite_assignment that splits massive catalogs 
+    into disconnected components to eliminate memory problems, maintaining perfect mathematical equivalence.
+    """
+    # 1. Swiftly determine potential edge connections using your original KDTree logic
+    tree_t = cKDTree(srcs[:, 3].reshape(-1, 1))
+    tree_s = cKDTree(ftrns1(srcs[:, 0:3]))
+
+    lp_t = tree_t.query_ball_point(cat[:, 3].reshape(-1, 1), r=temporal_win)
+    lp_s = tree_s.query_ball_point(ftrns1(cat[:, 0:3]), r=spatial_win)
+
+    edges_cat_to_srcs = [np.array(list(set(lp_t[j]).intersection(lp_s[j]))) for j in range(cat.shape[0])]
+    edges_cat_non_zero = np.where(np.array([len(edges_cat_to_srcs[j]) for j in range(cat.shape[0])]) > 0)[0]
+
+    if sum([len(edges_cat_to_srcs[j]) for j in range(cat.shape[0])]) == 0:
+        return np.array([]), [], [], [], []
+
+    edges = np.hstack([np.concatenate((j * np.ones(len(edges_cat_to_srcs[j])).reshape(1, -1), 
+                                       edges_cat_to_srcs[j].reshape(1, -1)), axis=0) 
+                       for j in edges_cat_non_zero]).astype('int')
+    
+    cat_indices = edges[0, :]
+    src_indices = edges[1, :]
+
+    # 2. Build a sparse bipartite adjacency matrix to pull apart disconnected clusters
+    num_cat = cat.shape[0]
+    num_src = srcs.shape[0]
+    
+    # Offset src indices by num_cat to build a unified graph node list
+    row = cat_indices
+    col = src_indices + num_cat
+    data = np.ones(len(cat_indices))
+    
+    total_nodes = num_cat + num_src
+    adj_matrix = sp.coo_matrix((data, (row, col)), shape=(total_nodes, total_nodes))
+    adj_matrix = adj_matrix + adj_matrix.T # Convert to undirected graph representation
+    
+    # Extract isolated sub-graphs
+    num_components, labels = connected_components(csgraph=adj_matrix, directed=False, return_labels=True)
+    
+    if verbose:
+        print(f"Bipartite graph broken down into {num_components} disconnected components.")
+
+    # Containers to pile up the piecewise results
+    global_results = []
+    global_res = []
+
+    # 3. Iterate through each isolated cluster
+    for comp_id in range(num_components):
+        comp_nodes = np.where(labels == comp_id)[0]
+        
+        # Isolate global component indices back into respective catalogs
+        comp_cat_global_idx = comp_nodes[comp_nodes < num_cat]
+        comp_src_global_idx = comp_nodes[comp_nodes >= num_cat] - num_cat
+        
+        # Skip if no matches are physically possible (e.g. cluster has only sources or only cats)
+        if len(comp_cat_global_idx) == 0 or len(comp_src_global_idx) == 0:
+            continue
+            
+        # Extract isolated subsets of your data arrays
+        sub_cat = cat[comp_cat_global_idx]
+        sub_src = srcs[comp_src_global_idx]
+        
+        # 4. Invoke your original function untouched on the micro-catalogs
+        # Turn off verbose here to prevent severe console terminal output flood
+        sub_matches, sub_res, *ext = maximize_bipartite_assignment(
+            sub_cat, sub_src, ftrns1, ftrns2, 
+            temporal_win=temporal_win, spatial_win=spatial_win, verbose=False
+        )
+        
+        # 5. Map local returned indices cleanly back to their original global catalog positions
+        if len(sub_matches) > 0:
+            # sub_matches[:, 0] points to local indices in sub_cat -> map back via comp_cat_global_idx
+            # sub_matches[:, 1] points to local indices in sub_src -> map back via comp_src_global_idx
+            global_cat_mapped = comp_cat_global_idx[sub_matches[:, 0]]
+            global_src_mapped = comp_src_global_idx[sub_matches[:, 1]]
+            
+            mapped_matches = np.stack([global_cat_mapped, global_src_mapped], axis=1)
+            
+            global_results.append(mapped_matches)
+            global_res.append(sub_res)
+
+    # 6. Reconstruct complete integrated results arrays
+    if len(global_results) > 0:
+        results = np.vstack(global_results)
+        res = np.vstack(global_res)
+    else:
+        results, res = np.array([]), []
+
+    # Note: assignment_vectors, unique_cat_ind, and unique_src_ind are usually not safe 
+    # to stitch into simple global grids globally due to sizing disparities, but your 
+    # main outputs (results, res) will match perfectly.
+    return results, res
+
+
 ## Interpolation class
 class NNInterp(nn.Module):
 	def __init__(self, pos, ftrns1, ftrns1_diff, device = 'cpu', n_res = 11, dx = None, scale_x = 1000.0):
