@@ -140,7 +140,7 @@ use_topography = process_config['use_topography']
 process_known_events = process_config['process_known_events']
 use_fixed_domain = process_config.get('use_fixed_domain', True)
 use_offset_quality_control = process_config.get('use_offset_quality_control', True)
-offset_ratio_quality_control = process_config.get('offset_ratio_quality_control', 4.5) # 3.0
+offset_ratio_quality_control = process_config.get('offset_ratio_quality_control', 2.0) # 3.0
 
 ## Minimum required picks and stations per event
 min_required_picks = process_config['min_required_picks']
@@ -228,6 +228,7 @@ if use_fixed_domain == True:
 	graph_params = z['graph_params']
 	pred_params = z['pred_params']
 	src_x_kernel = pred_params[3]
+	src_t_kernel = pred_params[2]
 	z.close()
 	# pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
 
@@ -490,14 +491,7 @@ time_shift_range = np.max([time_shifts[j].max() - time_shifts[j].min() for j in 
 max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
 min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
 
-# if (use_only_one_grid == True)*(1 == 0): ## Speeds up the initilization of the code by only loading one grid
-if use_only_one_grid == True: ## Speeds up the initilization of the code by only loading one grid	
-	z = np.load('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2]))
-	grid_choose = z['ichoose_grid'] # np.random.choice(len(x_grids))
-	x_grids = np.expand_dims(x_grids[grid_choose], axis = 0)
-	x_grids_trv = [x_grids_trv[grid_choose]]
-	time_shifts = np.expand_dims(time_shifts[grid_choose], axis = 0)
-	z.close()
+
 
 # x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs, max_t_ = load_templates_region(trv, locs, x_grids, ftrns1, training_params, graph_params, pred_params, max_t = max_t, min_t = min_t, time_shifts = time_shifts, dt_embed = pred_params[1]/5.0, t_win = pred_params[1]*2.0, device = device) ## Note: setting time embedding vectors with respect to kernel_sig_t
 ## Check subsetting of grids was correct
@@ -555,7 +549,7 @@ else:
 step_size = process_config['step_size']
 if step_size == 'full':
 	# step = n_resolution*dt_win
-	step = 1.0*t_win + 0.0
+	step = (1/3)*t_win + 0.0
 	n_overlap = 1.0
 elif step_size == 'partial':
 	step = (n_resolution/3)*dt_win
@@ -683,10 +677,6 @@ print('Num %d P picks; %d S picks \n'%(len(np.where(P[:,4] == 0)[0]), len(np.whe
 
 
 
-
-
-
-
 ## Full time window to process
 n_batch = 1 ## Rather than process full day, process window around available picks; ## Even more efficient, only around times of picks - max_moveout.
 use_subset_window = True
@@ -730,38 +720,6 @@ dt_embed_discretize = np.round(pred_params[1]/15.0, 2) # 0.05 ## Picks are discr
 
 
 
-if os.path.isfile('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2])) == True:
-
-	## Pre load the adjacencies for this day
-	print('Using fixed station graph') # date_2002_8_25_merged_graphs.npz
-	z = np.load('Graphs/date_%d_%d_%d_merged_graphs.npz'%(date[0], date[1], date[2]))
-	# z = np.load(st_graphs[np.random.choice(len(st_graphs))])
-	# A_src_in_sta = torch.Tensor(z['A_src_in_sta'][0:2,:]).long().to(device)
-	# A_src_in_sta_weights = torch.Tensor(z['A_src_in_sta'][2,:]).to(device)
-	# A_prod_src_src = torch.Tensor(z['A_prod_src_src'][0:2,:]).long().to(device)
-	# A_prod_sta_sta = torch.Tensor(z['A_prod_sta_sta'][0:2,:]).long().to(device)
-	# A_prod_src_src_weights = torch.Tensor(z['A_prod_src_src_weights']).to(device)
-	# A_prod_sta_sta_weights = torch.Tensor(z['A_prod_sta_sta_weights']).to(device)
-	# A_src_src = torch.Tensor(z['A_src'][0:2,:]).long().to(device)
-	A_sta_sta = torch.Tensor(np.ascontiguousarray(np.flip(z['A_sta'][0:2,:], axis = 0))).long().to(device)
-	A_src_src = torch.Tensor(np.ascontiguousarray(np.flip(z['A_src'][0:2,:], axis = 0))).long().to(device)
-	A_src_in_sta = torch.Tensor(z['A_src_in_sta'][0:2,:]).long().to(device)
-	# A_src_in_prod = torch.Tensor(z['A_src_in_prod'][0:2,:]).long().to(device)
-	# i0 = z['ichoose_grid']
-	ind_sta_select = z['ind_use']
-	assert(np.allclose(ind_use, ind_sta_select))
-	# ind_use = z['ind_use']
-	z.close()
-	assert(use_subgraph == True)
-
-else:
-	print('Build graphs')
-	moi
-
-
-
-
-
 ############### ############### ############### ###############
        ############### Begin Processing ###############
 ############### ############### ############### ###############
@@ -786,27 +744,6 @@ for cnt, strs in enumerate([0]):
 	A_src_in_sta_l = []
 	
 	for i in range(len(x_grids)):
-
-		# # if use_subgraph == False:
-		
-		# 	# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
-		# 	A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_edges_time_p, A_edges_time_s, A_edges_ref = extract_inputs_adjacencies(trv, locs, ind_use, x_grids[i], x_grids_trv[i], x_grids_trv_refs[i], x_grids_trv_pointers_p[i], x_grids_trv_pointers_s[i], ftrns1, graph_params, scale_time = scale_time, Ac = Ac, device = device)
-
-		# 	A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(len(ind_use)), len(x_grids[i])).reshape(1,-1), np.arange(len(x_grids[i])).repeat(len(ind_use), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
-		# 	if use_time_shift == False:
-		# 		spatial_vals = torch.Tensor(((np.repeat(np.expand_dims(x_grids[i][:,0:3], axis = 1), len(ind_use), axis = 1) - np.repeat(np.expand_dims(locs[ind_use], axis = 0), x_grids[i].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device)
-		# 	else:
-		# 		spatial_vals = torch.cat((torch.Tensor(((np.repeat(np.expand_dims(x_grids[i][:,0:3], axis = 1), len(ind_use), axis = 1) - np.repeat(np.expand_dims(locs[ind_use], axis = 0), x_grids[i].shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device), torch.Tensor(x_grids[i][:,3]).reshape(-1,1).to(device)/time_shift_range), dim = 1)
-
-		# 	A_src_in_edges = Data(x = spatial_vals, edge_index = A_src_in_prod).to(device)
-		# 	A_Lg_in_src = Data(x = spatial_vals, edge_index = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod.cpu().detach().numpy(), axis = 0))).long()).to(device)
-		# 	trv_out = trv(torch.Tensor(locs[ind_use]).to(device), torch.Tensor(x_grids[i]).to(device)).detach().reshape(-1,2) ## Can replace trv_out with Trv_out
-		# 	if use_time_shift == True: trv_out = trv_out + torch.Tensor(time_shifts[i]).to(device)[A_src_in_sta[1]].reshape(-1,1)
-
-		# 	mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src_src, torch.Tensor(A_edges_time_p).long().to(device), torch.Tensor(A_edges_time_s).long().to(device), torch.Tensor(A_edges_ref).to(device), trv_out, torch.Tensor(ftrns1(locs_use)).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device))
-		# 	A_src_in_sta_l.append(A_src_in_sta.cpu().detach().numpy())
-
-		# else:
 
 		# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
 		A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(locs_use, x_grids[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, scale_time = scale_time, Ac = Ac, A_sta_sta = A_sta_sta, A_src_src = A_src_src, A_src_in_sta = A_src_in_sta, device = device)
@@ -945,7 +882,6 @@ for cnt, strs in enumerate([0]):
 	if use_fixed_edges == True:
 		assert(len(x_grid_ind_list) == 1)
 		x_grid_ind = x_grid_ind_list[0]
-		# mz.SpaceTimeAttention.set_edges(x_query, x_context, x_query_t, x_context_t)
 		mz_list[x_grid_ind].SpaceTimeAttention.set_edges(X_query_cart_repeat, torch.Tensor(ftrns1(x_grids[x_grid_ind])).to(device), tq_repeat, torch.Tensor(x_grids[x_grid_ind][:,3]).to(device))
 		assert(mz_list[x_grid_ind].SpaceTimeAttention.use_fixed_edges == True)
 
@@ -967,22 +903,17 @@ for cnt, strs in enumerate([0]):
 					Masks[i][:,2::] = 0.0
 			
 			for i0 in range(len(tsteps_slice)):
-
 				if len(lp_times[i0]) == 0:
 					continue ## It will fail if len(lp_times[i0]) == 0!
 
 				out = mz_list[x_grid_ind].forward_fixed_source(Inpts[i0], Masks[i0], torch.Tensor(lp_times[i0]).to(device), torch.Tensor(lp_stations[i0]).long().to(device), torch.Tensor(lp_phases[i0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_query_cart_repeat, tq_repeat)
-
 				ifind_thresh = np.where(out[1][:,0].cpu().detach().numpy() > thresh*thresh_ratio)[0]
 				if len(ifind_thresh):
-					# t_vals = tsteps_abs[tsteps_slice_indices[i0]] + tq_repeat[ifind_thresh,0] # X_query_repeat[ifind_thresh,3]
-					# Out_2_sparse.append(np.concatenate((X_query_repeat[ifind_thresh,0:3], tq_repeat_cpu[ifind_thresh] + tsteps_abs[tsteps_slice_indices[i0]], out[1][ifind_thresh,0].reshape(-1,1).cpu().detach().numpy()), axis = 1))
 					Out_2_sparse.append(np.concatenate((X_query_repeat[ifind_thresh,0:3], tq_repeat_cpu[ifind_thresh] + tsteps_slice[i0], out[1][ifind_thresh,0].reshape(-1,1).cpu().detach().numpy()), axis = 1))
 
 				# out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
 				if (np.mod(i0, 50) == 0) + ((np.mod(i0, 5) == 0)*(out[1].max().item() > 0.075)):
 					print('%d %d %0.2f'%(n, i0, out[1].max().item()))
-					# out_cumulative_max = 0.0 # Reset moving detection metric print output
 	
 	print('Continuous processing time %0.4f'%(time.time() - st_process))
 
@@ -995,7 +926,6 @@ for cnt, strs in enumerate([0]):
 	isort = np.argsort(Out_2_sparse[:,3])
 	Out_2_sparse = Out_2_sparse[isort]
 	coords_norm = np.concatenate((ftrns1(Out_2_sparse[:,0:3])/sp_win, Out_2_sparse[:,[3]]/tc_win), axis = 1)
-	# coords_norm = coords_norm[isort]
 
 	gap_buffer = 1.1
 	time_diffs = np.diff(coords_norm[:, 3])
@@ -1045,8 +975,6 @@ for cnt, strs in enumerate([0]):
 				if len(refined) > 0:
 					srcs_l.append(refined)
 
-	# tsteps_slice_indices = tree_tsteps.query(tsteps_slice.reshape(-1,1))[1]
-	# out_cumulative_max = 0.0
 
 	srcs = np.vstack(srcs_l)
 	if len(srcs) == 0:
@@ -1087,6 +1015,7 @@ for cnt, strs in enumerate([0]):
 	lat_range_events = np.arange(srcs[:,0].min(), srcs[:,0].max() + np.diff(lat_range_extend)/5.0, np.diff(lat_range_extend)/5.0)
 	lat_deg_span = target_width / (np.deg2rad(1) * earth_radius)
 
+
 	st_process = time.time()
 	X_query_grid = []
 	srcs_refined_l = []
@@ -1096,8 +1025,7 @@ for cnt, strs in enumerate([0]):
 	Save_picks = [] # save all picks..
 	lp_meta_l = []
 
-	## Run post processing detections.
-	# print('check the thresh assoc %f'%thresh_assoc)
+
 
 	## May need to adapt the scale_time for different density of nodes
 	## Why print statements in build_sampling_grid
@@ -1190,8 +1118,6 @@ for cnt, strs in enumerate([0]):
 	iarg_sort = np.argsort(srcs_refined[:,3])
 	srcs_refined = srcs_refined[iarg_sort]
 	trv_out_srcs_l = [trv_out_srcs_l[j] for j in iarg_sort]
-	# Out_p_save = [Out_p_save_l[j] for j in iarg_sort]
-	# Out_s_save = [Out_s_save_l[j] for j in iarg_sort]
 	Out_p_save_l = [Out_p_save_l[j] for j in iarg_sort]
 	Out_s_save_l = [Out_s_save_l[j] for j in iarg_sort]
 	lp_meta_l = [lp_meta_l[j] for j in iarg_sort]
@@ -1220,6 +1146,17 @@ for cnt, strs in enumerate([0]):
 	Save_picks = [Save_picks[i] for i in ip_retained]
 	srcs_refined = srcs_refined[ip_retained]
 	
+
+	# st_time = time.time()
+	print('Begin competetive assignment')
+	iargsort = np.argsort(srcs_refined[:,3])
+	srcs_refined = srcs_refined[iargsort]
+	# trv_out_srcs = trv_out_srcs[iargsort]
+	Out_p_save = [Out_p_save[i] for i in iargsort]
+	Out_s_save = [Out_s_save[i] for i in iargsort]
+	Save_picks = [Save_picks[i] for i in iargsort]
+	lp_meta = [lp_meta_l[i] for i in iargsort]
+
 	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach()
 	trv_out_srcs_init2 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
 	print('Number sources (after sources refined and second local marching): %d (Time %0.4f)'%(len(srcs_refined), (time.time() - st_process)))
@@ -1233,22 +1170,16 @@ for cnt, strs in enumerate([0]):
 	############### ############### ############### ############
 	     ########### ########## ########### ###########
 
+	n_skipped = 0
+	cnt_false = 0
+	cnt_false1 = 0
+
 
 	st_process = time.time()
 	repeat_iters = 2 ## Repeat competitive assignment to allow recovering picks assigned to removed events
 	for inc_repeat in range(repeat_iters):
 
 		if inc_repeat == 0:
-
-			# st_time = time.time()
-			print('Begin competetive assignment')
-			iargsort = np.argsort(srcs_refined[:,3])
-			srcs_refined = srcs_refined[iargsort]
-			trv_out_srcs = trv_out_srcs[iargsort]
-			Out_p_save = [Out_p_save[i] for i in iargsort]
-			Out_s_save = [Out_s_save[i] for i in iargsort]
-			Save_picks = [Save_picks[i] for i in iargsort]
-			lp_meta = [lp_meta_l[i] for i in iargsort]
 
 			srcs_refined_init = np.copy(srcs_refined)
 			ind_srcs_retain = []
@@ -1264,6 +1195,9 @@ for cnt, strs in enumerate([0]):
 			# ind_not_used
 			ind_srcs_not_used = np.unique(np.concatenate((np.delete(np.arange(len(srcs_refined_init)), ind_srcs_retain, axis = 0), ind_srcs_retain[iremove]), axis = 0)).astype('int')
 			ind_srcs_used = np.delete(np.arange(len(srcs_refined_init)), ind_srcs_not_used, axis = 0)
+
+			ind_srcs_used = ind_srcs_retain[ikeep]
+
 
 			print('Initial pick counts')
 			print('Mean cnt_p: %0.4f'%(cnt_p.mean()))
@@ -1298,7 +1232,6 @@ for cnt, strs in enumerate([0]):
 
 			# ## Find overlapping events (events with shared pick assignments)
 			all_picks = np.vstack(lp_meta) # [:,0:2] # np.vstack([Save_picks[i] for i in range(len(Save_picks))])
-			# unique_picks = np.unique(all_picks[:,0:2], axis = 0)
 			unique_picks = np.unique(all_picks, axis = 0)
 
 			# ip_sort_unique = np.lexsort((unique_picks[:,0], unique_picks[:,1])) # sort by station
@@ -1306,9 +1239,7 @@ for cnt, strs in enumerate([0]):
 			unique_picks = unique_picks[ip_sort_unique]
 			len_unique_picks = len(unique_picks)
 
-			# tree_picks_select = cKDTree(all_picks[:,0:2])
 			tree_picks_unique_select = cKDTree(unique_picks[:,0:2])
-			# lp_tree_picks_select  = tree_picks_select.query_ball_point(unique_picks, r = 0)
 
 			matched_src_arrival_indices = []
 			matched_src_arrival_indices_p = []
@@ -1590,7 +1521,6 @@ for cnt, strs in enumerate([0]):
 				ipick = unique_picks[arv_ind_slice,1].astype('int')
 
 				## Now do assignments, on the stacked association predictions (over grids)
-
 				if (len(ipick) == 0) or (len(arv_src_slice) == 0):
 					continue
 
@@ -1600,6 +1530,7 @@ for cnt, strs in enumerate([0]):
 				wp_slice_init = np.copy(wp_slice)
 				ws_slice_init = np.copy(ws_slice)
 				
+
 				use_modified_weights = True
 				if use_modified_weights == True:
 					scale_weights = 0.2
@@ -1624,10 +1555,8 @@ for cnt, strs in enumerate([0]):
 							pairwise_similarity = np.dot(vec_w, vec_w1)/(norm_vec_w*norm_vec_w1)
 							if pairwise_similarity > thresh_restrict:
 								restrict.append(np.array([jj, kk]))
-				if len(restrict) == 0: restrict = None
 
 
-				# if len(restrict) == 0: restrict = None
 				use_restrict_trv_times = True
 				if use_restrict_trv_times == True:
 					trv_out_srcs_pairs = trv(torch.Tensor(locs).to(device), torch.Tensor(srcs_refined[arv_src_slice][:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[arv_src_slice][:,3].reshape(-1,1,1)
@@ -1651,6 +1580,7 @@ for cnt, strs in enumerate([0]):
 							if rms_residual < 1.5*kernel_sig_t:
 								restrict.append(np.array([jj, kk]))	
 
+				if len(restrict) == 0: restrict = None
 
 				if use_restrict == True:
 					assignments1, srcs_active1 = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
@@ -1659,17 +1589,14 @@ for cnt, strs in enumerate([0]):
 					assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
 					assignments1, srcs_active1 = competitive_assignment([wp_slice, ws_slice], ipick, cost_value, restrict = restrict) ## force 1 source?
 
-				# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
-				n_remove += (len(srcs_active) - len(srcs_active1)) if inc_repeat == (repeat_iters - 1) else 0
+				n_remove += (len(srcs_active) - len(srcs_active1)) #  if inc_repeat == (repeat_iters - 1) else 0
 
+				# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
 				# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, 1.5, force_n_sources = 1) ## force 1 source?
 				# assignments, srcs_active = competitive_assignment([wp_slice, ws_slice], ipick, cost_value) ## force 1 source?
 
 				if len(srcs_active) > 0:
-
 					for j in range(len(srcs_active)):
-
-
 						srcs_retained.append(srcs_refined[arv_src_slice[srcs_active[j]]].reshape(1,-1))
 
 						wp_val = wp_slice_init[srcs_active[j], assignments[j][0]]
@@ -1691,13 +1618,6 @@ for cnt, strs in enumerate([0]):
 
 				print('%d : %d of %d'%(i, len(srcs_active), len(arv_src_slice)))
 
-				## Find unique set of arrival indices, write to subset of matrix weights
-				## for wp and ws.
-
-				## Then solve CA. Need to scale weights so that: (i). Primarily, the cost is related to the number
-				## of picks per event, and (ii). It still identifies "good" fit and "bad" fit source-arrival pairs,
-				## based on the source-arrival weights.
-
 			if len(srcs_retained) == 0:
 				print('No events left after competitive assignment (e.g., cost is too high w.r.t. amount of available picks)')
 				continue
@@ -1705,6 +1625,12 @@ for cnt, strs in enumerate([0]):
 			srcs_refined = np.vstack(srcs_retained)
 			ind_srcs_retain = np.hstack(ind_srcs_retain)
 
+			## Find unique set of arrival indices, write to subset of matrix weights
+			## for wp and ws.
+
+			## Then solve CA. Need to scale weights so that: (i). Primarily, the cost is related to the number
+			## of picks per event, and (ii). It still identifies "good" fit and "bad" fit source-arrival pairs,
+			## based on the source-arrival weights.
 
 		print('Number sources (after competitive assignment): %d (Time %0.4f)'%(len(srcs_refined), time.time() - st_process))
 
@@ -1746,21 +1672,21 @@ for cnt, strs in enumerate([0]):
 			## Now for these sources find the location of matched previous events
 			imatched_ind = np.array([query_cnts[k][np.where(np.abs(np.concatenate([np.expand_dims(id_picks_[j], axis = 0) for j in query_cnts[k]], axis = 0) - np.expand_dims(id_picks[k], axis = 0)).max(2).max(1) < 1e-2)[0][0]] for k in iwhere_cnts])
 			src_matched = np.copy(src_location_[imatched_ind])
+			# iwhere_cnts = np.zeros(0)
 
 
 		for i in range(srcs_refined.shape[0]):
 
-			arv_p, ind_p, arv_s, ind_s = Picks_P_perm[i][:,0], Picks_P_perm[i][:,1].astype('int'), Picks_S_perm[i][:,0], Picks_S_perm[i][:,1].astype('int')
-
+			arv_p, ind_p, arv_s, ind_s = np.copy(Picks_P_perm[i][:,0]), np.copy(Picks_P_perm[i][:,1].astype('int')), np.copy(Picks_S_perm[i][:,0]), np.copy(Picks_S_perm[i][:,1].astype('int'))
 			ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
 
 			if len(ind_unique_arrivals) == 0:
 				srcs_trv.append(np.nan*np.ones((1, 4)))
-				# srcs_sigma.append(np.nan)
 				del_arv_p.append(0)
 				del_arv_s.append(0)
 				continue			
 			
+
 			perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
 			perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
 			locs_use_slice = locs_use[ind_unique_arrivals]
@@ -1779,39 +1705,45 @@ for cnt, strs in enumerate([0]):
 				logprob, skipped_p_ind, skipped_s_ind = np.nan, [], []
 				overwrite_val = True
 
+				# # xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
+				# inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
+				# inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
+				# xmle1, origin_rel1, _, _, _ = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
+				# origin1 = srcs_refined[i,3] + origin_rel1
+
+				# try:
+				# 	assert(np.linalg.norm(ftrns1(xmle) - ftrns1(xmle1), axis = 1).max() < 30e3)
+				# 	assert(np.abs(origin - origin1).item() < 10)
+				# except:
+				# 	print('Not same [1]')
+				# 	cnt_false += 1
+
 			else:
 
 				# xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
-				xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
-				origin = srcs_refined[i,3] + origin
-
+				inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
+				inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
+				xmle, origin_rel, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
+				origin = srcs_refined[i,3] + origin_rel
 
 			if use_offset_quality_control == True:
 				offset_dist = np.linalg.norm(ftrns1(xmle.reshape(1,-1)) - ftrns1(srcs_refined[i,:].reshape(1,-1)), axis = 1)
 				if offset_dist > offset_ratio_quality_control*src_x_kernel:
 					print('Removing event based on offset: %0.4d (%0.4f)'%(offset_dist, offset_dist/src_x_kernel))
 					xmle = np.nan*np.ones((1, 3))
+					n_skipped += 1
 
 
-			# if use_differential_evolution_location == True:
-			# else:
-			# xmle, logprob, Swarm = MLE_particle_swarm_location_one_mean_stable_depth_with_hull(trv, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, dx_depth, hull, ftrns1, ftrns2)
-			
 			if np.isnan(xmle).sum() > 0:
 				srcs_trv.append(np.nan*np.ones((1, 4)))
-				# srcs_sigma.append(np.nan)
 				del_arv_p.append(0)
 				del_arv_s.append(0)
 				continue
 
 			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + origin
-
 			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
 			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
 
-			# use_quality_check = process_config['use_quality_check'] ## If True, check all associated picks and set a maximum allowed relative error after obtaining initial location
-			# max_relative_error = process_config['max_relative_error'] ## 0.15 corresponds to 15% maximum relative error allowed
-			# min_time_buffer = process_config['min_time_buffer'] ## Uses this time (seconds) as a minimum residual time, beneath which, the relative error criterion is ignored (i.e., an associated pick is removed if both the relative error > max_relative_error and the residual > min_time_buffer)
 			if (use_quality_check == True)*(overwrite_val == False):
 				tval_p = pred_out[0,ind_p_perm_slice,0] - origin
 				tval_s = pred_out[0,ind_s_perm_slice,1] - origin
@@ -1855,96 +1787,81 @@ for cnt, strs in enumerate([0]):
 					assert(ind_p_perm_slice.min() > -1)
 				if len(ind_s_perm_slice) > 0:
 					assert(ind_s_perm_slice.min() > -1)
-					
-				# if len(ind_unique_arrivals) == 0:
-				# 	srcs_trv.append(np.nan*np.ones((1, 4)))
-				# 	continue				
-				
-				## For picks not removed by quality control in first location
-				## Can "force" trim to use the retained picks within trim
-				## in second location (e.g., relax trim for allowed picks)
-
-				## Alternatively: adapt location - apply twice with first pass identifying outliers with trim
-				## Then second (warm start and narrowed) and re-add trimmed picks with low errors
-
-				## Note: this would reduce "skip" criteria
 
 				if ((len(idel_p) > 0) + (len(idel_s) > 0)) > 0: ## If arrivals have been removed, re-locate
-
 					if (min_required_picks is not False)*(min_required_sta is not False):
-						
 						if ((len(ind_unique_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
 							srcs_trv.append(np.nan*np.ones((1, 4)))
-							# del_arv_p.append(0)
-							# del_arv_s.append(0)
-							# srcs_sigma.append(np.nan)
 							continue
 		
 					else:
-		
 						if len(ind_unique_arrivals) == 0:
 							srcs_trv.append(np.nan*np.ones((1, 4)))
-							# del_arv_p.append(0)
-							# del_arv_s.append(0)
-							# srcs_sigma.append(np.nan)
 							continue
 					
 					# if (len(list(set(skipped_p_ind).intersection(set(idel_p)))) == len(idel_p))*(len(list(set(skipped_s_ind).intersection(set(idel_s)))) == len(idel_s)):
 					if (set(idel_p).issubset(skipped_p_ind))*(set(idel_s).issubset(skipped_s_ind)):
 						print('Overlapped deleted indices %d %d'%(len(idel_p), len(idel_s)))
-						pass ## In this case, quality removed picks are same as trimmed skipped indices
-					else:
-						xmle, origin, logprob, _, _ = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
-						origin = srcs_refined[i,3] + origin
-				
-					## Check if the removed picks in idel_p and idel_s were contained in the "trim" residuals before
-					## if do, can skip relocation 
-					# skipped_p_ind, skipped_s_ind
+						# pass ## In this case, quality removed picks are same as trimmed skipped indices
 
+						# inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
+						# inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
+						# # xmle, origin_rel, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
+						# xmle1, origin_rel1, _, _, _ = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
+						# origin1 = srcs_refined[i,3] + origin_rel1
+
+						# try:
+						# 	assert(np.linalg.norm(ftrns1(xmle) - ftrns1(xmle1), axis = 1).max() < 30e3)
+						# 	assert(np.abs(origin - origin1).item() < 10)
+						# except:
+						# 	print('Not same [2]')
+						# 	cnt_false1 += 1
+
+					else:
+
+						inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
+						inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
+						xmle, origin_rel, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
+						origin = srcs_refined[i,3] + origin_rel
 
 				if use_offset_quality_control == True:
 					offset_dist = np.linalg.norm(ftrns1(xmle.reshape(1,-1)) - ftrns1(srcs_refined[i,:].reshape(1,-1)), axis = 1)
 					if offset_dist > offset_ratio_quality_control*src_x_kernel:
 						print('Removing event based on offset: %0.4d (%0.4f)'%(offset_dist, offset_dist/src_x_kernel))
 						xmle = np.nan*np.ones((1, 3))
+						n_skipped += 1
 
 				if np.isnan(xmle).sum() > 0:
 					srcs_trv.append(np.nan*np.ones((1, 4)))
-					# srcs_sigma.append(np.nan)
 					continue
-						
+
 			else:
 				del_arv_p.append(0)
 				del_arv_s.append(0)
 
 
-			srcs_trv.append(np.concatenate((xmle, np.array([origin]).reshape(1,-1)), axis = 1))
+			srcs_trv.append(np.concatenate((xmle.reshape(-1)[0:3].reshape(1,-1), np.array([origin]).reshape(1,-1)), axis = 1))
 		
 		srcs_trv = np.vstack(srcs_trv)
-		# srcs_sigma = np.hstack(srcs_sigma)
 		del_arv_p = np.hstack(del_arv_p)
 		del_arv_s = np.hstack(del_arv_s)
 		del_arv_p_init = np.copy(del_arv_p)
 		del_arv_s_init = np.copy(del_arv_s)
-		# assert(len(srcs_trv) == len(srcs_sigma))
 		assert(len(srcs_trv) == len(del_arv_p))
 		assert(len(srcs_trv) == len(del_arv_s))
 		assert(len(srcs_trv) == len(Picks_P))
 		assert(len(srcs_trv) == len(Picks_S))
 		assert(len(srcs_trv) == len(srcs_refined))
 		###### Only keep events with minimum number of picks and observing stations #########
-
 		print('Number sources (after travel time locations and quality control): %d (Time %0.4f)'%(len(srcs_trv), time.time() - st_process))
-		# print('Time first location: %0.4f'%(time.time() - st_time))
 		
+
 		# Count number of P and S picks
 		cnt_p, cnt_s = np.zeros(srcs_refined.shape[0]), np.zeros(srcs_refined.shape[0])
 		for i in range(srcs_refined.shape[0]):
 			cnt_p[i] = Picks_P[i].shape[0]
 			cnt_s[i] = Picks_S[i].shape[0]
 		
-		# min_required_picks = 6
-		# min_required_sta = 6
 
 		if (min_required_picks is not False)*(min_required_sta is not False):
 		
@@ -1977,6 +1894,19 @@ for cnt, strs in enumerate([0]):
 		
 		####################################################################################
 
+		# if len(ind_unique_arrivals) == 0:
+		# 	srcs_trv.append(np.nan*np.ones((1, 4)))
+		# 	continue				
+		
+		## For picks not removed by quality control in first location
+		## Can "force" trim to use the retained picks within trim
+		## in second location (e.g., relax trim for allowed picks)
+
+		## Alternatively: adapt location - apply twice with first pass identifying outliers with trim
+		## Then second (warm start and narrowed) and re-add trimmed picks with low errors
+
+		## Note: this would reduce "skip" criteria
+
 
 		## Save pick data for check
 		if inc_repeat != (repeat_iters - 1): ## On first iteration
@@ -1984,9 +1914,6 @@ for cnt, strs in enumerate([0]):
 			len_s_picks_ = np.array([len(Picks_S[j]) for j in range(len(Picks_S))])
 			id_picks_ = [np.concatenate((Picks_P[j][np.argsort(Picks_P[j][:,0]),0:2], Picks_S[j][np.argsort(Picks_S[j][:,0]),0:2]), axis = 0) for j in range(len(Picks_P))]
 			src_location_ = np.copy(srcs_trv)
-			# id_picks_p = np.array([Picks_P[j][np.argort(Picks_P[j][:,0]),0:2] for j in range(len(Picks_P))])
-			# id_picks_s = np.array([Picks_S[j][np.argort(Picks_S[j][:,0]),0:2] for j in range(len(Picks_S))])
-
 
 		if inc_repeat == (repeat_iters - 1):
 
@@ -2057,31 +1984,22 @@ for cnt, strs in enumerate([0]):
 	## Compute magnitudes.
 	# min_log_amplitude_val = -2.0 ## Choose this value to ignore very small amplitudes
 	if (compute_magnitudes == True)*(loaded_mag_model == True):
-
-
 		mag_r = []
-		mag_trv = []
-		
+		mag_trv = []		
 		for i in range(srcs_refined.shape[0]):
-		
 			ind_p, log_amp_p = Picks_P[i][:,1].astype('int'), np.log10(Picks_P[i][:,2])
 			ind_s, log_amp_s = Picks_S[i][:,1].astype('int'), np.log10(Picks_S[i][:,2])
-
 			mag_p = Mag(torch.Tensor(ind_p).long().to(device), torch.Tensor(srcs_refined[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_p).to(device), torch.zeros(len(ind_p)).long().to(device))
 			mag_s = Mag(torch.Tensor(ind_s).long().to(device), torch.Tensor(srcs_refined[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_s).to(device), torch.ones(len(ind_s)).long().to(device))
 			mag_pred = np.median(np.concatenate((mag_p.cpu().detach().numpy().reshape(-1), mag_s.cpu().detach().numpy().reshape(-1)), axis = 0))
 			mag_r.append(mag_pred)
-			
 			mag_p = Mag(torch.Tensor(ind_p).long().to(device), torch.Tensor(srcs_trv[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_p).to(device), torch.zeros(len(ind_p)).long().to(device))
 			mag_s = Mag(torch.Tensor(ind_s).long().to(device), torch.Tensor(srcs_trv[i,0:3].reshape(1,-1)).to(device), torch.Tensor(log_amp_s).to(device), torch.ones(len(ind_s)).long().to(device))
 			mag_pred = np.median(np.concatenate((mag_p.cpu().detach().numpy().reshape(-1), mag_s.cpu().detach().numpy().reshape(-1)), axis = 0))
 			mag_trv.append(mag_pred)
-
 		mag_r = np.hstack(mag_r)
 		mag_trv = np.hstack(mag_trv)
-	
 	else:
-
 		mag_r = np.nan*np.ones(srcs_trv.shape[0])
 		mag_trv = np.nan*np.ones(srcs_trv.shape[0])		
 
@@ -2103,20 +2021,17 @@ for cnt, strs in enumerate([0]):
 		else:
 			ioffset = np.array([]).astype('int')
 
-
 		## Remove based on anomolously high magnitudes and low pick counts (split and mislocated events)
 		if mag_thresh_check is not None:
 			ioutlier_magnitude_and_count = np.where((mag_trv > mag_thresh_check)*((cnt_p + cnt_s) < min_picks_check))[0]
 		else:
 			ioutlier_magnitude_and_count = np.array([]).astype('int')
 
-
 		## Sigma removal (what causes this? small events and bad associations? Merging two seperate events)
 		if max_sigma is not None:
 			isigma = np.where(srcs_sigma > max_sigma)[0]
 		else:
 			isigma = np.array([]).astype('int')
-
 
 		iremove = np.unique(np.concatenate((ioffset, ioutlier_magnitude_and_count, isigma), axis = 0)) # iremove_min_counts
 		ikeep = np.array(list(set(np.arange(len(srcs_trv))).difference( iremove )))
@@ -2141,9 +2056,6 @@ for cnt, strs in enumerate([0]):
 
 	trv_out1 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
 	trv_out1_all = compute_travel_times(trv, locs, [srcs_refined], device = device)[0] + srcs_refined[:,3].reshape(-1,1,1)
-	# trv_out1_all = np.copy(trv_out1) # trv(torch.Tensor(locs).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) 
-	# trv_out2 = trv(torch.Tensor(locs_use), torch.Tensor(srcs_trv[:,0:3])).cpu().detach().numpy() + srcs_trv[:,3].reshape(-1,1,1) 
-	# trv_out1_all = compute_travel_times()
 
 	trv_out2 = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
 	ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
@@ -2154,35 +2066,30 @@ for cnt, strs in enumerate([0]):
 		trv_out2_all[ifind_not_nan,:,:] = compute_travel_times(trv, locs, [srcs_trv[ifind_not_nan]], device = device)[0] + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 		# trv_out2_all[ifind_not_nan,:,:] = trv(torch.Tensor(locs).to(device), torch.Tensor(srcs_trv[ifind_not_nan,0:3]).to(device)).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 
-	# assert(np.nanmax(trv_out1 - trv_out1_all[:,ind_use,:]).max() < 1e-2)
-	# assert(np.nanmax(trv_out2 - trv_out2_all[:,ind_use,:]).max() < 1e-2)
 
 	if ('corr1' in globals())*('corr2' in globals()):
-		# corr1 and corr2 can be used to "shift" a processing region
-		# into the physical space of a pre-trained model for processing,
-		# and then un-shifting the solution, so that earthquakes are obtained
-		# using a pre-trained model in a new area.
 		srcs_refined[:,0:3] = srcs_refined[:,0:3] + corr1 - corr2
 		srcs_trv[:,0:3] = srcs_trv[:,0:3] + corr1 - corr2
-
-
-		# id_picks_p_ = np.array([Picks_P[j][np.argort(Picks_P[j][:,0]),0:2] for j in range(len(Picks_P))])
-		# id_picks_s_ = np.array([Picks_S[j][np.argort(Picks_S[j][:,0]),0:2] for j in range(len(Picks_S))])
-		# id_picks_p_ = np.array([Picks_P[j][:,0:2] for j in range(len(Picks_P))])
-		# id_picks_s_ = np.array([Picks_S[j][:,0:2] for j in range(len(Picks_S))])
-
 
 	############### ############### ############### ###############
 	     ############### Find Matched Events ###############
 	############### ############### ############### ###############
 
-	if process_known_events == True:
-		temporal_win_match = 10.0
-		spatial_win_match = 75e3
-		matches1 = maximize_bipartite_assignment(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
 
+	find_matched_events = True
+	if 	find_matched_events == True:
+
+		t0 = UTCDateTime(date[0], date[1], date[2])
+		min_magnitude = 0.1
+		srcs_known = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
+		print('Processing %d known events'%len(srcs_known))
+
+
+		temporal_win_match = 5.0
+		spatial_win_match = 35e3
+		matches1 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
 		if len(ifind_not_nan) > 0:
-			matches2 = maximize_bipartite_assignment(srcs_known, srcs_trv[ifind_not_nan], ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
+			matches2 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv[ifind_not_nan], ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
 			matches2[:,1] = ifind_not_nan[matches2[:,1]]
 		else:
 			matches2 = np.nan*np.zeros((0,2))
@@ -2192,7 +2099,6 @@ for cnt, strs in enumerate([0]):
 	save_on = process_config.get('save_on', True)
 
 	if save_on == True:
-
 		if process_known_events == True:
 			file_name_ext = 'known_events'
 		else:
@@ -2200,14 +2106,11 @@ for cnt, strs in enumerate([0]):
 		
 		ext_save = path_to_file + 'Catalog' + seperator + '%d'%yr + seperator + '%s_results_%s_%d_%d_%d_ver_%d.hdf5'%(name_of_project, file_name_ext, date[0], date[1], date[2], n_save_ver)
 		if (os.path.isdir(path_to_file + 'Catalog' + seperator + '%d'%yr) == 0): os.makedirs(base_path + 'Catalog' + seperator + '%d'%yr, exist_ok = True)
-		
 		file_save = h5py.File(ext_save, 'w')
-
 		julday = int((UTCDateTime(date[0], date[1], date[2]) - UTCDateTime(date[0], 1, 1))/(day_len)) + 1
 
 		## Note: the solution is in srcs or srcs_trv (lat, lon, depth, origin time)
 		## (the GNN prediction location and travel-time based location based on the GNN prediction associations)
-
 		## The associated picks for each event are in Picks/{n}_Picks_P and Picks/{n}_Picks_S
 		## for each source index n
 		
@@ -2247,6 +2150,11 @@ for cnt, strs in enumerate([0]):
 		file_save['pred_prams'] = pred_params
 		file_save['srcs_init'] = srcs ## These are initial local maxima after Local Marching
 		file_save['X_query'] = X_query
+
+		if find_matched_events == True:
+			file_save['srcs_known'] = srcs_known
+			file_save['matches1'] = matches1
+			file_save['matches2'] = matches2
 
 		# file_save['X_query'] = X_query
 		
@@ -2308,12 +2216,11 @@ for cnt, strs in enumerate([0]):
 			
 			f = open(ext_save, 'w')
 			for i in range(len(srcs_trv)):
-			
+				
 				t0 = UTCDateTime(date[0], date[1], date[2]) + srcs_trv[i,3]
 				sec_res = t0 - UTCDateTime(t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second)
-			
 				f.write('# %d %d %d %d %d %0.3f %0.4f %0.4f %0.3f %0.3f %0.3f %0.3f %0.3f %d \n'%(t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second + sec_res, srcs_trv[i,0], srcs_trv[i,1], -1.0*srcs_trv[i,2]/1000.0, mags[i], srcs_sigma[i]/1000.0, srcs_sigma[i]/1000.0, rms[i], i + 1))
-			
+				
 				for j in range(len(Picks_P[i])):
 					f.write('%s %0.3f %0.2f %s \n'%(stas[int(Picks_P[i][j,1])], Picks_P[i][j,0] - srcs_trv[i,3], pmap(Picks_P[i][j,-1]), 'P'))
 			
