@@ -17,6 +17,7 @@ import time
 from torch_cluster import knn
 from torch_geometric.utils import remove_self_loops, subgraph
 from torch_geometric.utils import to_undirected, to_networkx
+from scipy.sparse.csgraph import connected_components
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
