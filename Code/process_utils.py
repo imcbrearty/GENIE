@@ -1736,7 +1736,7 @@ def differential_evolution_location_trim1(trv, locs_use, arv_p, ind_p, arv_s, in
 
 
 
-def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
+def differential_evolution_location_trim4(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
                                         lat_range, lon_range, depth_range, time_range, 
                                         x0=None, sig_rel = 0.05, sig_min = 0.2, sig_max = 2.0, weight=[1.0, 0.85], 
                                         popsize=75, maxiter=1000, trim=0.2, mutation=(0.4, 0.9),
@@ -1837,6 +1837,158 @@ def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind
 
 
 
+
+def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind_s, 
+                                        lat_range, lon_range, depth_range, time_range, 
+                                        x0=None, sig_t=1.5, weight=[1.0, 0.85], 
+                                        popsize=75, maxiter=1000, trim=0.2, mutation=(0.5, 1.0),
+                                        min_picks=5, device='cpu', surface_profile=None, 
+                                        disp=True, vectorized=True, untrim_factor=1.25):
+
+    if (len(arv_p) + len(arv_s)) == 0:
+        return np.nan * np.ones((1, 3)), np.nan, np.nan, np.array([]), np.array([])
+
+    # --- 1. Pre-processing & Device Transfer ---
+    dev = torch.device(device)
+    n_picks = len(ind_p) + len(ind_s)
+    num_trim = int(np.floor(trim * n_picks))
+    if n_picks - num_trim < min_picks: 
+        num_trim = max(0, n_picks - min_picks)
+
+    # Prepare targets and weights once
+    trgt = np.concatenate((arv_p, arv_s), axis=0).reshape(1, -1)
+    if len(weight) == n_picks:
+        weight_vec = np.array(weight).reshape(1, -1)
+    else:
+        weight_vec = np.concatenate((weight[0] * np.ones(len(ind_p)), 
+                                     weight[1] * np.ones(len(ind_s))), axis=0).reshape(1, -1)
+
+    trgt_gpu = torch.as_tensor(trgt, dtype=torch.float32, device=dev)
+    weight_gpu = torch.as_tensor(weight_vec, dtype=torch.float32, device=dev)
+    locs_gpu = torch.as_tensor(locs_use, dtype=torch.float32, device=dev)
+    
+    # Pre-calculate surface constants if they exist
+    surf_data = None
+    if surface_profile is not None:
+        x1_dim = np.unique(surface_profile[:, 0])
+        x2_dim = np.unique(surface_profile[:, 1])
+        surf_data = {
+            'x1_min': x1_dim[0], 'x2_min': x2_dim[0],
+            'dx1': np.diff(x1_dim)[0], 'dx2': np.diff(x2_dim)[0],
+            'n1': len(x1_dim), 'n2': len(x2_dim),
+            'elev': torch.as_tensor(surface_profile[:, 2], dtype=torch.float32, device=dev)
+        }
+
+    # --- 2. Objective Function (Vectorized) ---
+    def likelihood_estimate(x):
+        if x.ndim == 1:
+            x = x.reshape(-1, 1)
+
+        x_gpu = torch.as_tensor(x, dtype=torch.float32, device=dev)
+        coords = x_gpu[0:3, :].T  # (PopSize, 3)
+        t0 = x_gpu[3, :].reshape(-1, 1, 1)  # (PopSize, 1, 1)
+
+        # Predict travel times (PopSize, Stations, 2)
+        pred = trv(locs_gpu, coords) + t0
+        
+        # Select P and S phases
+        p_vals = pred[:, ind_p, 0]
+        s_vals = pred[:, ind_s, 1]
+        pred_vals = torch.cat((p_vals, s_vals), dim=1)  # (PopSize, n_picks)
+
+        sq_err = ((trgt_gpu - pred_vals)**2) * weight_gpu / (sig_t**2)
+
+        # Trimming logic on GPU
+        if num_trim > 0:
+            sorted_err, _ = torch.sort(sq_err, dim=1)
+            keep_count = n_picks - num_trim
+            logprob = -0.5 * sorted_err[:, :keep_count].sum(dim=1) / keep_count
+        else:
+            logprob = -0.5 * sq_err.mean(dim=1)
+
+        # Surface Constraint
+        if surf_data:
+            i1 = torch.clamp(((x_gpu[0, :] - surf_data['x1_min']) / surf_data['dx1']).long(), 0, surf_data['n1'] - 1)
+            i2 = torch.clamp(((x_gpu[1, :] - surf_data['x2_min']) / surf_data['dx2']).long(), 0, surf_data['n2'] - 1)
+            surf_elev = surf_data['elev'][i1 + i2 * surf_data['n1']]
+            
+            air_mask = (x_gpu[2, :] < surf_elev) 
+            logprob[air_mask] -= 1e5 
+
+        return -1.0 * logprob.detach().cpu().numpy()
+
+    # --- 3. Optimization Setup ---
+    bounds = [lat_range, lon_range, depth_range, time_range]
+
+    # --- 4. Execute Optimization ---
+    optim = scipy.optimize.differential_evolution(
+        likelihood_estimate, 
+        bounds, 
+        popsize=popsize, 
+        maxiter=maxiter, 
+        disp=disp, 
+        vectorized=True,
+        x0=x0,
+        mutation=mutation,
+        polish=True
+    )
+
+    final_coords = optim.x[0:3].reshape(1, -1)
+    final_time = optim.x[3]
+    final_prob = -optim.fun
+
+    # --- 5. Identify SKIPPED Indices with Multiplicative Un-Trimming ---
+    skipped_p, skipped_s = np.array([]), np.array([])
+    
+    if num_trim > 0:
+        best_x = torch.as_tensor(optim.x, dtype=torch.float32, device=dev).reshape(-1, 1)
+        with torch.no_grad():
+            coords_f = best_x[0:3, :].T
+            t0_f = best_x[3, :].reshape(-1, 1, 1)
+            pred_f = trv(locs_gpu, coords_f) + t0_f
+            pred_v_f = torch.cat((pred_f[:, ind_p, 0], pred_f[:, ind_s, 1]), dim=1)
+            
+            # CRITICAL FIX: Extract weighted absolute residuals to mirror section 2
+            # Units are now effectively normalized deviation units, not raw seconds.
+            weighted_abs_res = (torch.abs(trgt_gpu - pred_v_f) * torch.sqrt(weight_gpu) / sig_t).cpu().numpy().flatten()
+            
+            # Rank based on the exact metric the optimizer used
+            sort_idx = np.argsort(weighted_abs_res)
+            keep_count = n_picks - num_trim
+            
+            # Find the max weighted error inside the trusted core group
+            kept_indices = sort_idx[:keep_count]
+            max_kept_weighted_res = weighted_abs_res[kept_indices].max()
+            
+            # Isolate the trimmed candidates
+            candidate_skipped_indices = sort_idx[keep_count:]
+            
+            # Dynamic Un-trim Threshold based on weighted multiples.
+            # A baseline floor of (0.10s * sqrt(weight) / sig_t) prevents over-flagging.
+            # For P-waves (weight=1, sig_t=1.5), 0.10s translates to ~0.066 deviation units.
+            floor_buffer = 0.10 / sig_t
+            untrim_tolerance = max(max_kept_weighted_res * untrim_factor, max_kept_weighted_res + floor_buffer)
+            
+            # Keep as skipped ONLY if the weighted residual blows past the allowed multiple
+            final_skipped_indices = [
+                idx for idx in candidate_skipped_indices 
+                if weighted_abs_res[idx] > untrim_tolerance
+            ]
+            
+            # Map linear array indexes back into P and S identity subsets
+            n_p = len(ind_p)
+            skipped_p = np.array([idx for idx in final_skipped_indices if idx < n_p], dtype=int)
+            skipped_s = np.array([idx - n_p for idx in final_skipped_indices if idx >= n_p], dtype=int)
+
+        if disp:
+            print('Error: %0.3f' % (final_prob))
+            if len(ind_p) > 0: 
+                print(f"DEBUG: pred_total[P_min]: {pred_f.cpu().detach().numpy()[:, ind_p, 0].min():.2f}")
+            if len(ind_s) > 0: 
+                print(f"DEBUG: pred_total[S_max]: {pred_f.cpu().detach().numpy()[:, ind_s, 1].max():.2f}")
+            print(f"DEBUG: current origin: {optim.x[3]:.2f}")
+
+    return final_coords, final_time, final_prob, skipped_p, skipped_s
 
 
 
