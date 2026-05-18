@@ -545,23 +545,37 @@ else:
 	dt_win = 1.0 ## Default version
 	t_win = 10.0
 
+# # step_size = process_config['step_size'] # 'full'
+# step_size = process_config['step_size']
+# if step_size == 'full':
+# 	# step = n_resolution*dt_win
+# 	step = (1/3)*t_win + 0.0
+# 	n_overlap = 1.0
+# elif step_size == 'partial':
+# 	step = (n_resolution/3)*dt_win
+# 	n_overlap = 3.0 ## Check this
+# 	assert(use_adaptive_window == True)
+# 	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
+# elif step_size == 'half':
+# 	step = int(np.floor((n_resolution/2)))*dt_win
+# 	n_overlap = 2.0 ## Check this
+# 	assert(use_adaptive_window == True)
+# 	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
+
 # step_size = process_config['step_size'] # 'full'
 step_size = process_config['step_size']
 if step_size == 'full':
-	# step = n_resolution*dt_win
-	step = (1/3)*t_win + 0.0
+	step = 1.0*t_win + 0.0
 	n_overlap = 1.0
+	assert(use_adaptive_window == True)
 elif step_size == 'partial':
-	step = (n_resolution/3)*dt_win
-	n_overlap = 3.0 ## Check this
+	step = (1/3.0)*t_win + 0.0
+	n_overlap = 1.0 ## Check this
 	assert(use_adaptive_window == True)
-	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
 elif step_size == 'half':
-	step = int(np.floor((n_resolution/2)))*dt_win
-	n_overlap = 2.0 ## Check this
+	step = (1/2.0)*t_win + 0.0
+	n_overlap = 1.0 ## Check this
 	assert(use_adaptive_window == True)
-	assert(n_resolution == 9) ## hard coded for length nine vector (must check which time fractions of total window stack uniformly over time when doing sliding window and stacking)
-
 
 # pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
 tc_win = pred_params[2]*1.35 # 1.25 # process_config['tc_win'] # Temporal window (s) to link events in Local Marching
