@@ -229,10 +229,14 @@ Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., 
 
 ## Load velocity model
 if vel_model_type == 1:
-	z = np.load(path_to_file + '1d_velocity_model.npz')
-	depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+	vp = np.array(config['velocity_model']['Vp'])
+	vs = np.array(config['velocity_model']['Vs'])
+	depths = np.array(config['velocity_model']['Depths'])
 	iarg = np.argsort(depths)
-	z.close()
+	# z = np.load(path_to_file + '1d_velocity_model.npz')
+	# depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+	# z.close()
+	
 	depths_fine = np.arange(depths.min(), depths.max() + dx_depth/10.0, dx_depth/10.0)
 	vp_fine = np.interp(depths_fine, depths[iarg], vp[iarg])
 	vs_fine = np.interp(depths_fine, depths[iarg], vs[iarg])
