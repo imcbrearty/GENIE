@@ -66,7 +66,7 @@ use_phase_types: True ## If False, then assume no phase type information is know
 use_absolute_pos: False ## If True, append the absolute station and source coordinates in the input feature (e.g., allows some extra `specilization' during training to specific areas; approach should be used tentatitevly)
 use_sign_input: False ## If true, tag the misfit features with sign information
 use_station_corrections: False ## if True, attach station corrections to travel times (loading from the file Grids/station_corrections_ver_1.npz with fields "locs_corr" and "corrs")
-use_updated_model_definition: False ## if True, add additional edge features to the Data Aggregation modules 
+# use_updated_model_definition: False ## if True, add additional edge features to the Data Aggregation modules 
 use_expanded: True ## If True, also use expanded graphs on source graph
 use_embedding: True ## If True, use station embedding
 
