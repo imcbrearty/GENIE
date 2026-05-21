@@ -1,9 +1,15 @@
 name_of_project: 'Ferndale'
 num_cores: 1 # How many cores would you like to use for travel time calculations? (it will increase memory cost). Note: now this is done with n_jobs below
-vel_model_ver: 1 ## Which travel time version to save when running calculate travel times
+
+################## ################# ############### ###############
+######### Note: Most important parameters to set are: #############
+## latitude_range, longitude_range, depth_range, number_of_spatial_nodes, 
+## n_jobs (for FMM travel time calculations), dx (for travel time calculation resolution), 
+## use_expanded and use_embedding (for using extra GNN layers)
+######### ################# ################# ########### #########
+###### ####################### ######################## ############
 
 ## Note, when running continuous days processing a number of parameters are also set in process_config
-
 latitude_range: [39.3, 41.2] # Latitude range of the region that will be processed
 longitude_range: [-125.0, -123.0] # Longitude range of the region that will be processed
 depth_range: [-40000, 2000] # Note: depths are in meters, positive above sea level, negative below sea level, and 'increasing' depth means going from deep to shallow.
@@ -11,81 +17,45 @@ time_range: # This sets up the Catalog and Pick files to have these years initia
   start: '2000-01-01'
   end: '2025-01-01'
 
-client : 'IRIS'
-network: 'HV'
-
-
-## Note: it is helpful to set pre_load_stations as True, and then to specify the initial station file yourself in stations.txt or stations.npz
-## You can also set convert_initial_pick_files as True, to convert the initial picks.txt into the expected format (when calling make_initial_files.py)
-
-pre_load_stations: True # If True, then skip download stations during make_initial_files.py; instead, stations.txt (or stations.npz) is assumed to already exist with locs and stas as the two fields.
-convert_initial_pick_files: False ## If True, will convert the initial pick files saved in "picks.txt" into the expected format in the Picks folders (when calling make_initial_files.py)
-convert_initial_catalog: False ## If True, will convert an initial catalog file ("catalog.txt" saved in HypoDD format) into the catalog format
-
-use_physics_informed: True ## If true, must run the "build" and "train" scripts seperately for the travel times and load a 3D (or 1D) velocity model
-use_topography: False ## If True, create the "surface_elevation.npz" file in the main project folder, saved with numpy array with "Points" (with columns of lat, lon, and elevation (m)). Can be arbitrary structured set of points (areas outside convex hull of Points will be trated as zero elevation.
-
 degree_padding: 0.25 # This region is appended to the lat_range and lon_range values above, and is used as a `padding' region, where we compute travel times, and simulate events in this region, yet train to predict zero for all labels in this area. This way, sources just outside the domain of interest arn't falsely mis-located inside the region (since the model learns what `exterior' events look like, to some extent).
 number_of_grids: 5 # Number of distinct spatial graphs to create (this reduced slight bias that can result from only using one spatial graph)
 number_of_spatial_nodes: 500 # Number of nodes per spatial graph
+fix_nominal_depth: True ## Set zero depth for domain as surface
 
-load_initial_files: [False]
-use_pretrained_model: [None]
-
+n_jobs: 1 ## Number of jobs to do the travel time calculations (note: you must run "calculate_travel_times_3D_build_data.py 0", and "calculate_travel_times_3D_build_data.py 1", for all i = 0 ... (n_jobs - 1))
 vel_model_type: 1 ## 1: 1d_velocity_model file is used; 2: 3d_velocity_model is used; 3: a series of 1d velocity models is used to construct a 3d model. 
-## If using a 3D model (vel_model_type = 2), save a file called '3d_velocity_model.npz' in the main directory, with fields: z['X'], z['Vp'], z['Vs']; where X is a numpy array of positions with columns of (lat, lon, depth (m))
-## with depth in meters and negative below sea level and positive above sea level. The entries in vectors Vp and Vs must correspond to velocity values (m/s) for P and S waves. 
-## X can be an unstructured set of points; we use nearest neighbor interpolation to map it to a regular grid.
-
+dx: 500.0 # Cartesian distance between nodes in FMM computation (try to automate choosing this)
 velocity_model: ## This is the model that's used when using "vel_model_type = 1"
   Depths: [-40000, -35000, -30000, -25000, -20000, -15000, -10000, -5000, 0, 5000] ## Must be in meters with increasing values, and positive above sea level, and neative below sea level
   Vp: [7884, 7808, 7623, 7305, 6739, 6186, 5752, 5225, 4610, 4528] ## m/s
   Vs: [4430, 4388, 4286, 4108, 3788, 3477, 3233, 2935, 2590, 2544] ## m/s
+## If using a 3D model (vel_model_type = 2), save a file called '3d_velocity_model.npz' in the main directory, with fields: z['X'], z['Vp'], z['Vs']; where X is a numpy array of positions with columns of (lat, lon, depth (m))
+## with depth in meters and negative below sea level and positive above sea level. The entries in vectors Vp and Vs must correspond to velocity values (m/s) for P and S waves. 
+## X can be an unstructured set of points; we use nearest neighbor interpolation to map it to a regular grid.
 
-### ASSEMBLE NETWORK DATA ###
-with_density: False
-use_spherical: False ## Should only set to true if travel time model also has spherical projection (to be added soon)
-depth_importance_weighting_value_for_spatial_graphs: 2.5 # up scale the depth importance of node positions when creating spatial graph if using a large horizontally extended domain
-fix_nominal_depth: True
-number_of_update_steps: 5000
-
-### TRAVEL TIMES ###
-## These are the elevation ranges over which stations might vary
-## we compute travel times for a range of reciever elevations
-# depth_steps:
-#   min_elevation: -500 # meters
-#   max_elevation: 4000 # meters
-#   elevation_step: 150 # meters
-
-# Can increase or decrease these as needed
-dx: 500.0 # Cartesian distance between nodes in FMM computation
-n_jobs: 1 ## Number of jobs to do the travel time calculations (note: you must run "calculate_travel_times_3D_build_data.py 0", and "calculate_travel_times_3D_build_data.py 1", for all i = 0 ... (n_jobs - 1))
-## Can increse or decrease d_deg and dx_depth seperately by uncommenting
-# d_deg: 0.005 # Degree distance between saved interpolation query points
-# dx_depth: 500.0 # Depth distance between nodes in FMM computation and saved query points
+pre_load_stations: True # If True, then skip download stations during make_initial_files.py; instead, stations.txt (or stations.npz) is assumed to already exist with locs and stas as the two fields.
+convert_initial_pick_files: False ## If True, will convert the initial pick files saved in "picks.txt" into the expected format in the Picks folders (when calling make_initial_files.py)
+convert_initial_catalog: False ## If True, will convert an initial catalog file ("catalog.txt" saved in HypoDD format) into the catalog format
+use_physics_informed: True ## If true, must run the "build" and "train" scripts seperately for the travel times and load a 3D (or 1D) velocity model
+use_topography: False ## If True, create the "surface_elevation.npz" file in the main project folder, saved with numpy array with "Points" (with columns of lat, lon, and elevation (m)). Can be arbitrary structured set of points (areas outside convex hull of Points will be trated as zero elevation.
 
 save_dense_travel_time_data: False # Save the dense travel times (only necessary if not training travel time neural network)
 train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
 use_relative_1d_profile: False # If False, the 1D profile is treated as absolute; if True, the 1D profile is shifted so zero depth occurs at each stations elevation
 use_sigmoid: False ## Use sigmoid outputs instead of linear (not currently training well)
 
-## Set model hyper-parameters (these can scale with the application domain size)
-scale_rel: 30000.0 # The normalization scale between source-source edges
-## Removing scale_t and eps from being definable for now; are set as proportional to kernel_sig_t
-# scale_t: 10.0 # The normalization scale during temporal attention
-# eps: 15.0 # The normalization and clipping window during arrival embedding and source-station-arrival attention
-
 ## Graph params
 k_sta_edges: 8 # or 10 are reasonable choices
 k_spc_edges: 15
-k_time_edges: 10
-# t_win: 10.0 ## This is the time window over which predictions are made. Shouldn't be changed for now.
-## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
+k_time_edges: 10 ## No longer used
 
-## Use subgraph
-use_subgraph: False
-max_deg_offset: 1.5
-k_nearest_pairs: 30
+
+## Set model hyper-parameters (these can scale with the application domain size)
+scale_rel: 30000.0 # The normalization scale between source-source edges (should be automatically set)
+time_shift_range: 30.0
+scale_time: 3500.0
+use_subgraph: True
+use_time_shift: True
 
 ## Other model parameters
 use_phase_types: True ## If False, then assume no phase type information is known on picks (e.g., fifth column of picks, P[:.4] is not used)
@@ -96,24 +66,12 @@ use_updated_model_definition: False ## if True, add additional edge features to 
 use_expanded: True ## If True, also use expanded graphs on source graph
 use_embedding: True ## If True, use station embedding
 
-use_time_shift: True
-time_shift_range: 30.0
-# time_shift_scale: 8.0
-scale_time: 3500.0
-
 ## Additional training params
 device: 'cuda' # or 'cpu'
 max_number_pick_association_labels_per_sample: 1500 # Max number of picks to compute associations for during training 
+make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
 ## (cuda RAM can run out for very large numbers of input picks in a single window during training at association prediction step). 
 ## This does not effect the input picks, just the ones we predict association labels for
-make_visualize_predictions: True # Plot example predictions during training (note: creates a lot of files currently)
-
-
-
-
-
-
-
 
 
 
