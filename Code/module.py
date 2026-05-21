@@ -79,7 +79,7 @@ use_embedding = config['use_embedding']
 use_sigmoid = config['use_sigmoid']
 attach_time = True
 
-device = torch.device('cuda') ## or use cpu
+device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')  ## or use cpu
 
 
 class DataAggregation(MessagePassing): # make equivelent version with sum operations.
