@@ -38,6 +38,7 @@ convert_initial_pick_files: False ## If True, will convert the initial pick file
 convert_initial_catalog: False ## If True, will convert an initial catalog file ("catalog.txt" saved in HypoDD format) into the catalog format
 use_physics_informed: True ## If true, must run the "build" and "train" scripts seperately for the travel times and load a 3D (or 1D) velocity model
 use_topography: False ## If True, create the "surface_elevation.npz" file in the main project folder, saved with numpy array with "Points" (with columns of lat, lon, and elevation (m)). Can be arbitrary structured set of points (areas outside convex hull of Points will be trated as zero elevation.
+use_spherical: False ## If False, use the elliptical WGS84 ellipsoid (default)
 
 save_dense_travel_time_data: False # Save the dense travel times (only necessary if not training travel time neural network)
 train_travel_time_neural_network: True # Fit a travel time neural network to the computed travel times
