@@ -2348,7 +2348,7 @@ class SpectralProductSampler:
         return G_sub
 
 
-def get_domain_bounds(points_lla, scale=1.05):
+def get_domain_bounds(points_lla, scale=1.05, lat_range = None, lon_range = None):
     lats = points_lla[:, 0]
     lons = points_lla[:, 1]
 
@@ -2360,8 +2360,16 @@ def get_domain_bounds(points_lla, scale=1.05):
         working_lons = lons
         is_wrapped = False
 
-    lat_min, lat_max = np.min(lats), np.max(lats)
-    lon_min, lon_max = np.min(working_lons), np.max(working_lons)
+    if lat_range is None:
+        lat_min, lat_max = np.min(lats), np.max(lats)
+    else:
+        lat_min, lat_max = lat_range
+
+    if lon_range is None:
+        lon_min, lon_max = np.min(working_lons), np.max(working_lons)
+    else:
+        lon_min, lon_max = lon_range
+    
 
     d_lat = lat_max - lat_min
     d_lon = lon_max - lon_min
