@@ -3472,25 +3472,26 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
         from ruamel.yaml import YAML
         yaml = YAML()
         yaml.preserve_quotes = True
+        precision = 5
 
         with open('config.yaml', "r") as file:
             data = yaml.load(file)
-        data['degree_padding'] = deg_padding
-        data['time_shift_range'] = time_shift_range
-        data['scale_time'] = scale_time
-        data['scale_rel'] = 2.0*source_label_width
+        data['degree_padding'] = float(np.round(deg_padding, precision))
+        data['time_shift_range'] = float(np.round(time_shift_range, precision))
+        data['scale_time'] = float(np.round(scale_time, precision))
+        data['scale_rel'] = float(np.round(2.0*source_label_width, precision))
         with open('config.yaml', "w") as file:
             yaml.dump(data, file)
 
         with open('train_config.yaml', "r") as file:
             data = yaml.load(file)
-        data['kernel_sig_t'] = sigma_input
-        data['src_x_kernel'] = source_label_width
-        data['src_t_kernel'] = source_label_width_t
-        data['src_x_arv_kernel'] = association_label_width
-        data['src_t_arv_kernel'] = association_label_width_t
-        data['src_depth_kernel'] = source_label_width
-        data['scale_time'] = scale_time/1000.0
+        data['kernel_sig_t'] = float(np.round(sigma_input, precision))
+        data['src_x_kernel'] = float(np.round(source_label_width, precision))
+        data['src_t_kernel'] = float(np.round(source_label_width_t, precision))
+        data['src_x_arv_kernel'] = float(np.round(association_label_width, precision))
+        data['src_t_arv_kernel'] = float(np.round(association_label_width_t, precision))
+        data['src_depth_kernel'] = float(np.round(source_label_width, precision))
+        data['scale_time'] = float(np.round(scale_time/1000.0, precision))
         with open('train_config.yaml', "w") as file:
             yaml.dump(data, file)
 
