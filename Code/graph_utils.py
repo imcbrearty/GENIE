@@ -3016,7 +3016,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
     if initialize is None: # else: [lat_range, lon_range, ]
         domain = get_domain_bounds(locs_use, scale = scale_domain)
     else:
-        domain = get_domain_bounds(locs_use, scale = 1.0, lat_range = initilize[0], lon_range = initilize[1])
+        domain = get_domain_bounds(locs_use, scale = 1.0, lat_range = initialize[0], lon_range = initialize[1])
 
 
     lat_range, lon_range = domain['lat_range'], domain['lon_range']
@@ -3511,7 +3511,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
     if initialize is None: # else: [lat_range, lon_range, ]
         domain = get_domain_bounds(locs_use, scale = scale_domain)
     else:
-        domain = get_domain_bounds(locs_use, scale = 1.0, lat_range = initilize[0], lon_range = initilize[1])
+        domain = get_domain_bounds(locs_use, scale = 1.0, lat_range = initialize[0], lon_range = initialize[1])
 
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
