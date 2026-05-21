@@ -2587,7 +2587,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
     else:
 
         ## Call fit domain
-        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, assign_based_on_grid = False, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = use_tuner, verbose = True, device = 'cpu')
+        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = use_tuner, verbose = True, device = 'cpu')
 
         z = np.load('Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]))
         # scale_time = scale_time, depth_boost = depth_upscale_factor, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input)
@@ -2772,7 +2772,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
 
 
-def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = True, n_tuner_steps = 50, verbose = True, device = 'cpu'):
+def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = True, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
     if domain is None:
         domain = get_domain_bounds(locs_use, scale = scale_domain)
