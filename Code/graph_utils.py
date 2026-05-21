@@ -3011,7 +3011,6 @@ def get_domain_bounds(points_lla, scale=1.05, lat_range = None, lon_range = None
 
 
 
-
 def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], n_grids = 1, initialize = None, use_paths = False, rbest = None, mn = None, optimize_station_graphs = False, optimize_source_graphs = False, use_domain_approximate = True, use_tuner = True, name_of_project = '', verbose = True, device = 'cpu'):
 
     if initialize is None: # else: [lat_range, lon_range, ]
@@ -3467,12 +3466,41 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
         # os.remove('Grids/grid_parameters_ver_1.npz')
         ## Also write parameters to relevant config files (and set parameters in module.py)
 
+        ## Overwrite config file variables
+        # import yaml
+        # from ruamel.yaml import YAML
+        from ruamel.yaml import YAML
+        yaml = YAML()
+        yaml.preserve_quotes = True
+
+        with open('config.yaml', "r") as file:
+            data = yaml.load(file)
+        data['degree_padding'] = deg_padding
+        data['time_shift_range'] = time_shift_range
+        data['scale_time'] = scale_time
+        data['scale_rel'] = 2.0*source_label_width
+        with open('config.yaml', "w") as file:
+            yaml.dump(data, file)
+
+        with open('train_config.yaml', "r") as file:
+            data = yaml.load(file)
+        data['kernel_sig_t'] = sigma_input
+        data['src_x_kernel'] = source_label_width
+        data['src_t_kernel'] = source_label_width_t
+        data['src_x_arv_kernel'] = association_label_width
+        data['src_t_arv_kernel'] = association_label_width_t
+        data['src_depth_kernel'] = source_label_width
+        data['scale_time'] = scale_time/1000.0
+        with open('train_config.yaml', "w") as file:
+            yaml.dump(data, file)
 
     else:
 
         # folder_path = "path/to/your/folder"
         os.makedirs('Domains', exist_ok = True)
         np.savez_compressed('Domains/domain_file_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]), A_src_in_sta = A_src_in_sta, A_sta = A_sta, A_src = A_src, Ac = Ac, A_prod_sta_sta = A_prod_sta_sta, A_prod_src_src = A_prod_src_src, A_prod_sta_sta_weights = A_prod_sta_sta_weights, A_prod_src_src_weights = A_prod_src_src_weights, A_src_in_prod = A_src_in_prod, x_grid = x_grid, scale_time = scale_time, depth_boost = depth_boost, ichoose_grid = 0, locs_use = locs_use, stas_use = stas_use, srcs_cart = x_grid_cart, locs_cart = locs_cart, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, rbest = rbest, mn = mn) # ind_use = np.arange(len(locs_use)) # metrics_product = metrics_product
+
+
 
 
 def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
