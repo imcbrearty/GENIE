@@ -47,7 +47,7 @@ path_to_file = str(pathlib.Path().absolute())
 seperator = '\\' if '\\' in path_to_file else '/'
 path_to_file += seperator
 
-use_updated_model_definition = config['use_updated_model_definition']
+# use_updated_model_definition = config['use_updated_model_definition']
 name_of_project = config['name_of_project']
 scale_rel = config['scale_rel'] # 30e3
 k_sta_edges = config['k_sta_edges']
