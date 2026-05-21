@@ -25,6 +25,7 @@ pip install obspy
 pip install cvxpy
 pip install h5py
 pip install pyyaml
+pip install ruamel.yaml
 
 ## If going to run calculate_travel_times.py, then need to install skfmm
 pip install scikit-fmm
