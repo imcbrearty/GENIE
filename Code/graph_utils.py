@@ -2587,7 +2587,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
     else:
 
         ## Call fit domain
-        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, assign_based_on_grid = False, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = use_tuner, device = 'cpu')
+        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, assign_based_on_grid = False, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = use_tuner, verbose = True, device = 'cpu')
 
         z = np.load('Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]))
         # scale_time = scale_time, depth_boost = depth_upscale_factor, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input)
@@ -2772,7 +2772,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
 
 
-def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = True, n_tuner_steps = 50, device = 'cpu'):
+def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = True, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
     if domain is None:
         domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -2790,9 +2790,15 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
     domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20, device = device)
 
     lat_range, lon_range = domain['lat_range'], domain['lon_range']
-    lat_range_extend, lon_range_extend = extend_geo_range(lat_range, lon_range, domain_scale['W_phys_m'], multiplier = 2.0)
-    deg_padding = np.mean([lat_range_extend[1] - lat_range[1], lat_range[0] - lat_range_extend[0], lon_range_extend[1] - lon_range[1], lon_range[0] - lon_range_extend[0]]) if use_global == False else 0.0
 
+    if np.isfinite(np.array([deg_padding])).sum() == 0:
+        lat_range_extend, lon_range_extend = extend_geo_range(lat_range, lon_range, domain_scale['W_phys_m'], multiplier = 2.0)
+    else:
+        lat_range_extend = [lat_range[0] - deg_padding, lat_range[1] + deg_padding]
+        lon_range_extend = [lon_range[0] - deg_padding, lon_range[1] + deg_padding]
+        
+    deg_padding = np.mean([lat_range_extend[1] - lat_range[1], lat_range[0] - lat_range_extend[0], lon_range_extend[1] - lon_range[1], lon_range[0] - lon_range_extend[0]]) if use_global == False else 0.0
+    
 
     earth_radius = 6378137.0
     ftrns1_abs = lambda x: lla2ecef(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((lla2ecef(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
@@ -2837,7 +2843,6 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 
     Dt_offsets = np.array(Dt_offsets)
     time_shift_range = np.round(np.quantile(Dt_offsets, quantile_times_srcs), 2) # /2.0
-
 
 
     scale_time_base = domain_scale['W_phys_m']/domain_scale['W_t_s']
@@ -2906,10 +2911,11 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
     assert(len(x_grid) == number_of_spatial_nodes)
 
     # if n == 0:
-    compute_final_grid_health(x_grid, scale_time, depth_boost, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
-    # compute_final_grid_health(x_grid, scale_time, depth_boost, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
-    perform_ks_density_test(x_grid, lat_range_extend)
-    perform_ks_depth_test_ellipsoid(x_grid, depth_range, ftrns1_abs)
+    if verbose == True:
+        compute_final_grid_health(x_grid, scale_time, depth_boost, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
+        # compute_final_grid_health(x_grid, scale_time, depth_boost, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
+        perform_ks_density_test(x_grid, lat_range_extend)
+        perform_ks_depth_test_ellipsoid(x_grid, depth_range, ftrns1_abs)
 
     k_edges = k_spc_edges # 18 ## An effective edge number in 4D
     edges = np.ascontiguousarray(np.flip(sort_edge_index(remove_self_loops(knn(torch.Tensor(np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)), torch.Tensor(np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)), k = k_edges + 1))[0].flip(0)).contiguous().cpu().detach().numpy(), axis = 0))
