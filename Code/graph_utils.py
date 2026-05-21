@@ -3188,7 +3188,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
     else:
 
         ## Call fit domain
-        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, assign_based_on_grid = False, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, n_grids = n_grids, use_tuner = use_tuner, initialize = initialize, verbose = verbose, device = device)
+        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, n_grids = n_grids, use_tuner = use_tuner, initialize = initialize, verbose = verbose, device = device)
 
         # if initialize is None:
         #     file_load = 'Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2])
@@ -3199,7 +3199,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
             file_load = 'Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2])
 
         else:
-            file_load = glob.glob('Grids/grid_parameters_ver_1.npz')[0]
+            file_load = 'Grids/grid_parameters_ver_1.npz'
 
 
         z = np.load(file_load)
@@ -3349,14 +3349,14 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
         degrees_src_srcs = np.bincount(A_prod_src_src[0].astype('int'))
         degrees_sta_stas = np.bincount(A_prod_sta_sta[0].astype('int'))
 
-
-        print('\nSubgraph Cartesian product: %d nodes (%d total; %0.4f)'%(A_src_in_sta.shape[1], len(x_grid_proj)*len(locs_cart), A_src_in_sta.shape[1]/(len(x_grid_proj)*len(locs_cart))))
-        print('Degree distribution (source): [%0.3f, %0.3f, %0.3f, %0.3f, %0.3f]' % tuple(np.quantile(degrees_srcs, [0, 0.25, 0.5, 0.75, 1.0])))
-        print('Degree distribution (sta): [%0.3f, %0.3f, %0.3f, %0.3f, %0.3f]' % tuple(np.quantile(degrees_stas, [0, 0.25, 0.5, 0.75, 1.0])))
-        print('Degree distribution (bipartite sta): [%0.2f, %0.2f, %0.2f, %0.2f, %0.2f]' % tuple(np.quantile(degrees_bipartite_sta, [0, 0.25, 0.5, 0.75, 1.0])))
-        print('Degree distribution (bipartite src): [%0.2f, %0.2f, %0.2f, %0.2f, %0.2f]' % tuple(np.quantile(degrees_bipartite_src, [0, 0.25, 0.5, 0.75, 1.0])))
-        print('Degree distribution (source-source): [%0.2f, %0.2f, %0.2f, %0.2f, %0.2f]' % tuple(np.quantile(degrees_src_srcs, [0, 0.25, 0.5, 0.75, 1.0])))
-        print('Degree distribution (station-station): [%0.2f, %0.2f, %0.2f, %0.2f, %0.2f]' % tuple(np.quantile(degrees_sta_stas, [0, 0.25, 0.5, 0.75, 1.0])))
+        if verbose == True:
+            print('\nSubgraph Cartesian product: %d nodes (%d total; %0.4f)'%(A_src_in_sta.shape[1], len(x_grid_proj)*len(locs_cart), A_src_in_sta.shape[1]/(len(x_grid_proj)*len(locs_cart))))
+            print('Degree distribution (source): [%0.3f, %0.3f, %0.3f, %0.3f, %0.3f]' % tuple(np.quantile(degrees_srcs, [0, 0.25, 0.5, 0.75, 1.0])))
+            print('Degree distribution (sta): [%0.3f, %0.3f, %0.3f, %0.3f, %0.3f]' % tuple(np.quantile(degrees_stas, [0, 0.25, 0.5, 0.75, 1.0])))
+            print('Degree distribution (bipartite sta): [%0.2f, %0.2f, %0.2f, %0.2f, %0.2f]' % tuple(np.quantile(degrees_bipartite_sta, [0, 0.25, 0.5, 0.75, 1.0])))
+            print('Degree distribution (bipartite src): [%0.2f, %0.2f, %0.2f, %0.2f, %0.2f]' % tuple(np.quantile(degrees_bipartite_src, [0, 0.25, 0.5, 0.75, 1.0])))
+            print('Degree distribution (source-source): [%0.2f, %0.2f, %0.2f, %0.2f, %0.2f]' % tuple(np.quantile(degrees_src_srcs, [0, 0.25, 0.5, 0.75, 1.0])))
+            print('Degree distribution (station-station): [%0.2f, %0.2f, %0.2f, %0.2f, %0.2f]' % tuple(np.quantile(degrees_sta_stas, [0, 0.25, 0.5, 0.75, 1.0])))
 
 
         fit_local_projection = False
@@ -3415,7 +3415,20 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
             data_save['A_prod_sta_sta_weights_%d'%n_grid] = A_prod_sta_sta_weights
             data_save['A_prod_src_src_weights_%d'%n_grid] = A_prod_src_src_weights
             data_save['A_src_in_prod_%d'%n_grid] = A_src_in_prod
-            if build_expander == True: data_save['A_c_%d'%n_grid] = Ac
+            if build_expander == True: data_save['Ac_%d'%n_grid] = Ac
+
+            if n_grid == 0:
+                data_save['A_src_in_sta'] = A_src_in_sta
+                data_save['A_sta'] = A_sta
+                data_save['A_src'] = A_src
+                data_save['A_prod_sta_sta'] = A_prod_sta_sta
+                data_save['A_prod_src_src'] = A_prod_src_src
+                data_save['A_prod_sta_sta_weights'] = A_prod_sta_sta_weights
+                data_save['A_prod_src_src_weights'] = A_prod_src_src_weights
+                data_save['A_src_in_prod'] = A_src_in_prod
+                data_save['x_grid'] = x_grid
+                if build_expander == True: data_save['Ac'] = Ac
+            
 
 
     if initialize is not None:
@@ -3449,7 +3462,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
         data_save['x_grid_projs'] = x_grid_projs
 
         # folder_path = "path/to/your/folder"
-        os.makedirs('Grids', exist_ok=True)
+        os.makedirs('Grids', exist_ok = True)
         np.savez_compressed('Grids/%s_seismic_network_templates_ver_1.npz'%(name_of_project), **data_save) # ind_use = np.arange(len(locs_use)) # metrics_product = metrics_product
         # os.remove('Grids/grid_parameters_ver_1.npz')
         ## Also write parameters to relevant config files (and set parameters in module.py)
@@ -3458,11 +3471,11 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
     else:
 
         # folder_path = "path/to/your/folder"
-        os.makedirs('Domains', exist_ok=True)
+        os.makedirs('Domains', exist_ok = True)
         np.savez_compressed('Domains/domain_file_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]), A_src_in_sta = A_src_in_sta, A_sta = A_sta, A_src = A_src, Ac = Ac, A_prod_sta_sta = A_prod_sta_sta, A_prod_src_src = A_prod_src_src, A_prod_sta_sta_weights = A_prod_sta_sta_weights, A_prod_src_src_weights = A_prod_src_src_weights, A_src_in_prod = A_src_in_prod, x_grid = x_grid, scale_time = scale_time, depth_boost = depth_boost, ichoose_grid = 0, locs_use = locs_use, stas_use = stas_use, srcs_cart = x_grid_cart, locs_cart = locs_cart, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, rbest = rbest, mn = mn) # ind_use = np.arange(len(locs_use)) # metrics_product = metrics_product
 
 
-def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
+def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
     # if domain is None:
     #     domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -3484,7 +3497,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 
 
     if np.isfinite(np.array([deg_padding])).sum() == 0:
-        lat_range_extend, lon_range_extend = extend_geo_range(lat_range, lon_range, domain_scale['W_phys_m'], multiplier = 2.0)
+        lat_range_extend, lon_range_extend = extend_geo_range(lat_range, lon_range, domain_scale['W_phys_m'], multiplier = extend_ratio)
     else:
         lat_range_extend = [lat_range[0] - deg_padding, lat_range[1] + deg_padding]
         lon_range_extend = [lon_range[0] - deg_padding, lon_range[1] + deg_padding]
@@ -3593,6 +3606,8 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
         x_grid = farthest_point_sampling(trial_points, number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_boost, mask_candidates = mask_points)
         x_grid_cart = ftrns1(x_grid)
         x_grid_proj = np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)
+        x_grids_l.append(np.expand_dims(x_grid, axis = 0))
+        
         # x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = mask_points)
 
         tol_frac = 0.01
@@ -3631,7 +3646,6 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 
         association_label_width = final_W_phys*1.2
         association_label_width_t = final_W_t*1.5
-        x_grids_l.append(np.expand_dims(x_grid, axis = 0))
 
         if (verbose == True)*(n_grid == 0):
             print('Num nodes: %d'%final_N)
@@ -3654,7 +3668,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
         x_grids = np.vstack(x_grids_l)
         np.savez_compressed('Grids/grid_parameters_ver_1.npz', scale_time = scale_time, depth_boost = depth_boost, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, x_grids = x_grids, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input)
 
-    else:
+    else: ## Could add multiple grids even for non-initialize case, for averaging
         np.savez_compressed('Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]), scale_time = scale_time, depth_boost = depth_boost, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input)
 
 
