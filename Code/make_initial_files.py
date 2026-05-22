@@ -225,7 +225,7 @@ if __name__ == '__main__':
         # depths, vp, vs = z['X'][:,2], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
         z.close()
     
-    # Vc = 3500.0
+    Vc = 3500.0
     scale_domain = 1.0
     deg_padding = np.nan ## Use hueristic
     n_trgt_nodes = config.get('n_trgt_nodes', int(200e3))
