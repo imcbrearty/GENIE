@@ -3498,7 +3498,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
         print("Saving Region file (kind of depreciated)")
         np.savez_compressed(
-            base_path + '%s_region.npz'%name_of_project,
+            '%s_region.npz'%name_of_project, # base_path + 
             lat_range = lat_range, # config['latitude_range'],
             lon_range = lon_range, # config['longitude_range'],
             depth_range = depth_range, # config['depth_range'],
