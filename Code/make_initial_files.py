@@ -417,22 +417,23 @@ if __name__ == '__main__':
 
 
 
-    print("Saving Region file (kind of depreciated)")
-    np.savez_compressed(
-        base_path + '%s_region.npz'%name_of_project,
-        lat_range=config['latitude_range'],
-        lon_range=config['longitude_range'],
-        depth_range=config['depth_range'],
-        # deg_pad=config['degree_padding'],
-        deg_pad=deg_padding,
-        num_grids=config['number_of_grids'],
-        n_spatial_nodes=config['number_of_spatial_nodes'],
-        years=years,
-        # load_initial_files=config['load_initial_files'],
-        # use_pretrained_model=config['use_pretrained_model']
-    )
+    # print("Saving Region file (kind of depreciated)")
+    # np.savez_compressed(
+    #     base_path + '%s_region.npz'%name_of_project,
+    #     lat_range=config['latitude_range'],
+    #     lon_range=config['longitude_range'],
+    #     depth_range=config['depth_range'],
+    #     # deg_pad=config['degree_padding'],
+    #     deg_pad=deg_padding,
+    #     num_grids=config['number_of_grids'],
+    #     n_spatial_nodes=config['number_of_spatial_nodes'],
+    #     years=years,
+    #     # load_initial_files=config['load_initial_files'],
+    #     # use_pretrained_model=config['use_pretrained_model']
+    # )
 
 
+    path_to_file = base_path
     ## Make necessary directories (can edit this to write the days with picks in Picks)
     if os.path.isfile(path_to_file + '%s_process_days_list_ver_1.txt'%config["name_of_project"]) == 0:
         f = open(path_to_file + '%s_process_days_list_ver_1.txt'%config["name_of_project"], 'w')
