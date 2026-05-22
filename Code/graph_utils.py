@@ -3495,6 +3495,23 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
         with open('train_config.yaml', "w") as file:
             yaml.dump(data, file)
 
+
+        print("Saving Region file (kind of depreciated)")
+        np.savez_compressed(
+            base_path + '%s_region.npz'%name_of_project,
+            lat_range = lat_range, # config['latitude_range'],
+            lon_range = lon_range, # config['longitude_range'],
+            depth_range = # config['depth_range'],
+            deg_pad = deg_padding, 
+            num_grids = n_grids, # config['number_of_grids'],
+            n_spatial_nodes = number_of_spatial_nodes) # config['number_of_spatial_nodes'])
+            # deg_pad=config['degree_padding'],
+            # years=years,
+            # load_initial_files=config['load_initial_files'],
+            # use_pretrained_model=config['use_pretrained_model']
+
+
+
     else:
 
         # folder_path = "path/to/your/folder"
