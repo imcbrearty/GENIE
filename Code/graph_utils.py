@@ -3501,7 +3501,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
             base_path + '%s_region.npz'%name_of_project,
             lat_range = lat_range, # config['latitude_range'],
             lon_range = lon_range, # config['longitude_range'],
-            depth_range = # config['depth_range'],
+            depth_range = depth_range, # config['depth_range'],
             deg_pad = deg_padding, 
             num_grids = n_grids, # config['number_of_grids'],
             n_spatial_nodes = number_of_spatial_nodes) # config['number_of_spatial_nodes'])
