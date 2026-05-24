@@ -1610,7 +1610,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		## Make association module layers (note, previous arrival embeddings used to be smaller)
 		self.ArrivalEmbedding = ArrivalEmbedding(30, 30, trv = trv, device = device, ftrns2 = ftrns2) ## [note: merging the embeddings for P and S into one (oveloaded) layer rather than keeping as seperate layers?]
 		self.Arrivals = SourceStationAttention(30, 30, 2, 15, n_heads = 3, use_src_pred = use_src_pred, device = device).to(device)
-		if self.use_src_pred == True:
+		if use_src_pred == True:
 			self.alpha = nn.Parameter(torch.tensor([0.1], device = device))
 
 		if use_embedding == True:
