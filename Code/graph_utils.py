@@ -5202,6 +5202,11 @@ def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_l
     srcs_init = torch.cat((trial_points[candidate_indices], coherence[candidate_indices].reshape(-1,1)), dim = 1)
     peaks = []
 
+    while len(srcs_init) > int(0.02*num_candidates):
+        n_remove = np.minimum(len(srcs_init) - int(0.1*num_candidates), int(len(srcs_init)/2))
+        idel = np.sort(np.random.choice(len(srcs_init), size = n_remove, replace = False))
+        srcs_init = torch.Tensor(np.delete(srcs_init.cpu().detach().numpy(), idel, axis = 0)).to(device)
+                                         
     if len(srcs_init) > 0:
 
         mp = LocalMarching(device=device)
