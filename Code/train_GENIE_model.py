@@ -25,6 +25,7 @@ from torch.nn import BCEWithLogitsLoss
 from torch.autograd import Variable
 from torch_geometric.data import Data, Batch
 from torch_geometric.data import HeteroData  # if you use heterogeneous graphs
+from collections import defaultdict
 from torch.nn import Softplus
 from torch_scatter import scatter
 from numpy.matlib import repmat
@@ -127,19 +128,42 @@ n_frac_reference_catalog = train_config['n_frac_reference_catalog'] # 0.8 ## The
 
 
 ## Prediction params
-kernel_sig_t = train_config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
-src_t_kernel = train_config['src_t_kernel'] # Kernel or origin time label (s)
-src_t_arv_kernel = train_config['src_t_arv_kernel'] # Kernel for arrival association time label (s)
-src_x_kernel = train_config['src_x_kernel'] # Kernel for source label, horizontal distance (m)
-src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
-src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
-# t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
-src_kernel_mean = np.mean([src_x_kernel, src_x_kernel, src_depth_kernel])
-src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
+# if use_variable_domain == FalseL
+# kernel_sig_t = train_config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
+# src_t_kernel = train_config['src_t_kernel'] # Kernel or origin time label (s)
+# src_t_arv_kernel = train_config['src_t_arv_kernel'] # Kernel for arrival association time label (s)
+# src_x_kernel = train_config['src_x_kernel'] # Kernel for source label, horizontal distance (m)
+# src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
+# src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
+# # t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
+# src_kernel_mean = np.mean([src_x_kernel, src_x_kernel, src_depth_kernel])
+# src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
+
+
 n_batches_per_job = train_config['n_batches_per_job']
 
-use_real_data = train_config.get('use_real_data', False)
+use_real_data = train_config.get('use_real_data', True)
 n_real_fraction = train_config.get('n_real_fraction', 0.3)
+
+use_fixed_graphs = train_config.get('use_fixed_graphs', True) # True # True
+use_variable_domain = train_config.get('use_real_data', True) # True
+if use_variable_domain == True: assert(use_fixed_graphs == True)
+
+if (use_variable_domain == False) or (1 == 1): ## Initilize so inputs exist
+
+	kernel_sig_t = train_config['kernel_sig_t'] # Kernel to embed arrival time - theoretical time misfit (s)
+	src_t_kernel = train_config['src_t_kernel'] # Kernel or origin time label (s)
+	src_t_arv_kernel = train_config['src_t_arv_kernel'] # Kernel for arrival association time label (s)
+	src_x_kernel = train_config['src_x_kernel'] # Kernel for source label, horizontal distance (m)
+	src_x_arv_kernel = train_config['src_x_arv_kernel'] # Kernel for arrival-source association label, horizontal distance (m)
+	src_depth_kernel = train_config['src_depth_kernel'] # Kernel of Cartesian projection, vertical distance (m)
+	# t_win = config['t_win'] ## This is the time window over which predictions are made. Shouldn't be changed for now.
+	src_kernel_mean = np.mean([src_x_kernel, src_x_kernel, src_depth_kernel])
+	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
+
+	## Else must load these per file
+
+
 
 if use_real_data == True: ## If using real data, mask the labels near the source (don't center window on source, but just center mask; in time, and possibly in space)
 	n_reference_ver = 1
@@ -159,39 +183,43 @@ if use_real_data == True: ## If using real data, mask the labels near the source
 		st_calibration = st_calibration[iperm_list]
 		dates_calibration = dates_calibration[iperm_list]
 
-	st1_picks = glob.glob(path_to_file + 'Picks/19*') ## Assuming years are 1900 and 2000's
-	st2_picks = glob.glob(path_to_file + 'Picks/20*')
-	st_picks = np.concatenate((st1_picks, st2_picks), axis = 0)	
-	st_picks = np.hstack([glob.glob(s + '/*ver_%d.npz'%1) for s in st_picks]) # n_ver_picks = 1
-	dates_picks = np.vstack([[int(j) for j in s.strip().split('/')[-1].split('_')[0:3]] for s in st_picks])
+	# st1_picks = glob.glob(path_to_file + 'Picks/19*') ## Assuming years are 1900 and 2000's
+	# st2_picks = glob.glob(path_to_file + 'Picks/20*')
+	# st_picks = np.concatenate((st1_picks, st2_picks), axis = 0)	
+	# st_picks = np.hstack([glob.glob(s + '/*ver_%d.npz'%1) for s in st_picks]) # n_ver_picks = 1
+	# dates_picks = np.vstack([[int(j) for j in s.strip().split('/')[-1].split('_')[0:3]] for s in st_picks])
 
-	tree_dates = cKDTree(dates_picks)
-	ifound = np.where(tree_dates.query(dates_calibration)[0] == 0)[0]
+	# tree_dates = cKDTree(dates_picks)
+	# ifound = np.where(tree_dates.query(dates_calibration)[0] == 0)[0]
 
-	st_calibration = st_calibration[ifound]
-	dates_calibration = dates_calibration[ifound]
+	# st_calibration = st_calibration[ifound]
+	# dates_calibration = dates_calibration[ifound]
 
 
-use_fixed_graphs = True
 if use_fixed_graphs == True:
-	st_graphs = glob.glob('Graphs/*merged_graph*')
+	# st_graphs = glob.glob('Domains/*graph*')
+	st_graphs = glob.glob('Domains/*domain_file*')
 
-	dates_allowed = np.vstack([[int(j) for j in s.strip().split('date_')[1].split('_')[0:3]] for s in st_graphs])
-	tree_dates = cKDTree(dates_allowed)
-	ifound = np.where(tree_dates.query(dates_calibration)[0] == 0)[0]
-	st_calibration = st_calibration[ifound]
-	dates_calibration = dates_calibration[ifound]
+# 	dates_allowed = np.vstack([[int(j) for j in s.strip().split('date_')[1].split('_')[0:3]] for s in st_graphs])
+# 	tree_dates = cKDTree(dates_allowed)
+# 	ifound = np.where(tree_dates.query(dates_calibration)[0] == 0)[0]
+# 	st_calibration = st_calibration[ifound]
+# 	dates_calibration = dates_calibration[ifound]
 
-# scale_time = train_config['scale_time']
 
-use_adaptive_window = True
-if use_adaptive_window == True:
-	n_resolution = 9 ## The discretization of the source time function output
-	t_win = np.round(np.copy(np.array([2*src_t_kernel]))[0], 2) ## Set window size to the source kernel width (i.e., prediction window is of length +/- src_t_kernel, or [-src_t_kernel + t0, t0 + src_t_kernel])
-	dt_win = np.diff(np.linspace(-t_win/2.0, t_win/2.0, n_resolution))[0]
-else:
-	dt_win = 1.0 ## Default version
-	t_win = 10.0
+if (use_variable_domain == False) or (1 == 1):
+
+	use_adaptive_window = True
+	if use_adaptive_window == True:
+		n_resolution = 9 ## The discretization of the source time function output
+		t_win = np.round(np.copy(np.array([2*src_t_kernel]))[0], 2) ## Set window size to the source kernel width (i.e., prediction window is of length +/- src_t_kernel, or [-src_t_kernel + t0, t0 + src_t_kernel])
+		dt_win = np.diff(np.linspace(-t_win/2.0, t_win/2.0, n_resolution))[0]
+	else:
+		dt_win = 1.0 ## Default version
+		t_win = 10.0
+
+	## Else; load variable per input
+
 
 ## Dataset parameters
 load_training_data = train_config['load_training_data']
@@ -202,9 +230,6 @@ optimize_training_data = train_config['optimize_training_data']
 max_number_pick_association_labels_per_sample = config['max_number_pick_association_labels_per_sample']
 make_visualize_predictions = config['make_visualize_predictions']
 
-## Note that right now, this shouldn't change, as the GNN definitions also assume this is 10 s.
-
-## Will update to be adaptive soon. The step size of temporal prediction is fixed at 1 s right now.
 
 ## Should add src_x_arv_kernel and src_t_arv_kerne to pred_params, but need to check usage of this variable in this and later scripts
 pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
@@ -232,7 +257,7 @@ if use_topography == True:
 	tree_surface = cKDTree(surface_profile[:,0:2])
 
 
-use_consistency_loss = True
+use_consistency_loss = False
 use_gradient_loss = train_config['use_gradient_loss']
 init_gradient_loss = False
 use_negative_loss = True ## If True, up-sample the false positive predictions 
@@ -248,16 +273,6 @@ if use_teleseisim_noise == True:
 	# inot_nan1, inot_nan2 = np.where(np.isnan(trv_teleseism) == 0)
 	xx_teleseism = xx_teleseism[ipos]
 	trv_teleseism = trv_teleseism[ipos]
-
-	# unique_depths = np.unique(xx_teleseism[:,1])
-	# ip_depths = [np.array(v) for v in cKDTree(xx_teleseism[:,1].reshape(-1,1)).query_ball_point(unique_depths.reshape(-1,1), r = 0)]
-	# iarg = [np.argsort(xx_teleseism[ip_depths[j],0]) for j in range(len(ip_depths))]
-	# ip_depths = [np.ascontiguousarray(ip_depths[j][iarg[j]]) for j in range(len(ip_depths))]
-
-	# deg_vals = [np.ascontiguousarray(xx_teleseism[ip_depths[j],0]) for j in range(len(ip_depths))]
-	# trv_vals = [np.ascontiguousarray(trv_teleseism[ip_depths[j],:]) for j in range(len(ip_depths))]
-	# inot_nan = [[np.where(np.isnan(trv_vals[j][:,k]) == 0)[0] for j in range(len(ip_depths))] for k in range(len(phase_types))]
-	# f_teleseisims = [[lambda x: np.interp(x, deg_vals[j], trv_vals[j][inot_nan,k], left = np.nan, right = np.nan) for j in range(len(ip_depths))] for k in range(len(phase_types))]
 
 
 
@@ -326,69 +341,76 @@ else:
 	
 
 # Load region
-z = np.load(path_to_file + '%s_region.npz'%name_of_project)
-lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
-z.close()
 
-# Load templates
-z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-x_grids = z['x_grids']
-scale_time = z['scale_time']/1000.0
-z.close()
+if (use_variable_domain == False) or (1 == 1):
 
-# Load stations
-z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
-locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
-z.close()
+	z = np.load(path_to_file + '%s_region.npz'%name_of_project)
+	lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
+	z.close()
+
+	# Load templates
+	z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
+	x_grids = z['x_grids']
+	scale_time = z['scale_time']/1000.0
+	z.close()
+
+	# Load stations
+	z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
+	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
+	z.close()
+
+	lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
+	lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
+
+	scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+	offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
+	scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+	offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
+
+	rbest_cuda = torch.Tensor(rbest).to(device)
+	mn_cuda = torch.Tensor(mn).to(device)
+
+
+	if use_expanded == True:
+		Ac = np.load(path_to_file + 'Grids/%s_seismic_network_expanders_ver_%d.npz'%(name_of_project, template_ver))['Ac']
+	else:
+		Ac = False
+
+
+	if use_time_shift == True:
+		# z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
+		# time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
+		time_shifts = x_grids[:,:,[3]]
+		# z.close()
+	else:
+		time_shifts = None # np.zeros((x_grids.shape[0], x_grids.shape[1]))
+
+
+
+	# use_spherical = False
+	if config['use_spherical'] == True:
+
+		earth_radius = 6371e3
+		ftrns1 = lambda x: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T
+		ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius)
+
+		ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, e = 0.0, a = earth_radius, device = device) - mn_cuda).T).T
+		ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, e = 0.0, a = earth_radius, device = device)
+
+	else:
+
+		earth_radius = 6378137.0
+		ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T
+		ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)
+
+		ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T
+		ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device)
+
+
 
 ## Create path to write files
 seperator = '\\' if '\\' in path_to_file else '/'
 write_training_file = path_to_file + 'GNN_TrainedModels' + seperator + name_of_project + '_'
-
-lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
-lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
-
-scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
-scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
-
-rbest_cuda = torch.Tensor(rbest).to(device)
-mn_cuda = torch.Tensor(mn).to(device)
-
-if use_expanded == True:
-	Ac = np.load(path_to_file + 'Grids/%s_seismic_network_expanders_ver_%d.npz'%(name_of_project, template_ver))['Ac']
-else:
-	Ac = False
-
-
-if use_time_shift == True:
-	# z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
-	# time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
-	time_shifts = x_grids[:,:,[3]]
-	# z.close()
-else:
-	time_shifts = None # np.zeros((x_grids.shape[0], x_grids.shape[1]))
-
-
-# use_spherical = False
-if config['use_spherical'] == True:
-
-	earth_radius = 6371e3
-	ftrns1 = lambda x: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T
-	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius)
-
-	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, e = 0.0, a = earth_radius, device = device) - mn_cuda).T).T
-	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, e = 0.0, a = earth_radius, device = device)
-
-else:
-
-	earth_radius = 6378137.0
-	ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T
-	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)
-
-	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T
-	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device)
 
 
 ## Check for reference catalog
@@ -451,7 +473,10 @@ training_params_2 = [spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_r
 
 ## Training params list 3
 # n_batch = train_config['n_batch']
-dist_range = train_config['dist_range'] # Should be chosen proportional to physical domain size
+
+if (use_variable_domain == False) or (1 == 1):
+	dist_range = train_config['dist_range'] # Should be chosen proportional to physical domain size
+
 max_rate_events = train_config['max_rate_events']
 max_miss_events = train_config['max_miss_events']
 max_false_events = train_config['max_rate_events']*train_config['max_false_events'] # Make max_false_events an absolute value, but it's based on the ratio of the value in the config file times the event rate
@@ -635,7 +660,141 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias = training_params_2
 	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts = training_params_3
 
-	assert(np.floor(n_sta_range[0]*locs.shape[0]) > k_sta_edges)
+	if use_variable_domain == True:
+
+		ichoose_domain = np.random.choice(st_graphs)
+		zfile = np.load(ichoose_domain)
+		# ind_file = int(ichoose_domain.split('/')[-1].split('_')[2])
+
+		ind_file, yr, mo, dy = [int(j) for j in ichoose_domain.strip().split('/')[-1].split('_')[2:6]]
+		# ind_file1 = 
+
+		z = np.load('Picks/%d/%d_%d_%d_ver_%d.npz'%(yr, yr, mo, dy, ind_file))
+		# z = np.load('Domains/domain_slice_%d_ver_1.npz'%ind_file)
+		P_ref = z['P']
+		date = z['date']
+		icorrupt = z['icorrupt']
+		z.close()
+		# date = np.array([int(j) for j in ichoose_domain.split('/')[-1].split('_')[1:4]])
+		kernel_sig_t = zfile['sigma_input']
+		src_x_kernel = zfile['source_label_width']
+		src_t_kernel = zfile['source_label_width_t']
+		src_depth_kernel = zfile['source_label_width']
+		src_x_arv_kernel = zfile['association_label_width']
+		src_t_arv_kernel = zfile['association_label_width_t']
+		# kernel_sig_t = z['association_label_width_t']
+		locs = zfile['locs_use']
+		stas = zfile['stas_use']
+		scale_time = zfile['scale_time']/1000.0
+		time_shift_range = zfile['time_shift_range']
+		lat_range = zfile['lat_range']
+		lon_range = zfile['lon_range']
+		lat_range_extend = zfile['lat_range_extend']
+		lon_range_extend = zfile['lon_range_extend']
+		depth_range = zfile['depth_range']
+		x_grid = zfile['x_grid']
+		depth_boost = zfile['depth_boost']
+		rbest = zfile['rbest']
+		mn = zfile['mn']
+		# zfile.close()
+
+		# z.close()
+
+		# params_extra = [locs, stas, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, rbest, mn, ftrns1, ftrns2] # = params_extra
+
+		# params_extra = [lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, t_win, dt_win, time_shift_range, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, rbest, mn, ftrns1, ftrns2] # = params_extra
+
+
+		# use_adaptive_window = True
+		if use_adaptive_window == True:
+			n_resolution = 9 ## The discretization of the source time function output
+			t_win = np.round(np.copy(np.array([2*src_t_kernel]))[0], 2) ## Set window size to the source kernel width (i.e., prediction window is of length +/- src_t_kernel, or [-src_t_kernel + t0, t0 + src_t_kernel])
+			dt_win = np.diff(np.linspace(-t_win/2.0, t_win/2.0, n_resolution))[0]
+		else:
+			dt_win = 1.0 ## Default version
+			t_win = 10.0
+
+
+		x_grids = np.expand_dims(x_grid, axis = 0)
+
+		x_grids_trv = compute_travel_times(trv, locs, x_grids, device = device)
+
+
+		scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+		offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
+
+		scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
+		offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
+
+		rbest_cuda = torch.Tensor(rbest).to(device)
+		mn_cuda = torch.Tensor(mn).to(device)
+
+		## Can load per sample Ac
+		# if use_expanded == True:
+		# 	Ac = np.load(path_to_file + 'Grids/%s_seismic_network_expanders_ver_%d.npz'%(name_of_project, template_ver))['Ac']
+		# else:
+		# 	Ac = False
+
+		if use_time_shift == True:
+			# z = np.load(path_to_file + 'Grids' + seperator + 'grid_time_shift_ver_1.npz')
+			# time_shifts = z['time_shifts'] ## Shape (n_grids, n_nodes, n_times)
+			time_shifts = x_grids[:,:,[3]]
+			# z.close()
+		else:
+			time_shifts = None # np.zeros((x_grids.shape[0], x_grids.shape[1]))
+
+
+		if use_time_shift == True:
+			for i in range(len(x_grids_trv)):
+				x_grids_trv[i] = x_grids_trv[i] + time_shifts[i].reshape(-1,1,1)
+			# print('Appending time shifts')
+
+
+		time_shift_range = np.max([time_shifts[j].max() - time_shifts[j].min() for j in range(len(time_shifts))])
+
+		max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
+		min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
+
+		for i in range(len(x_grids)):
+			
+			## Note, this definition of dt and win must match the definition used in process_continous_days
+			A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(x_grids_trv[i], k = k_time_edges, max_t = max_t, min_t = min_t, dt = kernel_sig_t/5.0, win = kernel_sig_t*2.0)
+
+			if config['train_travel_time_neural_network'] == False:
+				assert(x_grids_trv[i].min() > 0.0)
+				assert(x_grids_trv[i].max() < (ts_max_val + 3.0))
+
+			x_grids_trv_pointers_p.append(A_edges_time_p)
+			x_grids_trv_pointers_s.append(A_edges_time_s)
+			x_grids_trv_refs.append(dt_partition) # save as cuda tensor, or no?
+
+
+		# use_spherical = False
+		if config['use_spherical'] == True:
+
+			earth_radius = 6371e3
+			ftrns1 = lambda x: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T
+			ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius)
+
+			ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, e = 0.0, a = earth_radius, device = device) - mn_cuda).T).T
+			ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, e = 0.0, a = earth_radius, device = device)
+
+		else:
+
+			earth_radius = 6378137.0
+			ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T
+			ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)
+
+			ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T
+			ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device)
+
+
+
+
+
+	n_sta_range[0] = np.maximum(n_sta_range[0], k_sta_edges/locs.shape[0])
+
+	assert(np.floor(n_sta_range[0]*locs.shape[0]) >= k_sta_edges)
 
 	## Note: this uses a different definition of scale_x and offset_x than the rest of the script (the should really be called scale_x_extend and offset_x_extend to be consistent)
 	## Should update these names and use the correct name throught the rest of this function
@@ -728,14 +887,37 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		src_positions[ifind_match,2] = np.random.rand(len(ifind_match))*(surface_profile[imatch[ifind_match],2] - depth_range[0]) + depth_range[0]
 
 	use_real_data_sample = True if (use_real_data == True)*(np.random.rand() < n_real_fraction) else False
+	if use_real_data_sample == True:
+		if np.abs(dates_calibration - date.reshape(1,-1)).max(1).min() > 0:
+			use_real_data_sample = False
+
+		if icorrupt == True:
+			# icorrupt
+			use_real_data_sample = False
+			assert(len(P_ref) < 10)
+
 
 	if use_real_data_sample == True:
 		# min_magnitude = 2.5
-		ichoose_data = np.random.choice(len(st_calibration))
-		date_choose = dates_calibration[ichoose_data]
-		sdata = st_calibration[ichoose_data]
+
+		if use_variable_domain == False:
+			ichoose_data = np.random.choice(len(st_calibration))
+			date_choose = dates_calibration[ichoose_data]
+			sdata = st_calibration[ichoose_data]
+
+		else:
+			date_choose = np.copy(date)
+			sdata = path_to_file + 'Calibration' + seperator + '%d'%date_choose[0] + seperator + '%s_reference_%d_%d_%d_ver_1.npz'%(name_of_project, date_choose[0], date_choose[1], date_choose[2])
+
+			## Use ichoose_data consistent with the merged graph file
+
 		srcs_known = np.load(sdata)['srcs_ref']
-		P_ref = np.load('Picks/%d/%d_%d_%d_ver_1.npz'%(date_choose[0], date_choose[0], date_choose[1], date_choose[2]))['P']
+
+		if use_variable_domain == True:
+			ikeep_srcs = np.where((srcs_known[:,0] < lat_range[1])*(srcs_known[:,0] > lat_range[0])*(srcs_known[:,1] < lon_range[1])*(srcs_known[:,1] > lon_range[0]))[0]
+			srcs_known = srcs_known[ikeep_srcs]
+
+		# P_ref = np.load('Picks/%d/%d_%d_%d_ver_1.npz'%(date_choose[0], date_choose[0], date_choose[1], date_choose[2]))['P']
 		n_src = len(srcs_known)
 		src_positions = srcs_known[:,0:3]
 		src_magnitude = srcs_known[:,4]
@@ -743,11 +925,27 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		T = P_ref[:,0].max()
 		# z.close()
 
+	if len(src_positions) == 0:
+		src_times = np.array([np.random.rand()*T])
+		n_src = len(src_times)
+		src_positions = np.random.rand(n_src, 3)*scale_x + offset_x
+		src_magnitude = np.random.rand(n_src)*7.0 - 1.0 # magnitudes, between -1.0 and 7 (uniformly)
+
 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
 
 	use_uniform_distance_threshold = False
 	## This previously sampled a uniform distribution by default, now it samples a skewed
 	## distribution of the maximum source-reciever distances allowed for each event.
+
+
+	if use_variable_domain == True:
+		fixed_dist_range = [0.05, 0.5]
+		# min_dist_thresh = 15e3
+		# max_dist_thresh =
+		dist_range = pd(ftrns1(x_grid[:,0:3]), ftrns1(x_grid[:,0:3])) # [x, x1] ## Set dist_range proportional to domain
+		# dist_range = [max(min_dist_thresh, fixed_dist_range[0]*dist_range.max()), fixed_dist_range[1]*dist_range.max()]
+		dist_range = [fixed_dist_range[0]*dist_range.max(), fixed_dist_range[1]*dist_range.max()]
+
 	if use_uniform_distance_threshold == True:
 		dist_thresh = np.random.rand(n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
 	else:
@@ -943,19 +1141,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		print('Converged %d'%inc_pool)
 		# print(inc_pool)
 
-		# for j in range(len(Picks_P_perm)):
-
-		# 	iunique_sta = np.unique(np.concatenate((Picks_P_perm[j][:,1], Picks_S_perm[j][:,1]), axis = 0).astype('int'))
-		# 	embed_features = torch.zeros(len(locs_use)).to(device)
-		# 	embed_features[iunique_sta] = 1.0
-		# 	out_val = scatter(embed_features.reshape(-1,1)[knn_sta_edges[0]], knn_sta_edges[1], dim = 0, dim_size = locs_use.shape[0], reduce = 'sum').cpu().detach().numpy().reshape(-1)
-		# 	# out_val = embed_features.cpu().detach().numpy() - out_val ## If less than or equal to zero, at least one neighbor has a pick
-		# 	iallowed = np.sort(np.array(list(set(iunique_sta).intersection( np.where(out_val >= min_neighbor_picks)[0] ))))
-		# 	if len(iallowed) == 0: iallowed = np.array([-1]).astype('int') ## This catches an empty iallowed
-		# 	tree_allowed = cKDTree(iallowed.reshape(-1,1))
-		# 	if len(Picks_P_perm[j]) > 0: Picks_P_perm[j] = Picks_P_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_P_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_P_perm[j][:,1].astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')]
-		# 	if len(Picks_S_perm[j]) > 0: Picks_S_perm[j] = Picks_S_perm[j][np.array(list(set(np.where(tree_allowed.query(Picks_S_perm[j][:,1].astype('int').reshape(-1,1))[0] == 0)[0]).union(np.where(np.linalg.norm(ftrns1(locs_use[Picks_S_perm[j][:,1].astype('int')]) - ftrns1(srcs_refined[j,:].reshape(1,-1)), axis = 1) <= max_dist[j]*quantile_scale_dist)[0]))).astype('int')]
-
 
 		ikeep_p1, ikeep_p2 = trv_time_p1[ifind1,2].astype('int'), trv_time_p1[ifind1,1].astype('int')
 		ikeep_s1, ikeep_s2 = trv_time_p2[ifind2,2].astype('int'), trv_time_p2[ifind2,1].astype('int')
@@ -995,14 +1180,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		inoise = np.delete(np.arange(len(P_ref)), np.unique(np.concatenate((ip_query1[1][ifind1], ip_query2[1][ifind2]), axis = 0)))
 
 		print('Assigned %d real picks in %d sources (%d average) of all %d picks'%(len(arrivals), len(src_times), (len(arrivals)/len(src_times))/2.0, len(P_ref)))
-
-		# if len(src_times) > 5:
-			# iarg = np.argsort(src_magnitude)[cKDTree(np.logspace(0, 1, 10))]
-		
-
-		# pdb.set_trace()
-
-		# trv_out_pred[:,:,1] = np.nan
 
 
 
@@ -1134,28 +1311,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		arrivals = np.concatenate((arrivals, false_arrivals), axis = 0)	
 
 
-		# pdb.set_trace()
-
-
-		# ip_nearest = []
-
-
-
-		# pdb.set_trace()
-
-		# deg_vals = 
-
-		# trv_times = [trv_teleseism[cKDTree(np.array([100e3, 1.0]).reshape(1,-1)*(xx_teleseism)]]
-
-		## From these source coordinates must estimate travel times to stations (should use interpolation)
-
-
-
-		# src_teleseism = x_base[ifind]
-		# times_teleseism = 
-
-
-
 
 
 	# use_stable_association_labels = True
@@ -1193,10 +1348,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				# pdb.set_trace()
 
 
-			# noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-			# iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
-			# arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
-		
 		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
 			init_phase_type = arrivals[iz[iexcess_noise],4]
 			arrivals[iz[iexcess_noise],2] = -1
@@ -1304,6 +1455,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	st = time.time()
 	tree = cKDTree(arrivals[:,0][:,None])
+
+	## Check use of t_win here - in default mode, this t_win is large?
 	lp = tree.query_ball_point(time_samples.reshape(-1,1) + (max_t - min_t)/2.0 + min_t, r = t_win + (max_t - min_t)/2.0) 
 
 	lp_concat = np.hstack([np.array(list(lp[j])) for j in range(n_batch)]).astype('int')
@@ -1312,13 +1465,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	arrivals_select = arrivals[lp_concat]
 	phase_observed_select = phase_observed[lp_concat]
 
-	# Trv_subset_p = []
-	# Trv_subset_s = []
-	# Station_indices = []
-	# Grid_indices = []
-	# Batch_indices = []
-	# Sample_indices = []
-	# sc = 0
 
 	Trv_subset_p = []
 	Trv_subset_s = []
@@ -1345,16 +1491,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	for i in range(n_batch):
 
-		# if (use_consistency_loss == True)*(np.mod(i, 2) == 1)*(i >= (n_batch - 2*ilen)):
-		# 	i0 = Grid_indices[i - 1] ## Use repeated grid if use_consistency_loss = True
-		# else:
-		# 	i0 = np.random.randint(0, high = len(x_grids))
-
-		# if (use_consistency_loss == True)*(np.mod(i, 2) == 1)*(i >= (n_batch - 2*ilen)):
-		# 	i0 = Grid_indices[i - 1] ## Use repeated grid if use_consistency_loss = True
-		# else:
-		
-		# i0 = np.random.randint(0, high = len(x_grids))
 
 		# i0 = np.random.randint(0, high = len(x_grids))
 		# n_spc = x_grids[i0].shape[0]
@@ -1367,9 +1503,25 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 			n_sta_select = len(np.unique(P_ref[:,1]))
 			ind_sta_select = np.unique(P_ref[:,1]).astype('int')
+			if use_variable_domain == True: 
 
-			if use_fixed_graphs == True:
+				assert(np.abs(ind_sta_select - np.arange(len(locs))).max() == 0)
 
+				i0 = 0
+				ind_sta_select = np.arange(len(locs))
+				n_sta_select = len(ind_sta_select)
+				# A_sta_sta_l.append(np.ascontiguousarray(np.flip(zfile['A_sta'][0:2].astype('int'), axis = 0)))
+				A_sta_sta_l.append(zfile['A_sta'][0:2].astype('int'))
+				A_src_in_sta_l.append(zfile['A_src_in_sta'][0:2].astype('int'))
+				n_spc = x_grids[i0].shape[0]
+				# A_src_src_l.append(np.ascontiguousarray(np.flip(zfile['A_src'][0:2].astype('int'), axis = 0)))
+				A_src_src_l.append(zfile['A_src'][0:2].astype('int'))
+
+			# if use_fixed_graphs
+
+			elif (use_fixed_graphs == True)*(use_variable_domain == False):
+
+				## Kind of slow for every iteration
 				ifile = np.where(['%d_%d_%d'%(date_choose[0], date_choose[1], date_choose[2]) in s for s in st_graphs])[0]
 
 				# ifile = np.random.choice(len(st_graphs))
@@ -1395,13 +1547,32 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 		else:
 
-			if use_fixed_graphs == True:
+
+			if use_variable_domain == True:
+
+				i0 = 0
+				ind_sta_select = np.arange(len(locs))
+				n_sta_select = len(ind_sta_select)
+				A_sta_sta_l.append(zfile['A_sta'][0:2].astype('int'))
+				# z.close()
+
+				# z['ichoose_grid']
+				A_src_in_sta_l.append(zfile['A_src_in_sta'][0:2].astype('int'))
+				n_spc = x_grids[i0].shape[0]
+
+				# z = np.load('Grids/Spatial_graph_%d.npz'%i0)
+				A_src_src_l.append(zfile['A_src'][0:2].astype('int'))				
+
+
+			elif (use_fixed_graphs == True)*(use_variable_domain == False):
 
 				ifile = np.random.choice(len(st_graphs))
 				z = np.load(st_graphs[ifile])
 				ind_sta_select = z['ind_use']
 				n_sta_select = len(ind_sta_select)
-				A_sta_sta_l.append(np.ascontiguousarray(np.flip(z['A_sta'][0:2].astype('int'), axis = 0)))
+				# A_sta_sta_l.append(np.ascontiguousarray(np.flip(z['A_sta'][0:2].astype('int'), axis = 0)))
+				A_sta_sta_l.append(z['A_sta'][0:2].astype('int'), axis = 0) # ))
+
 				# z.close()
 
 				i0 = z['ichoose_grid']
@@ -1409,7 +1580,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				n_spc = x_grids[i0].shape[0]
 
 				# z = np.load('Grids/Spatial_graph_%d.npz'%i0)
-				A_src_src_l.append(np.ascontiguousarray(np.flip(z['A_src'][0:2].astype('int'), axis = 0)))
+				# A_src_src_l.append(np.ascontiguousarray(np.flip(z['A_src'][0:2].astype('int'), axis = 0)))
+				A_src_src_l.append(z['A_src'][0:2].astype('int'), axis = 0)
+
 				z.close()
 
 			else:
@@ -1845,16 +2018,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				lbls_grid = [lbls_grid.cpu().detach().numpy().reshape(-1,1), grad_grid_spc.cpu().detach().numpy(), grad_grid_t.cpu().detach().numpy()]
 				lbls_query = [lbls_query.cpu().detach().numpy().reshape(-1,1), grad_query_spc.cpu().detach().numpy(), grad_query_t.cpu().detach().numpy()]
 
-				# d2 = torch.autograd.grad(inputs = inpt_grad, outputs = pred, grad_outputs = torch_two_vec, retain_graph = True, create_graph = True)[0]
-				# d3 = torch.autograd.grad(inputs = inpt_grad, outputs = pred, grad_outputs = torch_three_vec, retain_graph = True, create_graph = True)[0]
-
-
-			# lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
-			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
-
-			# lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
-			# lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
-		
 		# print('Grad')
 		# print(lbls_grid[-1].shape)
 		# print(lbls_query[-1].shape)
@@ -1866,16 +2029,23 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitude.reshape(-1,1)), axis = 1)
 	data = [arrivals, srcs, active_sources, int(use_real_data_sample)]	## Note: active sources within region are only active_sources[np.where(inside_interior[active_sources] > 0)[0]]
 
+
+	if use_variable_domain == True:
+		params_extra = [locs, stas, lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t, rbest, mn, ftrns1, ftrns2, ftrns1_diff, ftrns2_diff] # = params_extra
+	else:
+		params_extra = None
+
+
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st))
 
 	if (use_expanded == False) or (skip_graphs == True):
 
-		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], params_extra, data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 	else:
 
-		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, [A_src_src_l, Ac_src_src_l], A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, [A_src_in_prod_l, Ac_src_in_prod_l], A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, [A_src_src_l, Ac_src_src_l], A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, [A_src_in_prod_l, Ac_src_in_prod_l], A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], params_extra, data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 
 
@@ -2032,80 +2202,7 @@ class SoftFocalLoss(nn.Module):
 		elif self.reduction == 'sum':
 			return loss.sum()
 		return loss
-
-# class GaussianDiceLoss(nn.Module):
-
-# 	# Start with bg_weight = 1.0
-# 	# If too many false positives → increase bg_weight to 1.5–3.0
-# 	# If missing weak Gaussians → decrease bg_weight to 0.5–0.8
-
-# 	def __init__(self, smooth=1e-5, bg_weight=1.0):
-# 		super().__init__()
-# 		self.smooth = smooth
-# 		self.bg_weight = bg_weight   # usually 1.0, sometimes 0.5–2.0
-
-# 	def forward(self, pred, target):
-# 		# No sigmoid! pred is raw linear output
-# 		pred = pred.float()
-# 		target = target.float()
-
-# 		# intersection = (pred * target).sum(dim=(-2,-1))  # sum over spatial + channel if multi-channel
-# 		# pred_sum = (pred ** 2).sum(dim=(-2,-1))
-# 		# target_sum = (target ** 2).sum(dim=(-2,-1))
-
-# 		intersection = (pred * target).sum(dim=(-1))  # sum over spatial + channel if multi-channel
-# 		pred_sum = (pred ** 2).sum(dim=(-1))
-# 		target_sum = (target ** 2).sum(dim=(-1))
-
-# 		dice = 1 - ((2.0 * intersection + self.smooth) /
-#                     (pred_sum + self.bg_weight * target_sum + self.smooth))
-
-# 		return dice.mean()
-
-## Replacing row wise sum with mean
-# class GaussianDiceLoss(nn.Module):
-
-# 	# Start with bg_weight = 1.0
-# 	# If too many false positives → increase bg_weight to 1.5–3.0
-# 	# If missing weak Gaussians → decrease bg_weight to 0.5–0.8
-
-# 	def __init__(self, smooth=1e-5, bg_weight=1.0):
-# 		super().__init__()
-# 		self.smooth = smooth
-# 		self.bg_weight = bg_weight   # usually 1.0, sometimes 0.5–2.0
-
-# 	def forward(self, pred, target):
-# 		# No sigmoid! pred is raw linear output
-# 		pred = pred.float()
-# 		target = target.float()
-
-# 		# intersection = (pred * target).sum(dim=(-2,-1))  # sum over spatial + channel if multi-channel
-# 		# pred_sum = (pred ** 2).sum(dim=(-2,-1))
-# 		# target_sum = (target ** 2).sum(dim=(-2,-1))
-
-# 		## Assume shape is n_srcs x n_associations (avg. over association axis)
-# 		if pred.shape[1] > 1:
-
-# 			intersection = (pred * target).mean(dim=(-1))  # sum over spatial + channel if multi-channel
-# 			pred_sum = (pred ** 2).mean(dim=(-1))
-# 			target_sum = (target ** 2).mean(dim=(-1))
-
-# 			dice = 1 - ((2.0 * intersection + self.smooth) /
-# 	                    (pred_sum + self.bg_weight * target_sum + self.smooth))
-
-# 			return dice.mean()
-
-# 		## Assume shape is n_src_queries
-# 		else:
-
-# 			intersection = (pred * target).sum()  # sum over spatial + channel if multi-channel
-# 			pred_sum = (pred ** 2).sum()
-# 			target_sum = (target ** 2).sum()
-
-# 			dice = 1 - ((2.0 * intersection + self.smooth) /
-# 	                    (pred_sum + self.bg_weight * target_sum + self.smooth))
-
-# 			return dice # .mean()			
+		
 
 ## Replacing row wise sum with mean
 class GaussianDiceLoss(nn.Module):
@@ -2124,24 +2221,6 @@ class GaussianDiceLoss(nn.Module):
 		pred = pred.float()
 		target = target.float()
 
-		# intersection = (pred * target).sum(dim=(-2,-1))  # sum over spatial + channel if multi-channel
-		# pred_sum = (pred ** 2).sum(dim=(-2,-1))
-		# target_sum = (target ** 2).sum(dim=(-2,-1))
-
-		# ## Assume shape is n_srcs x n_associations (avg. over association axis)
-		# if pred.shape[1] > 1:
-
-		# 	intersection = (pred * target).mean(dim=(-1))  # sum over spatial + channel if multi-channel
-		# 	pred_sum = (pred ** 2).mean(dim=(-1))
-		# 	target_sum = (target ** 2).mean(dim=(-1))
-
-		# 	dice = 1 - ((2.0 * intersection + self.smooth) /
-	    #                 (pred_sum + self.bg_weight * target_sum + self.smooth))
-
-		# 	return dice.mean()
-
-		## Assume shape is n_src_queries
-		# else:
 
 		intersection = (pred * target).sum()/pred.shape[1]  # sum over spatial + channel if multi-channel
 		pred_sum = (pred ** 2).sum()/pred.shape[1]
@@ -2153,179 +2232,93 @@ class GaussianDiceLoss(nn.Module):
 		return dice # .mean()
 
 
-class GaussianDiceLoss1(nn.Module):
-	def __init__(self, smooth=1e-5, bg_weight=1.0):
-		super().__init__()
-		self.smooth = smooth
-		self.bg_weight = bg_weight
+# class GaussianDiceLoss1(nn.Module):
+# 	def __init__(self, smooth=1e-5, bg_weight=1.0):
+# 		super().__init__()
+# 		self.smooth = smooth
+# 		self.bg_weight = bg_weight
 
-	def forward(self, pred, target):
-		# pred, target: (L, K) or (L, 1)
-		# Squeeze the dummy channel if present
-		if pred.ndim == 3 and pred.shape[-1] == 1:
-			pred = pred.squeeze(-1)      # (L,)
-			target = target.squeeze(-1)  # (L,)
+# 	def forward(self, pred, target):
+# 		# pred, target: (L, K) or (L, 1)
+# 		# Squeeze the dummy channel if present
+# 		if pred.ndim == 3 and pred.shape[-1] == 1:
+# 			pred = pred.squeeze(-1)      # (L,)
+# 			target = target.squeeze(-1)  # (L,)
 
-		# Now shape is either (L,) → treat as (L,1) or (L,K)
-		if pred.ndim == 1:
-			pred = pred.unsqueeze(-1)    # (L,1)
-			target = target.unsqueeze(-1)
+# 		# Now shape is either (L,) → treat as (L,1) or (L,K)
+# 		if pred.ndim == 1:
+# 			pred = pred.unsqueeze(-1)    # (L,1)
+# 			target = target.unsqueeze(-1)
 
-		# Critical: mean/sum over spatial dimension only (dim=0)
-		# This makes it invariant to different grid resolutions L
-		intersection = (pred * target).mean(dim=0)   # (K,)
-		pred_sum     = (pred ** 2).mean(dim=0)       # (K,)
-		target_sum   = (target ** 2).mean(dim=0)     # (K,)
+# 		# Critical: mean/sum over spatial dimension only (dim=0)
+# 		# This makes it invariant to different grid resolutions L
+# 		intersection = (pred * target).mean(dim=0)   # (K,)
+# 		pred_sum     = (pred ** 2).mean(dim=0)       # (K,)
+# 		target_sum   = (target ** 2).mean(dim=0)     # (K,)
 
-		numerator   = 2.0 * intersection + self.smooth
-		denominator = pred_sum + self.bg_weight * target_sum + self.smooth
+# 		numerator   = 2.0 * intersection + self.smooth
+# 		denominator = pred_sum + self.bg_weight * target_sum + self.smooth
 
-		per_station_dice = 1.0 - numerator / denominator    # (K,)
-		return per_station_dice.mean()
+# 		per_station_dice = 1.0 - numerator / denominator    # (K,)
+# 		return per_station_dice.mean()
 
 
-class GradientNormBalancer:
-	def __init__(self, losses_names, initial_loss=None, target_norm=1.0):
-		self.names = losses_names
-		self.target_norm = target_norm
-		self.scales = {name: 1.0 for name in losses_names}       # will auto-update
-		self.initial_loss = initial_loss or {}                   # optional warm-up values
+# class GradientNormBalancer:
+# 	def __init__(self, losses_names, initial_loss=None, target_norm=1.0):
+# 		self.names = losses_names
+# 		self.target_norm = target_norm
+# 		self.scales = {name: 1.0 for name in losses_names}       # will auto-update
+# 		self.initial_loss = initial_loss or {}                   # optional warm-up values
         	
-	def update_scales(self, loss_dict):
-		for name in self.names:
-			loss = loss_dict[name]
-			if loss.requires_grad:
-				grad_norm = torch.norm(torch.mean(torch.abs(loss.grad)), p=2) if loss.grad is not None else 0
-				# Or simpler and more common:
-				grad_norm = torch.norm(loss * torch.ones_like(loss), p=2).detach()
+# 	def update_scales(self, loss_dict):
+# 		for name in self.names:
+# 			loss = loss_dict[name]
+# 			if loss.requires_grad:
+# 				grad_norm = torch.norm(torch.mean(torch.abs(loss.grad)), p=2) if loss.grad is not None else 0
+# 				# Or simpler and more common:
+# 				grad_norm = torch.norm(loss * torch.ones_like(loss), p=2).detach()
 
-				target = self.target_norm
-				if name in self.initial_loss:
-					target *= self.initial_loss[name] / loss.item()   # optional homoscedastic boost
+# 				target = self.target_norm
+# 				if name in self.initial_loss:
+# 					target *= self.initial_loss[name] / loss.item()   # optional homoscedastic boost
                 
-				self.scales[name] = self.scales[name] * (target / (grad_norm + 1e-8)).detach()
-				self.scales[name] = torch.clamp(self.scales[name], 0.01, 100.0)  # stability
+# 				self.scales[name] = self.scales[name] * (target / (grad_norm + 1e-8)).detach()
+# 				self.scales[name] = torch.clamp(self.scales[name], 0.01, 100.0)  # stability
 
-	def __call__(self, loss_dict):
-		balanced = 0.0
-		for name, loss in loss_dict.items():
-			balanced += loss * self.scales[name]
-		return balanced
-
-
-class LossMagnitudeBalancer:
-	def __init__(self, anchor='dice', alpha = 0.98):
-		self.anchor = anchor
-		self.values = {}
-		self.scales = {}
-		self.alpha = alpha
-
-	def update(self, losses_dict):
-		for k, v in losses_dict.items():
-			v = v.detach().mean()
-			if k not in self.values:
-				self.values[k] = v
-				self.scales[k] = 1.0
-			else:
-				# EMA of loss magnitude
-				self.values[k] = self.alpha * self.values[k] + (1.0 - self.alpha) * v
-
-		anchor_val = self.values[self.anchor]
-		for k in losses_dict:
-			self.scales[k] = (anchor_val / (self.values[k] + 1e-8)).clamp(0.1, 10.0)
-
-	def __call__(self, losses_dict):
-		self.update(losses_dict)
-		total = sum(losses_dict[k] * self.scales[k] for k in losses_dict)
-		return total
+# 	def __call__(self, loss_dict):
+# 		balanced = 0.0
+# 		for name, loss in loss_dict.items():
+# 			balanced += loss * self.scales[name]
+# 		return balanced
 
 
-# def gaussian_heatmap_loss(pred, target):
+# class LossMagnitudeBalancer:
+# 	def __init__(self, anchor='dice', alpha = 0.98):
+# 		self.anchor = anchor
+# 		self.values = {}
+# 		self.scales = {}
+# 		self.alpha = alpha
 
-#     pos = target >= 0.01
-#     neg = ~pos
-    
-#     if pos.sum() == 0:  # safety
-#         return F.mse_loss(pred, target)
-        
-#     loss_pos = F.smooth_l1_loss(pred[pos], target[pos], beta=0.05, reduction='mean')
-#     loss_neg = F.mse_loss(pred[neg], target[neg], reduction='mean')
-    
-#     return 10.0 * loss_pos + loss_neg
+# 	def update(self, losses_dict):
+# 		for k, v in losses_dict.items():
+# 			v = v.detach().mean()
+# 			if k not in self.values:
+# 				self.values[k] = v
+# 				self.scales[k] = 1.0
+# 			else:
+# 				# EMA of loss magnitude
+# 				self.values[k] = self.alpha * self.values[k] + (1.0 - self.alpha) * v
 
+# 		anchor_val = self.values[self.anchor]
+# 		for k in losses_dict:
+# 			self.scales[k] = (anchor_val / (self.values[k] + 1e-8)).clamp(0.1, 10.0)
 
-# def gaussian_heatmap_regression(pred, target, eps=1e-6):
-# def gaussian_heatmap_loss(pred, target, eps=1e-6):
-#     pos = target >= 0.01
-#     neg = ~pos
-
-#     if not pos.any():
-#         return F.mse_loss(pred, target)
-
-#     # Log-scale positives (Gaussians are exponential tails!)
-#     log_pred_pos = torch.log(pred[pos] + eps)
-#     log_target_pos = torch.log(target[pos] + eps)
-#     loss_pos = F.smooth_l1_loss(log_pred_pos, log_target_pos, beta=0.1)
-
-#     # Negatives: push down gently but consistently
-#     loss_neg = F.mse_loss(pred[neg], target[neg])
-
-#     return 15.0 * loss_pos + 0.8 * loss_neg
+# 	def __call__(self, losses_dict):
+# 		self.update(losses_dict)
+# 		total = sum(losses_dict[k] * self.scales[k] for k in losses_dict)
+# 		return total
 
 
-# def gaussian_regression_loss(pred, target):
-#     pred   = pred.squeeze(-1)
-#     target = target.squeeze(-1)
-#     pos = target >= 0.01
-#     neg = ~pos
-#     loss = 0.0
-#     eps = 1e-6
-
-#     # Positives: log-space Charbonnier (no extra focal needed)
-#     if pos.any():
-#         log_pred = torch.log(pred[pos].clamp(min=eps))
-#         log_tgt  = torch.log(target[pos] + eps)
-#         diff = log_pred - log_tgt
-#         loss += torch.mean(torch.sqrt(diff*diff + 1e-6))   # ← pure Charbonnier
-
-#     # Negatives: mild focal-style background suppression
-#     if neg.any():
-#         residual = pred[neg]
-#         focal_weight = residual.abs().pow(2.0)             # ← γ=2.0
-#         loss += 15.0 * (focal_weight * residual.square()).mean()
-
-#     return loss
-
-# def gaussian_regression_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-#     """
-#     Current SOTA regression loss for raw continuous 4D Gaussian heatmaps.
-#     Used verbatim in 4DGaussians, GaussianTime-v2, MotionGS, etc.
-#     """
-#     pred   = pred.squeeze(-1)
-#     target = target.squeeze(-1)
-
-#     pos = target >= 0.01
-#     neg = ~pos
-
-#     loss = 0.0
-#     eps  = 1e-6
-
-#     # ==================== POSITIVES ====================
-#     if pos.any():
-#         # Log-space Charbonnier — the single best thing discovered in 2024
-#         log_pred = torch.log(pred[pos].clamp(min=eps))
-#         log_tgt  = torch.log(target[pos] + eps)
-#         diff     = log_pred - log_tgt
-#         loss += torch.mean(torch.sqrt(diff*diff + eps))   # ← pure Charbonnier
-
-#     # ==================== NEGATIVES ====================
-#     if neg.any():
-#         residual = pred[neg]
-#         # Focal-style weighting: large false positives get crushed
-#         focal_weight = residual.abs().pow(2.0)            # γ = 2.0
-#         loss += 15.0 * (focal_weight * residual.square()).mean()
-
-#     return loss
 
 # def gaussian_regression_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -2414,876 +2407,117 @@ def gaussian_heatmap_loss_with_cap(
     return loss
 
 
-## Consistency loss
 
-## Initilize consistency loss LPIPS
-# import lpips
-# lpips_fn = lpips.LPIPS(net='vgg', spatial=False).eval().to(device)
-
-# def consistency_loss(pred1, pred2):
-#     # pred1, pred2: [N, 1] or [N, 3] — raw unstructured points
-#     # Just unsqueeze to fake "image" with H=W=1
-#     x1 = pred1.unsqueeze(0).unsqueeze(0)   # [1,1,N,1] → treated as 1×N "image"
+# def consistency_loss1(pred1, pred2):
+#     x1 = pred1.unsqueeze(0).unsqueeze(0)   # [1,1,N,1]
 #     x2 = pred2.unsqueeze(0).unsqueeze(0)
 #     return lpips_fn(x1, x2).mean()
-
-
-# def consistency_loss1(pred1, pred2, coords, k = 11):
-#     # coords: [N, 3] or [N, 4] — same for both
-#     l1 = F.l1_loss(pred1, pred2)
-    
-#     # KNN gradient consistency (requires torch-cluster)
-#     # try:
-#     #  from torch_cluster import knn
-#     idx = knn(coords, coords, k)[:, 1:]  # [N, 10]
-#     grad1 = pred1 - pred1[idx]
-#     grad2 = pred2 - pred2[idx]
-#     grad_cons = F.l1_loss(grad1, grad2)
-#     return l1 + 0.5 * grad_cons
-#     except:
-#         return l1  # fallback
-
-def consistency_loss1(pred1, pred2):
-    x1 = pred1.unsqueeze(0).unsqueeze(0)   # [1,1,N,1]
-    x2 = pred2.unsqueeze(0).unsqueeze(0)
-    return lpips_fn(x1, x2).mean()
 
 # Option B — If LPIPS is too slow/heavy, use plain L1. It's honest and works great.
 def consistency_loss(pred1, pred2):
     return F.l1_loss(pred1, pred2)
 
 
-# def hard_negative_loss(pred_mined, target_mined):
-#     residual = pred_mined.squeeze() - target_mined
-#     gamma    = 3.5                                      # ← 3.0–4.0
-#     weight   = residual.abs().pow(gamma)
-#     return (weight * residual.square()).mean()
-
-
-## Total variation regularization
-
 # Slightly stronger version — also penalize second differences (curvature)
-def tv_loss_2nd_order(pred, coords, w1=0.02, w2=0.005):
-    tv1 = 0.0
-    tv2 = 0.0
-    for dim in [0,1,2]:
-        idx = torch.argsort(coords[:, dim])
-        p = pred[idx].squeeze()
-        d1 = p[1:] - p[:-1]
-        tv1 += d1.abs().mean()
-        if len(d1) > 1:
-            tv2 += (d1[1:] - d1[:-1]).abs().mean()
-    return w1 * tv1 / 3.0 + w2 * tv2 / 3.0
+# def tv_loss_2nd_order(pred, coords, w1=0.02, w2=0.005):
+#     tv1 = 0.0
+#     tv2 = 0.0
+#     for dim in [0,1,2]:
+#         idx = torch.argsort(coords[:, dim])
+#         p = pred[idx].squeeze()
+#         d1 = p[1:] - p[:-1]
+#         tv1 += d1.abs().mean()
+#         if len(d1) > 1:
+#             tv2 += (d1[1:] - d1[:-1]).abs().mean()
+#     return w1 * tv1 / 3.0 + w2 * tv2 / 3.0
 
 
-# def hard_negative_mining_loss(pred_mined, target_mined=0.0):
-#     residual = pred_mined.squeeze() - target_mined
-#     residual = residual.clamp(min=0.0)          # we only care about positive floaters
+# class LossAccumulationBalancer1: # TwoTier
 
-#     gamma = 3.8                                 # 3.5–4.0 is the sweet spot
-#     focal_weight = residual.pow(gamma)          # super-quadratic / cubic / quartic
-#     loss = focal_weight * residual.square()     # still multiply by r² for scale-invariance
+# 	def __init__(self, anchor = 'loss_dice2', accum_steps = 10, aux_target = 0.018, alpha = 0.98, primary_ext = 'loss_dice', device = device):
 
-#     return loss.mean()
-
-## Focal loss
-
-# def continuous_focal_loss(
-#     pred,           # [N,1] or [N] – raw unbounded continuous values
-#     target,         # [N,1] or [N] – ground-truth continuous Gaussian values
-#     pos_thresh=0.01,
-#     gamma_pos=0.5,      # <1.0 → down-weights easy positives
-#     gamma_neg=2.0,      # >1.0 → up-weights hard false positives
-#     lambda_neg=15.0,
-#     eps=1e-6
-# ):
-#     pred = pred.squeeze()
-#     target = target.squeeze()
-
-#     # Split pos/neg exactly like you already do
-#     pos = target >= pos_thresh
-#     neg = ~pos
-
-#     loss = 0.0
-
-#     # Positive regions: log-space Charbonnier (best convergence in practice)
-#     if pos.any():
-#         # Work in log space to handle large dynamic range of Gaussians
-#         log_pred = torch.log(pred[pos].clamp(min=eps))
-#         log_tgt  = torch.log(target[pos] + eps)
-#         diff = log_pred - log_tgt
-#         loss_pos = torch.sqrt(diff*diff + 1e-6)               # Charbonnier
-#         # Optional focal weighting on positives
-#         loss_pos = loss_pos * (1.0 + diff.abs()).pow(-gamma_pos)
-#         loss += loss_pos.mean()
-
-#     # Negative regions: push down hard on false positives, gently on tiny residuals
-#     if neg.any():
-#         residual = pred[neg]
-#         # Classic focal-style weighting without sigmoid
-#         focal_weight = (residual.abs() + eps).pow(gamma_neg - 1.0)   # higher γ → more focus on large errors
-#         loss_neg = focal_weight * residual.square()
-#         loss += lambda_neg * loss_neg.mean()
-
-#     return loss
-
-
-
-
-
-
-# class LossAccumulationBalancer:
-
-#     def __init__(self, accum_steps, anchor_head = 'dice', alpha=0.98):
-#         self.accum_steps = accum_steps
-#         self.alpha = alpha
-#         self.values = {}
-#         self.anchor = anchor_head
-
-#     def __call__(self, losses_dict):
-
-#         total = 0.0
-#         anchor_val = None
-
-#         for name, loss in losses_dict.items():
-#             val = loss.detach().mean().item()
-#             if name not in self.values:
-#                 self.values[name] = val * self.accum_steps   # bootstrap
-#             else:
-#                 self.values[name] = (self.alpha * self.values[name] + 
-#                                    (1 - self.alpha) * val * self.accum_steps)
-#             if name == self.anchor:
-#                 anchor_val = self.values[name]
-
-#         if anchor_val is None:
-#             anchor_val = next(iter(self.values.values()))
-
-#         for name, loss in losses_dict.items():
-#             scale = anchor_val / (self.values[name] + 1e-8)
-#             total += loss * scale.clamp(0.1, 100.0)
-
-#         return total
-
-# class LossAccumulationTwoTierBalancer:
-# 	def __init__(self, accum_steps=8, alpha=0.99):
 # 		self.accum_steps = accum_steps
 # 		self.alpha = alpha
-        
-# 		self.primary_ema = {}    # only the 4 dice_* losses
-# 		self.aux_ema     = {}    # consistency, hardneg, temporal, etc.
-        
-# 		self.primary_target = 0.15   # what one primary head should contribute
-# 		self.aux_target     = 0.018  # ≈ 0.12× primary (tune this once: 0.01–0.03 range)
+
+# 		self.primary_ema = {}   # only dice_0, dice_1, dice_2, dice_3
+# 		self.aux_ema     = {}   # consistency, hardneg_*, etc.
+# 		self.primary_ext = primary_ext
+
+# 		self.device = device
+# 		self.anchor_head = anchor         # ← your rarest / hardest head
+# 		self.aux_target  = aux_target             # total aux contribution ≈ 0.018
+# 		                                     # (0.10–0.15× one primary head)
 
 # 	def __call__(self, losses_dict):
+
 # 		total = 0.0
+# 		anchor_val = None
 
-# 		# === 1. Update EMAs ===
+# 		# 1. Update EMAs (full-batch equivalent)
 # 		for name, loss in losses_dict.items():
-# 			val = loss.detach().mean().item() * self.accum_steps   # full-batch equivalent
+# 			val = loss.detach().mean().item() * self.accum_steps
 
-# 			if name.startswith('dice_'):
+# 			if name.startswith(self.primary_ext):
 # 				if name not in self.primary_ema:
 # 					self.primary_ema[name] = val
 # 				else:
 # 					self.primary_ema[name] = self.alpha * self.primary_ema[name] + (1-self.alpha) * val
-
+# 				if name == self.anchor_head:
+# 					anchor_val = self.primary_ema[name]
+				    
 # 			else:  # auxiliary
 # 				if name not in self.aux_ema:
 # 					self.aux_ema[name] = val
 # 				else:
 # 					self.aux_ema[name] = self.alpha * self.aux_ema[name] + (1-self.alpha) * val
 
-# 		# === 2. Compute scales ===
-# 		# Primary: balance against each other → rare head gets high scale
-# 		primary_anchor = max(self.primary_ema.values())  # or your known hardest head
-# 		for name, loss in losses_dict.items():
-# 			if name.startswith('dice_'):
-# 				ema_val = self.primary_ema[name]
-# 				scale = self.primary_target * len(self.primary_ema) / (ema_val + 1e-8)
-# 				# equivalent to: primary_anchor / ema_val * (primary_target/primary_anchor)*4
-# 			else:
-# 				ema_val = self.aux_ema[name]
-# 				scale = self.aux_target / (ema_val + 1e-8)
+# 		# If anchor not seen yet, fall back
+# 		if anchor_val is None:
+# 			anchor_val = max(self.primary_ema.values(), default=0.1)
 
-# 			scale = scale.clamp(0.05, 500.0)
+# 		# 2. Apply scales
+# 		for name, loss in losses_dict.items():
+
+# 			if name.startswith(self.primary_ext):
+# 				# Anchor-based: rarest head gets scale ≈ 1.0
+# 				ema_val = self.primary_ema[name]
+# 				scale = torch.tensor(anchor_val / (ema_val + 1e-8), device = self.device)
+# 				scale = scale.clamp(0.1, 300.0)
+
+# 			else:
+
+# 				# Target-based: all aux together contribute ~aux_target
+# 				ema_val = self.aux_ema[name]
+# 				scale = torch.tensor(self.aux_target / (len(self.aux_ema) * (ema_val + 1e-8)), device = self.device)
+# 				# or: scale = self.aux_target / (ema_val + 1e-8) if you have one global aux
+# 				scale = scale.clamp(0.01, 50.0) # scale = 0.06 * anchor_val / (ema_val + 1e-8)   # aux ≈ 6% of anchor head
+
 # 			total += loss * scale
 
 # 		return total
-
-class LossAccumulationBalancer1: # TwoTier
-
-	def __init__(self, anchor = 'loss_dice2', accum_steps = 10, aux_target = 0.018, alpha = 0.98, primary_ext = 'loss_dice', device = device):
-
-		self.accum_steps = accum_steps
-		self.alpha = alpha
-
-		self.primary_ema = {}   # only dice_0, dice_1, dice_2, dice_3
-		self.aux_ema     = {}   # consistency, hardneg_*, etc.
-		self.primary_ext = primary_ext
-
-		self.device = device
-		self.anchor_head = anchor         # ← your rarest / hardest head
-		self.aux_target  = aux_target             # total aux contribution ≈ 0.018
-		                                     # (0.10–0.15× one primary head)
-
-	def __call__(self, losses_dict):
-
-		total = 0.0
-		anchor_val = None
-
-		# 1. Update EMAs (full-batch equivalent)
-		for name, loss in losses_dict.items():
-			val = loss.detach().mean().item() * self.accum_steps
-
-			if name.startswith(self.primary_ext):
-				if name not in self.primary_ema:
-					self.primary_ema[name] = val
-				else:
-					self.primary_ema[name] = self.alpha * self.primary_ema[name] + (1-self.alpha) * val
-				if name == self.anchor_head:
-					anchor_val = self.primary_ema[name]
-				    
-			else:  # auxiliary
-				if name not in self.aux_ema:
-					self.aux_ema[name] = val
-				else:
-					self.aux_ema[name] = self.alpha * self.aux_ema[name] + (1-self.alpha) * val
-
-		# If anchor not seen yet, fall back
-		if anchor_val is None:
-			anchor_val = max(self.primary_ema.values(), default=0.1)
-
-		# 2. Apply scales
-		for name, loss in losses_dict.items():
-
-			if name.startswith(self.primary_ext):
-				# Anchor-based: rarest head gets scale ≈ 1.0
-				ema_val = self.primary_ema[name]
-				scale = torch.tensor(anchor_val / (ema_val + 1e-8), device = self.device)
-				scale = scale.clamp(0.1, 300.0)
-
-			else:
-
-				# Target-based: all aux together contribute ~aux_target
-				ema_val = self.aux_ema[name]
-				scale = torch.tensor(self.aux_target / (len(self.aux_ema) * (ema_val + 1e-8)), device = self.device)
-				# or: scale = self.aux_target / (ema_val + 1e-8) if you have one global aux
-				scale = scale.clamp(0.01, 50.0) # scale = 0.06 * anchor_val / (ema_val + 1e-8)   # aux ≈ 6% of anchor head
-
-			total += loss * scale
-
-		return total
 	
-	def state_dict(self):
-		return {
-			'accum_steps': self.accum_steps,
-			'alpha': self.alpha,
-			'primary_ema': self.primary_ema,
-			'aux_ema': self.aux_ema,
-			'primary_ext': self.primary_ext,
-			'anchor_head': self.anchor_head,
-			'aux_target': self.aux_target,
-			# device is not saved – will be set on load
-		}
+# 	def state_dict(self):
+# 		return {
+# 			'accum_steps': self.accum_steps,
+# 			'alpha': self.alpha,
+# 			'primary_ema': self.primary_ema,
+# 			'aux_ema': self.aux_ema,
+# 			'primary_ext': self.primary_ext,
+# 			'anchor_head': self.anchor_head,
+# 			'aux_target': self.aux_target,
+# 			# device is not saved – will be set on load
+# 		}
+
+# 	def load_state_dict(self, state_dict, device='cpu'):
+# 		self.accum_steps = state_dict['accum_steps']
+# 		self.alpha = state_dict['alpha']
+# 		self.primary_ema = state_dict['primary_ema']
+# 		self.aux_ema = state_dict['aux_ema']
+# 		self.primary_ext = state_dict['primary_ext']
+# 		self.anchor_head = state_dict['anchor_head']
+# 		self.aux_target = state_dict['aux_target']
+# 		self.device = device  # update device on load
 
-	def load_state_dict(self, state_dict, device='cpu'):
-		self.accum_steps = state_dict['accum_steps']
-		self.alpha = state_dict['alpha']
-		self.primary_ema = state_dict['primary_ema']
-		self.aux_ema = state_dict['aux_ema']
-		self.primary_ext = state_dict['primary_ext']
-		self.anchor_head = state_dict['anchor_head']
-		self.aux_target = state_dict['aux_target']
-		self.device = device  # update device on load
-
-
-
-# class LossAccumulationBalancer:
-#     def __init__(
-#         self,
-#         anchor: str = 'loss_dice4',
-#         aux_target: float = 0.018,
-#         alpha: float = 0.98,
-#         primary_ext: str = 'loss_dice',
-#         device: str = 'cuda'
-#     ):
-#         self.anchor = anchor
-#         self.aux_target = aux_target
-#         self.alpha = alpha
-#         self.primary_ext = primary_ext
-#         self.device = device
-
-#         self.primary_ema = {}
-#         self.aux_ema = {}
-
-#         # === Accumulation state ===
-#         self._accum_prim = {}   # temporary sum over accum_steps
-#         self._accum_aux  = {}
-#         self._step_count = 0
-#         self.accum_steps = None   # will be set on first call
-
-#     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
-#         """
-#         Call this on every microbatch.
-#         Set is_last_accum_step=True on the final accum step (before optimizer.step()).
-#         """
-#         if accum_steps is not None:
-#             self.accum_steps = accum_steps
-
-#         total_loss = 0.0
-
-#         # --------------------------------------------------
-#         # 1. Accumulate raw loss values (microbatch → full batch)
-#         # --------------------------------------------------
-#         for name, loss in losses_dict.items():
-#             val = loss.detach().mean()   # keep as tensor for now
-
-#             if name.startswith(self.primary_ext):
-#                 if name not in self._accum_prim:
-#                     self._accum_prim[name] = val
-#                 else:
-#                     self._accum_prim[name] = self._accum_prim[name] + val
-#             else:
-#                 if name not in self._accum_aux:
-#                     self._accum_aux[name] = val
-#                 else:
-#                     self._accum_aux[name] = self._accum_aux[name] + val
-
-#         self._step_count += 1
-
-#         # --------------------------------------------------
-#         # 2. On the last accum step → update EMA with full-batch stats
-#         # --------------------------------------------------
-#         if is_last_accum_step or (self._step_count == self.accum_steps):
-#             # Average over accum_steps to get true batch magnitude
-#             anchor_ema = None
-
-#             for name, accum_val in self._accum_prim.items():
-#                 batch_val = (accum_val / self.accum_steps).item()
-
-#                 if name not in self.primary_ema:
-#                     self.primary_ema[name] = batch_val
-#                 else:
-#                     self.primary_ema[name] = (
-#                         self.alpha * self.primary_ema[name] +
-#                         (1 - self.alpha) * batch_val
-#                     )
-#                 if name == self.anchor:
-#                     anchor_ema = self.primary_ema[name]
-
-#             for name, accum_val in self._accum_aux.items():
-#                 batch_val = (accum_val / self.accum_steps).item()
-#                 if name not in self.aux_ema:
-#                     self.aux_ema[name] = batch_val
-#                 else:
-#                     self.aux_ema[name] = (
-#                         self.alpha * self.aux_ema[name] +
-#                         (1 - self.alpha) * batch_val
-#                     )
-
-#             # Reset accumulators
-#             self._accum_prim.clear()
-#             self._accum_aux.clear()
-#             self._step_count = 0
-
-#             # Fallback anchor
-#             if anchor_ema is None:
-#                 anchor_ema = max(self.primary_ema.values(), default=0.1)
-
-#         # --------------------------------------------------
-#         # 3. Apply scaling (using latest EMA, even mid-accumulation)
-#         # --------------------------------------------------
-#         # We still scale every microbatch — that's fine and necessary
-#         for name, loss in losses_dict.items():
-#             if name.startswith(self.primary_ext):
-#                 ema = self.primary_ema.get(name, 1.0)  # fallback early
-#                 scale = anchor_ema / (ema + 1e-8)
-#                 scale = scale.clamp(0.1, 300.0)
-#             else:
-#                 ema = self.aux_ema.get(name, 1.0)
-#                 scale = self.aux_target / (len(self.aux_ema) * (ema + 1e-8) if self.aux_ema else 1.0)
-#                 scale = scale.clamp(0.01, 50.0)
-
-#             total_loss += scale * loss
-
-#         return total_loss
-
-
-## Primary balancer
-
-# class LossAccumulationBalancer:
-#     def __init__(
-#         self,
-#         anchor: str = 'loss_dice4',
-#         aux_target: float = 0.05,
-#         alpha: float = 0.98,
-#         primary_ext: str = 'loss_dice',
-#         device: str = 'cuda'
-#     ):
-#         # aux_target: float = 0.018,
-
-#         self.anchor = anchor
-#         self.aux_target = aux_target
-#         self.alpha = alpha
-#         self.primary_ext = primary_ext
-#         self.device = device
-
-#         self.primary_ema = {}
-#         self.aux_ema = {}
-
-#         # self.register_buffer('_anchor_ema_current', torch.tensor(0.0))
-
-#         # === Persistent state ===
-#         self._anchor_ema_current = None      # ← this holds the latest known value
-#         self._accum_prim = {}
-#         self._accum_aux  = {}
-#         self._step_count = 0
-#         self.accum_steps = None
-
-#     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
-#         if accum_steps is not None:
-#             self.accum_steps = accum_steps
-
-#         total_loss = 0.0
-
-#         # --------------------------------------------------
-#         # 1. Accumulate microbatch statistics
-#         # --------------------------------------------------
-#         for name, loss in losses_dict.items():
-#             val = loss.detach().mean()
-
-#             if name.startswith(self.primary_ext):
-#                 self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
-#             else:
-#                 self._accum_aux[name] = self._accum_aux.get(name, 0.0) + val
-
-#         self._step_count += 1
-
-#         # --------------------------------------------------
-#         # 2. On last accum step → update EMA with full-batch stats
-#         # --------------------------------------------------
-#         updated = False
-#         if is_last_accum_step or (self.accum_steps is not None and self._step_count >= self.accum_steps):
-#             updated = True
-
-#             # Compute full-batch averages
-#             denom = self.accum_steps or self._step_count
-#             anchor_ema_new = None
-
-#             for name, accum_val in self._accum_prim.items():
-#                 batch_val = (accum_val / denom).item()
-
-#                 if name not in self.primary_ema:
-#                     self.primary_ema[name] = batch_val
-#                 else:
-#                     self.primary_ema[name] = (
-#                         self.alpha * self.primary_ema[name] +
-#                         (1 - self.alpha) * batch_val
-#                     )
-#                 if name == self.anchor:
-#                     anchor_ema_new = self.primary_ema[name]
-
-#             for name, accum_val in self._accum_aux.items():
-#                 batch_val = (accum_val / denom).item()
-#                 if name not in self.aux_ema:
-#                     self.aux_ema[name] = batch_val
-#                 else:
-#                     self.aux_ema[name] = (
-#                         self.alpha * self.aux_ema[name] +
-#                         (1 - self.alpha) * batch_val
-#                     )
-
-#             # Update the persistent anchor value
-#             if anchor_ema_new is not None:
-#                 self._anchor_ema_current = anchor_ema_new
-#             elif self._anchor_ema_current is None and self.primary_ema:
-#                 # Fallback: use max of existing primary EMAs
-#                 self._anchor_ema_current = max(self.primary_ema.values())
-
-#             # Reset accumulators
-#             self._accum_prim.clear()
-#             self._accum_aux.clear()
-#             self._step_count = 0
-
-#         # --------------------------------------------------
-#         # 3. Scale losses using the latest known anchor_ema
-#         # --------------------------------------------------
-#         # Safe fallback chain:
-#         if self._anchor_ema_current is None:
-#             # First forward pass ever → assume reasonable default
-#             anchor_val = 0.5
-#         else:
-#             anchor_val = self._anchor_ema_current
-
-#         for name, loss in losses_dict.items():
-#             if name.startswith(self.primary_ext):
-#                 ema = self.primary_ema.get(name, 1.0)
-#                 scale = torch.tensor(anchor_val / (ema + 1e-8), device = self.device)
-#                 scale = scale.clamp(0.1, 300.0)
-#             else:
-#                 ema = self.aux_ema.get(name, 1.0)
-#                 n_aux = max(len(self.aux_ema), 1)
-#                 scale = torch.tensor(self.aux_target / (n_aux * (ema + 1e-8)), device = self.device)
-#                 scale = scale.clamp(0.01, 50.0)
-
-#             total_loss += scale * loss
-
-#         return total_loss
-
-#     def state_dict(self):
-#         return {
-#             'anchor': self.anchor,
-#             'aux_target': self.aux_target,
-#             'alpha': self.alpha,
-#             'primary_ext': self.primary_ext,
-#             'accum_steps': self.accum_steps,
-#             'primary_ema': self.primary_ema,
-#             'aux_ema': self.aux_ema,
-#             '_anchor_ema_current': self._anchor_ema_current,
-#         }
-
-#     def load_state_dict(self, state_dict, device=None):
-#         self.anchor = state_dict['anchor']
-#         self.aux_target = state_dict['aux_target']
-#         self.alpha = state_dict['alpha']
-#         self.primary_ext = state_dict['primary_ext']
-#         self.accum_steps = state_dict.get('accum_steps', None)
-
-#         self.primary_ema = state_dict['primary_ema']
-#         self.aux_ema = state_dict['aux_ema']
-#         self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
-
-#         if device is not None:
-#             self.device = device
-
-#         # Reset transient accumulators (always!)
-#         self._accum_prim = {}
-#         self._accum_aux = {}
-#         self._step_count = 0
-
-        # self.anchor = anchor
-        # self.aux_target = aux_target
-        # self.alpha = alpha
-        # self.primary_ext = primary_ext
-        # self.device = device
-
-        # self.primary_ema = {}
-        # self.aux_ema = {}
-
-        # # === Persistent state ===
-        # self._anchor_ema_current = None      # ← this holds the latest known value
-        # self._accum_prim = {}
-        # self._accum_aux  = {}
-        # self._step_count = 0
-        # self.accum_steps = None
-
-
-from collections import defaultdict
-
-## Version before adding counter
-# class LossAccumulationBalancer:
-#     def __init__(
-#         self,
-#         anchor: str = 'loss_dice3',
-#         group_targets: dict = None,      # ← NEW: replaces aux_target
-#         alpha: float = 0.98,
-#         primary_ext: str = 'loss_dice',
-#         device: str = 'cuda'
-#     ):
-#         self.anchor = anchor
-#         self.alpha = alpha
-#         self.primary_ext = primary_ext
-#         self.device = device
-
-#         # === NEW: flexible group targets ===
-#         if group_targets is None:
-#             # fallback to old behaviour
-#             group_targets = {'primary': 1.0, 'aux': 0.02}
-#         self.group_targets = group_targets                  # e.g. {'regression': 0.03, 'mining': 0.02}
-#         self.default_group = 'aux' if 'aux' in group_targets else list(group_targets.keys())[1]
-
-#         # === Persistent state (unchanged) ===
-#         self.primary_ema = {}
-#         self.aux_ema = defaultdict(dict)  # aux_ema[group][loss_name] = value
-#         self._anchor_ema_current = None
-#         self._accum_prim = {}
-#         self._accum_aux = defaultdict(lambda: {})   # _accum_aux[group][name] = sum
-#         self._step_count = 0
-#         self.accum_steps = None
-
-#     # def _get_group(self, name: str) -> str:
-#     #     """Map loss name → group. Primary is anything starting with primary_ext."""
-#     #     if name.startswith(self.primary_ext):
-#     #         return 'primary'
-#     #     # Match exact group prefixes you define, longest first
-#     #     for group in sorted(self.group_targets.keys(), key=len, reverse=True):
-#     #         if group != 'primary' and name.startswith(group):   # e.g. 'consistency_', 'mining_'
-#     #             return group
-#     #     return self.default_group  # fallback
-
-#     def _get_group(self, name: str) -> str:
-#         if name.startswith(self.primary_ext):          # e.g. "loss_dice"
-#             return 'primary'
-
-#         # ← tries to match any group key you put in group_targets
-#         for group in sorted(self.group_targets.keys(), key=len, reverse=True):
-#             if group != 'primary' and name.startswith(group):
-#                 return group
-
-#         # ← fallback if nothing matched
-#         return 'aux'                                    # ← this is the default catch-all
-
-#     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
-#         if accum_steps is not None:
-#             self.accum_steps = accum_steps
-
-#         total_loss = 0.0
-
-#         # --------------------------------------------------
-#         # 1. Accumulate microbatch statistics → now per group
-#         # --------------------------------------------------
-#         for name, loss in losses_dict.items():
-#             val = loss.detach().mean().item()
-#             group = self._get_group(name)
-#             if group == 'primary':
-#                 self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
-#             else:
-#                 self._accum_aux[group][name] = self._accum_aux[group].get(name, 0.0) + val
-
-#         self._step_count += 1
-
-#         # --------------------------------------------------
-#         # 2. On last accum step → update EMAs
-#         # --------------------------------------------------
-#         updated = False
-#         if is_last_accum_step or (self.accum_steps and self._step_count >= self.accum_steps):
-#             updated = True
-#             denom = self.accum_steps or self._step_count
-
-#             # Primary EMA update
-#             anchor_ema_new = None
-#             for name, accum_val in self._accum_prim.items():
-#                 batch_val = accum_val / denom
-#                 if name not in self.primary_ema:
-#                     self.primary_ema[name] = batch_val
-#                 else:
-#                     self.primary_ema[name] = self.alpha * self.primary_ema[name] + (1 - self.alpha) * batch_val
-#                 if name == self.anchor:
-#                     anchor_ema_new = self.primary_ema[name]
-
-#             # Auxiliary EMA update (per group)
-#             for group, accum_dict in self._accum_aux.items():
-#                 for name, accum_val in accum_dict.items():
-#                     batch_val = accum_val / denom
-#                     ema_dict = self.aux_ema[group]
-#                     if name not in ema_dict:
-#                         ema_dict[name] = batch_val
-#                     else:
-#                         ema_dict[name] = self.alpha * ema_dict[name] + (1 - self.alpha) * batch_val
-
-#             if anchor_ema_new is not None:
-#                 self._anchor_ema_current = anchor_ema_new
-#             elif self._anchor_ema_current is None and self.primary_ema:
-#                 self._anchor_ema_current = max(self.primary_ema.values())
-
-#             # Reset accumulators
-#             self._accum_prim.clear()
-#             for d in self._accum_aux.values():
-#                 d.clear()
-#             self._step_count = 0
-
-#         # --------------------------------------------------
-#         # 3. Scale losses using latest anchor
-#         # --------------------------------------------------
-#         anchor_val = self._anchor_ema_current if self._anchor_ema_current is not None else 0.5
-
-#         for name, loss in losses_dict.items():
-#             group = self._get_group(name)
-
-#             if group == 'primary':
-#                 ema = self.primary_ema.get(name, 1.0)
-#                 scale = torch.tensor(anchor_val / (ema + 1e-8), device = self.device)
-#                 scale = scale.clamp(0.1, 300.0)
-#             else:
-#                 # One EMA dict per group
-#                 ema_dict = self.aux_ema[group]
-#                 ema = ema_dict.get(name, 1.0)
-#                 n_losses_in_group = max(len(ema_dict), 1)
-#                 target = self.group_targets[group]
-#                 scale = torch.tensor(target * anchor_val / (n_losses_in_group * (ema + 1e-8)), device = self.device)
-#                 scale = scale.clamp(0.01, 100.0)
-
-#             total_loss += scale * loss
-
-#         return total_loss
-
-#     # state_dict / load_state_dict → just add the new fields
-#     def state_dict(self):
-#         return {
-#             'anchor': self.anchor,
-#             'group_targets': self.group_targets,      # ← new
-#             'alpha': self.alpha,
-#             'primary_ext': self.primary_ext,
-#             'accum_steps': self.accum_steps,
-#             'primary_ema': self.primary_ema,
-#             'aux_ema': dict(self.aux_ema),             # convert defaultdict → dict
-#             '_anchor_ema_current': self._anchor_ema_current,
-#         }
-
-#     def load_state_dict(self, state_dict, device=None):
-#         self.anchor = state_dict['anchor']
-#         self.group_targets = state_dict.get('group_targets', {'primary': 1.0, 'aux': 0.05})
-#         self.alpha = state_dict['alpha']
-#         self.primary_ext = state_dict['primary_ext']
-#         self.accum_steps = state_dict.get('accum_steps', None)
-#         self.primary_ema = state_dict['primary_ema']
-#         self.aux_ema = defaultdict(dict, state_dict.get('aux_ema', {}))
-#         self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
-#         if device:
-#             self.device = device
-#         self._accum_prim.clear()
-#         for d in self._accum_aux.values():
-#             d.clear()
-#         self._step_count = 0
-
-
-# class LossAccumulationBalancer:
-#     def __init__(self,
-#         anchor: str = 'loss_dice3',
-#         group_targets: dict = None,      # ← NEW: replaces aux_target
-#         alpha: float = 0.98,
-#         primary_ext: str = 'loss_dice',
-#         device: str = 'cuda'       
-#         self._participation = {}        # NEW: name → how many microbatches had this loss
-#         self._participation_aux = defaultdict(dict)  # group → name → count
-#         ):
-
-#     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
-#         if accum_steps is not None:
-#             self.accum_steps = accum_steps
-
-#         total_loss = 0.0
-
-#         # --------------------------------------------------
-#         # 1. Accumulate values + participation
-#         # --------------------------------------------------
-#         for name, loss in losses_dict.items():
-#             val = loss.detach().mean().item()
-#             group = self._get_group(name)
-
-#             # Increment participation counter
-#             if group == 'primary':
-#                 self._participation[name] = self._participation.get(name, 0) + 1
-#                 self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
-#             else:
-#                 self._participation_aux[group][name] = self._participation_aux[group].get(name, 0) + 1
-#                 self._accum_aux[group][name] = self._accum_aux[group].get(name, 0.0) + val
-
-#         self._step_count += 1
-
-#         # --------------------------------------------------
-#         # 2. On last accum step → update EMAs with correct counts
-#         # --------------------------------------------------
-#         updated = False
-#         if is_last_accum_step or (self.accum_steps and self._step_count >= self.accum_steps):
-#             updated = True
-
-#             # Primary losses
-#             anchor_ema_new = None
-#             for name, accum_val in self._accum_prim.items():
-#                 n = self._participation.get(name, 1)           # ← actual number of times seen
-#                 batch_val = accum_val / n                      # ← correct average!
-#                 if name not in self.primary_ema:
-#                     self.primary_ema[name] = batch_val
-#                 else:
-#                     self.primary_ema[name] = (
-#                         self.alpha * self.primary_ema[name] + (1 - self.alpha) * batch_val
-#                     )
-#                 if name == self.anchor:
-#                     anchor_ema_new = self.primary_ema[name]
-
-#             # Auxiliary losses (per group)
-#             for group, accum_dict in self._accum_aux.items():
-#                 for name, accum_val in accum_dict.items():
-#                     n = self._participation_aux[group].get(name, 1)
-#                     batch_val = accum_val / n
-#                     ema_dict = self.aux_ema[group]
-#                     if name not in ema_dict:
-#                         ema_dict[name] = batch_val
-#                     else:
-#                         ema_dict[name] = self.alpha * ema_dict[name] + (1 - self.alpha) * batch_val
-
-#             if anchor_ema_new is not None:
-#                 self._anchor_ema_current = anchor_ema_new
-#             elif self._anchor_ema_current is None and self.primary_ema:
-#                 self._anchor_ema_current = max(self.primary_ema.values())
-
-#             # Reset everything
-#             self._accum_prim.clear()
-#             self._accum_aux.clear()
-#             self._participation.clear()
-#             self._participation_aux.clear()
-#             self._step_count = 0
-
-#         # --------------------------------------------------
-#         # 3. Scale losses (unchanged logic)
-#         # --------------------------------------------------
-#         anchor_val = self._anchor_ema_current if self._anchor_ema_current is not None else 0.5
-
-#         for name, loss in losses_dict.items():
-#             group = self._get_group(name)
-#             if group == 'primary':
-#                 ema = self.primary_ema.get(name, 1.0)
-#                 scale = torch.tensor(anchor_val / (ema + 1e-8), device=self.device)
-#                 scale = scale.clamp(0.1, 300.0)
-#             else:
-#                 ema_dict = self.aux_ema[group]
-#                 ema = ema_dict.get(name, 1.0)
-#                 n_losses = max(len(ema_dict), 1)
-#                 target = self.group_targets[group]
-#                 scale = torch.tensor(
-#                     target * anchor_val / (n_losses * (ema + 1e-8)),
-#                     device=self.device
-#                 )
-#                 scale = scale.clamp(0.01, 100.0)
-
-#             total_loss += scale * loss
-
-#         return total_loss
-
-#     # state_dict / load_state_dict → just add the new fields
-#     def state_dict(self):
-#         return {
-#             'anchor': self.anchor,
-#             'group_targets': self.group_targets,      # ← new
-#             'alpha': self.alpha,
-#             'primary_ext': self.primary_ext,
-#             'accum_steps': self.accum_steps,
-#             'primary_ema': self.primary_ema,
-#             'aux_ema': dict(self.aux_ema),             # convert defaultdict → dict
-#             '_anchor_ema_current': self._anchor_ema_current,
-#         }
-
-#     def load_state_dict(self, state_dict, device=None):
-#         self.anchor = state_dict['anchor']
-#         self.group_targets = state_dict.get('group_targets', {'primary': 1.0, 'aux': 0.05})
-#         self.alpha = state_dict['alpha']
-#         self.primary_ext = state_dict['primary_ext']
-#         self.accum_steps = state_dict.get('accum_steps', None)
-#         self.primary_ema = state_dict['primary_ema']
-#         self.aux_ema = defaultdict(dict, state_dict.get('aux_ema', {}))
-#         self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
-#         if device:
-#             self.device = device
-#         self._accum_prim.clear()
-#         for d in self._accum_aux.values():
-#             d.clear()
-#         self._step_count = 0
-
-
-
-from collections import defaultdict
 
 
 class LossAccumulationBalancer:
@@ -3442,47 +2676,6 @@ class UncertaintyBalancer(nn.Module):
 		return total / len(losses)
 # Usage: balancer = UncertaintyBalancer(4); total = balancer(losses)
 
-# class PointUncertainty(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.embed = nn.Embedding(num_points, 16)   # or use hash grid / triplane
-#         self.mlp   = nn.Sequential(nn.Linear(16+3, 32), nn.ReLU(), nn.Linear(32, 1))
-
-#     def forward(self, coords, point_ids=None):
-#         if point_ids is not None:
-#             e = self.embed(point_ids)
-#         else:
-#             e = spatial_hash_grid(coords)  # or triplane lookup
-#         return self.mlp(torch.cat([e, coords], dim=-1)).squeeze(-1)
-
-# class PerSampleUWT(nn.Module):
-#     def __init__(self, num_samples):
-#         super().__init__()
-#         self.log_vars = nn.Parameter(torch.zeros(num_samples))  # Trainable log(σ_i) per point
-
-#     def forward(self, losses_per_sample):  # losses_per_sample: [N] losses for each point
-#         vars = torch.exp(self.log_vars)  # σ_i²
-#         weights = 1 / (2 * vars)  # Down-weight high-uncertainty (bad) points
-#         weighted_loss = torch.mean(weights * losses_per_sample)
-#         reg_term = torch.mean(self.log_vars)  # Penalize extreme suppression
-#         return weighted_loss + reg_term
-
-# Usage: uw = PerSampleUWT(N); total_loss = uw(per_sample_losses)
-
-# class UWTLoss(nn.Module):
-#     def __init__(self, num_tasks=5, temp=2.0):  # e.g., dice, reg, cons, neg, cap
-#         super().__init__()
-#         self.log_vars = nn.Parameter(torch.zeros(num_tasks))  # Learnable uncertainties
-#         self.temp = temp
-
-#     def forward(self, losses):  # losses: dict of task losses
-#         task_losses = torch.stack([losses[k] for k in sorted(losses.keys())])
-#         precisions = torch.exp(-self.log_vars)  # 1/σ²
-#         weights = precisions / (task_losses * self.temp + 1e-8)  # UW weights
-#         total = torch.sum(weights * task_losses) + torch.sum(self.log_vars)
-#         return total
-
-# # Usage: uw_loss = UWTLoss(); total = uw_loss(losses_dict)
 
 
 if use_station_corrections == True:
@@ -3568,12 +2761,7 @@ if device.type == 'cuda' or device.type == 'cpu':
 	check_len = knn(10.0*torch.rand(200,3).to(device), 10.0*torch.rand(100,3).to(device), k = 15).numel()
 	if check_len != 3000: # If it's less than 2 * 10 * 5, there's an issue
 		raise SystemError('Issue with knn on cuda for some versions of pytorch geometric and cuda')
-	## Note: can update train script to still use cuda except use cpu for all knn operations,
-	## (need to convert inputs to knn to .cpu(), and then outputs of knn back to .cuda())
-	## or, just update cuda to the latest version (e.g., >= 12.1)
-	## See these issues: https://github.com/rusty1s/pytorch_cluster/issues/181,
-	## https://github.com/pyg-team/pytorch_geometric/issues/7475
-	
+
 ## Make supplemental information for grids
 x_grids_trv = []
 x_grids_trv_pointers_p = []
@@ -3584,55 +2772,99 @@ x_grids_trv_refs = []
 if config['train_travel_time_neural_network'] == False:
 	ts_max_val = Ts.max()
 
-x_grids_trv = compute_travel_times(trv, locs, x_grids, device = device)
-
-if use_time_shift == True:
-	for i in range(len(x_grids_trv)):
-		x_grids_trv[i] = x_grids_trv[i] + time_shifts[i].reshape(-1,1,1)
-	print('Appending time shifts')
 
 
-time_shift_range = np.max([time_shifts[j].max() - time_shifts[j].min() for j in range(len(time_shifts))])
+def compute_travel_times(trv, locs, x_grids, n_max_chunks = int(50e3), device = 'cpu'):
 
-max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
-min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
+	x_grids_trv = []
+	# locs_cuda = torch.Tensor(locs).to(device)
+	for i in range(len(x_grids)):
+		
+		n_sta, n_temp = len(locs), len(x_grids[i])
+		n_chunks = int(np.maximum(1, int((n_sta*n_temp)/n_max_chunks)))
+		n_int = max(int(len(locs)/n_chunks), 1)
+		n_chunks = np.minimum(n_chunks, len(locs))
+		inds = [np.arange(n_int) + n_int*j for j in range(n_chunks)]
 
-# for i in range(len(x_grids)):
-
-# 	if locs.shape[0]*x_grids[i].shape[0] > 150e3:
-# 		trv_out_l = []
-# 		for j in range(locs.shape[0]):
-# 			trv_out = trv(torch.Tensor(locs[j,:].reshape(1,-1)).to(device), torch.Tensor(x_grids[i]).to(device))
-# 			trv_out_l.append(trv_out.cpu().detach().numpy())
-# 		trv_out = torch.Tensor(np.concatenate(trv_out_l, axis = 1)).to(device)
-# 	else:
-# 		trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+		# pdb.set_trace()
+		if len(inds) == 0: inds = np.arange(len(locs))
+		if (inds[-1][-1] < len(locs))*(len(inds) > 1): inds[-1] = np.arange(inds[-2][-1] + 1, len(locs))
+		if (inds[-1][-1] < len(locs))*(len(inds) == 1): inds[-1] = np.arange(0, len(locs))
+		if inds[-1][-1] > (len(locs) - 1): inds[-1] = np.arange(inds[-1][0], len(locs))
+		assert(np.abs(np.hstack(inds) - np.arange(len(locs))).max() == 0)
 	
-# 	# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
-# 	x_grids_trv.append(trv_out.cpu().detach().numpy())
+		trv_out_l = []
+		x_grid_cuda = torch.Tensor(x_grids[i]).to(device)
+		for j in range(len(inds)):
+			# trv_out_l.append(trv(locs_cuda[inds[j]], x_grid_cuda).cpu().detach().numpy())
+			trv_out_l.append(trv(torch.Tensor(locs[inds[j]]).to(device), x_grid_cuda).cpu().detach().numpy())
+		# trv_out = np.concatenate(trv_out_l, axis = 1)
+		x_grids_trv.append(np.concatenate(trv_out_l, axis = 1))
 
-for i in range(len(x_grids)):
-	
-	## Note, this definition of dt and win must match the definition used in process_continous_days
-	A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(x_grids_trv[i], k = k_time_edges, max_t = max_t, min_t = min_t, dt = kernel_sig_t/5.0, win = kernel_sig_t*2.0)
+	return x_grids_trv
 
-	if config['train_travel_time_neural_network'] == False:
-		assert(x_grids_trv[i].min() > 0.0)
-		assert(x_grids_trv[i].max() < (ts_max_val + 3.0))
 
-	x_grids_trv_pointers_p.append(A_edges_time_p)
-	x_grids_trv_pointers_s.append(A_edges_time_s)
-	x_grids_trv_refs.append(dt_partition) # save as cuda tensor, or no?
+## If an absolute station list is used, could use this x_grids_trv_base, and "slice" into it during batch generation
+## Also, likely with use_variable_domain this base x_grids_trv, time_shift_range, max_t, min_t, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
+## all not needed
 
-	# edge_index = knn(torch.Tensor(ftrns1(x_grids[i])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[i])/1000.0).to(device), k = k_spc_edges).flip(0).contiguous()
-	# edge_index = remove_self_loops(edge_index)[0].cpu().detach().numpy()
-	# x_grids_edges.append(edge_index)
 
-## Check if this can cause an issue (can increase max_t to a bit larger than needed value)
-# max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))]))) # + 10.0
-# min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0 # + 10.0
 
-## Implement training.
+if use_variable_domain == False:
+
+	x_grids_trv = compute_travel_times(trv, locs, x_grids, n_max_chunks = int(2e3), device = device)
+	## Can also change this to use trv_pairwise
+
+	if use_time_shift == True:
+		for i in range(len(x_grids_trv)):
+			x_grids_trv[i] = x_grids_trv[i] + time_shifts[i].reshape(-1,1,1)
+		print('Appending time shifts')
+
+	time_shift_range = np.max([time_shifts[j].max() - time_shifts[j].min() for j in range(len(time_shifts))])
+
+	max_t = float(np.ceil(max([x_grids_trv[i].max() for i in range(len(x_grids_trv))])))
+	min_t = float(np.floor(min([x_grids_trv[i].min() for i in range(len(x_grids_trv))]))) if use_time_shift == True else 0.0
+
+	# for i in range(len(x_grids)):
+	# 	if locs.shape[0]*x_grids[i].shape[0] > 150e3:
+	# 		trv_out_l = []
+	# 		for j in range(locs.shape[0]):
+	# 			trv_out = trv(torch.Tensor(locs[j,:].reshape(1,-1)).to(device), torch.Tensor(x_grids[i]).to(device))
+	# 			trv_out_l.append(trv_out.cpu().detach().numpy())
+	# 		trv_out = torch.Tensor(np.concatenate(trv_out_l, axis = 1)).to(device)
+	# 	else:
+	# 		trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+	# 	# trv_out = trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[i]).to(device))
+	# 	x_grids_trv.append(trv_out.cpu().detach().numpy())
+	## Also slow - if needed, could be sliced into during batch generation
+
+	for i in range(len(x_grids)):
+		
+		## Note, this definition of dt and win must match the definition used in process_continous_days
+		A_edges_time_p, A_edges_time_s, dt_partition = assemble_time_pointers_for_stations(x_grids_trv[i], k = k_time_edges, max_t = max_t, min_t = min_t, dt = kernel_sig_t/5.0, win = kernel_sig_t*2.0)
+
+		if config['train_travel_time_neural_network'] == False:
+			assert(x_grids_trv[i].min() > 0.0)
+			assert(x_grids_trv[i].max() < (ts_max_val + 3.0))
+
+		x_grids_trv_pointers_p.append(A_edges_time_p)
+		x_grids_trv_pointers_s.append(A_edges_time_s)
+		x_grids_trv_refs.append(dt_partition) # save as cuda tensor, or no?
+
+else:
+
+	## Optionally can create x_grids_trv and then index it into if if "absolute" indices are inside the training files
+	x_grids_trv = np.nan*np.ones((len(x_grids), len(x_grids[0]), len(locs), 2))
+	time_shift_range = np.nan
+	max_t, min_t = np.nan, np.nan
+
+	x_grids_trv_pointers_p = [np.nan*np.zeros(1) for j in range(len(x_grids))] # .append(A_edges_time_p)
+	x_grids_trv_pointers_s = [np.nan*np.zeros(1) for j in range(len(x_grids))] # .append(A_edges_time_s)
+	x_grids_trv_refs = [np.nan*np.zeros(1) for j in range(len(x_grids))] # .append(dt_partition) # save as cuda tensor, or no?
+
+
+## Note for each input of "GCN_Detection_Network_extended" need to fix ftrns1_diff, ftrns2_diff, scale_rel, eps, etc.
+
 mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device = device).to(device)
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
 
@@ -3644,10 +2876,6 @@ mse_loss = torch.nn.MSELoss()
 huber_loss = torch.nn.HuberLoss(delta = 0.5, reduction = 'mean') ## Beneath delta, L2 loss is applied
 l1_loss = torch.nn.L1Loss()
 DiceLoss = GaussianDiceLoss(bg_weight = 1.0) ## Can change the bg_weight
-
-
-# loss_names = ['loss_dice1', 'loss_dice2', 'loss_dice3', 'loss_dice4', 'loss_negative', 'loss_consistency', 'loss_gradient', 'loss_global']
-
 
 np.random.seed() ## randomize seed
 
@@ -3679,7 +2907,7 @@ use_dice_loss = True
 use_mse_loss = False
 use_negative_loss = True
 # use_global_loss = False
-use_consistency_loss = True
+use_consistency_loss = False
 use_gradient_loss = False
 use_cap_loss = True
 use_huber_loss = False
@@ -3687,18 +2915,8 @@ use_l1_loss = True
 # use_focal_loss = True
 
 
-# n_burn_in = int(0.5*n_epochs/5)
-
 n_burn_in = int(1*n_epochs/5)
 loss_names = ['loss_dice1', 'loss_dice2', 'loss_dice3', 'loss_dice4', 'loss_negative', 'loss_consistency']
-
-# LossBalancer = LossMagnitudeBalancer(anchor = 'loss_dice4') ## Use sparsest target as the anchor (could also use loss_dice2)
-# LossBalancer = LossMagnitudeBalancer(anchor = 'loss_dice2') ## Use sparsest target as the anchor (could also use loss_dice2)
-# LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice2', accum_steps = n_batch, primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
-# balancer = LossAccumulationBalancer(anchor = 'loss_dice2', accum_steps = n_batch, primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
-# LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice4', primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
-# LossBalancer = LossAccumulationBalancer(anchor = 'loss_dice3', primary_ext = 'loss_dice', device = device) ## Use sparsest target as the anchor (could also use loss_dice2)
-
 
 
 LossBalancer = LossAccumulationBalancer(
@@ -3718,36 +2936,23 @@ LossBalancer = LossAccumulationBalancer(
 )
 
 
-
-
-
-## Need to add hard negatives to association outputs
-
-## May need to up-sample positive associations more (or broaden the label)
-## and can add hard negatives to association labels
-
-
-
-def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_src_in_prod_l, A_prod_sta_sta_l, A_prod_src_src_l, lp_srcs, lp_times, lp_stations, lp_phases, lp_meta, device = device):
+def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_src_in_prod_l, A_prod_sta_sta_l, A_prod_src_src_l, lp_srcs, lp_times, lp_stations, lp_phases, lp_meta, params_extra = None, device = device):
 
 	## Should add increased samples in x_src_query around places of coherency
 	## and true labels
+
+	# if use_variable_domain == True:
+	# 	lat_range_extend, lon_range_extend, lat_range_interior, lon_range_interior, depth_range, src_t_kernel, scale_x_extend, offset_x_extend, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, rbest, mn, ftrns1, ftrns2 = params_extra
+
+	## Extract domain specific parameters
+	if use_variable_domain == True:
+		locs, stas, lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t, rbest, mn, ftrns1, ftrns2, ftrns1_diff, ftrns2_diff = params_extra
+		lat_range_interior = [lat_range[0], lat_range[1]]
+		lon_range_interior = [lon_range[0], lon_range[1]]
+
+
 	x_src_query = np.random.rand(n_src_query,3)*scale_x_extend + offset_x_extend
 
-
-	## lp_srcs[i0]
-	## Locs[i0]
-	## X_fixed[i0]
-	## A_src_in_sta_l[i0]
-	## A_src_in_prod_l[i0]
-	## Inpts[i0]
-	## Masks[i0]
-	## A_prod_sta_sta_l[i0]
-	## A_prod_src_src_l[i0]
-	## lp_times[i0]
-	## lp_stations[i0]
-	## lp_phases[i0]
-	## lp_meta[i0]
 
 
 	tq_sample = torch.rand(n_src_query).to(device)*t_win - t_win/2.0
@@ -3803,6 +3008,7 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 		else:
 			trv_out = trv_pairwise(torch.Tensor(Locs[A_src_in_sta_l[0].cpu().detach().numpy()]).to(device), torch.Tensor(X_fixed[A_src_in_sta_l[1].cpu().detach().numpy()]).to(device)) + torch.Tensor(time_shifts[grid_match, A_src_in_sta_l[1].cpu().detach().numpy()]).reshape(-1,1).to(device)
 
+		## Consider changing spatial_vals to proportional to labels
 		spatial_vals = torch.cat((torch.Tensor((X_fixed[A_src_in_prod_l[1].cpu().detach().numpy()][:,0:3] - Locs[A_src_in_sta_l[0][A_src_in_prod_l[0]].cpu().detach().numpy()])/scale_x_extend).to(device), torch.Tensor(X_fixed[A_src_in_prod_l[1].cpu().detach().numpy()][:,[3]]).to(device)/time_shift_range), dim = 1)
 
 	else:
@@ -3812,7 +3018,7 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 		else:
 			trv_out = (trv(torch.Tensor(Locs).to(device), torch.Tensor(X_fixed).to(device)).detach() + torch.Tensor(np.expand_dims(time_shift[[grid_match],:], axis = 0)).to(device)).reshape(-1,2) ## Note: could also just take this from x_grids_trv
 
-
+		## Consider changing spatial_vals to proportional to labels
 		spatial_vals = torch.cat((torch.Tensor(((np.repeat(np.expand_dims(X_fixed[:,0:3], axis = 1), Locs.shape[0], axis = 1) - np.repeat(np.expand_dims(Locs, axis = 0), X_fixed.shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device), torch.Tensor(X_fixed[:,[3]]).to(device)/time_shift_range), dim = 1)
 
 
@@ -3846,12 +3052,6 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 	use_updated_pick_max_associations = True # Changing to True
 	if (len(lp_times) > max_number_pick_association_labels_per_sample)*(use_updated_pick_max_associations == True):
 
-		## Cnt number of picks per station
-		## Optimally choose n stations to compute association labels for
-		## so that sum cnt_i < max_mumber of picks used. 
-		## Permute station indices to not bias ordering.
-		## Keep all picks for this set of stations.
-		## (note: this does not effect output values, only the ones we compute losses on)
 
 		tree_sta_slice = cKDTree(lp_stations.reshape(-1,1))
 		lp_cnt_sta = tree_sta_slice.query_ball_point(np.arange(Locs.shape[0]).reshape(-1,1), r = 0)
@@ -3885,13 +3085,8 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 
 if build_training_data == True:
 
-	## If true, use this script to build the training data.
-	## For efficiency, each instance of this script (e.g., python train_GENIE_model.py $i$ for different integer $i$ calls)
-	## will build train_config['n_batches_per_job_training_data'] batches of training data and save them to train_config['path_to_data'].
-	## Call this script ~100's of times to build a large training dataset. Then set flag "build_training_data : False" in train_config.yaml
-	## and call this script with "load_training_data : True" to train with the available pre-built training data.
 
-	## If false, this script begins training the model, and builds a batch of data on the fly between each update step.
+	## Should start using the pairwise src-station x_grids_trv
 
 	n_repeat = train_config['n_batches_per_job'] ## Number of batches to make per job
 
@@ -3903,18 +3098,23 @@ if build_training_data == True:
 
 	print('Build and save training data on job index %d'%job_number)
 
+	print('Note set t_win in input')
+
 	for n in range(n_repeat):
 
 		file_index = n_repeat*job_number + n ## Unique file index
 
+		if os.path.isfile(path_to_data + 'training_data_slice_%d_ver_%d.hdf5'%(file_index, n_ver_training_data)) == True:
+			continue
+
 		if use_subgraph == True:
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], params_extra, data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
 			if use_expanded == True:
 				Ac_src_src_l = [[] for j in range(len(A_src_src_l))]
 				Ac_prod_src_src_l = [[] for j in range(len(A_prod_src_src_l))]
 
 		else:
-			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = False)
+			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], params_extra, data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = False)
 			if use_expanded == True:
 				A_src_src_l, Ac_src_src_l = A_src_src_l
 				A_prod_src_src_l, Ac_prod_src_src_l = A_prod_src_src_l
@@ -3931,6 +3131,16 @@ if build_training_data == True:
 				Ac_prod_src_src_l = [torch.Tensor(Ac_prod_src_src_l[j]).long().to(device) for j in range(len(Ac_prod_src_src_l))]
 
 
+		## Extract domain specific parameters
+		if use_variable_domain == True:
+			locs, stas, lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t, rbest, mn, ftrns1, ftrns2, ftrns1_diff, ftrns2_diff = params_extra
+			lat_range_interior = [lat_range[0], lat_range[1]]
+			lon_range_interior = [lon_range[0], lon_range[1]]
+			x_grids_trv = np.vstack([np.expand_dims(x_grids_trv[0], axis = 0)])
+			print('Stas: %d, %d'%(len(locs), len(stas)))
+
+
+		## Need to use current files src_arv_kernels
 		h = h5py.File(path_to_data + 'training_data_slice_%d_ver_%d.hdf5'%(file_index, n_ver_training_data), 'w')
 		h['data'] = data[0]
 		h['srcs'] = data[1]
@@ -3977,33 +3187,13 @@ if build_training_data == True:
 				A_src_in_sta_l[i] = torch.Tensor(np.concatenate((np.tile(np.arange(Locs[i].shape[0]), len(X_fixed[i])).reshape(1,-1), np.arange(len(X_fixed[i])).repeat(len(Locs[i]), axis = 0).reshape(1,-1)), axis = 0)).to(device).long() # A_src_in_sta
 
 			## Call extra inputs
-			x_src_query, tq_sample, x_src_query_cart, trv_out, trv_out_src, spatial_vals, tq, input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor, data_1, data_2, lp_times_slice, lp_stations_slice, lp_phases_slice, lp_meta_slice = create_training_inputs(trv, Inpts[i], Masks[i], Locs[i], X_fixed[i], A_src_in_sta_l[i], A_src_in_prod_l[i], A_prod_sta_sta_l[i], A_prod_src_src_l[i], lp_srcs[i], lp_times[i], lp_stations[i], lp_phases[i], lp_meta[i], device = device)
+			# print('Note set t_win in input')
+			x_src_query, tq_sample, x_src_query_cart, trv_out, trv_out_src, spatial_vals, tq, input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor, data_1, data_2, lp_times_slice, lp_stations_slice, lp_phases_slice, lp_meta_slice = create_training_inputs(trv, Inpts[i], Masks[i], Locs[i], X_fixed[i], A_src_in_sta_l[i], A_src_in_prod_l[i], A_prod_sta_sta_l[i], A_prod_src_src_l[i], lp_srcs[i], lp_times[i], lp_stations[i], lp_phases[i], lp_meta[i], params_extra = params_extra, device = device)
 
 			# pdb.set_trace()
 
 			pick_lbls = pick_labels_extract_interior_region_flattened(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta_slice[:,-2::], lp_srcs[i], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 
-			## New inputs, or modified inputs
-			# Inpts_slice
-			# Masks_slice
-			# x_src_query
-			# tq_sample
-			# x_src_query_cart
-			# trv_out
-			# trv_out_src
-			# spatial_vals
-			# tq
-			# input_tensor_1
-			# input_tensor_2
-			# A_prod_sta_tensor
-			# A_prod_src_tensor
-			# data_1
-			# data_2
-			# lp_time_slice
-			# lp_station_slice
-			# lp_phases_slice
-			# lp_met_slice
-			# pick_lbls
 
 			h['Inpts_%d'%i] = Inpts[i] # Inpts[i]
 			h['Masks_%d'%i] = Masks[i] # Masks[i]
@@ -4070,25 +3260,48 @@ if build_training_data == True:
 			h['data_2_edges_%d'%i] = data_2.edge_index.cpu().detach().numpy()
 			h['pick_lbls_%d'%i] = pick_lbls.cpu().detach().numpy()
 
-			# Inpts_slice
-			# Masks_slice
-			# x_src_query
-			# tq_sample
-			# x_src_query_cart
-			# trv_out
-			# trv_out_src
-			# spatial_vals
-			# tq
-			# input_tensor_1
-			# input_tensor_2
-			# A_prod_sta_tensor
-			# A_prod_src_tensor
-			# data_1
-			# data_2
-			# lp_time_slice
-			# lp_station_slice
-			# lp_phases_slice
-			# lp_met_slice
+
+			# locs, stas, lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t, rbest, mn, ftrns1, ftrns2, ftrns1_diff, ftrns2_diff = params_extra
+
+
+			## Extra parameters
+			if use_variable_domain == True:
+				h['locs_%d'%i] = locs
+				h['stas_%d'%i] = stas.astype('S')
+				h['lat_range_extend_%d'%i] = lat_range_extend
+				h['lon_range_extend_%d'%i] = lon_range_extend
+				h['lat_range_%d'%i] = lat_range # _interior
+				h['lon_range_%d'%i] = lon_range # _interior
+				h['depth_range_%d'%i] = depth_range
+				# h['src_t_kernel_%d'%i] = src_t_kernel
+				h['scale_x_extend_%d'%i] = scale_x_extend
+				h['offset_x_extend_%d'%i] = offset_x_extend
+				h['scale_time_%d'%i] = scale_time
+				h['t_win_%d'%i] = t_win
+				h['dt_win_%d'%i] = dt_win
+				h['time_shift_range_%d'%i] = time_shift_range
+				h['kernel_sig_t_%d'%i] = kernel_sig_t
+				h['src_x_kernel_%d'%i] = src_x_kernel
+				h['src_t_kernel_%d'%i] = src_t_kernel
+				h['src_depth_kernel_%d'%i] = src_depth_kernel
+				h['src_x_arv_kernel_%d'%i] = src_x_arv_kernel
+				h['src_t_arv_kernel_%d'%i] = src_t_arv_kernel
+				# x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t
+				h['x_grids_%d'%i] = x_grids
+				h['x_grids_trv_%d'%i] = x_grids_trv ## May have to convert from list
+
+
+				# for j in range(len(x_grids_trv_refs)):
+				for j in range(len(x_grids_trv)):
+					h['x_grids_trv_refs_%d_%d'%(i,j)] = x_grids_trv_refs[j]
+
+
+				h['max_t_%d'%i] = max_t
+				h['min_t_%d'%i] = min_t
+				h['rbest_%d'%i] = rbest
+				h['mn_%d'%i] = mn
+
+
 
 		h.close()
 
@@ -4098,19 +3311,43 @@ if build_training_data == True:
 	sys.exit()
 
 
+
+
 class TrainingDataset(Dataset):
 
-	def __init__(self, list_of_hdf5_paths, n_batch, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded):
+
+	def __init__(self, list_of_hdf5_paths, n_batch, total_steps, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded): ## This n_batch is not used (instead do batching with loader - though could change to save larger .hdf5 files with multiple samples)
 		self.files = list_of_hdf5_paths   # e.g. 1_000_000 files
 		self.n_batch = n_batch
 		self.use_gradient_loss = use_gradient_loss
 		self.use_expanded = use_expanded
 
+		# 1. Determine total length
+		num_actual_files = len(self.files)
+		if total_steps is None:
+			self.total_steps = num_actual_files
+		else:
+			self.total_steps = total_steps
+
+		# 2. Build a long, shuffled index map
+		# If total_steps is 3000 and num_actual_files is 1000, 
+		# this creates 3 unique permutations and joins them.
+		repeats = (self.total_steps // num_actual_files) + 1
+		master_indices = []
+		for _ in range(repeats):
+			master_indices.append(np.random.permutation(num_actual_files))
+        
+		self.index_map = np.concatenate(master_indices)[:self.total_steps]
+
+
 	def __len__(self):
-		return len(self.files)
+		return self.total_steps
 
 	def __getitem__(self, idx):
-		path = self.files[idx]
+		# path = self.files[idx]
+
+		actual_file_idx = self.index_map[idx]
+		path = self.files[actual_file_idx]
 
 		with h5py.File(path, 'r') as f:
 
@@ -4127,6 +3364,8 @@ class TrainingDataset(Dataset):
 			x_src_query_cart_l = []
 			# tq_sample = []
 			input_tensors_l = []
+			params_extra_l = []
+
 
 			if self.use_gradient_loss == True:
 				Lbls_grad_spc = []
@@ -4194,217 +3433,119 @@ class TrainingDataset(Dataset):
 					torch.from_numpy(f['trv_out_src_%d'%i][:])
 				]
 
+				params_extra = []
+				# locs, stas, lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t, rbest, mn, ftrns1, ftrns2, ftrns1_diff, ftrns2_diff = params_extra
+				if use_variable_domain == True:
+					params_extra.append(f['locs_%d'%i][:])
+					params_extra.append(f['stas_%d'%i][:])
+					params_extra.append(f['lat_range_extend_%d'%i][:])
+					params_extra.append(f['lon_range_extend_%d'%i][:])
+					params_extra.append(f['lat_range_%d'%i][:])
+					params_extra.append(f['lon_range_%d'%i][:])
+					params_extra.append(f['depth_range_%d'%i][:])
+					params_extra.append(f['scale_x_extend_%d'%i][:])
+					params_extra.append(f['offset_x_extend_%d'%i][:])
+					params_extra.append(f['scale_time_%d'%i][()])
+					params_extra.append(f['t_win_%d'%i][()])
+					params_extra.append(f['dt_win_%d'%i][()])
+					params_extra.append(f['time_shift_range_%d'%i][()])
+					params_extra.append(f['kernel_sig_t_%d'%i][()])
+					params_extra.append(f['src_x_kernel_%d'%i][()])
+					params_extra.append(f['src_t_kernel_%d'%i][()])
+					params_extra.append(f['src_depth_kernel_%d'%i][()])
+					params_extra.append(f['src_x_arv_kernel_%d'%i][()])
+					params_extra.append(f['src_t_arv_kernel_%d'%i][()])
+					params_extra.append(f['x_grids_%d'%i][:])
+
+					# params_extra.append(f['x_grids_trv_%d'%i][:])
+					params_extra.append(np.expand_dims(f['x_grids_trv_%d'%i][:], axis = 0))
+
+					## Need to check why x_grids_trv_refs_0_0 not always there
+
+					x_grids_trv_refs = []
+					# pdb.set_trace()
+					for j in range(len(params_extra[-1])):
+						x_grids_trv_refs.append(f['x_grids_trv_refs_%d_%d'%(i, j)][:])
+					# params_extra.append(f['x_grids_trv_refs_%d'%i])
+					params_extra.append(x_grids_trv_refs)
+
+					params_extra.append(f['max_t_%d'%i][()])
+					params_extra.append(f['min_t_%d'%i][()])
+					params_extra.append(f['rbest_%d'%i][:])
+					params_extra.append(f['mn_%d'%i][:])
+
+					# locs, stas, lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t, rbest, mn
+
 				## Could possibly map to cuda here (note: possible ragged list for A_prod_src_tensor)
 				input_tensors_l.append(input_tensors)
+				params_extra_l.append(params_extra)
 
 			real_data = f['real_data'][()]
-			data = [f['srcs'][:][f['srcs_active'][:].astype('int')], real_data]
 
-		# if real_data == True:
-		# h['srcs'] = data[1]
-		# h['srcs_active'] = data[2]
-		# # h['real_data'] = data[3]
+			# is_real
+			if 'is_real_sample_0' in f.keys():
+				real_data_v = np.array([f['is_real_sample_%d'%i][()] for i in range(self.n_batch)])
+				data = [f['srcs'][:][f['srcs_active'][:].astype('int')], real_data_v]
+
+			else:
+				data = [f['srcs'][:][f['srcs_active'][:].astype('int')], real_data]
 
 		if self.use_gradient_loss == False:
 
-			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l], data
+			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l], params_extra_l, data
 
 		else:
 
-			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t], data
+			return input_tensors_l, [lp_srcs, lp_times, lp_stations, lp_phases, X_query, Lbls, Lbls_query, Locs, pick_lbls_l, x_src_query_cart_l, spatial_vals_l, Lbls_grad_spc, Lbls_query_grad_spc, Lbls_grad_t, Lbls_query_grad_t], params_extra_l, data
 
 
+import random
+from tqdm import tqdm
 
-# class HDF5FileDataset(Dataset):
-#     def __init__(self, hdf5_file_path, device='cpu'):
-#         self.file_path = hdf5_file_path
-#         self.device = device
-        
-#         print(f"Loading entire file into RAM: {os.path.basename(hdf5_file_path)}")
-#         with h5py.File(hdf5_file_path, 'r') as f:
-#             # Adjust these keys to your actual HDF5 layout
-#             self.labels = torch.from_numpy(f['labels'][:])                    # (N,)
+def reshuffle_with_flags(input_dir, output_dir, n_batch=10):
+    os.makedirs(output_dir, exist_ok=True)
+    
+    all_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith('.hdf5')]
+    random.shuffle(all_files)
+    
+    # Process in chunks of n_batch files
+    for chunk_idx in tqdm(range(0, len(all_files), n_batch), desc="Re-batching"):
+        batch_files = all_files[chunk_idx : chunk_idx + n_batch]
+        if len(batch_files) < n_batch: break
             
-#             # Example: 4 graphs per sample
-#             self.graphs = [
-#                 torch.from_numpy(f['graph_0'][:]),   # (N, ...)
-#                 torch.from_numpy(f['graph_1'][:]),
-#                 torch.from_numpy(f['graph_2'][:]),
-#                 torch.from_numpy(f['graph_3'][:]),
-#             ]
-#             # Optional: pre-move to GPU right now if you're brave and have VRAM
-#             # if device != 'cpu':
-#             #     self.graphs = [g.to(device, non_blocking=True) for g in self.graphs]
-#             #     self.labels = self.labels.to(device, non_blocking=True)
+        handles = [h5py.File(f, 'r') for f in batch_files]
         
-#         self.n_samples = len(self.labels)
-#         print(f"Loaded {self.n_samples} samples → ready for blazing-fast training")
+        try:
+            for new_file_idx in range(n_batch):
+                new_path = os.path.join(output_dir, f"mix_chunk_{chunk_idx}_{new_file_idx}.hdf5")
+                
+                with h5py.File(new_path, 'w') as f_out:
+                    for i_target in range(n_batch):
+                        # Pick a source file and a specific sample index from it
+                        source_h5 = handles[i_target]
+                        i_src = random.randint(0, n_batch - 1)
+                        
+                        # 1. Copy all indexed data (spatial_vals_i, Lbls_i, etc.)
+                        suffix_src = f"_{i_src}"
+                        suffix_dst = f"_{i_target}"
+                        
+                        for key in source_h5.keys():
+                            if key.endswith(suffix_src):
+                                base_name = key.rsplit('_', 1)[0]
+                                source_h5.copy(key, f_out, name=f"{base_name}{suffix_dst}")
+                                
+                        # 2. Create the NEW per-sample flag
+                        # We pull the global 'real_data' value from the source file
+                        is_real = source_h5['real_data'][()] 
+                        f_out.create_dataset(f'is_real_sample{suffix_dst}', data=is_real)
 
-#     def __len__(self):
-#         return self.n_samples
+                    # 3. Copy global constants (if any)
+                    f_out.copy(handles[0]['srcs'], f_out, name='srcs')
+                    f_out.copy(handles[0]['srcs_active'], f_out, name='srcs_active')
 
-#     def __getitem__(self, idx):
-#         # All data already in RAM → this is basically free
-#         return tuple(g[idx] for g in self.graphs), self.labels[idx]
+        finally:
+            for h in handles: h.close()
 
-# lp_srcs_l = []
-# lp_times_l = []
-# lp_stations_l = []
-# lp_phases_l = []
-# X_query = []
-# Lbls = []
-# Lbls_query = []
-# pick_lbls_l = []
-# x_src_query_cart_l = []
-# input_tensors_l = []
-
-
-# h['Lbls_grad_spc_%d'%i] = Lbls[i][1]
-# h['Lbls_query_grad_spc_%d'%i] = Lbls_query[i][1]
-# h['Lbls_grad_t_%d'%i] = Lbls[i][2]
-# h['Lbls_query_grad_t_%d'%i] = Lbls_query[i][2]
-
-
-# adjust key names to your actual layout
-# input_tensor_1_l.append(torch.from_numpy(f['input_tensor_1_%d'%i][:]))
-# input_tensor_2_l.append(torch.from_numpy(f['input_tensor_2_%d'%i][:]))
-# A_prod_sta_tensor_l.append(torch.from_numpy(f['A_prod_sta_tensor_%d'%i]).long())
-# A_prod_src_tensor_l.append(torch.from_numpy(f['A_prod_src_tensor_%d'%i]).long())
-# data_1_l.append(Data(x = spatial_vals, edge_index = torch.from_numpy(f['data_1_edges_%d'%i]).long()))
-# data_2_l.append(Data(x = spatial_vals, edge_index = torch.from_numpy(f['data_2_edges_%d'%i]).long()))
-# A_src_in_sta_l.append(torch.from_numpy(f['A_src_in_sta_%d'%i]).long())
-# A_src_src_l.append(torch.from_numpy(f['A_src_src_%d'%i]).long())
-# A_edges_time_p_l.append(torch.from_numpy(f['A_edges_time_p_%d'%i]).long())
-# A_edges_time_s_l.append(torch.from_numpy(f['A_edges_time_s_%d'%i]).long())
-# A_edges_ref_l.append(torch.from_numpy(f['A_edges_ref_%d'%i]))
-# trv_out_l.append(torch.from_numpy(f['trv_out_%d'%i]))
-
-# Locs_cart_l.append(torch.from_numpy(f['Locs_cart_%d'%i]))
-# X_fixed_cart_l.append(torch.from_numpy(f['X_fixed_cart_%d'%i]))
-# X_fixed_t_l.append(torch.from_numpy(f['X_fixed_%d'%i][:,3]))
-
-# X_query_cart_l.append(torch.from_numpy(f['X_query_cart_%d'%i]))
-# X_query_t_l.append(torch.from_numpy(f['X_query_%d'%i][:,3]))
-# tq_sample_l.append(torch.from_numpy(f['tq_sample_%d'%i]))
-# trv_out_src_l.append(torch.from_numpy(f['trv_out_src_%d'%i]))
-# if self.use_expanded == True:
-# 	Ac_prod_src_src_l.append(torch.from_numpy(f['Ac_prod_src_src_%d'%i]).long())
-# else:
-# 	Ac_prod_src_src_l.append([])
-
-
-
-# Load all ~10 graphs for this event at once
-# input_tensor_1_l = []
-# input_tensor_2_l = []			
-# A_prod_sta_tensor_l = []
-# A_prod_src_tensor_l = []
-# data_1_l = []
-# data_2_l = []
-# A_src_in_sta_l = []
-# A_src_src_l = []
-# A_edges_time_p_l = [] ## No longer used
-# A_edges_time_s_l = [] ## No longer used
-# A_edges_ref_l = [] ## No longer used
-# trv_out_l = []
-# Locs_cart_l = [] ## Transform
-# X_fixed_cart_l = [] ## Transform
-# X_fixed_t_l = [] ## Slice
-# X_query_cart_l = [] ## Transform
-# x_src_query_cart_l = []
-# X_query_t_l = [] ## Slice
-# tq_sample_l = []
-# trv_out_src_l = []
-# Ac_prod_src_src_l = [] # if self.use_expanded == True: 
-
-# h['Lbls_grad_spc_%d'%i] = Lbls[i][1]
-# h['Lbls_query_grad_spc_%d'%i] = Lbls_query[i][1]
-# h['Lbls_grad_t_%d'%i] = Lbls[i][2]
-# h['Lbls_query_grad_t_%d'%i] = Lbls_query[i][2]	
-
-
-# with h5py.File(path, 'r') as f:
-# 	# Load all ~10 graphs for this event at once
-# 	# input_tensor_1_l = []
-# 	# input_tensor_2_l = []			
-# 	# A_prod_sta_tensor_l = []
-# 	# A_prod_src_tensor_l = []
-# 	# data_1_l = []
-# 	# data_2_l = []
-# 	# A_src_in_sta_l = []
-# 	# A_src_src_l = []
-# 	# A_edges_time_p_l = [] ## No longer used
-# 	# A_edges_time_s_l = [] ## No longer used
-# 	# A_edges_ref_l = [] ## No longer used
-# 	# trv_out_l = []
-# 	lp_srcs_l = []
-# 	lp_times_l = []
-# 	lp_stations_l = []
-# 	lp_phases_l = []
-# 	# Locs_cart_l = [] ## Transform
-# 	# X_fixed_cart_l = [] ## Transform
-# 	# X_fixed_t_l = [] ## Slice
-# 	X_query = []
-
-# 	# X_query_cart_l = [] ## Transform
-# 	# x_src_query_cart_l = []
-# 	# X_query_t_l = [] ## Slice
-# 	# tq_sample_l = []
-# 	# trv_out_src_l = []
-# 	# Ac_prod_src_src_l = [] # if self.use_expanded == True: 
-
-# 	Lbls_l = []
-# 	Lbls_query_l = []
-# 	pick_lbls_l = []
-
-# 	if self.use_gradient_loss == True:
-# 		Lbls_grad_spc_l = []
-# 		Lbls_query_grad_spc_l = []
-# 		Lbls_grad_t_l = []
-# 		Lbls_query_grad_t_l = []
-		
-# 		# h['Lbls_grad_spc_%d'%i] = Lbls[i][1]
-# 		# h['Lbls_query_grad_spc_%d'%i] = Lbls_query[i][1]
-# 		# h['Lbls_grad_t_%d'%i] = Lbls[i][2]
-# 		# h['Lbls_query_grad_t_%d'%i] = Lbls_query[i][2]	
-
-
-
-		# data = [h['data'][:], h['srcs'][:], h['srcs_active'][:]]
-
-## These are necessary inputs
-# # Continue processing the rest of the inputs
-# input_tensors = [
-# 	input_tensor_1, input_tensor_2, A_prod_sta_tensor, [A_prod_src_tensor, Ac_prod_src_src_l[i0]],
-# 	data_1, data_2,
-# 	A_src_in_sta_l[i0],
-# 	A_src_src_l[i0],
-# 	torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
-# 	torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
-# 	torch.Tensor(A_edges_ref_l[i0]).to(device),
-# 	trv_out,
-# 	torch.Tensor(lp_times[i0]).to(device),
-# 	torch.Tensor(lp_stations[i0]).long().to(device),
-# 	torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
-# 	torch.Tensor(ftrns1(Locs[i0])).to(device),
-# 	torch.Tensor(ftrns1(X_fixed[i0])).to(device),
-# 	torch.Tensor(X_fixed[i0][:,3]).to(device),
-# 	torch.Tensor(ftrns1(X_query[i0])).to(device),
-# 	torch.Tensor(x_src_query_cart).to(device),
-# 	torch.Tensor(X_query[i0][:,3]).to(device), tq_sample, trv_out_src
-# ]	
-
-
-
-# def move_to(obj, device):
-# 	"""Move tensor, list, tuple, dict, or nested combination thereof to device"""
-# 	if isinstance(obj, torch.Tensor):
-# 		return obj.to(device, non_blocking=True)
-# 	if isinstance(obj, (list, tuple)):
-# 		return type(obj)(move_to(x, device) for x in obj)
-# 	if isinstance(obj, dict):
-# 		return {k: move_to(v, device) for k, v in obj.items()}
-# 	return obj  # scalar, etc.
 
 
 def move_to(obj, device, non_blocking=True):
@@ -4471,44 +3612,13 @@ to_gpu = partial(move_to, device='cuda', non_blocking=True)
 to_cpu = partial(move_to, device='cpu', non_blocking=False)
 to_gpu_inplace = partial(move_to_inplace, device='cuda', non_blocking=True)
 
-# graphs = list(map(lambda g: g.to(device, non_blocking=True), graphs))
-
-# def to_device_inplace(obj, device):
-# 	if isinstance(obj, torch.Tensor):
-# 		obj.copy_(obj.to(device, non_blocking=True))   # if you really need in-place
-# 	elif isinstance(obj, (list, tuple)):
-# 		for i, x in enumerate(obj):
-# 			obj[i] = to_device_inplace(x, device)
-# 	elif isinstance(obj, dict):
-# 		for k in obj:
-# 			obj[k] = to_device_inplace(obj[k], device)
-# 	return obj
 
 
 ## Load Dataset
 if load_training_data == True:
-	dataset = TrainingDataset(np.random.permutation(files_load), n_batch, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded)
+	dataset = TrainingDataset(np.random.permutation(files_load), n_batch, n_epochs, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded)
 
 
-# loader = DataLoader(
-#     dataset,
-#     batch_size=8,              # ← 64 events at a time → 64 × 10 = 640 sub-samples
-#     shuffle=True,
-#     num_workers=12,             # ← THIS is what makes it fast
-#     pin_memory=True,
-#     persistent_workers=True,
-#     prefetch_factor=4,          # PyTorch 2.0+: loads 4×batch_size ahead
-# )
-
-# def to_float32(batch):
-#     if isinstance(batch, torch.Tensor):
-#         return batch.float()
-#     elif isinstance(batch, dict):
-#         return {k: to_float32(v) for k, v in batch.items()}
-#     elif isinstance(batch, (list, tuple)):
-#         return type(batch)(to_float32(v) for v in batch)
-#     else:
-#         return batch
 
 def to_float32(x):
     if isinstance(x, torch.Tensor):
@@ -4541,58 +3651,6 @@ loader = DataLoader(
     prefetch_factor=3,          # PyTorch 2.0+: loads 4×batch_size ahead
     collate_fn=collate_no_batch
 )
-
-
-
-## Can potentially batch the inputs (batch_size > 1) using a custom collate function 
-
-# def cust_collate(batch_dict):
-#     '''
-#     Collate function that concatenates the data for each individual using axis 0
-#     Args:
-#         batch_dict (dict): dictionary with the data for each individual
-#     Returns:
-#         batch_dict (dict): dictionary with the concatenated (axis = 0 ) data for each individual
-#     '''
-#     # concatenate the data for each individual using axis 0
-#     for i in range(len(batch_dict)):
-#         if i == 0:
-#             X = batch_dict[i]['X']
-#             Y = batch_dict[i]['Y']
-#             Z = batch_dict[i]['Z']
-#             id = batch_dict[i]['id']
-#         else:
-#             X = torch.cat((X, batch_dict[i]['X']), axis=0)
-#             Y = torch.cat((Y, batch_dict[i]['Y']), axis=0)
-#             Z = torch.cat((Z, batch_dict[i]['Z']), axis=0)
-#             id = torch.cat((id, batch_dict[i]['id']), axis=0)
-#     return {'X': X, 'Z': Z, 'Y': Y, 'id': id}
-
-# choice_data = ChoiceDataset_all(data, args, id_variable="id_ind")
-# data_loader = DataLoader(choice_data, batch_size=2, 
-#                          shuffle=False, num_workers=0, 
-#                          drop_last=False, 
-#                          collate_fn=cust_collate)
-
-
-# moi
-
-# st_time = time.time()
-
-# for batch_idx, vals in enumerate(loader):
-
-# 	if batch_idx > 10:
-# 		break
-
-# 	print(len(vals))
-
-# print('Time %0.4f'%(time.time() - st_time))
-
-
-## Note: replaced main gaussian regression target with Charbonair log loss
-## mixed with focal loss. Add perceptual consistency loss lpips.
-## Replaced negative loss with a focal loss. Changed cap loss to a L1 smooth loss 
-## (e.g., Huber). Also down-weight same points in the continuous Charbonair log loss
 
 
 
@@ -4684,8 +3742,13 @@ for batch_idx, inputs in enumerate(loader):
 	# ]
 
 
-	lbl_srcs = inputs[2][0]
-	use_real_data_sample = inputs[2][1]
+	lbl_srcs = inputs[3][0]
+	use_real_data_sample = inputs[3][1]
+	if len(np.array([use_real_data_sample]).reshape(-1)) > 1:
+		use_real_data_sample_v = np.array([use_real_data_sample]).reshape(-1) # np.copy(inputs[3][1]).reshape(-1)
+	else:
+		use_real_data_sample_v = use_real_data_sample*np.ones(n_batch)
+
 	X_fixed_cart = [inputs[0][j][-7] for j in range(n_batch)]
 	X_fixed_t = [inputs[0][j][-6] for j in range(n_batch)]
 	num_fixed = [X_fixed_cart[j].shape[0] for j in range(n_batch)]
@@ -4698,11 +3761,14 @@ for batch_idx, inputs in enumerate(loader):
 	mask_lbls_query_l = [[] for j in range(n_batch)]
 	mask_lbls_assoc_query_l = [[] for j in range(n_batch)]
 
-	if use_real_data_sample == True:
-		weight_assoc = 0.5 # else 1.0
-		## Only use labels within ~3 std of the sources
 
-		for j in range(n_batch):
+	weight_assoc_v = []
+	for j in range(n_batch):
+
+
+		if use_real_data_sample_v[j] == True:
+			weight_assoc = 0.5 # else 1.0
+			## Only use labels within ~3 std of the sources
 
 			mask_lbls = torch.zeros(num_fixed[j],1).to(device)
 			mask_lbls_query = torch.zeros(X_query[j].shape[0],1).to(device)
@@ -4725,15 +3791,19 @@ for batch_idx, inputs in enumerate(loader):
 			mask_lbls_lv.append(mask_lbls)
 			mask_lbls_query_lv.append(mask_lbls_query)
 			mask_lbls_assoc_query_lv.append(mask_lbls_assoc_query)
+			weight_assoc_v.append(weight_assoc)
 
+		else:
 
-	else:
+			weight_assoc = 1.0
+			# mask_lbls_lv = [torch.ones(num_fixed[j],1).to(device) for j in range(n_batch)]
+			# mask_lbls_query_lv = [torch.ones(X_query[j].shape[0],1).to(device) for j in range(n_batch)]
+			# mask_lbls_assoc_query_lv = [torch.ones(x_src_query_cart_l[j].shape[0],1).to(device) for j in range(n_batch)]
 
-		weight_assoc = 1.0
-		mask_lbls_lv = [torch.ones(num_fixed[j],1).to(device) for j in range(n_batch)]
-		mask_lbls_query_lv = [torch.ones(X_query[j].shape[0],1).to(device) for j in range(n_batch)]
-		mask_lbls_assoc_query_lv = [torch.ones(x_src_query_cart_l[j].shape[0],1).to(device) for j in range(n_batch)]
-
+			mask_lbls_lv.append(torch.ones(num_fixed[j],1).to(device))
+			mask_lbls_query_lv.append(torch.ones(X_query[j].shape[0],1).to(device))
+			mask_lbls_assoc_query_lv.append(torch.ones(x_src_query_cart_l[j].shape[0],1).to(device))
+			weight_assoc_v.append(weight_assoc)
 
 	for j in range(n_batch):
 		mask_lbls_l[j] = torch.where(mask_lbls_lv[j][:,0] > 0)[0]
@@ -4741,87 +3811,6 @@ for batch_idx, inputs in enumerate(loader):
 		mask_lbls_assoc_query_l[j] = torch.where(mask_lbls_assoc_query_lv[j][:,0] > 0)[0]
 
 
-	# moi
-
-
-	## If using real data, down-weight association losses, and "mask" the spatio-temporal source labels near sources
-
-
-	# ## Generate batch of synthetic inputs. Note, if this is too slow to interleave with model updates, 
-	# ## you can  build these synthetic training data offline and then just load during training. The 
-	# ## dataset would likely have a large memory footprint if doing so (e.g. > 1 Tb)
-
-	# if load_training_data == False:
-
-	# 	## Build a training batch on the fly
-	# 	if use_subgraph == False:
-	# 		[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True)
-	# 		if use_expanded == True:
-	# 			A_src_src_l, Ac_src_src_l = A_src_src_l
-	# 			A_src_in_prod_l, Ac_src_in_prod_l = A_src_in_prod_l			
-	# 		Inpts = [Inpts[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Inpts))]
-	# 		Masks = [Masks[j].reshape(len(X_fixed[j])*len(Locs[j]),-1) for j in range(len(Masks))]
-	# 		A_sta_sta_l = [torch.Tensor(A_sta_sta_l[j]).long().to(device) for j in range(len(A_sta_sta_l))]
-	# 		A_src_src_l = [torch.Tensor(A_src_src_l[j]).long().to(device) for j in range(len(A_src_src_l))]
-	# 		A_prod_sta_sta_l = [torch.Tensor(A_prod_sta_sta_l[j]).long().to(device) for j in range(len(A_prod_sta_sta_l))]
-	# 		A_prod_src_src_l = [torch.Tensor(A_prod_src_src_l[j]).long().to(device) for j in range(len(A_prod_src_src_l))]
-	# 		A_src_in_prod_l = [torch.Tensor(A_src_in_prod_l[j]).long().to(device) for j in range(len(A_src_in_prod_l))]
-	# 		A_src_in_sta_l = [torch.Tensor(np.concatenate((np.tile(np.arange(Locs[j].shape[0]), len(X_fixed[j])).reshape(1,-1), np.arange(len(X_fixed[j])).repeat(len(Locs[j]), axis = 0).reshape(1,-1)), axis = 0)).long().to(device) for j in range(len(Inpts))]
-	# 		if use_expanded == True:
-	# 			Ac_src_src_l = [torch.Tensor(Ac_src_src_l[j]).long().to(device) for j in range(len(Ac_src_src_l))]
-	# 			Ac_prod_src_src_l = [torch.Tensor(Ac_prod_src_src_l[j]).long().to(device) for j in range(len(Ac_prod_src_src_l))]
-
-
-	# 	if use_subgraph == True:
-	# 		[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
-	# 		A_src_in_sta_l = [[] for j in range(len(Inpts))]
-	# 		if use_expanded == True:
-	# 			Ac_src_src_l = [[] for j in range(len(A_src_src_l))]
-	# 			Ac_prod_src_src_l = [[] for j in range(len(A_prod_src_src_l))]				
-			
-	# 		for n in range(len(Inpts)):
-	# 			A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[n], X_fixed[n], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac, device = device)
-	# 			A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[n], X_fixed[n], A_src_in_sta, max_t, min_t = min_t, time_shift = X_fixed[n][:,3], dt_res = kernel_sig_t/5.0, t_win = kernel_sig_t*2.0, device = device)
-	# 			if use_expanded == True:
-	# 				A_src_src, Ac_src_src = A_src_src
-	# 				A_prod_src_src, Ac_prod_src_src = A_prod_src_src
-	# 			A_sta_sta_l[n] = A_sta_sta ## These should be equal
-	# 			A_src_src_l[n] = A_src_src ## These should be equal
-	# 			A_prod_sta_sta_l[n] = A_prod_sta_sta
-	# 			A_prod_src_src_l[n] = A_prod_src_src
-	# 			A_src_in_prod_l[n] = A_src_in_prod
-	# 			A_src_in_sta_l[n] = A_src_in_sta
-	# 			A_edges_time_p_l[n] = A_edges_time_p
-	# 			A_edges_time_s_l[n] = A_edges_time_s
-	# 			A_edges_ref_l[n] = dt_partition
-	# 			Inpts[n] = np.copy(np.ascontiguousarray(Inpts[n][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
-	# 			Masks[n] = np.copy(np.ascontiguousarray(Masks[n][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
-	# 			if use_expanded == True:
-	# 				Ac_src_src_l[n] = Ac_src_src ## These should be equal
-	# 				Ac_prod_src_src_l[n] = Ac_prod_src_src
-
-
-	# 	if use_gradient_loss == True:
-	# 		Lbls_grad_t = [Lbls[n][2] for n in range(len(Lbls))]
-	# 		Lbls_grad_spc = [Lbls[n][1] for n in range(len(Lbls))]
-	# 		Lbls_query_grad_t = [Lbls_query[n][2] for n in range(len(Lbls_query))]
-	# 		Lbls_query_grad_spc = [Lbls_query[n][1] for n in range(len(Lbls_query))]
-	# 		Lbls = [Lbls[n][0] for n in range(len(Lbls))]	
-	# 		Lbls_query = [Lbls_query[n][0] for n in range(len(Lbls_query))]
-
-	# # else:
-
-
-	# 	# file_choice = np.random.choice(files_load)
-
-	# 	# h = h5py.File(file_choice, 'r')
-		
-	# 	# data = [h['data'][:], h['srcs'][:], h['srcs_active'][:]]
-
-
-	# else:
-
-	# 	pass
 
 
 	loss_val = 0
@@ -4843,88 +3832,6 @@ for batch_idx, inputs in enumerate(loader):
 
 	for inc, i0 in enumerate(range(n_batch)):
 
-		# if load_training_data == True:
-
-		# 	## Overwrite i0 and create length-1 lists for the training samples loaded from .hdf5 file
-		# 	Inpts = []
-		# 	Masks = []
-		# 	X_fixed = []
-		# 	X_query = []
-		# 	Locs = []
-		# 	Trv_out = []
-		# 	Lbls = []
-		# 	Lbls_query = []
-		# 	lp_times = []
-		# 	lp_stations = []
-		# 	lp_phases = []
-		# 	lp_meta = []
-		# 	lp_srcs = []
-		# 	A_sta_sta_l = []
-		# 	A_src_src_l = []
-		# 	A_prod_sta_sta_l = []
-		# 	A_prod_src_src_l = []
-		# 	A_src_in_prod_l = []
-		# 	# A_src_in_prod_x_l = []
-		# 	# A_src_in_prod_edges_l = []
-		# 	A_edges_time_p_l = []
-		# 	A_edges_time_s_l = []
-		# 	A_edges_ref_l = []
-		# 	A_src_in_sta_l = []
-
-		# 	if use_expanded == True:
-		# 		Ac_src_src_l = []
-		# 		Ac_prod_src_src_l = []
-
-		# 	if use_gradient_loss == True:
-		# 		Lbls_grad_t = []
-		# 		Lbls_grad_spc = []
-		# 		Lbls_query_grad_t = []
-		# 		Lbls_query_grad_spc = []
-
-		# 	## Note: it would be more efficient (speed and memory) to pass 
-		# 	## in each sample one at time, rather than appending batch to a list
-			
-		# 	Inpts.append(h['Inpts_%d'%i0][:])
-		# 	Masks.append(h['Masks_%d'%i0][:])
-		# 	X_fixed.append(h['X_fixed_%d'%i0][:])
-		# 	X_query.append(h['X_query_%d'%i0][:])
-		# 	Locs.append(h['Locs_%d'%i0][:])
-		# 	Trv_out.append(h['Trv_out_%d'%i0][:])
-		# 	Lbls.append(h['Lbls_%d'%i0][:])
-		# 	Lbls_query.append(h['Lbls_query_%d'%i0][:])
-		# 	lp_times.append(h['lp_times_%d'%i0][:])
-		# 	lp_stations.append(h['lp_stations_%d'%i0][:])
-		# 	lp_phases.append(h['lp_phases_%d'%i0][:])
-		# 	lp_meta.append(h['lp_meta_%d'%i0][:])
-		# 	lp_srcs.append(h['lp_srcs_%d'%i0][:])
-		# 	A_sta_sta_l.append(torch.Tensor(h['A_sta_sta_%d'%i0][:]).long().to(device))
-		# 	A_src_src_l.append(torch.Tensor(h['A_src_src_%d'%i0][:]).long().to(device))
-		# 	A_prod_sta_sta_l.append(torch.Tensor(h['A_prod_sta_sta_%d'%i0][:]).long().to(device))
-		# 	A_prod_src_src_l.append(torch.Tensor(h['A_prod_src_src_%d'%i0][:]).long().to(device))
-		# 	A_src_in_prod_l.append(torch.Tensor(h['A_src_in_prod_%d'%i0][:]).long().to(device))
-
-		# 	# A_src_in_prod_l.append(h['A_src_in_prod_%d'%i0][:])
-		# 	# A_src_in_prod_x_l.append(h['A_src_in_prod_x_%d'%i0][:])
-		# 	# A_src_in_prod_edges_l.append(h['A_src_in_prod_edges_%d'%i0][:])
-		# 	# if use_subgraph == True:
-		# 	A_src_in_sta_l.append(torch.Tensor(h['A_src_in_sta_%d'%i0][:]).long().to(device))
-			
-		# 	A_edges_time_p_l.append(h['A_edges_time_p_%d'%i0][:])
-		# 	A_edges_time_s_l.append(h['A_edges_time_s_%d'%i0][:])
-		# 	A_edges_ref_l.append(h['A_edges_ref_%d'%i0][:])
-
-		# 	if use_expanded == True:
-		# 		Ac_src_src_l.append(torch.Tensor(h['Ac_src_src_%d'%i0][:]).long().to(device))
-		# 		Ac_prod_src_src_l.append(torch.Tensor(h['Ac_prod_src_src_%d'%i0][:]).long().to(device))
-
-		# 	if use_gradient_loss == True:
-		# 		Lbls_grad_spc.append(h['Lbls_grad_spc_%d'%i0][:])
-		# 		Lbls_grad_t.append(h['Lbls_grad_t_%d'%i0][:])
-		# 		Lbls_query_grad_spc.append(h['Lbls_query_grad_spc_%d'%i0][:])
-		# 		Lbls_query_grad_t.append(h['Lbls_query_grad_t_%d'%i0][:])
-
-		# 	i0 = 0 ## Over-write, so below indexing 
-
 
 		## Now i0 is not set to 0
 		## Adding skip... to skip samples with zero input picks
@@ -4932,61 +3839,42 @@ for batch_idx, inputs in enumerate(loader):
 			print('skip a sample!') ## If this skips, and yet i0 == (n_batch - 1), is it a problem?
 			continue ## Skip this!
 
-		
-		# if use_expanded == False:
 
-		# 	# Continue processing the rest of the inputs
-		# 	input_tensors = [
-		# 		input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor,
-		# 		data_1, data_2,
-		# 		A_src_in_sta_l[i0],
-		# 		A_src_src_l[i0],
-		# 		torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
-		# 		torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
-		# 		torch.Tensor(A_edges_ref_l[i0]).to(device),
-		# 		trv_out,
-		# 		torch.Tensor(lp_times[i0]).to(device),
-		# 		torch.Tensor(lp_stations[i0]).long().to(device),
-		# 		torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
-		# 		torch.Tensor(ftrns1(Locs[i0])).to(device),
-		# 		torch.Tensor(ftrns1(X_fixed[i0])).to(device),
-		# 		torch.Tensor(X_fixed[i0][:,3]).to(device),
-		# 		torch.Tensor(ftrns1(X_query[i0])).to(device),
-		# 		torch.Tensor(x_src_query_cart).to(device),
-		# 		torch.Tensor(X_query[i0][:,3]).to(device), tq_sample, trv_out_src
-		# 	]
 
-		# else:
+		if use_variable_domain == True:
 
-		# 	# Continue processing the rest of the inputs
-		# 	input_tensors = [
-		# 		input_tensor_1, input_tensor_2, A_prod_sta_tensor, [A_prod_src_tensor, Ac_prod_src_src_l[i0]],
-		# 		data_1, data_2,
-		# 		A_src_in_sta_l[i0],
-		# 		A_src_src_l[i0],
-		# 		torch.Tensor(A_edges_time_p_l[i0]).long().to(device),
-		# 		torch.Tensor(A_edges_time_s_l[i0]).long().to(device),
-		# 		torch.Tensor(A_edges_ref_l[i0]).to(device),
-		# 		trv_out,
-		# 		torch.Tensor(lp_times[i0]).to(device),
-		# 		torch.Tensor(lp_stations[i0]).long().to(device),
-		# 		torch.Tensor(lp_phases[i0]).reshape(-1, 1).float().to(device),
-		# 		torch.Tensor(ftrns1(Locs[i0])).to(device),
-		# 		torch.Tensor(ftrns1(X_fixed[i0])).to(device),
-		# 		torch.Tensor(X_fixed[i0][:,3]).to(device),
-		# 		torch.Tensor(ftrns1(X_query[i0])).to(device),
-		# 		torch.Tensor(x_src_query_cart).to(device),
-		# 		torch.Tensor(X_query[i0][:,3]).to(device), tq_sample, trv_out_src
-		# 	]			
+			locs, stas, lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t, rbest, mn = inputs[2][i0] # ftrns1, ftrns2, ftrns1_diff, ftrns2_diff = # params_extra
+			lat_range_interior = [lat_range[0], lat_range[1]]
+			lon_range_interior = [lon_range[0], lon_range[1]]
 
-		# locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t
 
-		# Call the model with pre-processed tensors
-		## To integrate negative_loss, must replace out[1] (which can't be overwritten, or can it?)
-		## If not, can replace with a variable name that is overwritten
+			## Set model hyper-parameters
 
-		## Extract inputs from inputs
-		# input_tensors = to_gpu(inputs[0]) if device == 'cuda' else inputs[0]
+
+			# use_spherical = False
+			if config['use_spherical'] == True:
+
+				earth_radius = 6371e3
+				ftrns1 = lambda x: (rbest @ (lla2ecef(x, e = 0.0, a = earth_radius) - mn).T).T
+				ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn, e = 0.0, a = earth_radius)
+
+				ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, e = 0.0, a = earth_radius, device = device) - mn_cuda).T).T
+				ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, e = 0.0, a = earth_radius, device = device)
+
+			else:
+
+				earth_radius = 6378137.0
+				ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T
+				ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)
+
+				ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T
+				ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device)
+
+
+			## Set model parameters
+			# mz.set_scale_coefficients(scale_rel, scale_time, kernel_sig_t, eps)
+			mz.set_scale_coefficients(src_x_kernel*2.0, scale_time, kernel_sig_t, kernel_sig_t*3.0, src_x_kernel, src_t_kernel, time_shift_range)
+			# scale_rel, scale_time, kernel_sig_t, eps, src_x_kernel, src_t_kernel, time_shift_range
 
 
 		if use_gradient_loss == False:
@@ -4999,12 +3887,6 @@ for batch_idx, inputs in enumerate(loader):
 			out, grads = mz(*input_tensors_l[i0], save_state = True) if (use_negative_loss == True)*(np.mod(i, use_negative_loss_step) == 0) else mz(*input_tensors_l[i0])
 			grad_grid_src, grad_grid_t, grad_query_src, grad_query_t = grads
 
-
-		# moi
-
-
-		## Note, negative loss could be used on x_src_query_cart, but it is more essential for constraining the false positives in out[1]
-		# pick_lbls = pick_labels_extract_interior_region_flattened(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 
 
 		## Select the specific pick labels (or can re-create above)
@@ -5078,29 +3960,18 @@ for batch_idx, inputs in enumerate(loader):
 		if use_dice_loss == True:
 
 
-			# loss_base1 = DiceLoss(out[0], torch.Tensor(Lbls[i0]).to(device))
-			# loss_dice2 = DiceLoss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-			# loss_dice3 = DiceLoss(out[2][:,:,0], pick_lbls[:,:,0])
-			# loss_dice4 = DiceLoss(out[3][:,:,0], pick_lbls[:,:,1])
-
-			# moi
-
 			loss_base1 = DiceLoss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
 			loss_dice2 = DiceLoss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
 
-			# moi
 
 			loss_dice3 = DiceLoss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0])
 			loss_dice4 = DiceLoss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])
 
-			# loss_dice = (loss_dice1 + loss_dice2 + loss_dice3 + loss_dice4)/4.0
 
 			# loss_src_val += (loss_dice1.item() + loss_dice2.item())/n_batch
 			loss_src_val += (loss_base1.item() + loss_dice2.item())/n_batch
 			loss_asc_val += (loss_dice3.item() + loss_dice4.item())/n_batch
 
-			# loss = 0.8*loss + 0.2*loss_dice
-			# print('Dice %0.5f %0.5f'%(n_batch*loss_src_val, n_batch*loss_asc_val)) # loss.item(), 
 
 
 		# use_mse_loss = False ## Switching to Huber loss
@@ -5108,11 +3979,11 @@ for batch_idx, inputs in enumerate(loader):
 
 			if use_sigmoid == False:
 
+				loss_mse1 = weights[0]*mse_loss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0][mask_lbls_l[i0]]).to(device)) + weights[1]*mse_loss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0][mask_lbls_query_l[i0]]).to(device))
+				loss_mse2 = weight_assoc_v[inc]*(weights[2]*mse_loss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*mse_loss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
+				# loss = loss_mse1 + 2.0*loss_mse2
 				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
 				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-				loss_mse1 = weights[0]*mse_loss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0][mask_lbls_l[i0]]).to(device)) + weights[1]*mse_loss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0][mask_lbls_query_l[i0]]).to(device))
-				loss_mse2 = weight_assoc*(weights[2]*mse_loss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*mse_loss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
-				# loss = loss_mse1 + 2.0*loss_mse2
 
 			else:
 
@@ -5122,10 +3993,8 @@ for batch_idx, inputs in enumerate(loader):
 
 				loss_bce = weights[0]*bce_loss(out[0][:,1], ifind_mask1.float()) + weights[1]*bce_loss(out[1][:,1], ifind_mask2.float())
 				loss_mse1 = weights[0]*mse_loss(out[0][ifind_mask1,0].reshape(-1,1), torch.Tensor(Lbls[i0]).to(device)[ifind_mask1]) + weights[1]*mse_loss(out[1][ifind_mask2,0].reshape(-1,1), torch.Tensor(Lbls_query[i0]).to(device)[ifind_mask2])
-				loss_mse2 = weight_assoc*(weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
+				loss_mse2 = weight_assoc_v[inc]*(weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 
-				# loss = loss_mse1 + loss_mse2 + (1/100.0)*loss_bce
-				# loss_bce_val += 0.1*loss_bce.item()
 
 
 		# use_huber_loss = True
@@ -5133,10 +4002,8 @@ for batch_idx, inputs in enumerate(loader):
 
 			if use_sigmoid == False:
 
-				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
-				# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 				loss_huber1 = weights[0]*huber_loss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0][mask_lbls_l[i0]]).to(device)) + weights[1]*huber_loss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0][mask_lbls_query_l[i0]]).to(device))
-				loss_huber2 = weight_assoc*(weights[2]*huber_loss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*huber_loss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
+				loss_huber2 = weight_assoc_v[inc]*(weights[2]*huber_loss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*huber_loss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
 				# loss = loss_mse1 + 2.0*loss_mse2
 
 			else:
@@ -5147,10 +4014,7 @@ for batch_idx, inputs in enumerate(loader):
 
 				loss_bce = weights[0]*bce_loss(out[0][:,1], ifind_mask1.float()) + weights[1]*bce_loss(out[1][:,1], ifind_mask2.float())
 				loss_huber1 = weights[0]*mse_loss(out[0][ifind_mask1,0].reshape(-1,1), torch.Tensor(Lbls[i0]).to(device)[ifind_mask1]) + weights[1]*mse_loss(out[1][ifind_mask2,0].reshape(-1,1), torch.Tensor(Lbls_query[i0]).to(device)[ifind_mask2])
-				loss_huber2 = weight_assoc*(weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-
-				# loss = loss_mse1 + loss_mse2 + (1/100.0)*loss_bce
-				# loss_bce_val += 0.1*loss_bce.item()
+				loss_huber2 = weight_assoc_v[inc]*(weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 
 
 		# use_huber_loss = True
@@ -5160,19 +4024,14 @@ for batch_idx, inputs in enumerate(loader):
 
 				if (use_cap_loss == False) or (i <= n_burn_in):
 
-					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
-					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 					loss_smooth_l1 = weights[0]*gaussian_heatmap_loss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]]) + weights[1]*gaussian_heatmap_loss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
-					loss_smooth_l2 = weight_assoc*(weights[2]*gaussian_heatmap_loss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*gaussian_heatmap_loss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
+					loss_smooth_l2 = weight_assoc_v[inc]*(weights[2]*gaussian_heatmap_loss(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*gaussian_heatmap_loss(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
 					# loss = loss_mse1 + 2.0*loss_mse2
 
 				else:
 
-					## Note: assuming up weighting of cap by 10.0
-					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
-					# loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 					loss_smooth_l1 = weights[0]*gaussian_heatmap_loss_with_cap(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]]) + weights[1]*gaussian_heatmap_loss_with_cap(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
-					loss_smooth_l2 = weight_assoc*(weights[2]*gaussian_heatmap_loss_with_cap(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*gaussian_heatmap_loss_with_cap(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
+					loss_smooth_l2 = weight_assoc_v[inc]*(weights[2]*gaussian_heatmap_loss_with_cap(out[2][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,0]) + weights[3]*gaussian_heatmap_loss_with_cap(out[3][mask_lbls_assoc_query_l[i0],:,0], pick_lbls[mask_lbls_assoc_query_l[i0],:,1])) # /n_batch
 					# loss = loss_mse1 + 2.0*loss_mse2					
 
 
@@ -5184,10 +4043,7 @@ for batch_idx, inputs in enumerate(loader):
 
 				loss_bce = weights[0]*bce_loss(out[0][:,1], ifind_mask1.float()) + weights[1]*bce_loss(out[1][:,1], ifind_mask2.float())
 				loss_huber1 = weights[0]*mse_loss(out[0][ifind_mask1,0].reshape(-1,1), torch.Tensor(Lbls[i0]).to(device)[ifind_mask1]) + weights[1]*mse_loss(out[1][ifind_mask2,0].reshape(-1,1), torch.Tensor(Lbls_query[i0]).to(device)[ifind_mask2])
-				loss_huber2 = weight_assoc*(weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-
-				# loss = loss_mse1 + loss_mse2 + (1/100.0)*loss_bce
-				# loss_bce_val += 0.1*loss_bce.item()
+				loss_huber2 = weight_assoc_v[inc]*(weights[2]*mse_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*mse_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
 
 
 
@@ -5197,10 +4053,6 @@ for batch_idx, inputs in enumerate(loader):
 			scale_cap = 1.0
 			cap_limit = 0.7
 
-			# ifind_cap1 = np.where(Lbls[i0] > cap_limit)[0]
-			# ifind_cap2 = np.where(Lbls_query[i0] > cap_limit)[0]
-			# ifind_cap11, ifind_cap12 = torch.where(pick_lbls[:,:,0] > cap_limit) # [0]
-			# ifind_cap21, ifind_cap22 = torch.where(pick_lbls[:,:,1] > cap_limit) # [0]
 
 			ifind_cap1 = np.where((Lbls[i0] > cap_limit)*(mask_lbls_lv[i0].cpu() > 0))[0]
 			ifind_cap2 = np.where((Lbls_query[i0] > cap_limit)*(mask_lbls_query_lv[i0].cpu() > 0))[0]
@@ -5211,28 +4063,21 @@ for batch_idx, inputs in enumerate(loader):
 
 			loss_cap1 = torch.tensor(0.0).to(device)
 			loss_cap2 = torch.tensor(0.0).to(device)
-			# if len(ifind_cap1) > 0: loss_cap1 += scale_cap*(weights[0]*huber_loss(out[0][ifind_cap1], torch.Tensor(Lbls[i0][ifind_cap1]).to(device)))
-			# if len(ifind_cap2) > 0: loss_cap1 += scale_cap*(weights[1]*huber_loss(out[1][ifind_cap2], torch.Tensor(Lbls_query[i0][ifind_cap2]).to(device)))
 
 			if len(ifind_cap1) > 0: loss_cap1 += scale_cap*(weights[0]*F.smooth_l1_loss(out[0][ifind_cap1], torch.Tensor(Lbls[i0][ifind_cap1]).to(device), beta = 0.5))
 			if len(ifind_cap2) > 0: loss_cap1 += scale_cap*(weights[1]*F.smooth_l1_loss(out[1][ifind_cap2], torch.Tensor(Lbls_query[i0][ifind_cap2]).to(device), beta = 0.5))
 
 
-			if len(ifind_cap11) > 0: loss_cap2 += weight_assoc*scale_cap*(weights[2]*F.smooth_l1_loss(out[2][ifind_cap11,ifind_cap12,0], pick_lbls[ifind_cap11,ifind_cap12,0], beta = 0.4)) # 0.5
-			if len(ifind_cap21) > 0: loss_cap2 += weight_assoc*scale_cap*(weights[3]*F.smooth_l1_loss(out[3][ifind_cap21,ifind_cap22,0], pick_lbls[ifind_cap21,ifind_cap22,1], beta = 0.4)) # 0.5
+			if len(ifind_cap11) > 0: loss_cap2 += weight_assoc_v[inc]*scale_cap*(weights[2]*F.smooth_l1_loss(out[2][ifind_cap11,ifind_cap12,0], pick_lbls[ifind_cap11,ifind_cap12,0], beta = 0.4)) # 0.5
+			if len(ifind_cap21) > 0: loss_cap2 += weight_assoc_v[inc]*scale_cap*(weights[3]*F.smooth_l1_loss(out[3][ifind_cap21,ifind_cap22,0], pick_lbls[ifind_cap21,ifind_cap22,1], beta = 0.4)) # 0.5
 
 			loss_cap_val += (loss_cap1 + loss_cap2)/n_batch
 
-			# else:
-			# 	loss_cap2 = torch.tensor(0).to(device)
 
-
-		if (use_negative_loss == True)*(i > n_burn_in)*(use_real_data_sample == False):
+		if (use_negative_loss == True)*(i > n_burn_in)*(use_real_data_sample_v[inc] == False):
 
 
 			min_up_sample = 0.1
-			## Up-sample queries for regions of high prediction but low labels. Or alternatively, essentially run a peak finder on the output.
-			## Do not include points that are < thresh for both labels and predictions
 			prob_up_sample = np.maximum(out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0].cpu().detach().numpy() < min_up_sample), 0.0)
 			# prob_up_sample = 
 			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
@@ -5242,37 +4087,17 @@ for batch_idx, inputs in enumerate(loader):
 			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3].cpu().detach().numpy(), lp_srcs[i0][:,3].cpu().detach().numpy(), src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
 
 
-			# mask_query = (out_query > min_up_sample) + (torch.Tensor(lbls_query).to(device) > min_up_sample) ## At least one field > min_up_sample
-			# mask_query = (out_query > min_up_sample) + (torch.Tensor(lbls_query).to(device) > min_up_sample) ## At least one field > min_up_sample
-
-
 			if use_sigmoid == False:
 
-				# loss_negative = mse_loss(out_query[mask_query], torch.Tensor(lbls_query).to(device)[mask_query]) # weights[1]*
 
-				# if mask_query.sum() > 0:
-				# loss_negative = mse_loss(out_query[mask_query], torch.Tensor(lbls_query).to(device)[mask_query]) # weights[1]*
-				# loss_negative = mse_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
-				# loss_negative = huber_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
-
-				# loss_negative = hard_negative_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
 				loss_negative = gaussian_heatmap_loss(out_query, torch.Tensor(lbls_query).to(device)) # weights[1]*
 
-
-				# else:
-				# loss_negative = torch.tensor(0.0).to(device)
-
-
-				# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-				# loss = 0.975*loss + 0.025*loss_negative
 
 			else:
 
 				## Not completely implemented
 				ifind_mask = torch.Tensor(lbls_query[:,0] > min_val_lbl).long().to(device)
-				loss_negative = (1/100.0)*bce_loss(out_query[:,1], ifind_mask.float()) + mse_loss(out_query[ifind_mask,0], torch.Tensor(lbls_query).to(device)[ifind_mask,0]) # weights[1]*
-				# loss2 = (weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-				# loss = 0.9*loss + 0.1*loss_negative				
+				loss_negative = (1/100.0)*bce_loss(out_query[:,1], ifind_mask.float()) + mse_loss(out_query[ifind_mask,0], torch.Tensor(lbls_query).to(device)[ifind_mask,0]) # weights[1]*		
 
 			loss_negative_val += loss_negative.item() # /n_batch
 			# print('loss negative %0.8f'%loss_negative)
@@ -5280,39 +4105,6 @@ for batch_idx, inputs in enumerate(loader):
 
 		loss_consistency_flag = False
 		if (use_consistency_loss == True)*(i > n_burn_in):
-
-
-			# def l1_gradient_loss(pred, target):
-			#     # pred, target: [N,1] or [N,3]
-			#     diff = pred - target
-
-			#     # Fake 3D gradient using nearest neighbors or just skip structure
-			#     # Simpler version used in several papers:
-			#     l1 = diff.abs().mean()
-			#     grad_pred  = pred[1:]  - pred[:-1]
-			#     grad_target = target[1:] - target[:-1]
-			#     grad_loss = (grad_pred - grad_target).abs().mean()
-
-			#     return l1 + 0.1 * grad_loss
-
-			# def consistency_loss(pred1, pred2, coords):
-			# def consistency_loss(pred1, pred2, coords):
-			#     l1 = F.l1_loss(pred1, pred2)
-			#     grad1 = pred1 - pred1.roll(1, dims=0)  # crude temporal gradient
-			#     grad2 = pred2 - pred2.roll(1, dims=0)
-			#     grad_cons = F.l1_loss(grad1, grad2)
-			#     return l1 + 0.5 * grad_cons
-
-			## Prefered loss function
-			# import lpips
-			# lpips_fn = lpips.LPIPS(net='vgg', spatial=False).eval().to(device)
-
-			# def consistency_loss(pred1, pred2):
-			# 	# pred1, pred2: [N, 1] or [N, 3] — raw unstructured points
-			# 	# Just unsqueeze to fake "image" with H=W=1
-			# 	x1 = pred1.unsqueeze(0).unsqueeze(0)   # [1,1,N,1] → treated as 1×N "image"
-			# 	x2 = pred2.unsqueeze(0).unsqueeze(0)
-			# 	return lpips_fn(x1, x2).mean()
 
 
 			ilen = int(np.floor(n_batch/2/2))
@@ -5327,19 +4119,8 @@ for batch_idx, inputs in enumerate(loader):
 					if use_sigmoid == False:
 
 
-						# # weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
-						# mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::].cpu().detach().numpy() - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
-						# loss_consistency = mse_loss(out[1][ind_consistency::][mask_loss.long()], out_save[0][ind_consistency::][mask_loss.long()]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-						# # loss = 0.9*loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
-						# # loss_consistency_val += 0.1*loss_consistency.item()/n_batch
-
-
-
 						# weight1 = ((Lbls[i0] - Lbls_save[0]).max() == 0) # .float()
 						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::].cpu().detach().numpy() - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()*(mask_lbls_query_lv[i0][ind_consistency::] > 0)  # .float()
-						# loss_consistency = l1_gradient_loss(out[1][ind_consistency::][mask_loss.long()], out_save[0][ind_consistency::][mask_loss.long()]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-						# loss = 0.9*loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
-						# loss_consistency_val += 0.1*loss_consistency.item()/n_batch
 
 						loss_consistency = consistency_loss(out[1][ind_consistency::][mask_loss.long()], out_save[0][ind_consistency::][mask_loss.long()])
 
@@ -5348,8 +4129,7 @@ for batch_idx, inputs in enumerate(loader):
 
 						mask_loss = torch.Tensor((np.abs(Lbls_query[i0][ind_consistency::].cpu().detach().numpy() - Lbls_save[0][ind_consistency::]) < 0.01)).to(device).float()  # .float()
 						loss_consistency = mse_loss(out[1][ind_consistency::][mask_loss.long()][:,0], out_save[0][ind_consistency::][mask_loss.long()][:,0]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-						# loss = 0.9*loss + 0.1*loss_consistency ## Need to check relative scaling of this compared to focal loss
-						# loss_consistency_val += 0.1*loss_consistency.item()/n_batch					
+	
 
 					loss_consistency_val += loss_consistency.item() # /n_batch
 					loss_consistency_flag = True
@@ -5362,30 +4142,9 @@ for batch_idx, inputs in enumerate(loader):
 
 
 
-		# if use_focal_loss == True:
-
-		# 	# loss_focal1 = continuous_focal_loss()
-
-		# 	## Unclear if will be stable for association predictions
-		# 	loss_focal1 = weights[0]*continuous_focal_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*continuous_focal_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-
-		# 	# loss_focal1 = (weights[2]*continuous_focal_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*continuous_focal_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-		# 	# loss = loss_mse1 + 2.0*loss_mse2
-
-
-
 		# if (use_gradient_loss == True)*(i > int(n_epochs/5)):
 		if (use_gradient_loss == True)*(i > n_burn_in):
 
-			# if init_gradient_loss == False:
-			# 	init_gradient_loss, mz.activate_gradient_loss = True, True
-			# else:
-			# 	loss_grad1 = 0.5*weights[0]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*mse_loss(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
-			# 	loss_grad2 = 0.5*weights[1]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*mse_loss(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
-			# 	loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
-
-			# 	# loss = 0.5*loss + 0.5*loss_grad
-			# 	loss_grad_val += 0.5*loss_grad.item()/n_batch
 
 			if init_gradient_loss == False:
 				init_gradient_loss, mz.activate_gradient_loss = True, True
@@ -5397,53 +4156,16 @@ for batch_idx, inputs in enumerate(loader):
 				loss_grad_magnitude_spc2 = l1_loss(torch.norm(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, dim = 1), torch.norm(torch.Tensor(Lbls_query_grad_spc[i0]).to(device), dim = 1))
 				loss_grad_magnitude_time2 = l1_loss(torch.norm(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), dim = 1), torch.norm(torch.Tensor(Lbls_query_grad_t[i0]).to(device), dim = 1))
 
-				## Add (non normalized) cosine distance between vectors
-
-				# def gradient_loss(pred, gt):
-				#     # pred, gt: [B,1,H,W] or [B,3,H,W] etc.
-				#     gy_pred, gx_pred = torch.gradient(pred, spacing=1.0)  # or sobel for isotropic
-				#     gy_gt, gx_gt   = torch.gradient(gt)
-				#     grad_mag_pred = torch.sqrt(gx_pred**2 + gy_pred**2 + 1e-6)
-				#     grad_mag_gt   = torch.sqrt(gx_gt**2 + gy_gt**2 + 1e-6)
-				    
-				#     # L1 on magnitude + cosine similarity on direction
-				#     loss_mag = F.l1_loss(grad_mag_pred, grad_gt_mag)
-				#     loss_dir = 1 - F.cosine_similarity(gx_pred*gt + gy_gt, gx_pred*gt + gy_pred + 1e-6).mean() ## Not normalizing
-				#     return loss_mag + loss_dir
-
-
-				# loss_grad1 = 0.5*weights[0]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_grid_src, torch.Tensor(Lbls_grad_spc[i0]).to(device)) + 0.5*weights[0]*mse_loss(torch.Tensor([src_t_kernel]).to(device)*grad_grid_t, torch.Tensor(Lbls_grad_t[i0]).to(device))
-				# loss_grad2 = 0.5*weights[1]*mse_loss(torch.Tensor([src_kernel_mean]).to(device)*grad_query_src, torch.Tensor(Lbls_query_grad_spc[i0]).to(device)) + 0.5*weights[1]*mse_loss(torch.Tensor([src_t_kernel]).to(device)*grad_query_t.reshape(-1), torch.Tensor(Lbls_query_grad_t[i0]).to(device))
-				# loss_grad = (loss_grad1 + loss_grad2)/(weights[0] + weights[1])
-
 				# loss = 0.5*loss + 0.5*loss_grad
 				loss_grad_val += 0.5*loss_grad.item()/n_batch
 
 
-
-		## Merge loss values in the Scalar (normalize with respect to batch size)
-
 		# pre_scale_weights1 = [10.0, 10.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
 		pre_scale_weights1 = [2.0, 2.0] ## May have to decrease these as training goes on (as MSE converged much closer to zero)
-		# pre_scale_weights2 = [1e1, 1e2, 1e1]
-		# pre_scale_weights2 = [1e1, 0.5e2, 1e1, 12.0]
 		pre_scale_weights2 = [0.5e1, 0.5e2, 1e1, 12.0]
 
 		# pre_scale_weights2 = [1e4, 1e4]
 
-
-		# ## Compute base losses
-		# loss_dict = {
-		# # 'loss_dice1': loss_base1, # loss_dice1
-		# 'loss_base1': loss_base1, # loss_dice1
-		# 'loss_dice2': loss_dice2,
-		# 'loss_dice3': loss_dice3,
-		# 'loss_dice4': loss_dice4,
-		# 'loss_huber1': loss_huber1*pre_scale_weights1[0],
-		# 'loss_huber2': loss_huber2*pre_scale_weights1[1],
-		# 'loss_cap1': loss_cap1*pre_scale_weights1[0],
-		# 'loss_cap2': loss_cap2*pre_scale_weights1[1],
-		# }
 
 		## Compute base losses
 		loss_dict = {
@@ -5460,42 +4182,9 @@ for batch_idx, inputs in enumerate(loader):
 
 
 
-
-		# ## Compute base losses
-		# loss_dict = {
-		# # 'loss_dice1': loss_base1, # loss_dice1
-		# 'loss_auxilary1': loss_base1, # loss_dice1
-		# 'loss_dice2': loss_dice2,
-		# 'loss_dice3': 0.5*loss_dice3 + 0.5*loss_dice4,
-		# # 'loss_dice4': loss_dice4,
-		# 'loss_huber1': loss_huber1*pre_scale_weights1[0],
-		# 'loss_huber2': loss_huber2*pre_scale_weights1[1],
-		# # 'loss_cap1': loss_cap1*pre_scale_weights1[0],
-		# # 'loss_cap2': loss_cap2*pre_scale_weights1[1],
-		# }
-
-
-		# 'loss_mse1': loss_mse1*pre_scale_weights1[0],
-		# 'loss_mse2': loss_mse2*pre_scale_weights1[1]
-
-		# losses_dict = {
-		#     'loss_dice1':         dice1_loss,
-		#     'loss_dice2':         dice2_loss,
-		#     'loss_dice3':         dice3_loss,   # ← this is still your anchor
-
-		#     'regression_huber1':  huber1,
-		#     'regression_huber2':  huber2,
-
-		#     'consistency_main':   consistency_loss,   # any name that starts with "consistency_"
-
-		#     'mining_negative':    negative_loss,
-		#     'mining_cap1':        cap_loss,
-		#     # etc.
-		# }
-
 		if i > n_burn_in:
 
-			if use_real_data_sample == False:
+			if use_real_data_sample_v[inc] == False:
 				loss_dict.update({'loss_negative': loss_negative*pre_scale_weights2[0]})
 
 			if loss_consistency_flag == True:
@@ -5506,11 +4195,9 @@ for batch_idx, inputs in enumerate(loader):
 			# loss_dict.update({'loss_cap2': loss_cap2*pre_scale_weights1[1]})
 
 
-		# moi
 		loss = LossBalancer(loss_dict, accum_steps = n_batch, is_last_accum_step = (inc == (n_batch - 1))) # losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False
 		loss = loss/n_batch
 
-		# loss = loss/n_batch
 
 
 		n_visualize_step = 1000
@@ -5537,16 +4224,6 @@ for batch_idx, inputs in enumerate(loader):
 		mx_pred_val_2 += out[1].max().item()
 		mx_pred_val_3 += out[2].max().item()
 		mx_pred_val_4 += out[3].max().item()
-
-
-	# if load_training_data == True:
-	# 	h.close() ## Close training file
-
-
-	# 3. One line of gradient clipping
-	# total_loss.backward()
-	# torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)  # this is the real saviour
-	# optimizer.step()
 
 
 	use_grad_norm = False
@@ -5582,106 +4259,6 @@ for batch_idx, inputs in enumerate(loader):
 				text_file.write(log)
 		log_buffer.clear()
 
-
-
-
-
-
-
-
-## Apply offline threshold estimator
-
-
-# def detect_discrete_events(val):
-
-# 	# iz1, iz2 = np.where(val > 0.01) # Zeros out all values less than this
-# 	# Out_2_sparse = np.concatenate((iz1.reshape(-1,1), iz2.reshape(-1,1), Out_2[iz1,iz2].reshape(-1,1)), axis = 1)
-
-# 	print('Continuous processing time %0.4f'%(time.time() - st_process))
-
-# 	xq = np.copy(X_query)
-# 	ts = np.copy(tsteps_abs)
-# 	assert(np.allclose(np.diff(ts)[0] - dt_win, 0.0))
-
-# 	if use_fixed_edges == True:
-# 		assert(len(x_grid_ind_list) == 1)
-# 		mz_list[x_grid_ind_list[0]].SpaceTimeAttention.use_fixed_edges = False
-# 		# x_grid_ind = x_grid_ind_list[0]
-
-# 	print('Begin peak finding')
-# 	use_sparse_peak_finding = False
-# 	if use_sparse_peak_finding == True:
-
-# 		srcs_init = []
-# 		for i in range(xq.shape[0]):
-
-# 			ifind_x = np.where(iz1 == i)[0]
-# 			if len(ifind_x) > 0:
-
-# 				trace = np.zeros(len(ts))
-# 				trace[iz2[ifind_x]] = Out_2_sparse[ifind_x,2]
-				
-# 				# ip = np.where(Out[:,i] > thresh)[0]
-# 				ip = find_peaks(trace, height = thresh, distance = int(1.5*src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
-# 				if len(ip[0]) > 0: # why use xq here?
-# 					val = np.concatenate((xq[i,:].reshape(1,-1)*np.ones((len(ip[0]),3)), ts[ip[0]].reshape(-1,1), ip[1]['peak_heights'].reshape(-1,1)), axis = 1)
-# 					srcs_init.append(val)		
-	
-# 	else:
-	
-# 		Out = np.zeros((X_query.shape[0], len(tsteps_abs))) ## Use dense out array
-# 		Out[Out_2_sparse[:,0].astype('int'), Out_2_sparse[:,1].astype('int')] = Out_2_sparse[:,2]
-	
-# 		srcs_init = []
-# 		for i in range(Out.shape[0]):
-# 			# ip = np.where(Out[:,i] > thresh)[0]
-# 			ip = find_peaks(Out[i,:], height = thresh, distance = int(1.5*src_t_kernel/dt_win)) ## Note: should add prominence as thresh/2.0, which might help detect nearby events. Also, why is min time spacing set as 2 seconds?
-# 			if len(ip[0]) > 0: # why use xq here?
-# 				val = np.concatenate((xq[i,:].reshape(1,-1)*np.ones((len(ip[0]),3)), ts[ip[0]].reshape(-1,1), ip[1]['peak_heights'].reshape(-1,1)), axis = 1)
-# 				srcs_init.append(val)
-
-# 	if len(srcs_init) == 0:
-# 		continue ## No sources, continue
-
-# 	srcs_init = np.vstack(srcs_init) # Could this have memory issues?
-
-# 	srcs_init = srcs_init[np.argsort(srcs_init[:,3]),:]
-# 	tdiff = np.diff(srcs_init[:,3])
-# 	ibreak = np.where(tdiff >= break_win)[0]
-# 	srcs_groups_l = []
-# 	ind_inc = 0
-
-# 	if len(ibreak) > 0:
-# 		for i in range(len(ibreak)):
-# 			srcs_groups_l.append(srcs_init[np.arange(ind_inc, ibreak[i] + 1)])
-# 			ind_inc = ibreak[i] + 1
-# 		if len(np.vstack(srcs_groups_l)) < srcs_init.shape[0]:
-# 			srcs_groups_l.append(srcs_init[(ibreak[-1] + 1)::])
-# 	else:
-# 		srcs_groups_l.append(srcs_init)
-
-# 	print('Begin local marching')
-# 	srcs_l = []
-# 	scale_depth_clustering = 0.2
-# 	for i in range(len(srcs_groups_l)):
-# 		if len(srcs_groups_l[i]) == 1:
-# 			srcs_l.append(srcs_groups_l[i])
-# 		else:
-# 			mp = LocalMarching(device = device)
-# 			srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False)
-# 			# srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering)
-# 			# srcs_out = mp(srcs_groups_l[i], ftrns1, tc_win = 2.5*dt_win, sp_win = 2.5*dist_grid, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, n_steps_max = 5, use_directed = False
-# 			if len(srcs_out) > 0:
-# 				srcs_l.append(srcs_out)
-# 	srcs = np.vstack(srcs_l)
-
-# 	if len(srcs) == 0:
-# 		print('No sources detected, finishing script')
-# 		continue ## No sources, continue
-
-# 	print('Detected %d number of initial local maxima'%srcs.shape[0])
-
-# 	srcs = srcs[np.argsort(srcs[:,3])]
 
 
 
@@ -5795,1173 +4372,6 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 	else:
 
 		return f1, prec, rec, Srcs, Srcs_trgt, Matches, Ind, Ind1 ## Can include detected events
-
-
-	## Could also compute location uncertainies and residuals
-
-
-
-
-
-
-
-
-
-
-
-# 	loss_dict = {
-# 	'loss_dice1': loss_base1, ## loss_dice1 ## Possibly move loss_dice1 to auxilary loss
-# 	'loss_dice2': loss_dice2,
-# 	'loss_dice3': loss_dice3,
-# 	'loss_dice4': loss_dice4,
-# 	'loss_negative': loss_negative*pre_scale_weights2[0],
-# 	'loss_mse1': loss_mse1*pre_scale_weights1[0],
-# 	'loss_mse2': loss_mse2*pre_scale_weights1[1]
-# 	}		
-
-# 	if loss_consistency_flag == True:
-
-# 		loss_dict = {
-# 		'loss_dice1': loss_base1, ## loss_dice1 ## Possibly move loss_dice1 to auxilary loss
-# 		'loss_dice2': loss_dice2,
-# 		'loss_dice3': loss_dice3,
-# 		'loss_dice4': loss_dice4,
-# 		'loss_negative': loss_negative*pre_scale_weights2[0],
-# 		'loss_consistency': loss_consistency*pre_scale_weights2[1],
-# 		'loss_mse1': loss_mse1*pre_scale_weights1[0],
-# 		'loss_mse2': loss_mse2*pre_scale_weights1[1]
-# 		}
-
-# 	else:		
-
-# else:
-
-
-## Global loss
-# # use_global_loss = False
-# if (use_global_loss == True)*(i > n_burn_in):
-
-# 	## Find all points far away from true sources
-# 	if len(lp_srcs[i0]) > 0:
-# 		imask_query = np.where(Lbls_query[i0][:,0] < 0.001)[0]
-
-# 		if use_sigmoid == False:
-
-# 			total_sum = out[1][imask_query].sum()/100.0 # .clamp(min = 0.0).mean()
-# 			loss_sum = mse_loss(total_sum, torch.zeros(total_sum.shape).to(device))
-# 			# loss = 0.9*loss + 0.1*loss_sum
-# 			loss = 0.95*loss + 0.05*loss_sum
-
-# 		else:
-
-# 			total_sum = (torch.sigmoid(out[1][imask_query,1])*out[1][imask_query,0]).sum()/100.0 # .clamp(min = 0.0).mean()
-# 			loss_sum = mse_loss(total_sum, torch.zeros(total_sum.shape).to(device))
-# 			# loss = 0.9*loss + 0.1*loss_sum
-# 			loss = 0.9*loss + 0.1*loss_sum
-
-# 		loss_global_val += 0.1*loss_sum.item()/n_batch
-
-
-
-# class RobustMagnitudeBalancer:
-#     def __init__(self, anchor_head='dice_3', alpha=0.99):
-#         self.alpha = alpha
-#         self.values = {}      # EMA of each loss magnitude
-#         self.scales = {}
-#         self.anchor = anchor_head
-
-#     def __call__(self, losses_dict):
-#         total = 0.0
-#         anchor_val = None
-
-#         for name, loss in losses_dict.items():
-#             val = loss.detach().mean().item()
-            
-#             if name not in self.values:
-#                 self.values[name] = val
-#             else:
-#                 self.values[name] = (self.alpha * self.values[name] + 
-#                                    (1 - self.alpha) * val)
-            
-#             if name == self.anchor:
-#                 anchor_val = self.values[name]
-
-#             scale = anchor_val / (self.values[name] + 1e-8)
-#             scale = scale.clamp(0.1, 100.0)
-#             self.scales[name] = scale
-            
-#             total += loss * scale
-
-#         return total
-
-
-# def pick_labels_extract_interior_region(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, sig_x = 15e3, sig_t = 6.5): # can expand kernel widths to other size if prefered
-
-# 	iz = np.where(source_pick[:,1] > -1.0)[0]
-# 	lbl_trgt = torch.zeros((xq_src_cart.shape[0], source_pick.shape[0], 2)).to(device)
-# 	src_pick_indices = source_pick[iz,1].astype('int')
-
-# 	inside_interior = ((src_slice[src_pick_indices,0] <= lat_range_interior[1])*(src_slice[src_pick_indices,0] >= lat_range_interior[0])*(src_slice[src_pick_indices,1] <= lon_range_interior[1])*(src_slice[src_pick_indices,1] >= lon_range_interior[0]))
-
-# 	if len(iz) > 0:
-# 		d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)
-# 		lbl_trgt[:,iz,0] = d*torch.Tensor((source_pick[iz,0] == 0)).to(device).float()
-# 		lbl_trgt[:,iz,1] = d*torch.Tensor((source_pick[iz,0] == 1)).to(device).float()
-
-# 	return lbl_trgt
-
-
-# def dice_loss(pred, trgts, thresh = [0.075], eps = 1e-5):
-
-# 	dim, j = trgts.ndim, 0
-# 	if dim == 1:
-# 		# for j in range(len(thresh)):
-# 		i1 = torch.where(trgts > thresh[j])[0]
-# 		i2 = torch.where(trgts <= thresh[j])[0]
-
-# 		dice_pos = 2.0*(pred[i1]*trgts[i1]).sum()/(pred[i1].sum() + trgts[i1].sum() + eps)
-# 		dice_neg = 2.0*((1.0 - pred[i2])*(1 - trgts[i2])).sum()/((1.0 - pred[i2]).sum() + (1.0 - trgts[i2]).sum() + eps)
-# 		dice_out = 0.5*dice_pos + 0.5*dice_neg
-
-# 	elif dim == 2:
-
-# 		i1, i2 = torch.where(trgts > thresh[j])
-# 		i3, i4 = torch.where(trgts <= thresh[j])
-
-# 		dice_pos = 2.0*(pred[i1,i2]*trgts[i1,i2]).sum()/(pred[i1,i2].sum() + trgts[i1,i2].sum() + eps)
-# 		dice_neg = 2.0*((1.0 - pred[i3, i4])*(1 - trgts[i3, i4])).sum()/((1.0 - pred[i3, i4]).sum() + (1.0 - trgts[i3, i4]).sum() + eps)
-# 		dice_out = 0.5*dice_pos + 0.5*dice_neg
-
-# 	return 1.0 - dice_out ## Loss function
-
-# def dice_loss(pred, trgts, thresh = [0.075], lambda_pos = 0.5, eps = 1e-5):
-
-# 	dim, j = trgts.ndim, 0
-# 	if dim == 1:
-# 		# for j in range(len(thresh)):
-# 		# i1 = torch.where(trgts > thresh[j])[0]
-# 		# i2 = torch.where(trgts <= thresh[j])[0]
-
-# 		dice_pos = 2.0*(pred*trgts).sum()/(pred.sum() + trgts.sum() + eps)
-# 		dice_neg = 2.0*((1.0 - pred)*(1 - trgts)).sum()/((1.0 - pred).sum() + (1.0 - trgts).sum() + eps)
-# 		dice_out = lambda_pos*dice_pos + (1.0 - lambda_pos)*dice_neg
-
-# 	elif dim == 2:
-
-# 		# i1, i2 = torch.where(trgts > thresh[j])
-# 		# i3, i4 = torch.where(trgts <= thresh[j])
-
-# 		dice_pos = 2.0*(pred*trgts).sum(1)/(pred.sum(1) + trgts.sum(1) + eps)
-# 		dice_neg = 2.0*((1.0 - pred)*(1 - trgts)).sum(1)/((1.0 - pred).sum(1) + (1.0 - trgts).sum(1) + eps)
-# 		dice_out = lambda_pos*dice_pos + (1.0 - lambda_pos)*dice_neg
-# 		dice_out = dice_out.mean()
-
-# 	return 1.0 - dice_out ## Loss function
-
-
-
-# ifind = np.where((np.abs(X_query[i0][:,0:3] - x_query_sample).max(1) == 0)*(X_query[i0][:,3] == x_query_sample_t.reshape(-1)))[0]
-# print('Max val %0.4f, %0.4f, %0.4f'%(np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max(), Lbls_query[i0][ifind].max(), lbls_query[ifind].max()))
-# print('Len [2] %d'%len(lp_srcs[i0]))
-# if np.abs(Lbls_query[i0][ifind,0] - lbls_query[ifind,0]).max() > 0.01:
-# 	# pass
-# 	moi
-# 	pass
-
-
-# print('loss global %0.8f'%loss_sum)
-
-
-# imask_query = np.where(Lbls_query[i0][:,0] > 0.01)[0]
-# imask_query1 = np.delete(np.arange(len(Lbls_query[i0]), imask_query), axis = 0)
-# idistant_from_sources = np.where(cKDTree(ftrns1(X_query[i0][imask_query])).query(ftrns1(X_query[i0][imask_query])) ) # np.where([len(ind_slice) for ind_slice in cKDTree(X_query[i0][imask_query]) ])
-
-
-# inearest = knn(torch.Tensor(ftrns1(lp_srcs[i0]) ))
-
-
-
-# loss_consistency = (weight1*weights[0]*loss_func(out_save[0], out[0]) + weight2*weights[1]*loss_func(out_save[1], out[1]))/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-# loss_consistency = loss_func(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-# loss_consistency = loss_func1(mask_loss*out_save[0][ind_consistency::], mask_loss*out[1][ind_consistency::]) # )/torch.maximum(torch.Tensor([1.0]).to(device), (weight1*weights[0] + weight2*weights[1]))
-
-
-## Can check if prediction is consistent at un-changed points
-# out[1] = out_query ## Can we overwrite; and also overwrite the query points?
-# X_query[i0] = np.concatenate((x_query_sample, x_query_sample_t.reshape(-1,1)), axis = 1)
-# Lbls_query[i0] = lbls_query
-
-# pdb.set_trace()
-
-## Also need to overwrite labels. Note: does this break for using gradient loss? Yes
-
-
-# if pick_lbls.max() > 0.3:
-	# np.savez_compressed('example_picks_%d.npz'%i, pick_lbls = pick_lbls.cpu().detach().numpy(), x_query = ftrns2(x_src_query_cart), x_cart = x_src_query_cart, srcs = lp_srcs[i0], srcs_cart = ftrns1(lp_srcs[i0]), times = lp_times[i0], inds = lp_stations[i0], meta = lp_meta[i0][:,-2::], tq_sample = tq_sample, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
-
-# n_burn_in = 5000
-# if i < n_burn_in:
-
-	# # loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
-	# # loss = (weights[0]*loss_func(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-	# loss1 = weights[0]*bce_loss(out[0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*bce_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-	# loss2 = (weights[2]*bce_loss(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*bce_loss(out[3][:,:,0], pick_lbls[:,:,1])) # /n_batch
-	# loss = loss1 + loss2
-
-
-
-# if Lbls_query[i0][:,5].max() > 0.2: # Plot all true sources
-# 	visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
-# elif np.random.rand() > 0.8: # Plot a fraction of false sources
-# 	visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
-
-
-# use_dice_loss = False
-# if (use_dice_loss == True)*(i > int(n_epochs/5)):
-
-
-# 	loss_dice1 = dice_loss(out[0], torch.Tensor(Lbls[i0]).to(device))
-# 	loss_dice2 = dice_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-# 	loss_dice3 = dice_loss(out[2][:,:,0], pick_lbls[:,:,0])
-# 	loss_dice4 = dice_loss(out[3][:,:,0], pick_lbls[:,:,1])
-# 	loss_dice = (loss_dice1 + loss_dice2 + loss_dice3 + loss_dice4)/5.0
-
-# 	loss = 0.8*loss + 0.2*loss_dice
-# 	print('Dice %0.5f %0.5f'%(loss.item(), loss_dice.item()))
-
-
-	## Can track the norms of the gradients of dice components
-	## and then balance the positive contribution (can track over a moving window)
-	# ratio = grad_pos / grad_neg
-	# lambda_pos = ratio / (1 + ratio)
-	# lambda_pos = clamp(lambda_pos, 0.6, 0.95)
-
-
-
-	# def dice_loss(p, t, epsilon = 1e-6):
-	# 	return (2.0*((p.clamp(min = 0.0, max = 1.0)*t.clamp(min = 0.0, max = 1.0)).sum()) + epsilon)/(p.clamp(min = 0.0, max = 1.0).pow(2).sum() + t.clamp(min = 0.0, max = 1.0).pow(2).sum() + epsilon)
-
-	# def dice_loss1(p, t, epsilon = 1e-6):
-	# 	return (2.0*((p.clamp(min = 0.0, max = 1.0)*t.clamp(min = 0.0, max = 1.0)).sum(1)) + epsilon)/(p.clamp(min = 0.0, max = 1.0).pow(2).sum(1) + t.clamp(min = 0.0, max = 1.0).pow(2).sum(1) + epsilon)
-
-	# min_val_trgt = 0.1
-	# z_vec = torch.Tensor([1.0]).to(device)
-	# dice1 = z_vec if (Lbls[i0].max() < min_val_trgt)*(out[0].max().item() < min_val_trgt) else dice_loss(out[0], torch.Tensor(Lbls[i0]).to(device))
-	# dice2 = z_vec if (Lbls_query[i0].max() < min_val_trgt)*(out[1].max().item() < min_val_trgt) else dice_loss(out[1], torch.Tensor(Lbls_query[i0]).to(device))
-	# loss_dice1 = (weights[0]*dice1 + weights[1]*dice2)/(weights[0] + weights[1])
-
-	# ## This may not be correct for picks since the max operation tends to mean many of the 
-	# ## values will not satsify the mask. Might have to estimate the mask per source and pick
-	# mask_dice3 = ((pick_lbls[:,:,0].max(1).values < min_val_trgt)*(out[2][:,:,0].max(1).values < min_val_trgt)).float()
-	# mask_dice4 = ((pick_lbls[:,:,1].max(1).values < min_val_trgt)*(out[3][:,:,0].max(1).values < min_val_trgt)).float()
-	# dice3 = mask_dice3 + (1.0 - mask_dice3)*dice_loss1(out[2][:,:,0], pick_lbls[:,:,0])
-	# dice4 = mask_dice4 + (1.0 - mask_dice4)*dice_loss1(out[3][:,:,0], pick_lbls[:,:,1])
-	# loss_dice2 = (weights[2]*dice3.mean() + weights[3]*dice4.mean())/(weights[2] + weights[3])
-
-	# loss_dice = 1.0 - (0.5*loss_dice1 + 0.5*loss_dice2)
-
-	# loss = 0.5*loss + 2.0*(0.5*loss_dice)/500.0 ## Why must the dice loss be scaled so small
-	# loss_dice_val += 2*(0.5*loss_dice.item())/500.0/n_batch
-
-
-
-# min_val_use = 0.1
-# use_sensitivity_loss = False
-# loss_regularize = torch.Tensor([0.0]).to(device)
-# if (use_sensitivity_loss == True)*(((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)) == False):
-
-# 	# if ((out[2].max().item() < min_val_use) + (out[3].max().item() < min_val_use)):
-# 	# 	continue
-	
-# 	sig_d = 0.15 ## Assumed pick uncertainty (seconds)
-# 	chi_pdf = chi2(df = 3).pdf(0.99)
-
-# 	scale_val1 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.01, 0, 0]).reshape(1,-1)), axis = 1)[0]
-# 	scale_val2 = 100.0*np.linalg.norm(ftrns1(x_src_query[:,0:3]) - ftrns1(x_src_query[:,0:3] + np.array([0.0, 0.01, 0]).reshape(1,-1)), axis = 1)[0]
-# 	scale_val = 0.5*(scale_val1 + scale_val2)
-
-# 	scale_partials = torch.Tensor((1/60.0)*np.array([1.0, 1.0, scale_val]).reshape(1,-1)).to(device)
-# 	src_input_p = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
-# 	src_input_s = Variable(torch.Tensor(x_src_query).repeat_interleave(len(lp_stations[i0]), dim = 0).to(device), requires_grad = True)
-# 	trv_out_p = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_p, method = 'direct')[:,0]
-# 	trv_out_s = trv_pairwise1(torch.Tensor(Locs[i0][lp_stations[i0].astype('int')]).repeat(len(x_src_query), 1).to(device), src_input_s, method = 'direct')[:,1]
-# 	# trv_out = trv_out[np.arange(len(trv_out)), arrivals[n_inds_picks[i],4].astype('int')] # .cpu().detach().numpy() ## Select phase type
-# 	d_p = scale_partials*torch.autograd.grad(inputs = src_input_p, outputs = trv_out_p, grad_outputs = torch.ones(len(trv_out_p)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
-# 	d_s = scale_partials*torch.autograd.grad(inputs = src_input_s, outputs = trv_out_s, grad_outputs = torch.ones(len(trv_out_s)).to(device), retain_graph = True, create_graph = True, allow_unused = True)[0] # .cpu().detach().numpy()
-# 	d_p = d_p.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
-# 	d_s = d_s.reshape(-1, len(lp_stations[i0]), 3).detach() ## Do we detach this
-# 	d_grad = torch.Tensor([1000.0]).to(device)*(1.0/scale_partials)*torch.cat((torch.clip(out[2], min = 0.0)*d_p, torch.clip(out[3], min = 0.0)*d_s), dim = 0)/torch.Tensor([scale_val1, scale_val2, 1.0]).to(device).reshape(1,-1)
-# 	var_cart = torch.bmm(d_grad.transpose(1,2), d_grad)
-# 	# try:
-# 	scale_loss = 10000.0
-# 	tol_cond = 1000.0
-# 	icond = torch.where(torch.linalg.cond(var_cart) < tol_cond)[0]
-# 	if len(icond) == 3: icond = torch.cat((icond, torch.Tensor([icond[-1].item()]).to(device)), dim = 0).long()
-# 	var_cart_inv = torch.linalg.solve(var_cart[icond], torch.eye(3).to(device))*torch.Tensor([(sig_d**2)*chi_pdf]).to(device)
-# 	sigma_cart = torch.norm(var_cart_inv[:,torch.arange(3),torch.arange(3)]**(0.5), dim = 1)
-# 	loss_regularize = (0.000002)*loss_func1(sigma_cart/scale_loss, torch.zeros(sigma_cart.shape).to(device)) # 0.001 # 0.0002
-# 	if torch.isnan(loss_regularize) == False: 
-# 		loss = loss + loss_regularize
-# 	# losses_regularize[i] = loss_regularize.item()
-# 	loss_regularize_val += loss_regularize.item()
-# 	loss_regularize_cnt += 1
-
-
-
-
-# Ac_prod_src_src = (n_sta_slice*Ac_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1).to(device)).contiguous()	
-## Must use "irregular" version of Cartesian product 
-
-# def build_src_src_product(Ac_src_src, locs, x_grid):
-
-# 	n_sta = len(locs)
-
-# 	A_src_in_sta = torch.Tensor(np.concatenate((np.tile(np.arange(locs.shape[0]), len(x_grid)).reshape(1,-1), np.arange(len(x_grid)).repeat(len(locs), axis = 0).reshape(1,-1)), axis = 0)).long().to(device)
-# 	tree_src_in_sta = cKDTree(A_src_in_sta[0].reshape(-1,1).cpu().detach().numpy())
-# 	lp_fixed_stas = tree_src_in_sta.query_ball_point(np.arange(locs.shape[0]).reshape(-1,1), r = 0)
-
-# 	degree_of_src_nodes = degree(A_src_in_sta[1])
-# 	cum_count_degree_of_src_nodes = np.concatenate((np.array([0]), np.cumsum(degree_of_src_nodes.cpu().detach().numpy())), axis = 0).astype('int')
-
-# 	sta_ind_lists = []
-# 	for i in range(x_grid.shape[0]):
-# 		ind_list = -1*np.ones(locs.shape[0])
-# 		ind_list[A_src_in_sta[0,cum_count_degree_of_src_nodes[i]:cum_count_degree_of_src_nodes[i+1]].cpu().detach().numpy()] = np.arange(degree_of_src_nodes[i].item())
-# 		sta_ind_lists.append(ind_list)
-# 	sta_ind_lists = np.hstack(sta_ind_lists).astype('int')
-
-# 	Ac_prod_src_src = []
-# 	for i in range(locs.shape[0]):
-	
-# 		slice_edges = subgraph(A_src_in_sta[1,np.array(lp_fixed_stas[i])], Ac_src_src, relabel_nodes = False)[0].cpu().detach().numpy()
-
-# 		## This can happen when a station is only linked to one source
-# 		if slice_edges.shape[1] == 0:
-# 			continue
-
-# 		shift_ind = sta_ind_lists[slice_edges*n_sta + i]
-# 		assert(shift_ind.min() >= 0)
-# 		## For each source, need to find where that station index is in the "order" of the subgraph Cartesian product
-# 		Ac_prod_src_src.append(torch.Tensor(cum_count_degree_of_src_nodes[slice_edges] + shift_ind).to(device))
-
-# 	Ac_prod_src_src = torch.Tensor(np.hstack(Ac_prod_src_src)).long().to(device)
-
-# 	return Ac_prod_src_src
-
-
-# if optimize_training_data == True:
-
-# 	# https://scikit-optimize.github.io/stable/auto_examples/bayesian-optimization.html
-
-# 	from skopt import gp_minimize
-
-# 	# Load configuration from YAML
-# 	with open('process_config.yaml', 'r') as file:
-# 		process_config = yaml.safe_load(file)
-# 		n_ver_picks = process_config['n_ver_picks']
-
-# 	## If true, run Bayesian optimization to determine optimal training parameters
-# 	st_load = glob.glob(path_to_file + 'Picks/19*') # Load years 1900's
-# 	st_load.extend(glob.glob(path_to_file + 'Picks/20*')) # Load years 2000's
-# 	iarg = np.argsort([int(st_load[i].split(seperator)[-1]) for i in range(len(st_load))])
-# 	st_load = [st_load[i] for i in iarg]
-# 	st_load_l = []
-# 	for i in range(len(st_load)):
-# 		st = glob.glob(st_load[i] + seperator + '*ver_%d.npz'%(n_ver_picks))
-# 		if len(st) > 0:
-# 			st_load_l.extend(st)
-# 	print('Loading %d detected files for comparisons'%len(st_load_l))
-
-# 	t_sample_win = 120.0 ## Bins to count picks in, and focus sampling around
-# 	windows = [40e3, 150e3, 300e3]
-# 	t_win_ball = [10.0, 15.0, 25.0]
-# 	n_ver_optimize = 1
-# 	n_max_files = 500
-
-# 	if len(st_load_l) > n_max_files:
-# 		ichoose = np.sort(np.random.choice(len(st_load_l), size = n_max_files, replace = False))
-# 		st_load_l = [st_load_l[j] for j in ichoose]
-
-# 	Trgts_list = []
-# 	for n in range(len(st_load_l)):
-# 		P = np.load(st_load_l[n])['P']
-# 		Trgts_list.append(sample_picks(P, locs, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win))
-# 		print('Finished file %d of %d'%(n, len(st_load_l)))
-
-# 	evaluate_bayesian_objective_evaluate = lambda x: evaluate_bayesian_objective(x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win)
-
-# 	## Now apply Bayesian optimization to training parameters
-
-# 	bounds = [(100.0, 300e3), # spc_random
-# 	          (100.0, 300e3), # spc_thresh_rand
-# 	          (0.001, 0.3), # coda_rate
-# 	          (1.0, 180.0), # coda_win
-# 	          (5000.0, 149e3), # dist_range[0]
-# 	          (300e3, 800e3), # dist_range[1]
-# 	          (5, 250), # max_rate_events
-# 	          (5, 250), # max_miss_events
-# 	          (0.2, 5.0), # max_false_events # (5, 350)
-# 	          (0, 0.25), # miss_pick_fraction[0]
-# 	          (0.25, 0.6)] # ] # miss_pick_fraction[0]
-
-# 	optimize = gp_minimize(evaluate_bayesian_objective_evaluate,                  # the function to minimize
-# 	                  bounds,      # the bounds on each dimension of x
-# 	                  acq_func="EI",      # the acquisition function
-# 	                  n_calls=150,         # the number of evaluations of f
-# 	                  n_random_starts=100,  # the number of random initialization points
-# 	                  noise='gaussian',       # the noise level (optional)
-# 	                  random_state=1234, # the random seed
-# 	                  initial_point_generator = 'lhs',
-# 	                  model_queue_size = 150)
-
-# 	res, Trgts, arrivals = evaluate_bayesian_objective(optimize.x, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win, return_vals = True)
-
-# 	strings = ['spc_random', 'spc_thresh_rand', 'coda_rate', 'coda_win', 'dist_range[0]', 'dist_range[1]', 'max_rate_events', 'max_miss_events', 'max_false_events', 'miss_pick_fraction[0]', 'miss_pick_fraction[0]']
-	
-# 	np.savez_compressed(path_to_file + 'Grids/%s_optimized_training_data_parameters_ver_%d.npz'%(name_of_project, n_ver_optimize), res = res, x = np.array(optimize.x), arrivals = arrivals, strings = strings)
-
-# 	print('Finished optimized training data')
-
-# 	print('Data set optimized; call the training script again to build training data')
-# 	sys.exit()
-
-
-
-# def sample_picks(P, locs_abs, t_sample_win = 120.0, windows = [40e3, 150e3, 300e3], t_win_ball = [10.0, 15.0, 25.0]): # windows = [40e3, 150e3, 300e3]
-
-# 	Trgts = []
-
-# 	iunique = np.sort(np.unique(P[:,1]).astype('int'))
-# 	lunique = len(iunique)
-
-# 	locs_use = np.copy(locs_abs[iunique]) # Overwrite locs_use
-
-# 	## An additional metric than can be added is the number of stations with a pick 
-# 	## within a "convex hull" (or the ratio of stations) connecting the source and stations at different distances..
-# 	## Hence, measures how much "filled in" versus "noisy" the foot print of associated stations is
-# 	## (would need a reference catalog, and should only sample "large" sources, since reference
-# 	## catalog would be biased to large sources)
-
-# 	perm_vec = -1*np.ones(len(locs_abs))
-# 	perm_vec[iunique] = np.arange(len(iunique))
-# 	perm_vec = perm_vec.astype('int')
-# 	P[:,1] = perm_vec[P[:,1].astype('int')] ## Overwrite pick indices
-# 	iunique = np.sort(np.unique(P[:,1]).astype('int'))
-# 	assert(len(iunique) == lunique)
-# 	assert(iunique.min() == 0)
-# 	assert(iunique.max() == (lunique - 1))
-
-# 	pw_dist = pd(ftrns1(locs_use), ftrns1(locs_use))
-
-# 	max_t_observed = P[:,0].max()
-# 	counts_in_time, bins_in_time = np.histogram(P[:,0], bins = np.arange(0, max_t_observed + 3600, t_sample_win))
-# 	upper_fifth_percentile = np.where(counts_in_time >= np.quantile(counts_in_time, 0.95))[0]
-
-
-# 	tree_times = cKDTree(P[:,[0]])
-# 	tree_indices = cKDTree(P[:,[1]])
-
-# 	## [1] Average pick rates
-
-# 	# ifind_per_sta = [np.where(P[:,1] == iunique[j])[0] for j in range(len(iunique))]
-# 	# counts_per_sta = [len(ifind_per_sta[j]) for j in range(len(iunique))]
-# 	ifind_per_sta = [np.where(P[:,1] == j)[0] for j in range(len(locs_use))]
-# 	counts_per_sta = [len(ifind_per_sta[j]) for j in range(len(locs_use))]
-# 	counts_per_hour = np.vstack([np.histogram(P[ifind_per_sta[j],0], bins = np.arange(0, max_t_observed + 3600, 3600.0))[0].reshape(1,-1) for j in range(len(ifind_per_sta))])
-# 	upper_fifth_percentile_stas = iunique[np.where(counts_per_sta >= np.quantile(counts_per_sta, 0.95))[0]]
-
-# 	Quants_counts = np.quantile(counts_per_hour, np.arange(0.1, 1.0, 0.2), axis = 0)
-# 	Trgts.append(np.median(Quants_counts, axis = 1))
-
-# 	## [2] Average "ratio" of picks within narrow spatial windows compared to outside, over max_t window (for random origin times)
-# 	# windows = [40e3, 150e3, 300e3] # [0.029238671690285857, 0.07309667922571464, 0.14619335845142928] of pw_dist_max
-# 	Ratio_bins = [[] for w in windows]
-# 	num_iter = 150
-# 	for j in range(num_iter):
-# 		for inc, k in enumerate(range(len(windows))):
-
-# 			ipick = np.random.choice(locs_use.shape[0]) ## Pick random station
-# 			ifind = np.where(pw_dist[ipick,:] < windows[k])[0] ## Find other stations within window distance
-# 			# ifind_outside = np.delete(np.arange(locs_use.shape[0]), ifind, axis = 0) ## Stations outside window distance
-
-# 			## Choose random origin time
-# 			t0 = np.random.rand()*3600*24
-
-# 			## Find all picks within t0 + max_t*fraction
-
-# 			fraction = 0.3
-# 			ifind_time = np.array(tree_times.query_ball_point(np.array([t0]).reshape(1,1), r = max_t*fraction)[0]).astype('int')
-# 			# tree_pick_indices = cKDTree(P[ifind_time,1].reshape(-1,1))
-# 			tree_pick_indices = cKDTree(ifind.reshape(-1,1))
-
-# 			## Of these picks, find subset that are nearby root station, and those that are not.
-# 			ifind_picks_inside = np.where(tree_pick_indices.query(P[ifind_time,1].astype('int').reshape(-1,1))[0] == 0)[0]
-# 			ifind_picks_outside = np.delete(np.arange(len(ifind_time)), ifind_picks_inside, axis = 0) ## Stations outside window distance
-
-# 			Ratio_bins[inc].append(len(ifind_picks_inside)/np.maximum(len(ifind_picks_outside), 1.0))
-
-# 	Ratio_bins = np.vstack([np.quantile(Ratio_bins[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Ratio_bins))])
-# 	Trgts.append(Ratio_bins)
-
-
-# 	## [3] Average "ratio" of picks within narrow spatial windows compared to outside, over max_t window (for "optimal" origin times and stations; e.g., near sources)
-# 	# windows = [40e3, 150e3, 300e3] # [0.029238671690285857, 0.07309667922571464, 0.14619335845142928] of pw_dist_max
-# 	Ratio_bins1 = [[] for w in windows]
-# 	num_iter = 150
-# 	prob_counts = 1.0/(1.0 + np.flip(np.argsort(Quants_counts.mean(0))))
-# 	prob_counts = prob_counts/prob_counts.sum()
-# 	for j in range(num_iter):
-# 		for inc, k in enumerate(range(len(windows))):
-
-# 			ipick = np.random.choice(upper_fifth_percentile_stas) ## Pick random station
-# 			ifind = np.where(pw_dist[ipick,:] < windows[k])[0] ## Find other stations within window distance
-# 			# ifind_outside = np.delete(np.arange(locs_use.shape[0]), ifind, axis = 0) ## Stations outside window distance
-
-# 			## Choose origin time focused on the high pick count time intervals
-# 			t0 = bins_in_time[np.random.choice(upper_fifth_percentile)] + np.random.rand()*t_sample_win
-
-# 			## Find all picks within t0 + max_t*fraction
-
-# 			fraction = 0.3
-# 			ifind_time = np.array(tree_times.query_ball_point(np.array([t0]).reshape(1,1), r = max_t*fraction)[0]).astype('int')
-# 			# tree_pick_indices = cKDTree(P[ifind_time,1].reshape(-1,1))
-# 			tree_pick_indices = cKDTree(ifind.reshape(-1,1))
-
-# 			## Of these picks, find subset that are nearby root station, and those that are not.
-# 			ifind_picks_inside = np.where(tree_pick_indices.query(P[ifind_time,1].astype('int').reshape(-1,1))[0] == 0)[0]
-# 			ifind_picks_outside = np.delete(np.arange(len(ifind_time)), ifind_picks_inside, axis = 0) ## Stations outside window distance
-
-# 			Ratio_bins1[inc].append(len(ifind_picks_inside)/np.maximum(len(ifind_picks_outside), 1.0))
-
-# 	Ratio_bins1 = np.vstack([np.quantile(Ratio_bins1[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Ratio_bins1))])
-# 	Trgts.append(Ratio_bins1)
-
-# 	## [4] Counts of station, for each neighboring station, if they have a pick at a similar time
-# 	## Instead of random picks, could pick picks nearby times of high activity
-# 	k_sta = 1*k_sta_edges + 0 # 10
-# 	# locs_use_use = locs_use[iunique]
-# 	edges = remove_self_loops(knn(torch.Tensor(ftrns1(locs_use)).to(device)/1000.0, torch.Tensor(ftrns1(locs_use)).to(device)/1000.0, k = k_sta))[0].flip(0).cpu().detach().numpy()
-
-# 	tree_edges = cKDTree(edges[1].reshape(-1,1))
-
-# 	# t_win_ball = [10.0, 15.0, 25.0]
-# 	num_picks = 1000
-# 	n_picks = len(P)
-# 	Ratio_neighbors = [[] for t in t_win_ball]
-# 	for j in range(num_picks):
-# 		for k in range(len(t_win_ball)):
-# 			ichoose = np.random.choice(n_picks)
-# 			ifind_ball = np.array(tree_times.query_ball_point(np.array([P[ichoose,0]]).reshape(-1,1), r = t_win_ball[k])[0]).astype('int')
-# 			ineighbors = edges[0][np.array(tree_edges.query_ball_point(np.array([P[ichoose,1]]).reshape(-1,1), r = 0)[0])]
-# 			size_intersection = len(list(set(ineighbors).intersection(P[ifind_ball,1].astype('int'))))
-# 			Ratio_neighbors[k].append(size_intersection/k_sta)
-
-# 	Ratio_neighbors = np.vstack([np.quantile(Ratio_neighbors[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Ratio_neighbors))])
-# 	Trgts.append(Ratio_neighbors)
-
-# 	## [5] For each pick, number of times another pick occurs within ~15 seconds, 30 seconds, 45 seconds, etc.
-# 	# t_win_ball = [5.0, 10.0, 15.0]
-# 	num_picks = 1500
-# 	Num_adjacent_picks = [[] for t in t_win_ball]
-# 	for j in range(num_picks):
-# 		for k in range(len(t_win_ball)):
-# 			ichoose = np.random.choice(n_picks)
-# 			sta_ind = P[ichoose,1]
-# 			ifind_ball = np.array(tree_times.query_ball_point(np.array([P[ichoose,0]]).reshape(-1,1) + t_win_ball[k]/2.0 + 0.1, r = t_win_ball[k]/2.0)[0]).astype('int')
-# 			min_sta_dist = (sta_ind == P[ifind_ball,1]).sum()
-# 			Num_adjacent_picks[k].append(min_sta_dist)
-
-# 	Num_adjacent_picks = np.vstack([np.quantile(Num_adjacent_picks[j], np.arange(0.1, 1.0, 0.2)).reshape(1,-1) for j in range(len(Num_adjacent_picks))])
-# 	Trgts.append(Num_adjacent_picks)
-
-# 	## [6] Possibly correlation of pick traces between nearby stations
-
-# 	return Trgts
-
-# def evaluate_bayesian_objective(x, n_random = 30, t_sample_win = 120.0, windows = [40e3, 150e3, 300e3], t_win_ball = [10.0, 15.0, 25.0], return_vals = False): # 	windows = [40e3, 150e3, 300e3], 	
-
-
-# 	training_params_2[0] = x[0] # spc_random
-# 	training_params_2[2] = x[1] # spc_thresh_rand
-# 	training_params_2[4] = x[2] # coda_rate
-# 	training_params_2[5][1] = x[3] # coda_win
-
-# 	training_params_3[1][0] = x[4] # dist_range[0]
-# 	training_params_3[1][1] = x[5] # dist_range[1]
-# 	training_params_3[2] = x[6] # max_rate_events
-# 	training_params_3[3] = x[7] # max_miss_events
-# 	training_params_3[4] = x[6]*x[8] # max_false_events (input of false rate to generate is an absolute number, not the ratio, which is x[8])
-# 	training_params_3[5][0] = x[9] # miss_pick_fraction[0]
-# 	training_params_3[5][1] = x[10] # miss_pick_fraction[0]
-
-# 	arrivals = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, return_only_data = True)[0]
-
-# 	P = np.copy(arrivals)
-
-# 	Trgts = sample_picks(P, locs, windows = windows, t_win_ball = t_win_ball, t_sample_win = t_sample_win)
-
-# 	res1, res2, res3, res4, res5 = 0, 0, 0, 0, 0
-
-# 	for n in range(n_random):
-
-# 		ichoose = np.random.choice(len(Trgts_list))
-
-# 		res1 += np.linalg.norm(Trgts[0] - Trgts_list[ichoose][0])/np.maximum(np.linalg.norm(Trgts_list[ichoose][0]), 1e-5)/n_random
-# 		res2 += np.linalg.norm(Trgts[1] - Trgts_list[ichoose][1])/np.maximum(np.linalg.norm(Trgts_list[ichoose][1]), 1e-5)/n_random
-# 		res3 += np.linalg.norm(Trgts[2] - Trgts_list[ichoose][2])/np.maximum(np.linalg.norm(Trgts_list[ichoose][2]), 1e-5)/n_random
-# 		res4 += np.linalg.norm(Trgts[3] - Trgts_list[ichoose][3])/np.maximum(np.linalg.norm(Trgts_list[ichoose][3]), 1e-5)/n_random
-# 		res5 += np.linalg.norm(Trgts[4] - Trgts_list[ichoose][4])/np.maximum(np.linalg.norm(Trgts_list[ichoose][4]), 1e-5)/n_random
-
-# 	res = res1 + res2 + res3 + res4 + res5 ## Residual is average relative residual over all five objectives
-
-# 	print(res)
-
-# 	if return_vals == False:
-
-# 		return res
-
-# 	else:
-
-# 		return res, Trgts, arrivals
-
-
-
-
-
-## Backup of an old format for splitting up "generate_synthetic_data" into several sub functions
-
-
-# def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params_1, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False):
-
-# 	if verbose == True:
-# 		st = time.time()
-
-# 	k_sta_edges, k_spc_edges, k_time_edges = graph_params
-# 	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
-
-# 	n_spc_query, n_src_query = training_params_1
-# 	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max = training_params_2
-# 	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources = training_params_3
-
-# 	## Generate synthetic events
-# 	arrivals, src_times, src_positions, src_magnitudes = generate_synthetic_events(locs)
-
-# 	## Check active sources and compute sampling points
-# 	arrivals_select, phase_observed, phase_observed_select, time_samples, lp, lp_src_times_all, active_sources, active_sources_per_slice_l, inside_interior, Trv_subset_p, Trv_subset_s, Station_indices, Batch_indices, Grid_indices, Sample_indices = check_active_sources_and_compute_sampling_points(locs, arrivals, src_times, src_positions, src_magnitudes)
-
-# 	## Compute inputs and labels
-# 	[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] = compute_inputs_and_labels(locs, arrivals, src_times, src_positions, phase_observed, phase_observed_select, time_samples, lp, lp_src_times_all, active_sources_per_slice_l, inside_interior, t_win, src_t_kernel, src_x_kernel, Trv_subset_p, Trv_subset_s, Station_indices, Batch_indices, Grid_indices, Sample_indices)
-
-# 	## Initilize source and data variables
-# 	srcs = np.concatenate((src_positions, src_times.reshape(-1,1), src_magnitudes.reshape(-1,1)), axis = 1)
-# 	data = [arrivals, srcs, active_sources]
-
-# 	if verbose == True:
-# 		print('batch gen time took %0.2f'%(time.time() - st))
-
-# 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
-
-# def generate_synthetic_events(locs):
-
-# 	assert(np.floor(n_sta_range[0]*locs.shape[0]) > k_sta_edges)
-
-# 	scale_x = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
-# 	offset_x = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
-# 	n_sta = locs.shape[0]
-# 	locs_tensor = torch.Tensor(locs).to(device)
-
-# 	# t_slice = np.arange(-t_win/2.0, t_win/2.0 + 1.0, 1.0)
-
-# 	tsteps = np.arange(0, T + dt, dt)
-# 	tvec = np.arange(-tscale*4, tscale*4 + dt, dt)
-# 	tvec_kernel = np.exp(-(tvec**2)/(2.0*(tscale**2)))
-
-# 	p_rate_events = fftconvolve(np.random.randn(2*locs.shape[0] + 3, len(tsteps)), tvec_kernel.reshape(1,-1).repeat(2*locs.shape[0] + 3,0), 'same', axes = 1)
-# 	c_cor = (p_rate_events@p_rate_events.T) ## Not slow!
-# 	global_event_rate, global_miss_rate, global_false_rate = p_rate_events[0:3,:]
-
-# 	# Process global event rate, to physical units.
-# 	global_event_rate = (global_event_rate - global_event_rate.min())/(global_event_rate.max() - global_event_rate.min()) # [0,1] scale
-# 	min_add = np.random.rand()*0.25*max_rate_events ## minimum between 0 and 0.25 of max rate
-# 	scale = np.random.rand()*(0.5*max_rate_events - min_add) + 0.5*max_rate_events
-# 	global_event_rate = global_event_rate*scale + min_add
-
-# 	global_miss_rate = (global_miss_rate - global_miss_rate.min())/(global_miss_rate.max() - global_miss_rate.min()) # [0,1] scale
-# 	min_add = np.random.rand()*0.25*max_miss_events ## minimum between 0 and 0.25 of max rate
-# 	scale = np.random.rand()*(0.5*max_miss_events - min_add) + 0.5*max_miss_events
-# 	global_miss_rate = global_miss_rate*scale + min_add
-
-# 	global_false_rate = (global_false_rate - global_false_rate.min())/(global_false_rate.max() - global_false_rate.min()) # [0,1] scale
-# 	min_add = np.random.rand()*0.25*max_false_events ## minimum between 0 and 0.25 of max rate
-# 	scale = np.random.rand()*(0.5*max_false_events - min_add) + 0.5*max_false_events
-# 	global_false_rate = global_false_rate*scale + min_add
-
-# 	station_miss_rate = p_rate_events[3 + np.arange(n_sta),:]
-# 	station_miss_rate = (station_miss_rate - station_miss_rate.min(1, keepdims = True))/(station_miss_rate.max(1, keepdims = True) - station_miss_rate.min(1, keepdims = True)) # [0,1] scale
-# 	min_add = np.random.rand(n_sta,1)*0.25*max_miss_events ## minimum between 0 and 0.25 of max rate
-# 	scale = np.random.rand(n_sta,1)*(0.5*max_miss_events - min_add) + 0.5*max_miss_events
-# 	station_miss_rate = station_miss_rate*scale + min_add
-
-# 	station_false_rate = p_rate_events[3 + n_sta + np.arange(n_sta),:]
-# 	station_false_rate = (station_false_rate - station_false_rate.min(1, keepdims = True))/(station_false_rate.max(1, keepdims = True) - station_false_rate.min(1, keepdims = True))
-# 	min_add = np.random.rand(n_sta,1)*0.25*max_false_events ## minimum between 0 and 0.25 of max rate
-# 	scale = np.random.rand(n_sta,1)*(0.5*max_false_events - min_add) + 0.5*max_false_events
-# 	station_false_rate = station_false_rate*scale + min_add
-
-# 	## Sample events.
-# 	vals = np.random.poisson(dt*global_event_rate/T) # This scaling, assigns to each bin the number of events to achieve correct, on averge, average
-# 	src_times = np.sort(np.hstack([np.random.rand(vals[j])*dt + tsteps[j] for j in range(len(vals))]))
-# 	n_src = len(src_times)
-# 	src_positions = np.random.rand(n_src, 3)*scale_x + offset_x
-# 	src_magnitudes = np.random.rand(n_src)*7.0 - 1.0 # magnitudes, between -1.0 and 7 (uniformly)
-
-# 	if use_shallow_sources == True:
-# 		sample_random_depths = gamma(1.75, 0.0).rvs(n_src)
-# 		sample_random_grab = np.where(sample_random_depths > 5)[0] # Clip the long tails, and place in uniform, [0,5].
-# 		sample_random_depths[sample_random_grab] = 5.0*np.random.rand(len(sample_random_grab))
-# 		sample_random_depths = sample_random_depths/sample_random_depths.max() # Scale to range
-# 		sample_random_depths = -sample_random_depths*(scale_x[0,2] - 2e3) + (offset_x[0,2] + scale_x[0,2] - 2e3) # Project along axis, going negative direction. Removing 2e3 on edges.
-# 		src_positions[:,2] = sample_random_depths
-
-# 	m1 = [0.5761163, -0.21916288]
-# 	m2 = 1.15
-
-# 	amp_thresh = 1.0
-# 	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
-
-# 	use_uniform_distance_threshold = False
-# 	## This previously sampled a skewed distribution by default, not it samples a uniform
-# 	## distribution of the maximum source-reciever distances allowed for each event.
-# 	if use_uniform_distance_threshold == True:
-# 		dist_thresh = np.random.rand(n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-# 	else:
-# 		## Use beta distribution to generate more samples with smaller moveouts
-# 		# dist_thresh = -1.0*np.log(np.sqrt(np.random.rand(n_src))) ## Sort of strange dist threshold set!
-# 		# dist_thresh = (dist_thresh*dist_range[1]/10.0 + dist_range[0]).reshape(-1,1)
-# 		dist_thresh = beta(2,5).rvs(size = n_src).reshape(-1,1)*(dist_range[1] - dist_range[0]) + dist_range[0]
-		
-# 	# create different distance dependent thresholds.
-# 	dist_thresh_p = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None] # Increased sig from 20e3 to 25e3 # Decreased to 10 km
-# 	dist_thresh_s = dist_thresh + spc_thresh_rand*np.random.laplace(size = dist_thresh.shape[0])[:,None]
-
-# 	ikeep_p1, ikeep_p2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_p))
-# 	ikeep_s1, ikeep_s2 = np.where(((sr_distances + spc_random*np.random.randn(n_src, n_sta)) < dist_thresh_s))
-
-# 	arrivals_theoretical = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
-# 	arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)
-# 	arrivals_indices = np.arange(n_sta).reshape(1,-1).repeat(n_src, 0)
-# 	src_indices = np.arange(n_src).reshape(-1,1).repeat(n_sta, 1)
-
-# 	arrivals_p = np.concatenate((arrivals_theoretical[ikeep_p1, ikeep_p2, 0].reshape(-1,1), arrivals_indices[ikeep_p1, ikeep_p2].reshape(-1,1), src_indices[ikeep_p1, ikeep_p2].reshape(-1,1), arrival_origin_times[ikeep_p1, ikeep_p2].reshape(-1,1), np.zeros(len(ikeep_p1)).reshape(-1,1)), axis = 1)
-# 	arrivals_s = np.concatenate((arrivals_theoretical[ikeep_s1, ikeep_s2, 1].reshape(-1,1), arrivals_indices[ikeep_s1, ikeep_s2].reshape(-1,1), src_indices[ikeep_s1, ikeep_s2].reshape(-1,1), arrival_origin_times[ikeep_s1, ikeep_s2].reshape(-1,1), np.ones(len(ikeep_s1)).reshape(-1,1)), axis = 1)
-# 	arrivals = np.concatenate((arrivals_p, arrivals_s), axis = 0)
-
-# 	t_inc = np.floor(arrivals[:,3]/dt).astype('int')
-# 	p_miss_rate = 0.5*station_miss_rate[arrivals[:,1].astype('int'), t_inc] + 0.5*global_miss_rate[t_inc]
-# 	idel = np.where((np.random.rand(arrivals.shape[0]) + s_extra*arrivals[:,4]) < dt*p_miss_rate/T)[0]
-
-# 	arrivals = np.delete(arrivals, idel, axis = 0)
-# 	n_events = len(src_times)
-
-# 	icoda = np.where(np.random.rand(arrivals.shape[0]) < coda_rate)[0]
-# 	if len(icoda) > 0:
-# 		false_coda_arrivals = np.random.rand(len(icoda))*(coda_win[1] - coda_win[0]) + coda_win[0] + arrivals[icoda,0] + arrivals[icoda,3]
-# 		false_coda_arrivals = np.concatenate((false_coda_arrivals.reshape(-1,1), arrivals[icoda,1].reshape(-1,1), -1.0*np.ones((len(icoda),1)), np.zeros((len(icoda),1)), -1.0*np.ones((len(icoda),1))), axis = 1)
-# 		arrivals = np.concatenate((arrivals, false_coda_arrivals), axis = 0)
-
-# 	## Base false events
-# 	station_false_rate_eval = 0.5*station_false_rate + 0.5*global_false_rate
-# 	vals = np.random.poisson(dt*station_false_rate_eval/T) # This scaling, assigns to each bin the number of events to achieve correct, on averge, average
-
-# 	# How to speed up this part?
-# 	i1, i2 = np.where(vals > 0)
-# 	v_val, t_val = vals[i1,i2], tsteps[i2]
-# 	false_times = np.repeat(t_val, v_val) + np.random.rand(vals.sum())*dt
-# 	false_indices = np.hstack([k*np.ones(vals[k,:].sum()) for k in range(n_sta)])
-# 	n_false = len(false_times)
-# 	false_arrivals = np.concatenate((false_times.reshape(-1,1), false_indices.reshape(-1,1), -1.0*np.ones((n_false,1)), np.zeros((n_false,1)), -1.0*np.ones((n_false,1))), axis = 1)
-# 	arrivals = np.concatenate((arrivals, false_arrivals), axis = 0)
-
-# 	n_spikes = np.random.randint(0, high = int(max_num_spikes*T/(3600*24))) ## Decreased from 150. Note: these may be unneccessary now. ## Up to 200 spikes per day, decreased from 200
-# 	if n_spikes > 0:
-# 		n_spikes_extent = np.random.randint(1, high = n_sta, size = n_spikes) ## This many stations per spike
-# 		time_spikes = np.random.rand(n_spikes)*T
-# 		sta_ind_spikes = np.hstack([np.random.choice(n_sta, size = n_spikes_extent[j], replace = False) for j in range(n_spikes)])
-# 		sta_time_spikes = np.hstack([time_spikes[j] + np.random.randn(n_spikes_extent[j])*spike_time_spread for j in range(n_spikes)])
-# 		false_arrivals_spikes = np.concatenate((sta_time_spikes.reshape(-1,1), sta_ind_spikes.reshape(-1,1), -1.0*np.ones((len(sta_ind_spikes),1)), np.zeros((len(sta_ind_spikes),1)), -1.0*np.ones((len(sta_ind_spikes),1))), axis = 1)
-# 		arrivals = np.concatenate((arrivals, false_arrivals_spikes), axis = 0) ## Concatenate on spikes
-
-
-# 	## Check which true picks have so much noise, they should be marked as `false picks' for the association labels
-# 	if use_stable_association_labels == True:
-# 		iz = np.where(arrivals[:,4] >= 0)[0]
-# 		noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-# 		iexcess_noise = np.where(np.abs(noise_values) > thresh_noise_max*sig_t*arrivals[iz,0])[0]
-# 		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
-# 		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
-# 			arrivals[iz[iexcess_noise],2] = -1
-# 			arrivals[iz[iexcess_noise],3] = 0
-# 			arrivals[iz[iexcess_noise],4] = -1
-# 	else: ## This was the original version
-# 		iz = np.where(arrivals[:,4] >= 0)[0]
-# 		arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-
-# 	return arrivals, src_times, src_positions, src_magnitudes
-
-# def check_active_sources_and_compute_sampling_points(locs, arrivals, src_times, src_positions, src_magnitudes):
-
-# 	n_events = len(src_times)
-# 	n_sta = locs.shape[0]
-
-# 	## Check which sources are active
-# 	source_tree_indices = cKDTree(arrivals[:,2].reshape(-1,1))
-# 	lp = source_tree_indices.query_ball_point(np.arange(n_events).reshape(-1,1), r = 0)
-# 	lp_backup = [lp[j] for j in range(len(lp))]
-# 	n_unique_station_counts = np.array([len(np.unique(arrivals[lp[j],1])) for j in range(n_events)])
-# 	active_sources = np.where(n_unique_station_counts >= min_sta_arrival)[0] # subset of sources
-# 	non_active_sources = np.delete(np.arange(n_events), active_sources, axis = 0)
-# 	src_positions_active = src_positions[active_sources]
-# 	src_times_active = src_times[active_sources]
-# 	src_magnitudes_active = src_magnitudes[active_sources] ## Not currently used
-
-# 	inside_interior = ((src_positions[:,0] < lat_range[1])*(src_positions[:,0] > lat_range[0])*(src_positions[:,1] < lon_range[1])*(src_positions[:,1] > lon_range[0]))
-	
-# 	iwhere_real = np.where(arrivals[:,-1] > -1)[0]
-# 	iwhere_false = np.delete(np.arange(arrivals.shape[0]), iwhere_real)
-# 	phase_observed = np.copy(arrivals[:,-1]).astype('int')
-
-# 	if len(iwhere_false) > 0: # For false picks, assign a random phase type
-# 		phase_observed[iwhere_false] = np.random.randint(0, high = 2, size = len(iwhere_false))
-
-# 	perturb_phases = True # For true picks, randomly flip a fraction of phases
-# 	if (len(phase_observed) > 0)*(perturb_phases == True):
-# 		n_switch = int(np.random.rand()*(0.2*len(iwhere_real))) # switch up to 20% phases
-# 		iflip = np.random.choice(iwhere_real, size = n_switch, replace = False)
-# 		phase_observed[iflip] = np.mod(phase_observed[iflip] + 1, 2)
-
-# 	scale_vec = np.array([1,2*t_win]).reshape(1,-1)
-
-# 	if use_sources == False:
-# 		time_samples = np.sort(np.random.rand(n_batch)*T) ## Uniform
-
-# 	elif use_sources == True:
-# 		time_samples = src_times_active[np.sort(np.random.choice(len(src_times_active), size = n_batch))]
-
-# 	l_src_times_active = len(src_times_active)
-# 	if (use_preferential_sampling == True)*(len(src_times_active) > 1):
-# 		for j in range(n_batch):
-# 			if np.random.rand() > 0.5: # 30% of samples, re-focus time. # 0.7
-# 				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*src_t_kernel*np.random.laplace()
-
-# 	time_samples = np.sort(time_samples)
-
-# 	max_t = float(np.ceil(max([x_grids_trv[j].max() for j in range(len(x_grids_trv))])))
-
-# 	tree_src_times_all = cKDTree(src_times[:,np.newaxis])
-# 	tree_src_times = cKDTree(src_times_active[:,np.newaxis])
-# 	lp_src_times_all = tree_src_times_all.query_ball_point(time_samples[:,np.newaxis], r = 3.0*src_t_kernel)
-# 	lp_src_times = tree_src_times.query_ball_point(time_samples[:,np.newaxis], r = 3.0*src_t_kernel)
-
-# 	st = time.time()
-# 	tree = cKDTree(arrivals[:,0][:,None])
-# 	lp = tree.query_ball_point(time_samples.reshape(-1,1) + max_t/2.0, r = t_win + max_t/2.0) 
-
-# 	lp_concat = np.hstack([np.array(list(lp[j])) for j in range(n_batch)]).astype('int')
-# 	if len(lp_concat) == 0:
-# 		lp_concat = np.array([0]) # So it doesnt fail?
-
-# 	arrivals_select = arrivals[lp_concat]
-# 	phase_observed_select = phase_observed[lp_concat]
-
-# 	Trv_subset_p = []
-# 	Trv_subset_s = []
-# 	Station_indices = []
-# 	Grid_indices = []
-# 	Batch_indices = []
-# 	Sample_indices = []
-# 	sc = 0
-
-# 	if (fixed_subnetworks is not None):
-# 		fixed_subnetworks_flag = 1
-# 	else:
-# 		fixed_subnetworks_flag = 0		
-
-# 	active_sources_per_slice_l = []
-# 	src_positions_active_per_slice_l = []
-# 	src_times_active_per_slice_l = []
-
-# 	for i in range(n_batch):
-# 		i0 = np.random.randint(0, high = len(x_grids))
-# 		n_spc = x_grids[i0].shape[0]
-# 		if use_full_network == True:
-# 			n_sta_select = n_sta
-# 			ind_sta_select = np.arange(n_sta)
-
-# 		else:
-# 			if (fixed_subnetworks_flag == 1)*(np.random.rand() < 0.5): # 50 % networks are one of fixed networks.
-# 				isub_network = np.random.randint(0, high = len(fixed_subnetworks))
-# 				n_sta_select = len(fixed_subnetworks[isub_network])
-# 				ind_sta_select = np.copy(fixed_subnetworks[isub_network]) ## Choose one of specific networks.
-			
-# 			else:
-# 				n_sta_select = int(n_sta*(np.random.rand()*(n_sta_range[1] - n_sta_range[0]) + n_sta_range[0]))
-# 				ind_sta_select = np.sort(np.random.choice(n_sta, size = n_sta_select, replace = False))
-
-# 		Trv_subset_p.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
-# 		Trv_subset_s.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
-# 		Station_indices.append(ind_sta_select) # record subsets used
-# 		Batch_indices.append(i*np.ones(len(ind_sta_select)*n_spc))
-# 		Grid_indices.append(i0)
-# 		Sample_indices.append(np.arange(len(ind_sta_select)*n_spc) + sc)
-# 		sc += len(Sample_indices[-1])
-
-# 		active_sources_per_slice = np.where(np.array([len( np.array(list(set(ind_sta_select).intersection(np.unique(arrivals[lp_backup[j],1])))) ) >= min_sta_arrival for j in lp_src_times_all[i]]))[0]
-
-# 		active_sources_per_slice_l.append(active_sources_per_slice)
-
-# 	Trv_subset_p = np.vstack(Trv_subset_p)
-# 	Trv_subset_s = np.vstack(Trv_subset_s)
-# 	Batch_indices = np.hstack(Batch_indices)
-
-# 	return arrivals_select, phase_observed, phase_observed_select, time_samples, lp, lp_src_times_all, active_sources, active_sources_per_slice_l, inside_interior, Trv_subset_p, Trv_subset_s, Station_indices, Batch_indices, Grid_indices, Sample_indices
-
-# def compute_inputs_and_labels(locs, arrivals, src_times, src_positions, phase_observed, phase_observed_select, time_samples, lp, lp_src_times_all, active_sources_per_slice_l, inside_interior, t_win, src_t_kernel, src_x_kernel, Trv_subset_p, Trv_subset_s, Station_indices, Batch_indices, Grid_indices, Sample_indices):
-
-# 	n_sta = locs.shape[0]
-
-# 	offset_per_batch = 1.5*max_t
-# 	offset_per_station = 1.5*n_batch*offset_per_batch
-
-# 	t_slice = np.arange(-t_win/2.0, t_win/2.0 + 1.0, 1.0)
-# 	src_spatial_kernel = np.array([src_x_kernel, src_x_kernel, src_depth_kernel]).reshape(1,1,-1) # Combine, so can scale depth and x-y offset differently.
-
-# 	arrivals_offset = np.hstack([-time_samples[i] + i*offset_per_batch + offset_per_station*arrivals[lp[i],1] for i in range(n_batch)]) ## Actually, make disjoint, both in station axis, and in batch number.
-# 	one_vec = np.concatenate((np.ones(1), np.zeros(4)), axis = 0).reshape(1,-1)
-# 	arrivals_select = np.vstack([arrivals[lp[i]] for i in range(n_batch)]) + arrivals_offset.reshape(-1,1)*one_vec ## Does this ever fail? E.g., when there's a missing station's
-# 	n_arvs = arrivals_select.shape[0]
-
-# 	# Rather slow!
-# 	iargsort = np.argsort(arrivals_select[:,0])
-# 	arrivals_select = arrivals_select[iargsort]
-# 	phase_observed_select = phase_observed_select[iargsort]
-
-# 	iwhere_p = np.where(phase_observed_select == 0)[0]
-# 	iwhere_s = np.where(phase_observed_select == 1)[0]
-# 	n_arvs_p = len(iwhere_p)
-# 	n_arvs_s = len(iwhere_s)
-
-# 	query_time_p = Trv_subset_p[:,0] + Batch_indices*offset_per_batch + Trv_subset_p[:,1]*offset_per_station
-# 	query_time_s = Trv_subset_s[:,0] + Batch_indices*offset_per_batch + Trv_subset_s[:,1]*offset_per_station
-
-# 	## No phase type information
-# 	ip_p = np.searchsorted(arrivals_select[:,0], query_time_p)
-# 	ip_s = np.searchsorted(arrivals_select[:,0], query_time_s)
-
-# 	ip_p_pad = ip_p.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
-# 	ip_s_pad = ip_s.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
-# 	ip_p_pad = np.minimum(np.maximum(ip_p_pad, 0), n_arvs - 1) 
-# 	ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
-
-# 	rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-# 	rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
-
-# 	## With phase type information
-# 	ip_p1 = np.searchsorted(arrivals_select[iwhere_p,0], query_time_p)
-# 	ip_s1 = np.searchsorted(arrivals_select[iwhere_s,0], query_time_s)
-
-# 	ip_p1_pad = ip_p1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
-# 	ip_s1_pad = ip_s1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
-# 	ip_p1_pad = np.minimum(np.maximum(ip_p1_pad, 0), n_arvs_p - 1) 
-# 	ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
-
-# 	rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-# 	rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
-
-# 	time_vec_slice = np.arange(k_time_edges)
-
-# 	Inpts = []
-# 	Masks = []
-# 	Lbls = []
-# 	Lbls_query = []
-# 	X_fixed = []
-# 	X_query = []
-# 	Locs = []
-# 	Trv_out = []
-
-# 	A_sta_sta_l = []
-# 	A_src_src_l = []
-# 	A_prod_sta_sta_l = []
-# 	A_prod_src_src_l = []
-# 	A_src_in_prod_l = []
-# 	A_edges_time_p_l = []
-# 	A_edges_time_s_l = []
-# 	A_edges_ref_l = []
-
-# 	lp_times = []
-# 	lp_stations = []
-# 	lp_phases = []
-# 	lp_meta = []
-# 	lp_srcs = []
-# 	lp_srcs_active = []
-
-# 	thresh_mask = 0.01
-# 	for i in range(n_batch):
-# 		# Create inputs and mask
-# 		grid_select = Grid_indices[i]
-# 		ind_select = Sample_indices[i]
-# 		sta_select = Station_indices[i]
-# 		n_spc = x_grids[grid_select].shape[0]
-# 		n_sta_slice = len(sta_select)
-
-# 		inpt = np.zeros((x_grids[Grid_indices[i]].shape[0], n_sta, 4)) # Could make this smaller (on the subset of stations), to begin with.
-# 		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
-# 		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
-# 		inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
-# 		inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
-
-# 		trv_out = x_grids_trv[grid_select][:,sta_select,:] ## Subsetting, into sliced indices.
-# 		Inpts.append(inpt[:,sta_select,:]) # sub-select, subset of stations.
-# 		Masks.append(1.0*(inpt[:,sta_select,:] > thresh_mask))
-# 		Trv_out.append(trv_out)
-# 		Locs.append(locs[sta_select])
-# 		X_fixed.append(x_grids[grid_select])
-
-# 		## Assemble pick datasets
-# 		perm_vec = -1*np.ones(n_sta)
-# 		perm_vec[sta_select] = np.arange(len(sta_select))
-# 		meta = arrivals[lp[i],:]
-# 		phase_vals = phase_observed[lp[i]]
-# 		times = meta[:,0]
-# 		indices = perm_vec[meta[:,1].astype('int')]
-# 		ineed = np.where(indices > -1)[0]
-# 		times = times[ineed] ## Overwrite, now. Double check if this is ok.
-# 		indices = indices[ineed]
-# 		phase_vals = phase_vals[ineed]
-# 		meta = meta[ineed]
-
-# 		active_sources_per_slice = np.array(lp_src_times_all[i])[np.array(active_sources_per_slice_l[i])]
-# 		ind_inside = np.where(inside_interior[active_sources_per_slice.astype('int')] > 0)[0]
-# 		active_sources_per_slice = active_sources_per_slice[ind_inside]
-
-# 		ind_src_unique = np.unique(meta[meta[:,2] > -1.0,2]).astype('int') # ignore -1.0 entries.
-
-# 		if len(ind_src_unique) > 0:
-# 			ind_src_unique = np.sort(np.array(list(set(ind_src_unique).intersection(active_sources_per_slice)))).astype('int')
-
-# 		src_subset = np.concatenate((src_positions[ind_src_unique], src_times[ind_src_unique].reshape(-1,1) - time_samples[i]), axis = 1)
-# 		if len(ind_src_unique) > 0:
-# 			perm_vec_meta = np.arange(ind_src_unique.max() + 1)
-# 			perm_vec_meta[ind_src_unique] = np.arange(len(ind_src_unique))
-# 			meta = np.concatenate((meta, -1.0*np.ones((meta.shape[0],1))), axis = 1)
-# 			# ifind = np.where(meta[:,2] > -1.0)[0] ## Need to find picks with a source index inside the active_sources_per_slice
-# 			ifind = np.where([meta[j,2] in ind_src_unique for j in range(meta.shape[0])])[0]
-# 			meta[ifind,-1] = perm_vec_meta[meta[ifind,2].astype('int')] # save pointer to active source, for these picks (in new, local index, of subset of sources)
-# 		else:
-# 			meta = np.concatenate((meta, -1.0*np.ones((meta.shape[0],1))), axis = 1)
-
-# 		# Do these really need to be on cuda?
-# 		lex_sort = np.lexsort((times, indices)) ## Make sure lexsort doesn't cause any problems
-# 		lp_times.append(times[lex_sort] - time_samples[i])
-# 		lp_stations.append(indices[lex_sort])
-# 		lp_phases.append(phase_vals[lex_sort])
-# 		lp_meta.append(meta[lex_sort]) # final index of meta points into 
-# 		lp_srcs.append(src_subset)
-
-# 		A_sta_sta = remove_self_loops(knn(torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), torch.Tensor(ftrns1(locs[sta_select])/1000.0).to(device), k = k_sta_edges + 1).flip(0).contiguous())[0]
-# 		A_src_src = remove_self_loops(knn(torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), torch.Tensor(ftrns1(x_grids[grid_select])/1000.0).to(device), k = k_spc_edges + 1).flip(0).contiguous())[0]
-# 		## Cross-product graph is: source node x station node. Order as, for each source node, all station nodes.
-
-# 		# Cross-product graph, nodes connected by: same source node, connected stations
-# 		A_prod_sta_sta = (A_sta_sta.repeat(1, n_spc) + n_sta_slice*torch.arange(n_spc).repeat_interleave(n_sta_slice*k_sta_edges).view(1,-1).to(device)).contiguous()
-# 		A_prod_src_src = (n_sta_slice*A_src_src.repeat(1, n_sta_slice) + torch.arange(n_sta_slice).repeat_interleave(n_spc*k_spc_edges).view(1,-1).to(device)).contiguous()	
-
-# 		# For each unique spatial point, sum in all edges.
-# 		A_src_in_prod = torch.cat((torch.arange(n_sta_slice*n_spc).view(1,-1), torch.arange(n_spc).repeat_interleave(n_sta_slice).view(1,-1)), dim = 0).to(device).contiguous()
-
-# 		## Sub-selecting from the time-arrays, is easy, since the time-arrays are indexed by station (triplet indexing; )
-# 		len_dt = len(x_grids_trv_refs[grid_select])
-
-# 		### Note: A_edges_time_p needs to be augmented: by removing stations, we need to re-label indices for subsequent nodes,
-# 		### To the "correct" number of stations. Since, not n_sta shows up in definition of edges. "assemble_pointers.."
-# 		A_edges_time_p = x_grids_trv_pointers_p[grid_select][np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*sta_select.repeat(k_time_edges*len_dt)]
-# 		A_edges_time_s = x_grids_trv_pointers_s[grid_select][np.tile(np.arange(k_time_edges*len_dt), n_sta_slice) + (len_dt*k_time_edges)*sta_select.repeat(k_time_edges*len_dt)]
-# 		## Need to convert these edges again. Convention is:
-# 		## subtract i (station index absolute list), divide by n_sta, mutiply by N stations, plus ith station (in permutted indices)
-# 		# shape is len_dt*k_time_edges*len(sta_select)
-# 		one_vec = np.repeat(sta_select*np.ones(n_sta_slice), k_time_edges*len_dt).astype('int') # also used elsewhere
-# 		A_edges_time_p = (n_sta_slice*(A_edges_time_p - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
-# 		A_edges_time_s = (n_sta_slice*(A_edges_time_s - one_vec)/n_sta) + perm_vec[one_vec] # transform indices, based on subsetting of stations.
-# 		# print('permute indices 1')
-# 		assert(A_edges_time_p.max() < n_spc*n_sta_slice) ## Can remove these, after a bit of testing.
-# 		assert(A_edges_time_s.max() < n_spc*n_sta_slice)
-
-# 		A_sta_sta_l.append(A_sta_sta.cpu().detach().numpy())
-# 		A_src_src_l.append(A_src_src.cpu().detach().numpy())
-# 		A_prod_sta_sta_l.append(A_prod_sta_sta.cpu().detach().numpy())
-# 		A_prod_src_src_l.append(A_prod_src_src.cpu().detach().numpy())
-# 		A_src_in_prod_l.append(A_src_in_prod.cpu().detach().numpy())
-# 		A_edges_time_p_l.append(A_edges_time_p)
-# 		A_edges_time_s_l.append(A_edges_time_s)
-# 		A_edges_ref_l.append(x_grids_trv_refs[grid_select])
-
-# 		x_query = np.random.rand(n_spc_query, 3)*scale_x + offset_x # Check if scale_x and offset_x are correct.
-
-# 		if len(lp_srcs[-1]) > 0:
-# 			x_query[0:len(lp_srcs[-1]),0:3] = lp_srcs[-1][:,0:3]
-
-# 		if len(active_sources_per_slice) == 0:
-# 			lbls_grid = np.zeros((x_grids[grid_select].shape[0], len(t_slice)))
-# 			lbls_query = np.zeros((n_spc_query, len(t_slice)))
-# 		else:
-# 			active_sources_per_slice = active_sources_per_slice.astype('int')
-
-# 			lbls_grid = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_grids[grid_select]), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
-# 			lbls_query = (np.expand_dims(np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_positions[active_sources_per_slice]), axis = 0))**2)/(src_spatial_kernel**2)).sum(2)), axis = 1)*np.exp(-0.5*(((time_samples[i] + t_slice).reshape(1,-1,1) - src_times[active_sources_per_slice].reshape(1,1,-1))**2)/(src_t_kernel**2))).max(2)
-
-# 		X_query.append(x_query)
-# 		Lbls.append(lbls_grid)
-# 		Lbls_query.append(lbls_query)
-
-# 	return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l] # , data
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
