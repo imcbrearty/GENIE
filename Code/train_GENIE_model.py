@@ -1608,6 +1608,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				i0 = np.random.randint(0, high = len(x_grids))
 				n_spc = x_grids[i0].shape[0]
 
+
 		# if use_time_shift == False:
 
 		Trv_subset_p.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
@@ -1634,6 +1635,13 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		active_sources_per_slice = np.array(list(set(active_sources_per_slice).intersection(np.where((cnt_per_slice_p + cnt_per_slice_s) >= min_pick_arrival)[0]))).astype('int')
 		
 		active_sources_per_slice_l.append(active_sources_per_slice)
+
+
+	if use_expanded == True:
+		Ac = zfile['Ac']
+
+	zfile.close()
+
 
 	Trv_subset_p = np.vstack(Trv_subset_p)
 	Trv_subset_s = np.vstack(Trv_subset_s)
@@ -1841,10 +1849,17 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 			if use_expanded == True:
 
+
+
 				use_perm_expand = True
 				if use_perm_expand == True:
+
+					# try:
 					perm_vec_expand = np.random.permutation(np.arange(x_grids[grid_select].shape[0])).astype('int')
 					Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
+					# except:
+					# pdb.set_trace()
+
 				else:
 					perm_vec_expand = np.arange(x_grids[grid_select].shape[0]).astype('int')
 					Ac_src_src = torch.Tensor(perm_vec_expand[Ac]).long().to(device)
@@ -3259,7 +3274,8 @@ if build_training_data == True:
 			h['data_1_edges_%d'%i] = data_1.edge_index.cpu().detach().numpy()
 			h['data_2_edges_%d'%i] = data_2.edge_index.cpu().detach().numpy()
 			h['pick_lbls_%d'%i] = pick_lbls.cpu().detach().numpy()
-
+			# f_out.create_dataset(f'is_real_sample{suffix_dst}', data=is_real)
+			h['is_real_sample_%d'%i] = data[3]
 
 			# locs, stas, lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t, rbest, mn, ftrns1, ftrns2, ftrns1_diff, ftrns2_diff = params_extra
 
@@ -4372,6 +4388,41 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 	else:
 
 		return f1, prec, rec, Srcs, Srcs_trgt, Matches, Ind, Ind1 ## Can include detected events
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
