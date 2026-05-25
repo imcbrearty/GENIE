@@ -187,6 +187,11 @@ else:
 date = np.array([int(date[0]), int(date[1]), int(date[2])])
 yr, mo, dy = date[0], date[1], date[2]
 
+## Load primary domains spatial region
+z = np.load(path_to_file + '%s_region.npz'%name_of_project)
+lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
+z.close()
+
 ### Begin automated processing ###
 
 print('\nName of program is %s'%argvs[0])
@@ -250,6 +255,7 @@ else:
 	z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
 	locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
 	z.close()
+		
 
 	# Load region
 	z = np.load(path_to_file + '%s_region.npz'%name_of_project)
@@ -295,7 +301,7 @@ else:
 	ind_use = np.arange(len(locs))
 	assert((np.abs(ind_use) - np.arange(len(locs))).max() == 0)  # = np.arange(len(locs))
 	z.close()
-
+	
 	# else:
 	# 	# Load stations
 	# 	z.close()
@@ -319,6 +325,19 @@ else:
 		print('No model domain')
 		m_domain = None
 
+
+	apply_location_shift = True ## Add this to allow shifting the "Calibration" events as well
+	if apply_location_shift == True:
+		# buf_region = np.diff(lat_range)[0]*0.05
+		if (locs[:,0].min() < (lat_range[0] - deg_pad)) or (locs[:,0].max() > (lat_range[1] + deg_pad)) or (locs[:,1].min() < (lon_range[0] - deg_pad)) or (locs[:,1].max() > (lon_range[1] + deg_pad)):
+			print('Applying domain shift')
+			locs_shifted, mn_shift, rbest_shift = generate_pseudo_lla_for_new_region(locs, mn, rbest, ftrns2)
+			locs = np.copy(locs_shifted)
+			locs_use = np.copy(locs_shifted)
+		else:
+			apply_location_shift = False
+	
+	
 	## Add estimate of number of nodes / cartesian product size
 	deg_padding = np.nan ## Use hueristic
 	Vc = 3500.0
@@ -2058,23 +2077,31 @@ for cnt, strs in enumerate([0]):
 	trv_out2 = np.nan*np.zeros((srcs_trv.shape[0], locs_use.shape[0], 2))
 	ifind_not_nan = np.where(np.isnan(srcs_trv[:,0]) == 0)[0]
 	trv_out2_all = np.nan*np.zeros((srcs_trv.shape[0], locs.shape[0], 2))
-
+	
 	if len(ifind_not_nan) > 0:
 		trv_out2[ifind_not_nan,:,:] = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_trv[ifind_not_nan,0:3]).to(device)).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 		trv_out2_all[ifind_not_nan,:,:] = compute_travel_times(trv, locs, [srcs_trv[ifind_not_nan]], device = device)[0] + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 		# trv_out2_all[ifind_not_nan,:,:] = trv(torch.Tensor(locs).to(device), torch.Tensor(srcs_trv[ifind_not_nan,0:3]).to(device)).cpu().detach().numpy() + srcs_trv[ifind_not_nan,3].reshape(-1,1,1)
 
+	if apply_location_shift == True:
+		locs = pseudo_lla_to_real_lla(locs, ftrns1, mn_shift, rbest_shift)
+		locs_use = pseudo_lla_to_real_lla(locs_use, ftrns1, mn_shift, rbest_shift)
+		srcs_trv = pseudo_lla_to_real_lla(srcs_trv, ftrns1, mn_shift, rbest_shift)
+		srcs_refined = pseudo_lla_to_real_lla(srcs_refined, ftrns1, mn_shift, rbest_shift)
+		srcs = pseudo_lla_to_real_lla(srcs, ftrns1, mn_shift, rbest_shift)
+		X_query = pseudo_lla_to_real_lla(X_query, ftrns1, mn_shift, rbest_shift)
 
-	if ('corr1' in globals())*('corr2' in globals()):
-		srcs_refined[:,0:3] = srcs_refined[:,0:3] + corr1 - corr2
-		srcs_trv[:,0:3] = srcs_trv[:,0:3] + corr1 - corr2
+
+	# if ('corr1' in globals())*('corr2' in globals()):
+	# 	srcs_refined[:,0:3] = srcs_refined[:,0:3] + corr1 - corr2
+	# 	srcs_trv[:,0:3] = srcs_trv[:,0:3] + corr1 - corr2
 
 	############### ############### ############### ###############
 	     ############### Find Matched Events ###############
 	############### ############### ############### ###############
 
 
-	find_matched_events = True
+	find_matched_events = True ## Check this if use_shift is true
 	if 	find_matched_events == True:
 
 		t0 = UTCDateTime(date[0], date[1], date[2])
@@ -2161,6 +2188,10 @@ for cnt, strs in enumerate([0]):
 				file_save['srcs_known'] = srcs_known
 				file_save['izmatch1'] = matches1
 				file_save['izmatch2'] = matches2
+
+		if apply_location_shift == True:
+			file_save['mn_shift'] = mn_shift
+			file_save['rbest_shift'] = rbest_shift
 		
 		if extra_save == True: # This is the continuous space-time output, it can be useful for visualization/debugging, but is memory itensive
 			file_save['Out'] = Out_2_sparse ## Is this heavy?
