@@ -3229,6 +3229,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
 
     num_grids = 1 if initialize is None else initialize[2]
+    number_of_spatial_nodes = x_grid.shape[0]
 
     # A_sta_sta_l = []
     # A_src_src_l = []
