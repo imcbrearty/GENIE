@@ -136,6 +136,26 @@ def rotation_matrix(a, b, c):
 
 	return rot
 
+
+def rotation_matrix_full_precision(a, b, c):
+
+	# a, b, c = vec
+
+	rot = np.zeros((3,3))
+	rot[0,0] = np.cos(b)*np.cos(c)
+	rot[0,1] = np.sin(a)*np.sin(b)*np.cos(c) - np.cos(a)*np.sin(c)
+	rot[0,2] = np.cos(a)*np.sin(b)*np.cos(c) + np.sin(a)*np.sin(c)
+
+	rot[1,0] = np.cos(b)*np.sin(c)
+	rot[1,1] = np.sin(a)*np.sin(b)*np.sin(c) + np.cos(a)*np.cos(c)
+	rot[1,2] = np.cos(a)*np.sin(b)*np.sin(c) - np.sin(a)*np.cos(c)
+
+	rot[2,0] = -np.sin(b)
+	rot[2,1] = np.sin(a)*np.cos(b)
+	rot[2,2] = np.cos(a)*np.cos(b)
+
+	return rot
+
 def generate_pseudo_lla_for_new_region(lla_B, mn_A, rbest_A, ftrns2_A):
     """
     Teleports Region B stations into Region A's footprint, 
@@ -215,25 +235,6 @@ def get_analytical_transform(center_loc):
     rbest = np.vstack([east, north, up]) # Shape: (3, 3)
     
     return rbest, mn
-
-def rotation_matrix_full_precision(a, b, c):
-
-	# a, b, c = vec
-
-	rot = np.zeros((3,3))
-	rot[0,0] = np.cos(b)*np.cos(c)
-	rot[0,1] = np.sin(a)*np.sin(b)*np.cos(c) - np.cos(a)*np.sin(c)
-	rot[0,2] = np.cos(a)*np.sin(b)*np.cos(c) + np.sin(a)*np.sin(c)
-
-	rot[1,0] = np.cos(b)*np.sin(c)
-	rot[1,1] = np.sin(a)*np.sin(b)*np.sin(c) + np.cos(a)*np.cos(c)
-	rot[1,2] = np.cos(a)*np.sin(b)*np.sin(c) - np.sin(a)*np.cos(c)
-
-	rot[2,0] = -np.sin(b)
-	rot[2,1] = np.sin(a)*np.cos(b)
-	rot[2,2] = np.cos(a)*np.cos(b)
-
-	return rot
 
 def hash_rows(val):
 	return val[:,0].to(torch.int64) << 32 | val[:,1].to(torch.int64)
