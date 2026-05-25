@@ -2087,10 +2087,10 @@ for cnt, strs in enumerate([0]):
 	if apply_location_shift == True:
 		locs = pseudo_lla_to_real_lla(locs, ftrns1, mn_shift, rbest_shift)
 		locs_use = pseudo_lla_to_real_lla(locs_use, ftrns1, mn_shift, rbest_shift)
-		srcs_trv = pseudo_lla_to_real_lla(srcs_trv, ftrns1, mn_shift, rbest_shift)
-		srcs_refined = pseudo_lla_to_real_lla(srcs_refined, ftrns1, mn_shift, rbest_shift)
-		srcs = pseudo_lla_to_real_lla(srcs, ftrns1, mn_shift, rbest_shift)
-		X_query = pseudo_lla_to_real_lla(X_query, ftrns1, mn_shift, rbest_shift)
+		srcs_trv[:,0:3] = pseudo_lla_to_real_lla(srcs_trv[:,0:3], ftrns1, mn_shift, rbest_shift)
+		srcs_refined[:,0:3] = pseudo_lla_to_real_lla(srcs_refined[:,0:3], ftrns1, mn_shift, rbest_shift)
+		srcs[:,0:3] = pseudo_lla_to_real_lla(srcs[:,0:3], ftrns1, mn_shift, rbest_shift)
+		X_query[:,0:3] = pseudo_lla_to_real_lla(X_query[:,0:3], ftrns1, mn_shift, rbest_shift)
 
 
 	# if ('corr1' in globals())*('corr2' in globals()):
