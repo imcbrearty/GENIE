@@ -24,6 +24,7 @@ from torch_geometric.utils import softmax
 from torch_geometric.utils import degree
 from torch_scatter import scatter
 from numpy.matlib import repmat
+import scipy.sparse as sp
 import networkx as nx
 import cvxpy as cp
 import itertools
