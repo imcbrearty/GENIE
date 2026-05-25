@@ -326,6 +326,7 @@ else:
 		m_domain = None
 
 
+	## Can also apply this in travel time calculation
 	apply_location_shift = True ## Add this to allow shifting the "Calibration" events as well
 	if apply_location_shift == True:
 		# buf_region = np.diff(lat_range)[0]*0.05
