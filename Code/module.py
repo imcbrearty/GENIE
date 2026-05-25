@@ -1581,8 +1581,8 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 4, 15, device = device).to(device)
 
 		if use_expanded == True:
-			self.SpatialAggregation1_expanded = SpatialAggregation(15, 30).to(device) # 15, 30
-			self.SpatialAggregation2_expanded = SpatialAggregation(15, 30).to(device) # 15, 30
+			self.SpatialAggregation1_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
+			self.SpatialAggregation2_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
 			self.alpha_expand1 = nn.Parameter(torch.tensor([0.1], device = device))
 			self.alpha_expand2 = nn.Parameter(torch.tensor([0.1], device = device))
 
