@@ -136,6 +136,86 @@ def rotation_matrix(a, b, c):
 
 	return rot
 
+def generate_pseudo_lla_for_new_region(lla_B, mn_A, rbest_A, ftrns2_A):
+    """
+    Teleports Region B stations into Region A's footprint, 
+    returning "pseudo" LLA coordinates that preserve local distances.
+    """
+    # --- Step 1: Compute a local reference frame for Region B ---
+    # We use the mean of Region B to minimize distortion during the flattening phase
+    mn_B = np.mean(lla2ecef(lla_B), axis=0, keepdims=True)
+    
+    # Generate a local rotation matrix (rbest_B) for Region B's center
+    # This aligns Z with local up, X with East, Y with North for Region B
+    lat_B_center = np.mean(lla_B[:, 0]) * np.pi / 180.0
+    lon_B_center = np.mean(lla_B[:, 1]) * np.pi / 180.0
+    
+    # Standard local ENU (East-North-Up) rotation matrix formation
+    rbest_B = np.array([
+        [-np.sin(lon_B_center), np.cos(lon_B_center), 0],
+        [-np.sin(lat_B_center)*np.cos(lon_B_center), -np.sin(lat_B_center)*np.sin(lon_B_center), np.cos(lat_B_center)],
+        [np.cos(lat_B_center)*np.cos(lon_B_center), np.cos(lat_B_center)*np.sin(lon_B_center), np.sin(lat_B_center)]
+    ])
+    
+    # --- Step 2: Convert Region B to its own local Cartesian space ---
+    # (Distance and depth geometry are now frozen into a flat metric grid)
+    xyz_local_B = (rbest_B @ (lla2ecef(lla_B) - mn_B).T).T
+    
+    # --- Step 3: Reverse project using Region A's parameters ---
+    # We pretend xyz_local_B is actually native to Region A, and ask:
+    # "What global LLA coordinates would produce this exact local Cartesian layout in A?"
+    pseudo_lla_B = ftrns2_A(xyz_local_B)
+    
+    return pseudo_lla_B, mn_B, rbest_B
+
+def pseudo_lla_to_real_lla(pseudo_lla_events, ftrns1_A, mn_B, rbest_B):
+    """
+    Takes events/points located in the pseudo-LLA domain and maps them
+    back to their true, real-world global LLA coordinates.
+    """
+    # --- Step 1: Project pseudo-points into Region A's local Cartesian space ---
+    # This recovers the exact, un-distorted local (X, Y, Z) geometry
+    xyz_local = ftrns1_A(pseudo_lla_events)
+    
+    # --- Step 2: Un-rotate and Un-center using Region B's parameters ---
+    # We invert the local transformation: (rbest_B.T @ xyz_local) + mn_B
+    # (Note: Since rbest_B is an orthogonal rotation matrix, its transpose is its inverse)
+    ecef_real = (rbest_B.T @ xyz_local.T).T + mn_B
+    
+    # --- Step 3: Convert absolute ECEF back to real-world LLA ---
+    real_lla_events = ecef2lla(ecef_real)
+    
+    return real_lla_events
+
+def get_analytical_transform(center_loc):
+    """
+    Analytically computes the exact rbest and mn to center and align 
+    the local coordinate system, replacing differential evolution.
+    
+    center_loc: numpy array of shape (1, 3) -> [lat, lon, alt] (in degrees)
+    """
+    # 1. Compute mn (The center point in absolute ECEF)
+    mn = lla2ecef(center_loc.reshape(1, -1)) # Shape: (1, 3)
+    
+    # Convert lat/lon of center to radians
+    lat_rad = np.radians(center_loc[0, 0])
+    lon_rad = np.radians(center_loc[0, 1])
+    
+    # 2. Compute the exact local East, North, and Up unit vectors
+    # Row 0: East direction (points along +X in your local system)
+    east  = np.array([-np.sin(lon_rad), np.cos(lon_rad), 0.0])
+    
+    # Row 1: North direction (points along +Y in your local system)
+    north = np.array([-np.sin(lat_rad)*np.cos(lon_rad), -np.sin(lat_rad)*np.sin(lon_rad), np.cos(lat_rad)])
+    
+    # Row 2: Up direction (points along +Z in your local system)
+    up    = np.array([np.cos(lat_rad)*np.cos(lon_rad), np.cos(lat_rad)*np.sin(lon_rad), np.sin(lat_rad)])
+    
+    # Stack them to create the clean rbest rotation matrix
+    rbest = np.vstack([east, north, up]) # Shape: (3, 3)
+    
+    return rbest, mn
+
 def rotation_matrix_full_precision(a, b, c):
 
 	# a, b, c = vec
