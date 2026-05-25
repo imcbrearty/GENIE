@@ -1473,6 +1473,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	Batch_indices = []
 	Sample_indices = []
 	A_src_src_l = []
+	Ac_src_src_l = []
 	A_sta_sta_l = []
 	A_prod_src_src_l = []
 	A_prod_sta_sta_l = []
@@ -1516,6 +1517,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				n_spc = x_grids[i0].shape[0]
 				# A_src_src_l.append(np.ascontiguousarray(np.flip(zfile['A_src'][0:2].astype('int'), axis = 0)))
 				A_src_src_l.append(zfile['A_src'][0:2].astype('int'))
+				if use_expanded == True:
+					Ac_src_src_l.append(zfile['Ac'][0:2].astype('int'))
 
 			# if use_fixed_graphs
 
@@ -1537,6 +1540,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 				# z = np.load('Grids/Spatial_graph_%d.npz'%i0)
 				A_src_src_l.append(np.ascontiguousarray(np.flip(z['A_src'][0:2].astype('int'), axis = 0)))
+				if use_expanded == True:
+					Ac_src_src_l.append(z['Ac'][0:2].astype('int'))
+
 				z.close()
 
 			else:
@@ -1561,7 +1567,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				n_spc = x_grids[i0].shape[0]
 
 				# z = np.load('Grids/Spatial_graph_%d.npz'%i0)
-				A_src_src_l.append(zfile['A_src'][0:2].astype('int'))				
+				A_src_src_l.append(zfile['A_src'][0:2].astype('int'))
+				if use_expanded == True:
+					Ac_src_src_l.append(zfile['Ac'][0:2].astype('int'))
 
 
 			elif (use_fixed_graphs == True)*(use_variable_domain == False):
@@ -1582,6 +1590,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				# z = np.load('Grids/Spatial_graph_%d.npz'%i0)
 				# A_src_src_l.append(np.ascontiguousarray(np.flip(z['A_src'][0:2].astype('int'), axis = 0)))
 				A_src_src_l.append(z['A_src'][0:2].astype('int'), axis = 0)
+				if use_expanded == True:
+					Ac_src_src_l.append(z['Ac'][0:2].astype('int'))
 
 				z.close()
 
@@ -1755,7 +1765,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	A_edges_ref_l = []
 
 	# if use_expanded_graphs == True:
-	Ac_src_src_l = []
+	# Ac_src_src_l = []
 	Ac_prod_src_src_l = []
 
 	lp_times = []
@@ -1763,6 +1773,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	lp_phases = []
 	lp_meta = []
 	lp_srcs = []
+	if skip_graphs == False:
+		Ac_src_src_l = []
 
 	thresh_mask = 0.01
 	for i in range(n_batch):
@@ -1849,8 +1861,6 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 			if use_expanded == True:
 
-
-
 				use_perm_expand = True
 				if use_perm_expand == True:
 
@@ -1920,7 +1930,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 			A_edges_time_s_l.append([])
 			A_edges_ref_l.append([])
 
-			Ac_src_src_l.append([])
+			# Ac_src_src_l.append([])
 			Ac_prod_src_src_l.append([])
 
 		
@@ -2056,7 +2066,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	if (use_expanded == False) or (skip_graphs == True):
 
-		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], params_extra, data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+		Ac_src_in_prod_l = [[] for j in range(len(A_src_in_prod_l))]
+		# return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], params_extra, data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
+		return [Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, [A_src_src_l, Ac_src_src_l], A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, [A_src_in_prod_l, Ac_src_in_prod_l], A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], params_extra, data ## Can return data, or, merge this with the update-loss compute, itself (to save read-write time into arrays..)
 
 	else:
 
@@ -3124,8 +3136,12 @@ if build_training_data == True:
 
 		if use_subgraph == True:
 			[Inpts, Masks, X_fixed, X_query, Locs, Trv_out], [Lbls, Lbls_query, lp_times, lp_stations, lp_phases, lp_meta, lp_srcs], [A_sta_sta_l, A_src_src_l, A_src_in_sta_l, A_prod_sta_sta_l, A_prod_src_src_l, A_src_in_prod_l, A_edges_time_p_l, A_edges_time_s_l, A_edges_ref_l], params_extra, data = generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range_interior, lon_range_interior, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, verbose = True, skip_graphs = True)
+			A_src_src_l, Ac_src_src_l = A_src_src_l
+			A_src_in_prod_l, Ac_src_in_prod_l = A_src_in_prod_l
+			# A_prod_src_src_l, Ac_prod_src_src_l = A_prod_src_src_l
+
 			if use_expanded == True:
-				Ac_src_src_l = [[] for j in range(len(A_src_src_l))]
+				# Ac_src_src_l = [[] for j in range(len(A_src_src_l))]
 				Ac_prod_src_src_l = [[] for j in range(len(A_prod_src_src_l))]
 
 		else:
@@ -3170,11 +3186,11 @@ if build_training_data == True:
 			if use_subgraph == True:
 
 				if use_fixed_graphs == False:
-					A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, scale_time = scale_time, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac, device = device)
+					A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, scale_time = scale_time, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac_src_src_l[i], device = device)
 
 				else:
 					# A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac, A_sta_sta = torch.Tensor(A_sta_sta_l[i]).long().to(device), A_src_src = torch.Tensor(A_src_src_l[i]).long().to(device), device = device)
-					A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, scale_time = scale_time, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac, A_sta_sta = torch.Tensor(A_sta_sta_l[i]).long().to(device), A_src_src = torch.Tensor(A_src_src_l[i]).long().to(device), A_src_in_sta = torch.Tensor(A_src_in_sta_l[i]).long().to(device),  device = device)
+					A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(Locs[i], X_fixed[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, scale_time = scale_time, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, Ac = Ac_src_src_l[i], A_sta_sta = torch.Tensor(A_sta_sta_l[i]).long().to(device), A_src_src = torch.Tensor(A_src_src_l[i]).long().to(device), A_src_in_sta = torch.Tensor(A_src_in_sta_l[i]).long().to(device),  device = device)
 
 
 				A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, Locs[i], X_fixed[i], A_src_in_sta, max_t, min_t = min_t, time_shift = X_fixed[i][:,3], dt_res = kernel_sig_t/5.0, t_win = kernel_sig_t*2.0, device = device)
@@ -3431,7 +3447,7 @@ class TrainingDataset(Dataset):
 					# Data(x = spatial_vals, edge_index = torch.from_numpy(f['data_1_edges_%d'%i][:]).long()), 
 					# Data(x = spatial_vals, edge_index = torch.from_numpy(f['data_2_edges_%d'%i][:]).long()),
 					torch.from_numpy(f['A_src_in_sta_%d'%i][:]).long(),
-					torch.from_numpy(f['A_src_src_%d'%i][:]).long(),
+					[torch.from_numpy(f['A_src_src_%d'%i][:]).long(), torch.from_numpy(f['Ac_src_src_%d'%i][:]).long()] if use_expanded == True else torch.from_numpy(f['A_src_src_%d'%i][:]).long(),
 					torch.zeros(1), # torch.Tensor(A_edges_time_p_l[i0]).long().to(device)
 					torch.zeros(1), # torch.Tensor(A_edges_time_s_l[i0]).long().to(device)
 					torch.zeros(1), # torch.Tensor(A_edges_ref_l[i0]).to(device)
@@ -3480,8 +3496,8 @@ class TrainingDataset(Dataset):
 
 					x_grids_trv_refs = []
 					# pdb.set_trace()
-					for j in range(len(params_extra[-1])):
-						x_grids_trv_refs.append(f['x_grids_trv_refs_%d_%d'%(i, j)][:])
+					# for j in range(len(params_extra[-1])):
+					# 	x_grids_trv_refs.append(f['x_grids_trv_refs_%d_%d'%(i, j)][:])
 					# params_extra.append(f['x_grids_trv_refs_%d'%i])
 					params_extra.append(x_grids_trv_refs)
 
@@ -3518,49 +3534,177 @@ class TrainingDataset(Dataset):
 import random
 from tqdm import tqdm
 
-def reshuffle_with_flags(input_dir, output_dir, n_batch=10):
+# def reshuffle_with_flags(input_dir, output_dir, n_batch=10):
+#     os.makedirs(output_dir, exist_ok=True)
+    
+#     all_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith('.hdf5')]
+#     random.shuffle(all_files)
+    
+#     # Process in chunks of n_batch files
+#     for chunk_idx in tqdm(range(0, len(all_files), n_batch), desc="Re-batching"):
+#         batch_files = all_files[chunk_idx : chunk_idx + n_batch]
+#         if len(batch_files) < n_batch: break
+            
+#         handles = [h5py.File(f, 'r') for f in batch_files]
+        
+#         try:
+#             for new_file_idx in range(n_batch):
+#                 new_path = os.path.join(output_dir, f"mix_chunk_{chunk_idx}_{new_file_idx}.hdf5")
+                
+#                 with h5py.File(new_path, 'w') as f_out:
+#                     for i_target in range(n_batch):
+#                         # Pick a source file and a specific sample index from it
+#                         source_h5 = handles[i_target]
+#                         i_src = random.randint(0, n_batch - 1)
+                        
+#                         # 1. Copy all indexed data (spatial_vals_i, Lbls_i, etc.)
+#                         suffix_src = f"_{i_src}"
+#                         suffix_dst = f"_{i_target}"
+                        
+#                         for key in source_h5.keys():
+#                             if key.endswith(suffix_src):
+#                                 base_name = key.rsplit('_', 1)[0]
+#                                 source_h5.copy(key, f_out, name=f"{base_name}{suffix_dst}")
+                                
+#                         # 2. Create the NEW per-sample flag
+#                         # We pull the global 'real_data' value from the source file
+#                         is_real = source_h5['real_data'][()] 
+#                         f_out.create_dataset(f'is_real_sample{suffix_dst}', data=is_real)
+
+#                     # 3. Copy global constants (if any)
+#                     f_out.copy(handles[0]['srcs'], f_out, name='srcs')
+#                     f_out.copy(handles[0]['srcs_active'], f_out, name='srcs_active')
+
+#         finally:
+#             for h in handles: h.close()
+
+
+
+import os
+import sys
+import random
+import h5py
+
+def reshuffle_subset(input_dir, output_dir, job_idx, files_per_job, n_batch=15):
+    """
+    job_idx: The SLURM_ARRAY_TASK_ID
+    files_per_job: How many HDF5 files this specific task should generate
+    n_batch: Number of samples per output HDF5 file
+    """
     os.makedirs(output_dir, exist_ok=True)
     
-    all_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith('.hdf5')]
+    # 1. Get and Sort (Essential for consistency across parallel Slurm tasks)
+    all_files = sorted([
+        os.path.join(input_dir, f) 
+        for f in os.listdir(input_dir) 
+        if f.endswith('.h5') or f.endswith('.hdf5')
+    ])
+    
+    # 2. Global Shuffle (Use a fixed seed so all jobs see the same shuffled list)
+    random.seed(42)
     random.shuffle(all_files)
     
-    # Process in chunks of n_batch files
-    for chunk_idx in tqdm(range(0, len(all_files), n_batch), desc="Re-batching"):
-        batch_files = all_files[chunk_idx : chunk_idx + n_batch]
-        if len(batch_files) < n_batch: break
-            
-        handles = [h5py.File(f, 'r') for f in batch_files]
+    # 3. Consumption Math
+    total_needed = files_per_job * n_batch
+    total_available = len(all_files)
+    
+    # 4. Extract unique pool for this job using Modulo (Wrapping)
+    source_pool = []
+    for i in range(total_needed):
+        global_idx = (job_idx * total_needed + i) % total_available
+        source_pool.append(all_files[global_idx])
+
+    # 5. Set seed once for this job for continuous internal randomness 
+    random.seed(job_idx)
+
+    # Grab version number from the first file in our shuffled list
+    first_file_name = os.path.basename(all_files[0])
+    n_ver = int(first_file_name.split('_')[-1].split('.')[0])
+    start_naming_index = job_idx * files_per_job
+
+    print(f"Job {job_idx}: Generating {files_per_job} files starting at ID {start_naming_index}")
+
+    # Track an index for extra file draws if we hit an completely dead file
+    fallback_pool_idx = 0
+
+    for f_idx in range(files_per_job):
+        unique_id = start_naming_index + f_idx
+        new_filename = f"training_data_slice_{unique_id}_ver_{n_ver}.hdf5"
+        new_path = os.path.join(output_dir, new_filename)
         
-        try:
-            for new_file_idx in range(n_batch):
-                new_path = os.path.join(output_dir, f"mix_chunk_{chunk_idx}_{new_file_idx}.hdf5")
+        # Slice the pool for this specific output file (n_batch files)
+        current_sources = source_pool[f_idx * n_batch : (f_idx + 1) * n_batch]
+        
+        with h5py.File(new_path, 'w') as f_out:
+            meta_copied = False
+            i_target = 0
+            
+            while i_target < n_batch:
+                # Get the next scheduled source file, or pull a fallback if we exceeded the slice
+                if i_target < len(current_sources):
+                    src_path = current_sources[i_target]
+                else:
+                    # Edge case fallback: Grab next file out of the global pool via wrapping
+                    fallback_idx = (job_idx * total_needed + total_needed + fallback_pool_idx) % total_available
+                    src_path = all_files[fallback_idx]
+                    fallback_pool_idx += 1
+
+                # Open files sequentially to prevent file descriptor leakage
+                with h5py.File(src_path, 'r') as src_h5:
+                    
+                    # 1. Scan keys to find all available sample indices
+                    source_keys = list(src_h5.keys())
+                    sample_indices = set()
+                    for key in source_keys:
+                        if key.startswith("lp_times_"):
+                            parts = key.rsplit('_', 1)
+                            if len(parts) > 1 and parts[1].isdigit():
+                                sample_indices.add(int(parts[1]))
+                    
+                    # 2. Filter out keys where lp_times_<i> is empty (length 0)
+                    valid_indices = []
+                    for idx in sample_indices:
+                        lp_key = f"lp_times_{idx}"
+                        # Check dataset size/shape cleanly without loading the full data array
+                        if src_h5[lp_key].shape[0] > 0:
+                            valid_indices.append(idx)
+                    
+                    # CRITICAL EDGE CASE: All indices in this file are bad
+                    if not valid_indices:
+                        print(f"Warning: {os.path.basename(src_path)} has 0 valid samples. Skipping file.")
+                        # Do not increment i_target; let the loop retry with a fallback file
+                        # If this was one of the original slice files, append a placeholder to keep index alignment
+                        if i_target < len(current_sources):
+                            current_sources.append(None) 
+                        continue
+                    
+                    # Pick a valid sample index at random
+                    i_src = random.choice(valid_indices)
+                    
+                    suffix_src = f"_{i_src}"
+                    suffix_dst = f"_{i_target}"
+                    
+                    # Copy all datasets belonging to the chosen sample
+                    for key in source_keys:
+                        parts = key.rsplit('_', 1)
+                        if len(parts) > 1 and parts[1] == str(i_src):
+                            base_name = parts[0]
+                            src_h5.copy(key, f_out, name=f"{base_name}{suffix_dst}")
+                    
+                    # Add the per-sample real data flag safely
+                    if 'real_data' in src_h5:
+                        is_real = src_h5['real_data'][()]
+                        # f_out.create_dataset(f'is_real_sample{suffix_dst}', data=is_real)
+
+                    # Copy global metadata from the first successful file in the mix
+                    if not meta_copied:
+                        for global_key in ['real_data', 'srcs', 'srcs_active']:
+                            if global_key in src_h5:
+                                f_out.create_dataset(global_key, data=src_h5[global_key][()])
+                        meta_copied = True
                 
-                with h5py.File(new_path, 'w') as f_out:
-                    for i_target in range(n_batch):
-                        # Pick a source file and a specific sample index from it
-                        source_h5 = handles[i_target]
-                        i_src = random.randint(0, n_batch - 1)
-                        
-                        # 1. Copy all indexed data (spatial_vals_i, Lbls_i, etc.)
-                        suffix_src = f"_{i_src}"
-                        suffix_dst = f"_{i_target}"
-                        
-                        for key in source_h5.keys():
-                            if key.endswith(suffix_src):
-                                base_name = key.rsplit('_', 1)[0]
-                                source_h5.copy(key, f_out, name=f"{base_name}{suffix_dst}")
-                                
-                        # 2. Create the NEW per-sample flag
-                        # We pull the global 'real_data' value from the source file
-                        is_real = source_h5['real_data'][()] 
-                        f_out.create_dataset(f'is_real_sample{suffix_dst}', data=is_real)
-
-                    # 3. Copy global constants (if any)
-                    f_out.copy(handles[0]['srcs'], f_out, name='srcs')
-                    f_out.copy(handles[0]['srcs_active'], f_out, name='srcs_active')
-
-        finally:
-            for h in handles: h.close()
+                # Advance to next target sample inside the output file
+                i_target += 1
 
 
 
