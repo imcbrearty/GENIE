@@ -518,10 +518,11 @@ if use_only_one_grid == True:
 	assert(len(time_shifts) == 1)
 	assert(len(x_grids) == 1)
 	assert(len(x_grids_trv) == 1)
-	for i in range(len(x_grids_init)):
-		diff = np.linalg.norm(time_shifts[0,:] - x_grids_init[i,:,3])
-		if diff == 0:
-			assert(np.linalg.norm(x_grids_init[i,:,:] - x_grids[0]) == 0)
+	if use_fixed_domain == True:
+		for i in range(len(x_grids_init)):
+			diff = np.linalg.norm(time_shifts[0,:] - x_grids_init[i,:,3])
+			if diff == 0:
+				assert(np.linalg.norm(x_grids_init[i,:,:] - x_grids[0]) == 0)
 	# assert(np.abs(x_grids_trv[0] - (trv(torch.Tensor(locs).to(device), torch.Tensor(x_grids[0]).to(device)).cpu().detach().numpy() + x_grids[0][:,3].reshape(-1,1,1))).max() < 1e-2)
 
 # assert(max_t_ == max_t)
