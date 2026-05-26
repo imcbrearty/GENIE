@@ -2092,10 +2092,10 @@ for cnt, strs in enumerate([0]):
 		srcs_refined[:,0:3] = pseudo_lla_to_real_lla(srcs_refined[:,0:3], ftrns1, mn_shift, rbest_shift)
 		srcs[:,0:3] = pseudo_lla_to_real_lla(srcs[:,0:3], ftrns1, mn_shift, rbest_shift)
 		X_query[:,0:3] = pseudo_lla_to_real_lla(X_query[:,0:3], ftrns1, mn_shift, rbest_shift)
-
+		
 		# if initialize is None: # else: [lat_range, lon_range, ]
-    	domain_ = get_domain_bounds(locs_use, scale = scale_domain)
-    	lat_range, lon_range = domain_['lat_range'], domain_['lon_range']
+		domain_ = get_domain_bounds(locs_use, scale = scale_domain)
+		lat_range, lon_range = domain_['lat_range'], domain_['lon_range']
 
 	# if ('corr1' in globals())*('corr2' in globals()):
 	# 	srcs_refined[:,0:3] = srcs_refined[:,0:3] + corr1 - corr2
