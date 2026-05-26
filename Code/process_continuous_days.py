@@ -2093,6 +2093,9 @@ for cnt, strs in enumerate([0]):
 		srcs[:,0:3] = pseudo_lla_to_real_lla(srcs[:,0:3], ftrns1, mn_shift, rbest_shift)
 		X_query[:,0:3] = pseudo_lla_to_real_lla(X_query[:,0:3], ftrns1, mn_shift, rbest_shift)
 
+		# if initialize is None: # else: [lat_range, lon_range, ]
+    	domain_ = get_domain_bounds(locs_use, scale = scale_domain)
+    	lat_range, lon_range = domain_['lat_range'], domain_['lon_range']
 
 	# if ('corr1' in globals())*('corr2' in globals()):
 	# 	srcs_refined[:,0:3] = srcs_refined[:,0:3] + corr1 - corr2
@@ -2177,6 +2180,8 @@ for cnt, strs in enumerate([0]):
 		file_save['pred_prams'] = pred_params
 		file_save['srcs_init'] = srcs ## These are initial local maxima after Local Marching
 		file_save['X_query'] = X_query
+		file_save['lat_range'] = lat_range
+		file_save['lon_range'] = lon_range
 
 		if find_matched_events == True:
 			file_save['srcs_known'] = srcs_known
