@@ -1298,6 +1298,7 @@ class SourceStationAttention(MessagePassing):
 			self.proj_src_1 = nn.Linear(n_latent*n_heads, n_hidden) # can remove this layer possibly.
 			self.proj_src_2 = nn.Linear(n_hidden, n_hidden) # can remove this layer possibly.
 			self.proj_src_3 = nn.Linear(n_hidden, n_dim_out_src)
+			self.proj_attn = nn.Linear(n_hidden, 1)
 			self.activate_src = nn.PReLU()			
 			self.activate_src1 = nn.PReLU()			
 			self.use_src_pred = True
@@ -1414,11 +1415,19 @@ class SourceStationAttention(MessagePassing):
 		# out = self.proj_2(self.embed_src(src_embed[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
 
 		if self.use_src_pred == True:
+			# out_embed = self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads) # M is output. Taking mean over heads
+			# out_src = self.proj_src_3(self.activate_src1(self.proj_src_2(self.activate_src(self.proj_src_1(out_embed))).view(n_src, n_arv, -1).sum(1)))
+			# out = self.proj_2(self.activate4(self.proj_1(out_embed)))
+			# return out.view(n_src, n_arv, -1), out_src ## Make sure this is correct reshape (not transposed)
+
 			out_embed = self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads) # M is output. Taking mean over heads
-			out_src = self.proj_src_3(self.activate_src1(self.proj_src_2(self.activate_src(self.proj_src_1(out_embed))).view(n_src, n_arv, -1).sum(1)))
+			# out_src = self.proj_src_3(self.activate_src1(self.proj_src_2(self.activate_src(self.proj_src_1(out_embed))).view(n_src, n_arv, -1).sum(1)))
+			out_src = self.activate_src(self.proj_src_1(out_embed)).view(n_src, n_arv, -1)
+			alpha_score = torch.softmax(self.proj_attn(out_src), dim = 1)
+			out_src = self.proj_src_3(self.activate_src1(self.proj_src_2((alpha_score*out_src).sum(1))))
 			out = self.proj_2(self.activate4(self.proj_1(out_embed)))
 			return out.view(n_src, n_arv, -1), out_src ## Make sure this is correct reshape (not transposed)
-
+		
 		else:
 
 			out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
