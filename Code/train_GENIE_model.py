@@ -4244,7 +4244,7 @@ for batch_idx, inputs in enumerate(loader):
 			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
 			x_query_sample, x_query_sample_t = sample_dense_queries(X_query[i0][:,0:3].cpu().detach().numpy(), X_query[i0][:,3].cpu().detach().numpy(), prob_up_sample, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, replace = False, randomize = False) # replace = False
 			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device), train = True) # x_query_cart, t_query
-			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3].cpu().detach().numpy(), lp_srcs[i0][:,3].cpu().detach().numpy(), src_spatial_kernel, src_t_kernel, ftrns1) ## Compute updated labels
+			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:,0:3].cpu().detach().numpy(), lp_srcs[i0][:,3].cpu().detach().numpy(), src_x_kernel, src_t_kernel, ftrns1) ## Compute updated labels
 
 
 			if use_sigmoid == False:
