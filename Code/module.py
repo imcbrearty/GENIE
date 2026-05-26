@@ -1374,7 +1374,7 @@ class SourceStationAttention(MessagePassing):
 
 		if len(src_index) == 0:
 			if self.use_src_pred == True:
-				return torch.zeros(n_src, n_arv, self.n_phases).to(self.device), return torch.zeros(n_src, self.n_dim_out_src).to(self.device)
+				return torch.zeros(n_src, n_arv, self.n_phases).to(self.device), torch.zeros(n_src, self.n_dim_out_src).to(self.device)
 			else:
 				return torch.zeros(n_src, n_arv, self.n_phases).to(self.device)
 
