@@ -1424,7 +1424,7 @@ class SourceStationAttention(MessagePassing):
 
 			out_embed = self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads) # M is output. Taking mean over heads
 			# out_src = self.proj_src_3(self.activate_src1(self.proj_src_2(self.activate_src(self.proj_src_1(out_embed))).view(n_src, n_arv, -1).sum(1)))
-			tau_base = torch.exp(self.log_tau)
+			tau_base = torch.exp(self.log_tau) 
 			tau_deg = tau_base * (n_arv ** 0.5)
 			out_src = self.activate_src(self.proj_src_1(out_embed)).view(n_src, n_arv, -1)
 			# alpha_score = torch.softmax(self.proj_attn(out_src) / tau, dim = 1)
