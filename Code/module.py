@@ -300,7 +300,7 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 
 class BipartiteGraphOperator(MessagePassing):
 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
-		super(BipartiteGraphOperator, self).__init__('add')
+		super(BipartiteGraphOperator, self).__init__('add') # (aggr='gcn')
 		# 1. Standard projection for the geometric features
 		self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
 		self.fc2 = nn.Linear(ndim_in, ndim_out) 
