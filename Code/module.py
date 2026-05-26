@@ -1303,7 +1303,7 @@ class SourceStationAttention(MessagePassing):
 			self.activate_src1 = nn.PReLU()			
 			self.use_src_pred = True
 			self.n_dim_out_src = n_dim_out_src
-			self.log_tau = nn.Parameter(torch.tensor([np.log(0.1)], device=device))
+			self.log_tau = nn.Parameter(torch.tensor([np.log(0.1)], dtype = torch.float32, device = device))
 			
 		else:
 			self.use_src_pred = False
