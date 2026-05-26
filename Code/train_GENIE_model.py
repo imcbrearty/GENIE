@@ -4239,7 +4239,8 @@ for batch_idx, inputs in enumerate(loader):
 
 
 			min_up_sample = 0.1
-			prob_up_sample = np.maximum(out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0].cpu().detach().numpy() < min_up_sample), 0.0)
+			# prob_up_sample = np.maximum(out[1][:,0].detach().cpu().detach().numpy()*(out[1][:,0].detach().cpu().detach().numpy() > min_up_sample)*(Lbls_query[i0][:,0].cpu().detach().numpy() < min_up_sample), 0.0)
+			prob_up_sample = np.maximum((out[1][:,0].cpu().detach()*(out[1][:,0].cpu().detach() > min_up_sample)*(Lbls_query[i0][:,0].detach() < min_up_sample)).cpu().detach().numpy(), 0.0)
 			# prob_up_sample = 
 			if prob_up_sample.sum() == 0: prob_up_sample = np.ones(len(prob_up_sample))
 			prob_up_sample = prob_up_sample/prob_up_sample.sum() ## Can transform these probabilities or clip them
