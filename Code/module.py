@@ -1303,6 +1303,8 @@ class SourceStationAttention(MessagePassing):
 			self.activate_src1 = nn.PReLU()			
 			self.use_src_pred = True
 			self.n_dim_out_src = n_dim_out_src
+			self.log_tau = nn.Parameter(torch.tensor([np.log(0.1)], device=device))
+			
 		else:
 			self.use_src_pred = False
 
@@ -1422,8 +1424,9 @@ class SourceStationAttention(MessagePassing):
 
 			out_embed = self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads) # M is output. Taking mean over heads
 			# out_src = self.proj_src_3(self.activate_src1(self.proj_src_2(self.activate_src(self.proj_src_1(out_embed))).view(n_src, n_arv, -1).sum(1)))
+			tau = torch.exp(self.log_tau)
 			out_src = self.activate_src(self.proj_src_1(out_embed)).view(n_src, n_arv, -1)
-			alpha_score = torch.softmax(self.proj_attn(out_src), dim = 1)
+			alpha_score = torch.softmax(self.proj_attn(out_src) / tau, dim = 1)
 			out_src = self.proj_src_3(self.activate_src1(self.proj_src_2((alpha_score*out_src).sum(1))))
 			out = self.proj_2(self.activate4(self.proj_1(out_embed)))
 			return out.view(n_src, n_arv, -1), out_src ## Make sure this is correct reshape (not transposed)
