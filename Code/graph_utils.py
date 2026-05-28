@@ -2663,6 +2663,342 @@ class SpectralProductSampler1:
 
 
 
+import time
+from collections import deque
+import numpy as np
+import networkx as nx
+from scipy.sparse.csgraph import shortest_path
+from scipy.sparse.linalg import lsqr
+from scipy.spatial import cKDTree
+
+class SpectralProductSampler2:
+
+    def __init__(self, G_A, G_B, pos_A, pos_B, sparse_threshold = 2000, k_approx = 150):
+
+        self.G_A = G_A
+        self.G_B = G_B
+        self.pos_A = pos_A
+        self.pos_B = pos_B
+        self.k_approx = k_approx
+        
+        # Determine mode for each factor independently
+        self.mode_A = 'sparse' if len(G_A) > sparse_threshold else 'dense'
+        self.mode_B = 'sparse' if len(G_B) > sparse_threshold else 'dense'
+        
+        # 1. Compute Leverage Scores (tau)
+        self.tau_A, self.L_A_obj = self._compute_spectral_stats(G_A, self.mode_A)
+        self.tau_B, self.L_B_obj = self._compute_spectral_stats(G_B, self.mode_B)
+        
+        # 2. Probabilities for sampling
+        self.p_A = self.tau_A / np.sum(self.tau_A)
+        self.p_B = self.tau_B / np.sum(self.tau_B)
+
+        # 3. Index mappings
+        self.node_to_idx_A = {node: i for i, node in enumerate(G_A.nodes())}
+        self.node_to_idx_B = {node: i for i, node in enumerate(G_B.nodes())}
+        self._precompute_edge_weights()
+
+        # Convert the graphs to CSR format once
+        self.adj_A = nx.to_scipy_sparse_array(self.G_A, weight='res_w', format='csr')
+        self.adj_B = nx.to_scipy_sparse_array(self.G_B, weight='res_w', format='csr')
+
+        # Force internal CSR structure to 32-bit
+        self.adj_A.indices = self.adj_A.indices.astype(np.int32)
+        self.adj_A.indptr = self.adj_A.indptr.astype(np.int32)
+        self.adj_B.indices = self.adj_B.indices.astype(np.int32)
+        self.adj_B.indptr = self.adj_B.indptr.astype(np.int32)
+
+        # Store node lists for index-to-node mapping
+        self.nodes_A = list(self.G_A.nodes())
+        self.nodes_B = list(self.G_B.nodes())
+
+    def _precompute_edge_weights(self):
+        """Run this once to store weights on the graph edges."""
+        for G, L_obj, mode, mapping in [
+            (self.G_A, self.L_A_obj, self.mode_A, self.node_to_idx_A),
+            (self.G_B, self.L_B_obj, self.mode_B, self.node_to_idx_B)
+        ]:
+            for u, v in G.edges():
+                if mode == 'dense':
+                    u_idx, v_idx = mapping[u], mapping[v]
+                    w = max(1e-6, L_obj[u_idx, u_idx] + L_obj[v_idx, v_idx] - 2 * L_obj[u_idx, v_idx])
+                else:
+                    w = 1.0 / np.sqrt(G.degree(u) * G.degree(v))
+                
+                G[u][v]['res_w'] = w
+
+    def _compute_spectral_stats(self, G, mode):
+        L = nx.laplacian_matrix(G).astype(float)
+        n = L.shape[0]
+        
+        if mode == 'dense':
+            L_pinv = np.linalg.pinv(L.toarray())
+            return np.diag(L_pinv), L_pinv
+        else:
+            R = np.random.randn(n, self.k_approx) / np.sqrt(self.k_approx)
+            Z = np.zeros((n, self.k_approx))
+            for i in range(self.k_approx):
+                sol = lsqr(L, R[:, i])[0]
+                Z[:, i] = sol
+            tau = np.sum(Z**2, axis=1)
+            return tau, L
+
+    def _reconstruct_path(self, predecessors, start_idx, end_idx, node_list):
+        path = []
+        curr = end_idx
+        while curr != -9999:
+            path.append(node_list[curr])
+            if curr == start_idx: break
+            curr = predecessors[curr]
+        return path[::-1]
+
+    def get_resistance_path(self, G, source, target):
+        return nx.shortest_path(G, source, target, weight='res_w')
+
+    def _get_path_from_predecessor(self, predecessors, start_idx, end_idx, mapping_list):
+        path = []
+        curr = end_idx
+        while curr != -9999:
+            path.append(mapping_list[curr])
+            if curr == start_idx: break
+            curr = predecessors[curr]
+        return path[::-1]
+
+    def select_anchors(self, n_total_target=100000, core_ratio=0.2, n_physical_src = 15, n_physical_sta = 10):
+        nodes_A = list(self.G_A.nodes())
+        nodes_B = list(self.G_B.nodes())
+        anchors = set()
+
+        n_physical_src = min(n_physical_src, len(nodes_B) - 1)
+
+        # 1. THE SPECTRAL CORE
+        n_core_target = int(n_total_target * core_ratio)
+        ratio = len(nodes_A) / len(nodes_B)
+        k_a = max(1, int(np.sqrt(n_core_target * ratio)))
+        k_b = max(1, int(n_core_target / k_a))
+
+        top_a_indices = np.argsort(self.tau_A)[-k_a:]
+        top_b_indices = np.argsort(self.tau_B)[-k_b:]
+        
+        for idx_a in top_a_indices:
+            for idx_b in top_b_indices:
+                anchors.add((nodes_A[idx_a], nodes_B[idx_b]))
+
+        # 2. THE SPECTRAL DISTRIBUTION
+        n_remaining = n_total_target - len(anchors)
+        if n_remaining > 0:
+            idx_a = np.random.choice(len(nodes_A), size=n_remaining, p=self.p_A)
+            idx_b = np.random.choice(len(nodes_B), size=n_remaining, p=self.p_B)
+            for i in range(n_remaining):
+                anchors.add((nodes_A[idx_a[i]], nodes_B[idx_b[i]]))
+
+        coords_A = np.array([self.pos_A[n] for n in nodes_A])
+        coords_B = np.array([self.pos_B[n] for n in nodes_B])
+
+        tree_sta = cKDTree(coords_B)
+        tree_src = cKDTree(coords_A)
+        
+        _, indices = tree_sta.query(coords_A, k=n_physical_src)
+        
+        for a_idx, b_indices in enumerate(indices):
+            source = nodes_A[a_idx]
+            if n_physical_src == 1:
+                b_indices = [b_indices]
+            for b_idx in b_indices:
+                station = nodes_B[b_idx]
+                anchors.add((source, station))
+
+        _, indices = tree_src.query(coords_B, k=n_physical_sta)
+        
+        for b_idx, a_indices in enumerate(indices):
+            station = nodes_B[b_idx]
+            if n_physical_sta == 1:
+                a_indices = [a_indices]
+            for a_idx in a_indices:
+                source = nodes_A[a_idx]
+                anchors.add((source, station))
+
+        return list(anchors)
+
+    def sort_anchors_greedy(self, anchors):
+        if not anchors: return []
+        return sorted(list(anchors), key=lambda x: (
+            self.pos_B[x[1]][0], 
+            self.pos_B[x[1]][1], 
+            self.pos_A[x[0]][0], 
+            self.pos_A[x[0]][1]
+        ))
+
+    def build_final_subgraph(self, target_node_count=100000, anchor_fraction = 0.15, slack_factor = 2.5, skip_paths = False):
+        nodes_to_retain = set()
+        st_time = time.time()
+
+        # 1. Seeds
+        anchors = self.select_anchors(n_total_target=int(target_node_count * anchor_fraction))
+        nodes_to_retain.update(anchors)
+
+        nodes_A = list(self.G_A.nodes())
+        nodes_B = list(self.G_B.nodes())
+
+        MAX_DEG_A = int((target_node_count / len(self.G_A)) * slack_factor)
+        MAX_DEG_B = int((target_node_count / len(self.G_B)) * slack_factor)
+
+        count_A = {node: 0 for node in self.G_A.nodes()}
+        count_B = {node: 0 for node in self.G_B.nodes()}
+
+        for a, b in anchors:
+            count_A[a] += 1
+            count_B[b] += 1
+
+        print('Time [1] : %0.4f'%(time.time() - st_time))
+
+        # Sort anchors
+        sorted_anchors = self.sort_anchors_greedy(anchors)
+        print('Time [2] : %0.4f'%(time.time() - st_time))
+
+        if not skip_paths:
+            n_init_nodes = len(nodes_to_retain)
+            
+            # PROTECT BLOBS: Cap structural skeleton paths at 40% of target budget
+            skeleton_cap = int(target_node_count * 0.40)
+
+            # 2. THE BACKBONE
+            for i in range(len(sorted_anchors) - 1):
+                u, v = sorted_anchors[i], sorted_anchors[i+1]
+                
+                # --- Factor A ---
+                u_idx_a = self.node_to_idx_A[u[0]]
+                v_idx_a = self.node_to_idx_A[v[0]]
+                if u_idx_a == v_idx_a:
+                    path_a = [u[0]]
+                else:
+                    _, pred_a = shortest_path(self.adj_A, directed=False, indices=u_idx_a, return_predecessors=True)
+                    path_a = self._reconstruct_path(pred_a, u_idx_a, v_idx_a, self.nodes_A)
+                
+                # --- Factor B ---
+                u_idx_b = self.node_to_idx_B[u[1]]
+                v_idx_b = self.node_to_idx_B[v[1]]
+                if u_idx_b == v_idx_b:
+                    path_b = [u[1]]
+                else:
+                    _, pred_b = shortest_path(self.adj_B, directed=False, indices=u_idx_b, return_predecessors=True)
+                    path_b = self._reconstruct_path(pred_b, u_idx_b, v_idx_b, self.nodes_B)
+                
+                # Clean single-pass batch injection
+                nodes_to_retain.update((na, u[1]) for na in path_a)
+                for na in path_a:
+                    count_A[na] += 1
+                    count_B[u[1]] += 1
+
+                nodes_to_retain.update((v[0], nb) for nb in path_b)
+                for nb in path_b:
+                    count_A[v[0]] += 1
+                    count_B[nb] += 1
+                
+                # Check structural constraint early termination
+                if len(nodes_to_retain) >= skeleton_cap:
+                    print(f"Backbone pathing capped at {len(nodes_to_retain)} nodes to reserve budget for blobs.")
+                    break
+
+            print('Added %d nodes during path finding'%(len(nodes_to_retain) - n_init_nodes))
+            print('Time [3] : %0.4f'%(time.time() - st_time))
+
+        # 3. PRIORITY EXPANSION (Uniformly Distributed Blobs via Queue structure)
+        neighbor_queue = deque()
+        for a, b in list(nodes_to_retain):
+            if count_B[b] < MAX_DEG_B:
+                for na in self.G_A.neighbors(a):
+                    if (na, b) not in nodes_to_retain:
+                        neighbor_queue.append((a, b, na, 'A'))
+            if count_A[a] < MAX_DEG_A:
+                for nb in self.G_B.neighbors(b):
+                    if (a, nb) not in nodes_to_retain:
+                        neighbor_queue.append((a, nb, 'B'))
+
+        # Round-robin distribution processing
+        while neighbor_queue and len(nodes_to_retain) < target_node_count:
+            parent_a, parent_b, neighbor, factor = neighbor_queue.popleft()
+            
+            if factor == 'A':
+                candidate = (neighbor, parent_b)
+                if candidate not in nodes_to_retain and count_B[parent_b] < MAX_DEG_B:
+                    nodes_to_retain.add(candidate)
+                    count_A[neighbor] += 1
+                    count_B[parent_b] += 1
+            else:
+                candidate = (parent_a, neighbor)
+                if candidate not in nodes_to_retain and count_A[parent_a] < MAX_DEG_A:
+                    nodes_to_retain.add(candidate)
+                    count_A[parent_a] += 1
+                    count_B[neighbor] += 1
+
+        print('Time [4] : %0.4f'%(time.time() - st_time))
+
+        # 4. STOCHASTIC FILLING
+        nodes_A_list, nodes_B_list = list(self.G_A.nodes()), list(self.G_B.nodes())
+        
+        chunk_size = 5000
+        chunk_idx = chunk_size
+        
+        while len(nodes_to_retain) < target_node_count:
+            if chunk_idx >= chunk_size:
+                pre_sampled_a = np.random.choice(len(nodes_A_list), size=chunk_size, p=self.p_A)
+                pre_sampled_b = np.random.choice(len(nodes_B_list), size=chunk_size, p=self.p_B)
+                chunk_idx = 0
+                
+            idx_a = pre_sampled_a[chunk_idx]
+            idx_b = pre_sampled_b[chunk_idx]
+            chunk_idx += 1
+            
+            seed = (nodes_A_list[idx_a], nodes_B_list[idx_b])
+            nodes_to_retain.add(seed)
+            
+            for na in self.G_A.neighbors(seed[0]):
+                if len(nodes_to_retain) >= target_node_count: break
+                nodes_to_retain.add((na, seed[1]))
+            for nb in self.G_B.neighbors(seed[1]):
+                if len(nodes_to_retain) >= target_node_count: break
+                nodes_to_retain.add((seed[0], nb))
+
+        print('Time [5] : %0.4f'%(time.time() - st_time))
+
+        # Step 5: Multi-Relational Induction
+        G_sub = nx.Graph()
+        G_sub.add_nodes_from(nodes_to_retain)
+
+        retained_by_A = {}
+        retained_by_B = {}
+        for (a, b) in nodes_to_retain:
+            retained_by_A.setdefault(a, set()).add(b)
+            retained_by_B.setdefault(b, set()).add(a)
+
+        for (a, b) in nodes_to_retain:
+            # 1. Factor A Edges
+            for na in self.G_A[a]:
+                if b in retained_by_A.get(na, set()):
+                    G_sub.add_edge((a, b), (na, b), edge_type='factor_a')
+                    
+            # 2. Factor B Edges
+            for nb in self.G_B[b]:
+                if a in retained_by_B.get(nb, set()):
+                    G_sub.add_edge((a, b), (a, nb), edge_type='factor_b')
+
+        return G_sub
+
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
 
 
 def get_domain_bounds(points_lla, scale=1.05, lat_range = None, lon_range = None):
