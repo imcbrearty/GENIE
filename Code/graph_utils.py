@@ -2013,7 +2013,7 @@ def initialize_sensor_graph(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt
 
 
 
-class SpectralProductSampler:
+class SpectralProductSampler_backup:
 
     def __init__(self, G_A, G_B, pos_A, pos_B, sparse_threshold = 2000, k_approx = 150):
 
@@ -2996,7 +2996,7 @@ from scipy.sparse.csgraph import shortest_path
 from scipy.sparse.linalg import lsqr
 from scipy.spatial import cKDTree
 
-class SpectralProductSampler2:
+class SpectralProductSampler:
 
     def __init__(self, G_A, G_B, pos_A, pos_B, sparse_threshold = 2000, k_approx = 150):
 
@@ -3049,13 +3049,15 @@ class SpectralProductSampler2:
                     w = max(1e-6, L_obj[u_idx, u_idx] + L_obj[v_idx, v_idx] - 2 * L_obj[u_idx, v_idx])
                 else:
                     w = 1.0 / np.sqrt(G.degree(u) * G.degree(v))
+                    # w = 1.0 / G.degree(u)
                 
                 G[u][v]['res_w'] = w
 
     def _compute_spectral_stats(self, G, mode):
         L = nx.laplacian_matrix(G).astype(float)
         n = L.shape[0]
-        
+        # L = L + scipy.sparse.diags(np.full(n, 1e-6))
+
         if mode == 'dense':
             L_pinv = np.linalg.pinv(L.toarray())
             return np.diag(L_pinv), L_pinv
