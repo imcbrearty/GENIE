@@ -235,7 +235,7 @@ ind_use = ind_use[int(argvs[1])]
 
 # n_optimal_points = config.get('target_grid_resolution', np.array([300, 300, 150])) # np.array([300, 300, 150])
 
-n_optimal_points = np.array([300, 300, 150])
+n_optimal_points = np.array([250, 250, 125])
 n_optimal_points = config.get('target_grid_resolution', n_optimal_points) # np.array([300, 300, 150])
 
 
@@ -314,8 +314,8 @@ for sta_ind in ind_use:
 
 	for inc_res, dx_res in enumerate(optim):
 
-		if inc_res == (len(optim) - 1):
-			dx_res = dx_res*1.25
+		# if inc_res == (len(optim) - 1):
+		# 	dx_res = dx_res*1.25
 
 		## Boundary of domain, in Cartesian coordinates
 		elev = locs[:,2].max() + 1000.0
