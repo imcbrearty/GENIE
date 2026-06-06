@@ -884,7 +884,14 @@ for sta_ind in ind_use:
 		idx_x2_src = np.argmin(np.abs(x2 - loc_proj[0,1]))
 		
 		assert(np.allclose(np.array([x1[idx_x1_src], x2[idx_x2_src], x3[inearest]]), loc_proj[0,:], atol = 1e-3)) 
-		src_index = (idx_x2_src * n1 * n3) + (idx_x1_src * n3) + inearest
+		# src_index = (idx_x2_src * n1 * n3) + (idx_x1_src * n3) + inearest
+
+		# OPTION A: The Stride Math Fix (Strictly matching indexing='ij')
+		src_index = (idx_x1_src * n2 * n3) + (idx_x2_src * n3) + inearest
+		# OPTION B: The Bulletproof Geometric Fix (Recommended)
+		# Directly finds whichever row in xx physically matches the target source point
+		src_index1 = np.argmin(np.linalg.norm(xx - loc_proj, axis=1))
+		assert(src_index == src_index1)
 
 		Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, dx_res, vel_type=vel_model_type)
 
