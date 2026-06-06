@@ -309,7 +309,6 @@ def estimate_safe_cores(cpu_point_budget, safety_factor=0.8):
 
 
 
-
 def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2):
     """
     Computes travel times using ObsPy TauP by mapping a structural 3D point mesh
@@ -666,7 +665,7 @@ for sta_ind in ind_use:
     data['loc'] = locs_concat[sta_ind].reshape(1,-1)
     data['loc_proj'] = loc_proj
     data['engine'] = engine_type
-    
+
 
     for inc_res, dx_res in enumerate(optim):
 
@@ -731,6 +730,15 @@ for sta_ind in ind_use:
                 span_x3 = np.minimum(4.0 * opt_R_max2, regional_span_x3)
 
 
+        # # 4. Derive grid counts ensuring dx == dy == dz (Perfect cubes)
+        # n1_target = int(np.ceil(span_x1 / dx_res)) + 8
+        # n2_target = int(np.ceil(span_x2 / dx_res)) + 8
+        # n3_target = int(np.ceil(span_x3 / dx_res)) + 8
+
+        # # 5. Force odd dimensions so the station source lands perfectly on a node center
+        # n1 = n1_target + 1 if n1_target % 2 == 0 else n1_target
+        # n2 = n2_target + 1 if n2_target % 2 == 0 else n2_target
+        # n3 = n3_target + 1 if n3_target % 2 == 0 else n3_target
 
 
         # 4. Derive grid counts ensuring dx == dy == dz (Perfect cubes)
@@ -823,7 +831,7 @@ for sta_ind in ind_use:
         assert(src_index == src_index1)
 
         Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, [dx_res, dx_res, dz_res], vel_type=vel_model_type)
-        print('dx_v %0.4f %0.4f %0.4f'%(dx_res, dx_res, dz_res))
+        print('dx_v %0.4f %0.4f %0.4f \n'%(dx_res, dx_res, dz_res))
         # print([dx_res, dx_res, dz_res])
 
         # =====================================================================
@@ -1016,7 +1024,7 @@ for sta_ind in ind_use:
         sta_ind += len(ind_use_rand)*int(argvs[1])
 
     np.savez_compressed(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData' + seperator + '%s_1d_velocity_model_station_%d_ver_%d.npz'%(name_of_project, sta_ind, vel_model_ver), **data)
-
+    print('Saved %d'%sta_ind)
 
 
 print("All files saved successfully!")
