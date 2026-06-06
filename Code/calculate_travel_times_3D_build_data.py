@@ -933,7 +933,7 @@ for sta_ind in ind_use:
 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis=1)
 		X = ftrns2(xx)
 
-		print('Domain: %0.4f, %0.4f, %0.4f'%(dx_res*len(x1), dx_res*len(x2), dz_res*len(x3)))
+		print('\nDomain: %0.4f, %0.4f, %0.4f'%(dx_res*len(x1), dx_res*len(x2), dz_res*len(x3)))
 
 
 		idx_x1_src = np.argmin(np.abs(x1 - loc_proj[0,0]))
@@ -950,6 +950,8 @@ for sta_ind in ind_use:
 		assert(src_index == src_index1)
 
 		Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, [dx_res, dx_res, dz_res], vel_type=vel_model_type)
+		print('dx_v')
+		print([dx_res, dx_res, dz_res])
 
 		# =====================================================================
 		# EXECUTION BACKEND BRANCH
