@@ -434,9 +434,25 @@ if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.np
 	if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - surface_profile[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
 
 
+include_random_samples = True
+if include_random_samples == True:
+	ind_use_rand = np.random.choice(len(locs), size = int(3*len(ind_use)))
+	locs_nn = cKDTree(ftrns1(locs)).query(ftrns1(locs[ind_use_rand]), k = 2)[0][:,1]
+	locs_rand = ftrns2(locs_nn.reshape(-1,1)*np.random.randn(len(ind_use_rand),3) + ftrns1(locs[ind_use_rand]))
+	irand = np.sort(np.random.choice(len(ind_use_rand), size = int(np.floor(len(ind_use_rand)/2)), replace = False)) if int(np.floor(len(ind_use_rand)/2)) > 0 else np.zeros(0).astype('int')
+	locs_rand[irand] = np.random.uniform(offset_x_extend, offset_x_extend + offset_x_extend)
+	locs_rand = locs_rand.clip(offset_x_extend, offset_x_extend + scale_x_extend)
+	ind_use = np.concatenate((ind_use, np.arange(len(ind_use_rand)) + len(locs)), axis = 0)
+	locs_concat = np.concatenate((locs, locs_rand), axis = 0)
+else:
+	locs_concat = np.copy(locs)
+
+
+
 for sta_ind in ind_use:
 
-	loc_proj = ftrns1(locs[sta_ind].reshape(1,-1))
+	# loc_proj = ftrns1(locs[sta_ind].reshape(1,-1))
+	loc_proj = ftrns1(locs_concat[sta_ind].reshape(1,-1))
 	max_dist = np.linalg.norm(query_proj - loc_proj, axis = 1) ## Create grid centered on point with this radius
 
 	print('\nLat range: %0.2f, %0.2f'%(lat_range_extend[0], lat_range_extend[1]))
@@ -457,7 +473,10 @@ for sta_ind in ind_use:
 	regional_span_x3 = float(np.abs(zz_corners[1, 2] - zz_corners[0, 2])) # Vertical Span
 
 	target_error = 0.02
-	n_optimal_points1 = np.prod(n_optimal_points)
+	if sta_ind < len(locs): ## Regular resolution
+		n_optimal_points1 = np.prod(n_optimal_points)
+	else:
+		n_optimal_points1 = int(np.prod(n_optimal_points)/8)	
 
 	# Run the geometrically updated optimizer
 	optim, (opt_R_max1, opt_R_max2) = optimize_grid_resolutions(
@@ -469,10 +488,11 @@ for sta_ind in ind_use:
 		cpu_point_budget = n_optimal_points1
 	)
 	print('Optimized dx settings:', optim)
+	print('Domain: %0.4f, %0.4f, %0.4f'%(regional_span_x1, regional_span_x2, regional_span_x3))
 
 	data = {}
 	data['res'] = optim
-	data['loc'] = locs[sta_ind].reshape(1,-1)
+	data['loc'] = locs_concat[sta_ind].reshape(1,-1)
 	data['loc_proj'] = loc_proj
 
 
@@ -635,9 +655,14 @@ for sta_ind in ind_use:
 		if sample_points == True:
 
 			scale_factor = len(locs)/25
-			n_zero_inputs = int(100000/scale_factor)
-			n_per_station = int(150000/scale_factor)
-			n_per_station1 = int(100000/scale_factor)
+			n_zero_inputs = int(int(100000/scale_factor) / (len(optim) - 1))
+			n_per_station = int(int(150000/scale_factor) / (len(optim) - 1))
+			n_per_station1 = int(int(100000/scale_factor) / (len(optim) - 1))
+
+			if sta_ind >= len(locs):
+				n_zero_inputs = int(n_zero_inputs/3)
+				n_per_station = int(n_per_station/3)
+				n_per_station1 = int(n_per_station1/3)
 
 			# # p = np.zeros(locs_ref.shape[0])
 			# p[sta_ind] = 1
@@ -724,6 +749,74 @@ for sta_ind in ind_use:
 			data['Vs_%d'%inc_res] = Vs			
 
 
+	# =========================================================================
+	# CONCATENATION OUTSIDE THE LOOP (Combines Tier 0, Tier 1, and Tier 2)
+	# =========================================================================
+	if sample_points == True:
+
+		# Gather keys across all tiers dynamically
+		tiers = range(len(optim))
+		
+		# 1. Spatial Matrices (Shape: N, 3)
+		data['X'] = np.concatenate([data['X_%d' % i] for i in tiers], axis=0)
+		data['X_cart'] = np.concatenate([data['X_cart_%d' % i] for i in tiers], axis=0)
+		
+		data['X_vald'] = np.concatenate([data['X_vald_%d' % i] for i in tiers], axis=0)
+		data['X_cart_vald'] = np.concatenate([data['X_cart_vald_%d' % i] for i in tiers], axis=0)
+		
+		data['X_boundary'] = np.concatenate([data['X_boundary_%d' % i] for i in tiers], axis=0)
+		data['X_cart_boundary'] = np.concatenate([data['X_cart_boundary_%d' % i] for i in tiers], axis=0)
+
+		# 2. Vectors (Handles 1D flat vs 2D column arrays identically)
+		if len(data['Tp_0'].shape) == 1:
+			data['Tp'] = np.concatenate([data['Tp_%d' % i] for i in tiers], axis=0)
+			data['Ts'] = np.concatenate([data['Ts_%d' % i] for i in tiers], axis=0)
+			data['Vp'] = np.concatenate([data['Vp_%d' % i] for i in tiers], axis=0)
+			data['Vs'] = np.concatenate([data['Vs_%d' % i] for i in tiers], axis=0)
+			data['Dist'] = np.concatenate([data['Dist_%d' % i] for i in tiers], axis=0)
+
+			data['Tp_vald'] = np.concatenate([data['Tp_vald_%d' % i] for i in tiers], axis=0)
+			data['Ts_vald'] = np.concatenate([data['Ts_vald_%d' % i] for i in tiers], axis=0)
+			data['Vp_vald'] = np.concatenate([data['Vp_vald_%d' % i] for i in tiers], axis=0)
+			data['Vs_vald'] = np.concatenate([data['Vs_vald_%d' % i] for i in tiers], axis=0)
+			data['Dist_vald'] = np.concatenate([data['Dist_vald_%d' % i] for i in tiers], axis=0)
+
+			data['Tp_boundary'] = np.concatenate([data['Tp_boundary_%d' % i] for i in tiers], axis=0)
+			data['Ts_boundary'] = np.concatenate([data['Ts_boundary_%d' % i] for i in tiers], axis=0)
+			data['Vp_boundary'] = np.concatenate([data['Vp_boundary_%d' % i] for i in tiers], axis=0)
+			data['Vs_boundary'] = np.concatenate([data['Vs_boundary_%d' % i] for i in tiers], axis=0)
+		else:
+			# Assumes 2D column formatting (N, 1)
+			data['Tp'] = np.concatenate([data['Tp_%d' % i] for i in tiers], axis=0)
+			data['Ts'] = np.concatenate([data['Ts_%d' % i] for i in tiers], axis=0)
+			data['Vp'] = np.concatenate([data['Vp_%d' % i] for i in tiers], axis=0)
+			data['Vs'] = np.concatenate([data['Vs_%d' % i] for i in tiers], axis=0)
+			data['Dist'] = np.concatenate([data['Dist_%d' % i].reshape(-1, 1) for i in tiers], axis=0)
+
+			data['Tp_vald'] = np.concatenate([data['Tp_vald_%d' % i] for i in tiers], axis=0)
+			data['Ts_vald'] = np.concatenate([data['Ts_vald_%d' % i] for i in tiers], axis=0)
+			data['Vp_vald'] = np.concatenate([data['Vp_vald_%d' % i] for i in tiers], axis=0)
+			data['Vs_vald'] = np.concatenate([data['Vs_vald_%d' % i] for i in tiers], axis=0)
+			data['Dist_vald'] = np.concatenate([data['Dist_vald_%d' % i].reshape(-1, 1) for i in tiers], axis=0)
+
+			data['Tp_boundary'] = np.concatenate([data['Tp_boundary_%d' % i] for i in tiers], axis=0)
+			data['Ts_boundary'] = np.concatenate([data['Ts_boundary_%d' % i] for i in tiers], axis=0)
+			data['Vp_boundary'] = np.concatenate([data['Vp_boundary_%d' % i] for i in tiers], axis=0)
+			data['Vs_boundary'] = np.concatenate([data['Vs_boundary_%d' % i] for i in tiers], axis=0)
+
+	else:
+		# If you aren't sampling points, concatenate raw un-sampled grids
+		tiers = range(len(optim))
+		data['Tp'] = np.concatenate([data['Tp_%d' % i] for i in tiers], axis=0)
+		data['Ts'] = np.concatenate([data['Ts_%d' % i] for i in tiers], axis=0)
+		data['X'] = np.concatenate([data['X_%d' % i] for i in tiers], axis=0)
+		data['X_cart'] = np.concatenate([data['X_cart_%d' % i] for i in tiers], axis=0)
+		data['Vp'] = np.concatenate([data['Vp_%d' % i] for i in tiers], axis=0)
+		data['Vs'] = np.concatenate([data['Vs_%d' % i] for i in tiers], axis=0)	
+
+	if sta_ind >= len(locs):
+		sta_ind += len(ind_use_rand)*int(argvs[1])
+
 	np.savez_compressed(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData' + seperator + '%s_1d_velocity_model_station_%d_ver_%d.npz'%(name_of_project, sta_ind, vel_model_ver), **data)
 
 
@@ -731,4 +824,94 @@ for sta_ind in ind_use:
 print("All files saved successfully!")
 print("✔ Script execution: Done")
 
+
+
+# def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores = 10):
+
+# 	def step_test(args):
+
+
+# 		yval, dx_v, h, h1, ind = args # <-- Cleaned up payload
+# 		# yval, dx_v, h, h1, x11, x12, x13, ind = args
+# 		print(yval.shape); print(x11.shape); print(x12.shape); print(x13.shape)
+
+# 		phi_xy = (x11 - yval[0,0])**2 + (x12 - yval[0,1])**2
+# 		phi_v = (x13 - yval[0,2])**2
+
+# 		phi = np.sqrt(phi_xy + phi_v)
+# 		# phi = phi - phi.min() - np.mean(dx_v)/5.0 ## Why include np.mean(dx_v)?
+# 		phi = phi - phi.min() # - np.mean(dx_v)/5.0 ## Why include np.mean(dx_v)?
+# 		assert((phi == 0).sum() == 1)
+
+# 		v = np.copy(h).reshape(x11.shape) # correct?
+# 		v1 = np.copy(h1).reshape(x11.shape) # correct?
+
+# 		# t = skfmm.travel_time(phi, v, dx = [dx_v[0], dx_v[1], dx_v[2]])
+# 		# t1 = skfmm.travel_time(phi, v1, dx = [dx_v[0], dx_v[1], dx_v[2]])
+
+# 		fmm_dx = [
+# 		        float(np.abs(x12[1, 0, 0] - x12[0, 0, 0])),  # Spacing along Axis 0 (y / North)
+# 		        float(np.abs(x11[0, 1, 0] - x11[0, 0, 0])),  # Spacing along Axis 1 (x / East)
+# 		        float(np.abs(x13[0, 0, 1] - x13[0, 0, 0]))   # Spacing along Axis 2 (z / Depth)
+# 		    ]
+
+# 		# t = skfmm.travel_time(phi, v, dx = [dx_v[1], dx_v[0], dx_v[2]])
+# 		# t1 = skfmm.travel_time(phi, v1, dx = [dx_v[1], dx_v[0], dx_v[2]])
+
+# 		print('fmm dx')
+# 		print(fmm_dx)
+# 		t = skfmm.travel_time(phi, v, dx = fmm_dx)
+# 		t1 = skfmm.travel_time(phi, v1, dx = fmm_dx)
+
+# 		return t, t1, phi, ind
+
+# 	tp_times, ts_times = np.nan*np.zeros((h.shape[0], xx_r.shape[0])), np.nan*np.zeros((h.shape[0], xx_r.shape[0]))
+
+# 	# results = Parallel(n_jobs = num_cores)(delayed(step_test)( [xx_r[i,:][None,:], dx_v, h, h1, x11, x12, x13, i] ) for i in range(xx_r.shape[0]))
+# 	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [xx_r[i,:][None,:], dx_v, h, h1, i] ) for i in range(xx_r.shape[0]))
+
+# 	for i in range(xx_r.shape[0]):
+
+# 		## Make sure to write results to correct station, based on ind
+# 		tp_times[:,results[i][-1]] = results[i][0].reshape(-1)
+# 		ts_times[:,results[i][-1]] = results[i][1].reshape(-1)
+
+# 	return tp_times, ts_times
+
+# import numpy as np
+# from joblib import Parallel, delayed
+
+
+# ## Load "Points" field that specifies surface elevation (columns of lat, lon, elevation (meters)). Points outside convex hull of Points will be treated as zero elevation.
+# z = np.load(path_to_file + 'surface_elevation.npz')
+# Points = z['Points']
+# z.close()
+
+# ## Concatenate station elevations
+# Points = np.concatenate((Points, locs), axis = 0)
+
+# d_deg = dx_res/110e3
+# ## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
+# tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
+
+# x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg/5.0, d_deg/5.0), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg/5.0, d_deg/5.0)
+# x11_s, x12_s = np.meshgrid(x1_s, x2_s)
+# surface_profile = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
+# ip_match = tree.query(ftrns1(np.concatenate((surface_profile, np.zeros((len(surface_profile),1))), axis = 1)))
+# val = Points[ip_match[1],2] ## Surface elevations of regular grid
+# hull = ConvexHull(Points[:,0:2])
+# ioutside_hull = np.where(in_hull(surface_profile,  hull.points[hull.vertices]) == 0)[0]
+# val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
+# surface_profile = np.concatenate((surface_profile, val.reshape(-1,1)), axis = 1)
+# if os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == False:
+# 	np.savez_compressed(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project, surface_profile = surface_profile)
+	
+# ## Check if stations are beneath surface
+# tol_elev_val = 150.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
+# tree = cKDTree(ftrns1(surface_profile))
+# unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
+# dist_near = tree.query(ftrns1(locs))[0]
+# dist_perturb = tree.query(unit_out)[0]
+# iabove_surface = np.where(dist_perturb > dist_near)[0]
+# if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - surface_profile[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
 
