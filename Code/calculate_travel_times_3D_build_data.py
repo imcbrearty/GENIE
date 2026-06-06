@@ -36,6 +36,9 @@ if len(argvs) == 1:
 
 def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores=10):
 
+
+    print(xx.shape); print(x11.shape); print(x12.shape); print(x13.shape)
+
     # -------------------------------------------------------------
     # VARIANT A: OPTIMIZED LINUX SHAPE (Reads grids via scope closure)
     # -------------------------------------------------------------
@@ -524,6 +527,14 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2):
 	tp_times = interp_p(query_points)
 	ts_times = interp_s(query_points)
 
+	# Inside compute_travel_times_taup_optimized, right before "return tp_times, ts_times":
+	# Find the source point by coordinate matching in LLA or Cartesian
+	# and force it analytically to 0.0 to prevent interpolation bleeding.
+	station_idx = np.argmin(distances_deg + np.abs(target_depths_km - source_depth_km))
+	if distances_deg[station_idx] < 1e-4:
+		tp_times[station_idx] = 0.0
+		ts_times[station_idx] = 0.0
+
 	return tp_times, ts_times
 
 def create_custom_taup_model(depths, vp, vs, model_name="custom_1d"):
@@ -643,7 +654,7 @@ def initilize_velocity_model(x, vp, vs, xx, dx_res, vel_type = 1):
 
 		iarg = np.argsort(x)
 
-		dx_depth = dx_res # config.get('dx_depth', dx)
+		dx_depth = dx_res[2] # config.get('dx_depth', dx)
 		depths_fine = np.arange(x.min(), x.max() + dx_depth/10.0, dx_depth/10.0)
 		vp_fine = np.interp(depths_fine, x[iarg], vp[iarg])
 		vs_fine = np.interp(depths_fine, x[iarg], vs[iarg])
@@ -767,7 +778,7 @@ for sta_ind in ind_use:
 		cpu_point_budget = n_optimal_points1
 	)
 	print('Optimized dx settings:', optim)
-	print('Domain: %0.4f, %0.4f, %0.4f'%(regional_span_x1, regional_span_x2, regional_span_x3))
+	# print('Domain: %0.4f, %0.4f, %0.4f'%(regional_span_x1, regional_span_x2, regional_span_x3))
 
 	data = {}
 	data['res'] = optim
@@ -807,8 +818,7 @@ for sta_ind in ind_use:
 		# 2. Calculate the true physical dimensions of the regional domain in meters
 		regional_span_x1 = float(np.abs(corners_xyz[1, 0] - corners_xyz[0, 0])) # True East-West span
 		regional_span_x2 = float(np.abs(corners_xyz[1, 1] - corners_xyz[0, 1])) # True North-South span
-		regional_span_x3 = float(np.abs(corners_xyz[1, 2] - corners_xyz[0, 2])) # True Vertical span
-
+		regional_span_x3 = float(np.abs(corners_xyz[1, 2] - corners_xyz[0, 2])) # True Vertical span		
 
 		# 3. Scale down BOTH horizontal and vertical spans for local fine tiers
 		if inc_res == 0:
@@ -839,10 +849,53 @@ for sta_ind in ind_use:
 				span_x3 = np.minimum(4.0 * opt_R_max2, regional_span_x3)
 
 
+		# # 4. Derive grid counts ensuring dx == dy == dz (Perfect cubes)
+		# n1_target = int(np.ceil(span_x1 / dx_res)) + 8
+		# n2_target = int(np.ceil(span_x2 / dx_res)) + 8
+		# n3_target = int(np.ceil(span_x3 / dx_res)) + 8
+
+		# # 5. Force odd dimensions so the station source lands perfectly on a node center
+		# n1 = n1_target + 1 if n1_target % 2 == 0 else n1_target
+		# n2 = n2_target + 1 if n2_target % 2 == 0 else n2_target
+		# n3 = n3_target + 1 if n3_target % 2 == 0 else n3_target
+
+
 		# 4. Derive grid counts ensuring dx == dy == dz (Perfect cubes)
 		n1_target = int(np.ceil(span_x1 / dx_res)) + 8
 		n2_target = int(np.ceil(span_x2 / dx_res)) + 8
-		n3_target = int(np.ceil(span_x3 / dx_res)) + 8
+		
+		# # --- ASYMMETRIC OVERRIDE FOR TIER 3 ---
+		# use_asymmetric_depths = True
+		# if (inc_res == (len(optim) - 1))*(use_asymmetric_depths == True):  # Assuming Tier 3 is index 2
+		# 	# Cap the vertical step size to a much finer value (e.g., max 2000 meters)
+		# 	dz_res = min(2000.0, dx_res)
+		# 	n3_target = int(np.ceil(span_x3 / dz_res)) + 8
+		# else:
+		# 	dz_res = dx_res
+		# 	n3_target = int(np.ceil(span_x3 / dx_res)) + 8
+
+		use_asymmetric_depths = True
+		if (inc_res == (len(optim) - 1)) and use_asymmetric_depths:
+			# Define your structural limits dynamically:
+			# 1. Guarantee a minimum number of vertical nodes (e.g., at least 60 layers)
+			min_vertical_layers = 60 
+			dz_from_layers = span_x3 / min_vertical_layers
+			
+			# 2. Prevent the cell aspect ratio (dx/dz) from exceeding a limit (e.g., max 4:1)
+			max_aspect_ratio = 4.0
+			dz_from_aspect = dx_res / max_aspect_ratio
+			
+			# Pick the finer (smaller) dz of the two constraints, but never make it coarser than dx_res
+			dz_res = min(dz_from_layers, dz_from_aspect, dx_res)
+			
+			# Enforce a sanity floor so dz doesn't become micro-scale (e.g., never sharper than Tier 2's dx)
+			if inc_res > 0:
+				dz_res = max(dz_res, optim[inc_res - 1]) 
+				
+			n3_target = int(np.ceil(span_x3 / dz_res)) + 8
+		else:
+			dz_res = dx_res
+			n3_target = int(np.ceil(span_x3 / dx_res)) + 8
 
 		# 5. Force odd dimensions so the station source lands perfectly on a node center
 		n1 = n1_target + 1 if n1_target % 2 == 0 else n1_target
@@ -853,7 +906,7 @@ for sta_ind in ind_use:
 		# --- UNIFIED MESH GRID GENERATION ---
 		x1 = np.linspace(0, n1 - 1, n1) * dx_res
 		x2 = np.linspace(0, n2 - 1, n2) * dx_res
-		x3 = np.linspace(0, n3 - 1, n3) * dx_res
+		x3 = np.linspace(0, n3 - 1, n3) * dz_res
 
 		if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
 			x1 = (x1 - x1.mean()) + loc_proj[0,0]
@@ -880,6 +933,9 @@ for sta_ind in ind_use:
 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis=1)
 		X = ftrns2(xx)
 
+		print('Domain: %0.4f, %0.4f, %0.4f'%(dx_res*len(x1), dx_res*len(x2), dz_res*len(x3)))
+
+
 		idx_x1_src = np.argmin(np.abs(x1 - loc_proj[0,0]))
 		idx_x2_src = np.argmin(np.abs(x2 - loc_proj[0,1]))
 		
@@ -893,7 +949,7 @@ for sta_ind in ind_use:
 		src_index1 = np.argmin(np.linalg.norm(xx - loc_proj, axis=1))
 		assert(src_index == src_index1)
 
-		Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, dx_res, vel_type=vel_model_type)
+		Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, [dx_res, dx_res, dz_res], vel_type=vel_model_type)
 
 		# =====================================================================
 		# EXECUTION BACKEND BRANCH
@@ -903,7 +959,7 @@ for sta_ind in ind_use:
 			tp_flattened, ts_flattened = compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2)
 		else:
 			# Run parallel Eikonal solver explicitly with matrix grids
-			tp_grid, ts_grid = compute_travel_times_parallel(xx, loc_proj, Vp, Vs, dx_res, x11, x12, x13, num_cores=num_cores)
+			tp_grid, ts_grid = compute_travel_times_parallel(xx, loc_proj, Vp, Vs, [dx_res, dx_res, dz_res], x11, x12, x13, num_cores=num_cores)
 			tp_flattened = tp_grid.reshape(-1)
 			ts_flattened = ts_grid.reshape(-1)
 
