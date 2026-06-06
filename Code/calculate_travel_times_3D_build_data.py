@@ -665,7 +665,7 @@ for sta_ind in ind_use:
     data['res'] = optim
     data['loc'] = locs_concat[sta_ind].reshape(1,-1)
     data['loc_proj'] = loc_proj
-    data['engine'] = engine
+    data['engine'] = engine_type
     
 
     for inc_res, dx_res in enumerate(optim):
