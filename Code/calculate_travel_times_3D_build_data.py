@@ -314,6 +314,8 @@ for sta_ind in ind_use:
 
 	for inc_res, dx_res in enumerate(optim):
 
+		if inc_res == (len(optim) - 1):
+			dx_res = dx_res*1.25
 
 		## Boundary of domain, in Cartesian coordinates
 		elev = locs[:,2].max() + 1000.0
@@ -411,7 +413,7 @@ for sta_ind in ind_use:
 		results = compute_travel_times_parallel(xx, loc_proj, Vp, Vs, dx_v, x11, x12, x13, num_cores = num_cores)
 		assert(np.allclose(results[0].min(), 0.0))
 		assert(np.allclose(results[1].min(), 0.0))
-		
+
 
 		sample_points = True
 		if sample_points == True:
@@ -442,14 +444,14 @@ for sta_ind in ind_use:
 			
 			isample = np.random.permutation(np.concatenate((isample, isample1, isample2, isample3), axis = 0))
 
-			use_within_region = False
+			use_within_region = True
 			if use_within_region == True:
 				ikeep = np.where((X[isample][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample][:,1] < (lon_range_extend[1] - deg_pad)))[0]
 				isample = isample[ikeep]
 				ikeep1 = np.where((X[isample_vald][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample_vald][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample_vald][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample_vald][:,1] < (lon_range_extend[1] - deg_pad)))[0]
 				isample_vald = isample_vald[ikeep1]
 
-			
+
 			Tp_sample = results[0][isample] # np.concatenate((results[0][isample], results[0][isample1], results[0][isample2], results[0][isample3]), axis = 0)
 			Ts_sample = results[1][isample] # np.concatenate((results[1][isample], results[1][isample1], results[1][isample2], results[1][isample3]), axis = 0)
 			Vp_sample = Vp[isample] # np.concatenate((Vp[isample], Vp[isample1], Vp[isample2], Vp[isample3]), axis = 0)
