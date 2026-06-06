@@ -8,6 +8,8 @@ from joblib import Parallel, delayed
 import multiprocessing
 import skfmm
 from scipy.interpolate import RegularGridInterpolator
+from obspy.taup import TauPyModel
+from obspy.taup.taup_create import build_taup_model
 from numpy import interp
 import shutil
 import pathlib
@@ -49,10 +51,17 @@ def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_core
         v = np.copy(h).reshape(x11.shape)
         v1 = np.copy(h1).reshape(x11.shape)
 
+        # fmm_dx = [
+        #     float(np.abs(x12[1, 0, 0] - x12[0, 0, 0])),
+        #     float(np.abs(x11[0, 1, 0] - x11[0, 0, 0])),
+        #     float(np.abs(x13[0, 0, 1] - x13[0, 0, 0]))
+        # ]
+
+		# FIXED: Extract spacings directly from their corresponding arrays
         fmm_dx = [
-            float(np.abs(x12[1, 0, 0] - x12[0, 0, 0])),
-            float(np.abs(x11[0, 1, 0] - x11[0, 0, 0])),
-            float(np.abs(x13[0, 0, 1] - x13[0, 0, 0]))
+            float(np.abs(x11[1, 0, 0] - x11[0, 0, 0])), # True dx (changes along axis 0)
+            float(np.abs(x12[0, 1, 0] - x12[0, 0, 0])), # True dy (changes along axis 1)
+            float(np.abs(x13[0, 0, 1] - x13[0, 0, 0]))  # True dz (changes along axis 2)
         ]
 
         t = skfmm.travel_time(phi, v, dx=fmm_dx)
@@ -74,10 +83,17 @@ def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_core
         v = np.copy(h).reshape(x11_local.shape)
         v1 = np.copy(h1).reshape(x11_local.shape)
 
+        # fmm_dx = [
+        #     float(np.abs(x12_local[1, 0, 0] - x12_local[0, 0, 0])),
+        #     float(np.abs(x11_local[0, 1, 0] - x11_local[0, 0, 0])),
+        #     float(np.abs(x13_local[0, 0, 1] - x13_local[0, 0, 0]))
+        # ]
+
+        # FIXED: Extract spacings directly from their corresponding arrays
         fmm_dx = [
-            float(np.abs(x12_local[1, 0, 0] - x12_local[0, 0, 0])),
-            float(np.abs(x11_local[0, 1, 0] - x11_local[0, 0, 0])),
-            float(np.abs(x13_local[0, 0, 1] - x13_local[0, 0, 0]))
+            float(np.abs(x11[1, 0, 0] - x11[0, 0, 0])), # True dx (changes along axis 0)
+            float(np.abs(x12[0, 1, 0] - x12[0, 0, 0])), # True dy (changes along axis 1)
+            float(np.abs(x13[0, 0, 1] - x13[0, 0, 0]))  # True dz (changes along axis 2)
         ]
 
         t = skfmm.travel_time(phi, v, dx=fmm_dx)
@@ -281,11 +297,266 @@ def estimate_safe_cores(cpu_point_budget, safety_factor=0.8):
     
     return optimal_cores
 
+
+# def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2):
+#     """
+#     Computes travel times using ObsPy TauP by mapping a dense 3D point cloud
+#     to a temporary 2D distance-depth lookup table. 
+    
+#     Grid step sizes are dynamically estimated based on the geometric ranges 
+#     to guarantee numerical precision equivalent to the 3D grid layout.
+#     """
+#     num_points = xx.shape[0]
+    
+#     # 1. Map local Cartesian inputs to true geographic coordinates (LLA)
+#     # X_lla: [Lat, Lon, Elevation]
+#     X_lla = ftrns2(xx)
+#     station_lla = ftrns2(loc_proj)[0]
+
+#     # Convert elevations/depths to true positive depths in kilometers
+#     # (TauP treats depths as positive downward below sea level/ellipsoid)
+#     source_depth_km = np.abs(station_lla[2]) / 1000.0
+#     target_depths_km = np.abs(X_lla[:, 2]) / 1000.0
+
+#     # 2. Vectorized True WGS84 Great-Circle Distance Calculation (in Degrees)
+#     lat1 = np.radians(station_lla[0])
+#     lon1 = np.radians(station_lla[1])
+#     lat2 = np.radians(X_lla[:, 0])
+#     lon2 = np.radians(X_lla[:, 1])
+
+#     dlon = lon2 - lon1
+#     cos_clat = np.sin(lat1) * np.sin(lat2) + np.cos(lat1) * np.cos(lat2) * np.cos(dlon)
+#     cos_clat = np.clip(cos_clat, -1.0, 1.0) # Numerical safety clip
+#     distances_deg = np.degrees(np.arccos(cos_clat))
+
+#     # 3. Dynamic Step Size Estimation based on Range Proportions
+#     min_deg, max_deg = distances_deg.min(), distances_deg.max()
+#     min_dep, max_dep = target_depths_km.min(), target_depths_km.max()
+    
+#     deg_range = max_deg - min_deg
+#     dep_range = max_dep - min_dep
+
+#     # Aim for a dense 200x200 lookup matrix over the target tier space.
+#     # This maintains ultra-fine sub-grid resolution while completing the TauP loop instantly.
+#     dist_step_deg = max(1e-4, deg_range / 200.0) if deg_range > 0 else 0.01
+#     depth_step_km = max(1e-3, dep_range / 200.0) if dep_range > 0 else 0.5
+
+#     # 4. Generate Bounded 1D Coordinate Arrays
+#     # Padding by a few extra steps prevents out-of-bounds edge interpolation errors
+#     grid_deg = np.arange(max(0.0, min_deg - 2*dist_step_deg), max_deg + 2*dist_step_deg, dist_step_deg)
+#     grid_dep = np.arange(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, depth_step_km)
+
+#     # 5. Initialize Lookup Tables
+#     lookup_tp = np.nan * np.zeros((len(grid_deg), len(grid_dep)))
+#     lookup_ts = np.nan * np.zeros((len(grid_deg), len(grid_dep)))
+
+#     # 6. Populate 2D Lookup Grid via TauP Ray-Tracing
+#     # for i, deg in enumerate(grid_deg):
+#     #     for j, dep in enumerate(grid_dep):
+#     #         try:
+#     #             # Calculate P arrivals
+#     #             arrivals_p = taup_model.get_travel_times(
+#     #                 source_depth_in_km=source_depth_km,
+#     #                 distance_in_degree=deg,
+#     #                 phase_list=["p", "P"],
+#     #                 receiver_depth_in_km=dep
+#     #             )
+#     #             if arrivals_p:
+#     #                 lookup_tp[i, j] = arrivals_p[0].time
+
+#     #             # Calculate S arrivals
+#     #             arrivals_s = taup_model.get_travel_times(
+#     #                 source_depth_in_km=source_depth_km,
+#     #                 distance_in_degree=deg,
+#     #                 phase_list=["s", "S"],
+#     #                 receiver_depth_in_km=dep
+#     #             )
+#     #             if arrivals_s:
+#     #                 lookup_ts[i, j] = arrivals_s[0].time
+#     #         except Exception:
+#     #             continue
+
+#     for i, deg in enumerate(grid_deg):
+#         try:
+#             # 1. Pass the ENTIRE depth array to TauP at once
+#             arrivals = taup_model.get_travel_times(
+#                 source_depth_in_km=source_depth_km,
+#                 distance_in_degree=deg,
+#                 phase_list=["p", "P", "s", "S"], # Query both simultaneously
+#                 receiver_depth_in_km=grid_dep     # <--- Vectorized array pass!
+#             )
+            
+#             # 2. Parse the bulk arrivals and map them directly to their depth index
+#             for arrival in arrivals:
+#                 # Determine which index in grid_dep this arrival belongs to
+#                 # (TauP rounds receiver depth slightly, so find the closest match)
+#                 j = np.argmin(np.abs(grid_dep - arrival.receiver_depth))
+                
+#                 phase = arrival.name.upper()
+#                 if phase in ["P", "P"]:
+#                     # Keep the earliest arriving P wave for this depth
+#                     if np.isnan(lookup_tp[i, j]) or arrival.time < lookup_tp[i, j]:
+#                         lookup_tp[i, j] = arrival.time
+#                 elif phase in ["S", "S"]:
+#                     # Keep the earliest arriving S wave for this depth
+#                     if np.isnan(lookup_ts[i, j]) or arrival.time < lookup_ts[i, j]:
+#                         lookup_ts[i, j] = arrival.time
+                        
+#         except Exception:
+#             continue
+
+#     # 7. Clean NaN values (shadow zones/core boundaries) using a nearest valid fill
+#     # We use a simple fallback interpolation to keep the RegularGridInterpolator stable
+#     if np.any(np.isnan(lookup_tp)):
+#         mask = np.isnan(lookup_tp)
+#         lookup_tp[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), lookup_tp[~mask])
+        
+#     if np.any(np.isnan(lookup_ts)):
+#         mask = np.isnan(lookup_ts)
+#         lookup_ts[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), lookup_ts[~mask])
+
+#     # 8. High-Speed 2D Matrix Interpolation back to the 3D Cloud
+#     interp_p = RegularGridInterpolator((grid_deg, grid_dep), lookup_tp, method='linear', bounds_error=False, fill_value=None)
+#     interp_s = RegularGridInterpolator((grid_deg, grid_dep), lookup_ts, method='linear', bounds_error=False, fill_value=None)
+
+#     query_points = np.column_stack((distances_deg, target_depths_km))
+    
+#     tp_times = interp_p(query_points)
+#     ts_times = interp_s(query_points)
+
+#     return tp_times, ts_times
+
+def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2):
+	"""
+	Computes travel times using ObsPy TauP by mapping a structural 3D point mesh
+	to a temporary 2D distance-depth lookup table, then maps results back to xx.
+	"""
+	num_points = xx.shape[0]
+	
+	# 1. Map local Cartesian inputs to true geographic coordinates (LLA)
+	X_lla = ftrns2(xx)
+	station_lla = ftrns2(loc_proj)[0]
+
+	source_depth_km = np.abs(station_lla[2]) / 1000.0
+	target_depths_km = np.abs(X_lla[:, 2]) / 1000.0
+
+	# 2. Vectorized True WGS84 Great-Circle Distance Calculation (in Degrees)
+	lat1 = np.radians(station_lla[0])
+	lon1 = np.radians(station_lla[1])
+	lat2 = np.radians(X_lla[:, 0])
+	lon2 = np.radians(X_lla[:, 1])
+
+	dlon = lon2 - lon1
+	cos_clat = np.sin(lat1) * np.sin(lat2) + np.cos(lat1) * np.cos(lat2) * np.cos(dlon)
+	cos_clat = np.clip(cos_clat, -1.0, 1.0) 
+	distances_deg = np.degrees(np.arccos(cos_clat))
+
+	# 3. Dynamic Step Size Estimation based on Range Proportions
+	max_deg = distances_deg.max()
+	min_dep, max_dep = target_depths_km.min(), target_depths_km.max()
+	dep_range = max_dep - min_dep
+
+	dist_step_deg = max(1e-4, max_deg / 200.0) if max_deg > 0 else 0.01
+	depth_step_km = max(1e-3, dep_range / 200.0) if dep_range > 0 else 0.5
+
+	# Force the angular lookup grid to start exactly at 0.0 degrees
+	grid_deg = np.arange(0.0, max_deg + 2*dist_step_deg, dist_step_deg)
+	grid_dep = np.arange(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, depth_step_km)
+
+	# 5. Initialize Lookup Tables
+	lookup_tp = np.nan * np.zeros((len(grid_deg), len(grid_dep)))
+	lookup_ts = np.nan * np.zeros((len(grid_deg), len(grid_dep)))
+
+	# 6. Populate 2D Lookup Grid via TauP Ray-Tracing
+	for i, deg in enumerate(grid_deg):
+		# Skip 0.0 degrees distance column to prevent TauP ray-tracer singularities
+		if np.isclose(deg, 0.0, atol=1e-7):
+			continue
+		try:
+			arrivals = taup_model.get_travel_times(
+				source_depth_in_km=source_depth_km,
+				distance_in_degree=deg,
+				phase_list=["p", "P", "s", "S"], 
+				receiver_depth_in_km=grid_dep     
+			)
+			
+			for arrival in arrivals:
+				j = np.argmin(np.abs(grid_dep - arrival.receiver_depth))
+				phase = arrival.name.upper()
+				if phase in ["P", "P"]:
+					if np.isnan(lookup_tp[i, j]) or arrival.time < lookup_tp[i, j]:
+						lookup_tp[i, j] = arrival.time
+				elif phase in ["S", "S"]:
+					if np.isnan(lookup_ts[i, j]) or arrival.time < lookup_ts[i, j]:
+						lookup_ts[i, j] = arrival.time
+						
+		except Exception:
+			continue
+
+	# === EXPLICIT SOURCE POSITION ENFORCEMENT ===
+	# Manually handle the 0.0-degree distance column using basic crustal velocities
+	# to avoid numerical boundary issues during final interpolation.
+	idx_deg_zero = 0 
+	for j, dep in enumerate(grid_dep):
+		if np.isclose(dep, source_depth_km, atol=depth_step_km * 0.5):
+			lookup_tp[idx_deg_zero, j] = 0.0
+			lookup_ts[idx_deg_zero, j] = 0.0
+		else:
+			distance_km = np.abs(dep - source_depth_km)
+			lookup_tp[idx_deg_zero, j] = distance_km / 5.5  # Baseline regional Vp
+			lookup_ts[idx_deg_zero, j] = distance_km / 3.2  # Baseline regional Vs
+
+	# 7. Clean up remaining NaN gaps (e.g. core shadow zones) safely
+	if np.any(np.isnan(lookup_tp)):
+		mask = np.isnan(lookup_tp)
+		lookup_tp[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), lookup_tp[~mask])
+		
+	if np.any(np.isnan(lookup_ts)):
+		mask = np.isnan(lookup_ts)
+		lookup_ts[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), lookup_ts[~mask])
+
+	# 8. High-Speed 2D Matrix Interpolation back to the structural 3D Mesh
+	interp_p = RegularGridInterpolator((grid_deg, grid_dep), lookup_tp, method='linear', bounds_error=False, fill_value=None)
+	interp_s = RegularGridInterpolator((grid_deg, grid_dep), lookup_ts, method='linear', bounds_error=False, fill_value=None)
+
+	query_points = np.column_stack((distances_deg, target_depths_km))
+	
+	tp_times = interp_p(query_points)
+	ts_times = interp_s(query_points)
+
+	return tp_times, ts_times
+
+def create_custom_taup_model(depths, vp, vs, model_name="custom_1d"):
+    """
+    Creates and compiles a custom 1D velocity model for ObsPy TauP.
+    """
+    tvel_filename = f"{model_name}.tvel"
+    
+    # Write the .tvel file format: depth, Vp, Vs, density (optional/dummy)
+    with open(tvel_filename, "w") as f:
+        f.write(f"# Custom 1D Model: {model_name}\n")
+        for d, p, s in zip(depths, vp, vs):
+            # TauP expects depths in km and velocities in km/s
+            # If your input arrays are in meters and m/s, divide by 1000.0
+            f.write(f"{d/1000.0:7.3f} {p/1000.0:7.3f} {s/1000.0:7.3f} 2.700\n")
+            
+    # Compile the .tvel file into a .npz binary file that TauP can parse
+    build_taup_model(tvel_filename)
+
+    if os.path.exists(tvel_filename):
+    	os.remove(tvel_filename)
+    
+    # Load and return the model instance
+    return TauPyModel(model=model_name)
+
+
 # Load configuration from YAML
 config = load_config('config.yaml')
 name_of_project = config['name_of_project']
 # num_cores = config['num_cores']
 
+# --- INITIALIZE THE ENGINE IN YOUR CONFIG LOADING SECTION ---
+engine_type = config.get('engine_type', 'eikonal') # 'eikonal' or 'taup'
 
 ## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
 path_to_file = str(pathlib.Path().absolute())
@@ -344,11 +615,19 @@ hardware_safe_cores = estimate_safe_cores(cpu_point_budget, safety_factor=0.8)
 num_cores = min(config['num_cores'], hardware_safe_cores)
 
 ## Load velocity model
+if engine_type == 'taup':
+	print('Using 1D velocity model and TauP' if vel_model_type == 1 else 'Using 1D velocity model and TauP (overwritting vel_model_type)'%vel_model_type)
+	vel_model_type = 1
+
 if vel_model_type == 1:
 	vp = np.array(config['velocity_model']['Vp'])
 	vs = np.array(config['velocity_model']['Vs'])
 	x_vel = np.array(config['velocity_model']['Depths'])
 	vs_min = np.quantile(vs, 0.2)
+
+	if engine_type == 'taup':
+	    # Pre-compile your 1D velocity model once before entering the loop
+	    taup_model = create_custom_taup_model(x_vel, vp, vs, model_name= '1D_Velocity_Models_Regional' + seperator + 'regional_%d_1d'%int(argvs[1]))
 
 else:
 
@@ -570,121 +849,145 @@ for sta_ind in ind_use:
 		n2 = n2_target + 1 if n2_target % 2 == 0 else n2_target
 		n3 = n3_target + 1 if n3_target % 2 == 0 else n3_target
 
-		# moi
 
-		x1 = np.linspace(0, n1 - 1, n1)*dx_res
-		x2 = np.linspace(0, n2 - 1, n2)*dx_res
-		x3 = np.linspace(0, n3 - 1, n3)*dx_res
+		# --- UNIFIED MESH GRID GENERATION ---
+		x1 = np.linspace(0, n1 - 1, n1) * dx_res
+		x2 = np.linspace(0, n2 - 1, n2) * dx_res
+		x3 = np.linspace(0, n3 - 1, n3) * dx_res
 
-		# Safety diagnostic printout
-		print(f"Grid Layout Settings [Tier {inc_res+1}]: Shape = ({n2}, {n1}, {n3}) | Spacing = {dx_res:.1f}m")
-		# === END GEOGRAPHICALLY AWARE NODE ESTIMATION ===
-
-
-		# # === ADJUSTED CENTER SHIFT LOGIC ===
-		# if inc_res < (len(optim) - 1):
-		# 	# Tiers 1 & 2: Local sub-grids are centered directly on the station
-		# 	x1 = (x1 - x1.mean()) + loc_proj[0,0]
-		# 	x2 = (x2 - x2.mean()) + loc_proj[0,1]
-		# else:
-		# 	# Tier 3: Start by centering on the geographical domain center
-		# 	domain_center_xyz = corners_xyz.mean(axis=0)
-		# 	x1 = (x1 - x1.mean()) + domain_center_xyz[0]
-		# 	x2 = (x2 - x2.mean()) + domain_center_xyz[1]
-
-		# 	# --- PERFECT STATION ALIGNMENT SHIFT (TIER 3) ---
-		# 	# Find how far the station is from the nearest unshifted grid lines
-		# 	snap_idx_x1 = np.argmin(np.abs(x1 - loc_proj[0,0]))
-		# 	snap_idx_x2 = np.argmin(np.abs(x2 - loc_proj[0,1]))
-			
-		# 	# Calculate the sub-node tracking error (< 1.0 grid node)
-		# 	shift_x1 = loc_proj[0,0] - x1[snap_idx_x1]
-		# 	shift_x2 = loc_proj[0,1] - x2[snap_idx_x2]
-			
-		# 	# Shift the entire grid space so a node lands EXACTLY on the station
-		# 	x1 = x1 + shift_x1
-		# 	x2 = x2 + shift_x2
-		# 	# ------------------------------------------------
-
-		# === ADJUSTED CENTER SHIFT LOGIC ===
-		# Only use full regional domain centering if it's a real station using the full footprint
 		if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
-			# Tiers 1 & 2 (and virtual Tier 3): Local sub-grids center directly on the station source
 			x1 = (x1 - x1.mean()) + loc_proj[0,0]
 			x2 = (x2 - x2.mean()) + loc_proj[0,1]
 		else:
-			# Real Station Tier 3: Centered on full geographical domain center
 			domain_center_xyz = corners_xyz.mean(axis=0)
 			x1 = (x1 - x1.mean()) + domain_center_xyz[0]
 			x2 = (x2 - x2.mean()) + domain_center_xyz[1]
 
-			# --- PERFECT STATION ALIGNMENT SHIFT (TIER 3) ---
 			snap_idx_x1 = np.argmin(np.abs(x1 - loc_proj[0,0]))
 			snap_idx_x2 = np.argmin(np.abs(x2 - loc_proj[0,1]))
 			
-			shift_x1 = loc_proj[0,0] - x1[snap_idx_x1]
-			shift_x2 = loc_proj[0,1] - x2[snap_idx_x2]
-			
-			x1 = x1 + shift_x1
-			x2 = x2 + shift_x2
-			
+			x1 = x1 + (loc_proj[0,0] - x1[snap_idx_x1])
+			x2 = x2 + (loc_proj[0,1] - x2[snap_idx_x2])
 
-		# Vertical axis processing (Applies safely across all tiers)
 		x3 = (x3 - x3.mean()) + loc_proj[0,2]
-		x3 = x3 - x3.max() + zz[:,2].max()
+		x3 = x3 - x3.max() + elev
 		
-		# Align the nearest discrete vertical coordinate with the station's true depth profile
 		inearest = np.argmin(np.abs(x3 - loc_proj[0,2]))
-		diff_val = x3[inearest] - loc_proj[0,2]
-		x3 = x3 - diff_val
+		x3 = x3 - (x3[inearest] - loc_proj[0,2])
 
-		# Build your meshgrid geometry
-		x11, x12, x13 = np.meshgrid(x1, x2, x3)
-		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-		dx_v = np.array([np.diff(x1)[0], np.diff(x2)[0], np.diff(x3)[0]])
-		
-		assert(np.allclose(dx_v, dx_v.mean(), atol = 1e-3))
-		
-		# Dynamic Source Index Search
+		# Matrix indexing assigned properly for asymmetric cases
+		x11, x12, x13 = np.meshgrid(x1, x2, x3, indexing='ij')
+		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis=1)
+		X = ftrns2(xx)
+
 		idx_x1_src = np.argmin(np.abs(x1 - loc_proj[0,0]))
 		idx_x2_src = np.argmin(np.abs(x2 - loc_proj[0,1]))
 		
-		# Strict verification: The tracking error must now be exactly 0.0
-		assert(np.isclose(x1[idx_x1_src], loc_proj[0,0], atol = 1e-3))
-		assert(np.isclose(x2[idx_x2_src], loc_proj[0,1], atol = 1e-3))
 		assert(np.allclose(np.array([x1[idx_x1_src], x2[idx_x2_src], x3[inearest]]), loc_proj[0,:], atol = 1e-3)) 
-
-		# Compute flat row-major index matching meshgrid shape (n2, n1, n3)
 		src_index = (idx_x2_src * n1 * n3) + (idx_x1_src * n3) + inearest
-		assert(np.allclose(xx[src_index], loc_proj[0,:], atol = 1e-3))
-		# === END ADJUSTED CENTER SHIFT LOGIC ===
 
-		print('dx_v')
-		print(dx_v)
+		Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, dx_res, vel_type=vel_model_type)
 
-		# moi
-		Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, dx_res, vel_type = vel_model_type)
-		X = ftrns2(xx)
+		# =====================================================================
+		# EXECUTION BACKEND BRANCH
+		# =====================================================================
+		if engine_type == 'taup':
+			# Resolve times using the 1D model interpolator mapped to the 3D grid
+			tp_flattened, ts_flattened = compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2)
+		else:
+			# Run parallel Eikonal solver explicitly with matrix grids
+			tp_grid, ts_grid = compute_travel_times_parallel(xx, loc_proj, Vp, Vs, dx_res, x11, x12, x13, num_cores=num_cores)
+			tp_flattened = tp_grid.reshape(-1)
+			ts_flattened = ts_grid.reshape(-1)
+
+		# Pack answers into unified format for downstream steps
+		results = [tp_flattened[:, None], ts_flattened[:, None]]
+		assert(np.isclose(results[0][src_index], 0.0, atol=1e-2))
+		assert(np.isclose(results[1][src_index], 0.0, atol=1e-2))
 
 
-		## Apply topography clipping to velocity model
-		if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.npz') == True):
-
-			## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
-			inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
-			unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1.0*np.ones((len(inear_surface),1))), axis = 1))
-			dist_near = tree.query(xx[inear_surface])[0]
-			dist_perturb = tree.query(unit_out)[0]
-			iabove_surface = np.where(dist_perturb > dist_near)[0]
+		# # =====================================================================
+		# # EXECUTION BACKEND BRANCH
+		# # =====================================================================
+		# if engine_type == 'taup':
+		# 	total_points = n1 * n2 * n3
 			
-			## Set points above surface to air wave speeds (or find a way to mask)
-			Vp[inear_surface[iabove_surface]] = 343.0 ## Assumed acoustic p wave speed
-			Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
+		# 	x1_samples = np.random.uniform(-span_x1/2.0, span_x1/2.0, size=total_points) + loc_proj[0,0]
+		# 	x2_samples = np.random.uniform(-span_x2/2.0, span_x2/2.0, size=total_points) + loc_proj[0,1]
+		# 	x3_samples = np.random.uniform(elev - span_x3, elev, size=total_points)
+			
+		# 	xx = np.column_stack((x1_samples, x2_samples, x3_samples))
+		# 	X = ftrns2(xx)
+
+		# 	Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, dx_res, vel_type=vel_model_type)
+
+		# 	# Resolve times directly using the 1D model interpolator
+		# 	tp_flattened, ts_flattened = compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2)
+			
+		# 	# Identify the point closest to the source node to track boundaries safely
+		# 	src_index = np.argmin(np.linalg.norm(xx - loc_proj, axis=1))
+
+		# else:
+		# 	# --- EIKONAL MESH GRID STRATEGY ---
+		# 	x1 = np.linspace(0, n1 - 1, n1)*dx_res
+		# 	x2 = np.linspace(0, n2 - 1, n2)*dx_res
+		# 	x3 = np.linspace(0, n3 - 1, n3)*dx_res
+
+		# 	if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
+		# 		x1 = (x1 - x1.mean()) + loc_proj[0,0]
+		# 		x2 = (x2 - x2.mean()) + loc_proj[0,1]
+		# 	else:
+		# 		domain_center_xyz = corners_xyz.mean(axis=0)
+		# 		x1 = (x1 - x1.mean()) + domain_center_xyz[0]
+		# 		x2 = (x2 - x2.mean()) + domain_center_xyz[1]
+
+		# 		snap_idx_x1 = np.argmin(np.abs(x1 - loc_proj[0,0]))
+		# 		snap_idx_x2 = np.argmin(np.abs(x2 - loc_proj[0,1]))
+				
+		# 		x1 = x1 + (loc_proj[0,0] - x1[snap_idx_x1])
+		# 		x2 = x2 + (loc_proj[0,1] - x2[snap_idx_x2])
+
+		# 	x3 = (x3 - x3.mean()) + loc_proj[0,2]
+		# 	x3 = x3 - x3.max() + elev
+			
+		# 	inearest = np.argmin(np.abs(x3 - loc_proj[0,2]))
+		# 	x3 = x3 - (x3[inearest] - loc_proj[0,2])
+
+		# 	# FIXED: Matrix indexing assigned properly for asymmetric cases
+		# 	x11, x12, x13 = np.meshgrid(x1, x2, x3, indexing='ij')
+		# 	xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis=1)
+		# 	X = ftrns2(xx)
+
+		# 	idx_x1_src = np.argmin(np.abs(x1 - loc_proj[0,0]))
+		# 	idx_x2_src = np.argmin(np.abs(x2 - loc_proj[0,1]))
+			
+		# 	assert(np.allclose(np.array([x1[idx_x1_src], x2[idx_x2_src], x3[inearest]]), loc_proj[0,:], atol = 1e-3)) 
+		# 	src_index = (idx_x2_src * n1 * n3) + (idx_x1_src * n3) + inearest
+
+		# 	Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, dx_res, vel_type=vel_model_type)
+
+		# 	## Apply topography clipping to velocity model
+		# 	if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.npz') == True):
+		# 		## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
+		# 		inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
+		# 		unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1.0*np.ones((len(inear_surface),1))), axis = 1))
+		# 		dist_near = tree.query(xx[inear_surface])[0]
+		# 		dist_perturb = tree.query(unit_out)[0]
+		# 		iabove_surface = np.where(dist_perturb > dist_near)[0]				
+		# 		## Set points above surface to air wave speeds (or find a way to mask)
+		# 		Vp[inear_surface[iabove_surface]] = 343.0 ## Assumed acoustic p wave speed
+		# 		Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
 
 
-		results = compute_travel_times_parallel(xx, loc_proj, Vp, Vs, dx_v, x11, x12, x13, num_cores = num_cores)
-		assert(np.allclose(results[0].min(), 0.0))
-		assert(np.allclose(results[1].min(), 0.0))
+		# 	# Run parallel solver explicitly with matrix grids
+		# 	tp_grid, ts_grid = compute_travel_times_parallel(xx, loc_proj, Vp, Vs, dx_res, x11, x12, x13, num_cores=num_cores)
+		# 	tp_flattened = tp_grid.reshape(-1)
+		# 	ts_flattened = ts_grid.reshape(-1)
+
+		# # FIXED: Pack answers cleanly into unified 2D structure across both execution engines
+		# results = [tp_flattened[:, None], ts_flattened[:, None]]
+		# assert(np.isclose(results[0][src_index], 0.0, atol=1e-2))
+		# assert(np.isclose(results[1][src_index], 0.0, atol=1e-2))
 
 
 		sample_points = True
@@ -860,6 +1163,122 @@ for sta_ind in ind_use:
 print("All files saved successfully!")
 print("✔ Script execution: Done")
 
+
+
+
+		# x1 = np.linspace(0, n1 - 1, n1)*dx_res
+		# x2 = np.linspace(0, n2 - 1, n2)*dx_res
+		# x3 = np.linspace(0, n3 - 1, n3)*dx_res
+
+		# # Safety diagnostic printout
+		# print(f"Grid Layout Settings [Tier {inc_res+1}]: Shape = ({n2}, {n1}, {n3}) | Spacing = {dx_res:.1f}m")
+		# # === END GEOGRAPHICALLY AWARE NODE ESTIMATION ===
+
+
+		# # # === ADJUSTED CENTER SHIFT LOGIC ===
+		# # if inc_res < (len(optim) - 1):
+		# # 	# Tiers 1 & 2: Local sub-grids are centered directly on the station
+		# # 	x1 = (x1 - x1.mean()) + loc_proj[0,0]
+		# # 	x2 = (x2 - x2.mean()) + loc_proj[0,1]
+		# # else:
+		# # 	# Tier 3: Start by centering on the geographical domain center
+		# # 	domain_center_xyz = corners_xyz.mean(axis=0)
+		# # 	x1 = (x1 - x1.mean()) + domain_center_xyz[0]
+		# # 	x2 = (x2 - x2.mean()) + domain_center_xyz[1]
+
+		# # 	# --- PERFECT STATION ALIGNMENT SHIFT (TIER 3) ---
+		# # 	# Find how far the station is from the nearest unshifted grid lines
+		# # 	snap_idx_x1 = np.argmin(np.abs(x1 - loc_proj[0,0]))
+		# # 	snap_idx_x2 = np.argmin(np.abs(x2 - loc_proj[0,1]))
+			
+		# # 	# Calculate the sub-node tracking error (< 1.0 grid node)
+		# # 	shift_x1 = loc_proj[0,0] - x1[snap_idx_x1]
+		# # 	shift_x2 = loc_proj[0,1] - x2[snap_idx_x2]
+			
+		# # 	# Shift the entire grid space so a node lands EXACTLY on the station
+		# # 	x1 = x1 + shift_x1
+		# # 	x2 = x2 + shift_x2
+		# # 	# ------------------------------------------------
+
+		# # === ADJUSTED CENTER SHIFT LOGIC ===
+		# # Only use full regional domain centering if it's a real station using the full footprint
+		# if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
+		# 	# Tiers 1 & 2 (and virtual Tier 3): Local sub-grids center directly on the station source
+		# 	x1 = (x1 - x1.mean()) + loc_proj[0,0]
+		# 	x2 = (x2 - x2.mean()) + loc_proj[0,1]
+		# else:
+		# 	# Real Station Tier 3: Centered on full geographical domain center
+		# 	domain_center_xyz = corners_xyz.mean(axis=0)
+		# 	x1 = (x1 - x1.mean()) + domain_center_xyz[0]
+		# 	x2 = (x2 - x2.mean()) + domain_center_xyz[1]
+
+		# 	# --- PERFECT STATION ALIGNMENT SHIFT (TIER 3) ---
+		# 	snap_idx_x1 = np.argmin(np.abs(x1 - loc_proj[0,0]))
+		# 	snap_idx_x2 = np.argmin(np.abs(x2 - loc_proj[0,1]))
+			
+		# 	shift_x1 = loc_proj[0,0] - x1[snap_idx_x1]
+		# 	shift_x2 = loc_proj[0,1] - x2[snap_idx_x2]
+			
+		# 	x1 = x1 + shift_x1
+		# 	x2 = x2 + shift_x2
+
+
+		# # Vertical axis processing (Applies safely across all tiers)
+		# x3 = (x3 - x3.mean()) + loc_proj[0,2]
+		# x3 = x3 - x3.max() + zz[:,2].max()
+		
+		# # Align the nearest discrete vertical coordinate with the station's true depth profile
+		# inearest = np.argmin(np.abs(x3 - loc_proj[0,2]))
+		# diff_val = x3[inearest] - loc_proj[0,2]
+		# x3 = x3 - diff_val
+
+		# # Build your meshgrid geometry
+		# x11, x12, x13 = np.meshgrid(x1, x2, x3)
+		# xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+		# dx_v = np.array([np.diff(x1)[0], np.diff(x2)[0], np.diff(x3)[0]])
+		
+		# assert(np.allclose(dx_v, dx_v.mean(), atol = 1e-3))
+		
+		# # Dynamic Source Index Search
+		# idx_x1_src = np.argmin(np.abs(x1 - loc_proj[0,0]))
+		# idx_x2_src = np.argmin(np.abs(x2 - loc_proj[0,1]))
+		
+		# # Strict verification: The tracking error must now be exactly 0.0
+		# assert(np.isclose(x1[idx_x1_src], loc_proj[0,0], atol = 1e-3))
+		# assert(np.isclose(x2[idx_x2_src], loc_proj[0,1], atol = 1e-3))
+		# assert(np.allclose(np.array([x1[idx_x1_src], x2[idx_x2_src], x3[inearest]]), loc_proj[0,:], atol = 1e-3)) 
+
+		# # Compute flat row-major index matching meshgrid shape (n2, n1, n3)
+		# src_index = (idx_x2_src * n1 * n3) + (idx_x1_src * n3) + inearest
+		# assert(np.allclose(xx[src_index], loc_proj[0,:], atol = 1e-3))
+		# # === END ADJUSTED CENTER SHIFT LOGIC ===
+
+		# print('dx_v')
+		# print(dx_v)
+
+		# # moi
+		# Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, dx_res, vel_type = vel_model_type)
+		# X = ftrns2(xx)
+
+
+		# ## Apply topography clipping to velocity model
+		# if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.npz') == True):
+
+		# 	## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
+		# 	inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
+		# 	unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1.0*np.ones((len(inear_surface),1))), axis = 1))
+		# 	dist_near = tree.query(xx[inear_surface])[0]
+		# 	dist_perturb = tree.query(unit_out)[0]
+		# 	iabove_surface = np.where(dist_perturb > dist_near)[0]
+			
+		# 	## Set points above surface to air wave speeds (or find a way to mask)
+		# 	Vp[inear_surface[iabove_surface]] = 343.0 ## Assumed acoustic p wave speed
+		# 	Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
+
+
+		# results = compute_travel_times_parallel(xx, loc_proj, Vp, Vs, dx_v, x11, x12, x13, num_cores = num_cores)
+		# assert(np.allclose(results[0].min(), 0.0))
+		# assert(np.allclose(results[1].min(), 0.0))
 
 
 # def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores = 10):
