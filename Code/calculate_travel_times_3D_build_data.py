@@ -22,6 +22,8 @@ from scipy.optimize import differential_evolution
 # from scipy.metrics import pairwise_distances as pd
 from sklearn.metrics import pairwise_distances as pd
 from process_utils import * # differential_evolution_location
+import platform
+import psutil
 import glob
 import sys
 import os
@@ -30,150 +32,259 @@ argvs = sys.argv
 if len(argvs) == 1:
 	argvs.append(0)
 
-def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores = 10):
+def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores=10):
 
-	def step_test(args):
+    # -------------------------------------------------------------
+    # VARIANT A: OPTIMIZED LINUX SHAPE (Reads grids via scope closure)
+    # -------------------------------------------------------------
+    def step_test_linux(args):
+        yval, dx_v, h, h1, ind = args
+        
+        phi_xy = (x11 - yval[0,0])**2 + (x12 - yval[0,1])**2
+        phi_v = (x13 - yval[0,2])**2
+        phi = np.sqrt(phi_xy + phi_v) # - phi.min()
+        phi = phi - phi.min()
+        assert((phi == 0).sum() == 1)
 
-		yval, dx_v, h, h1, x11, x12, x13, ind = args
-		print(yval.shape); print(x11.shape); print(x12.shape); print(x13.shape)
+        v = np.copy(h).reshape(x11.shape)
+        v1 = np.copy(h1).reshape(x11.shape)
 
-		phi_xy = (x11 - yval[0,0])**2 + (x12 - yval[0,1])**2
-		phi_v = (x13 - yval[0,2])**2
+        fmm_dx = [
+            float(np.abs(x12[1, 0, 0] - x12[0, 0, 0])),
+            float(np.abs(x11[0, 1, 0] - x11[0, 0, 0])),
+            float(np.abs(x13[0, 0, 1] - x13[0, 0, 0]))
+        ]
 
-		phi = np.sqrt(phi_xy + phi_v)
-		# phi = phi - phi.min() - np.mean(dx_v)/5.0 ## Why include np.mean(dx_v)?
-		phi = phi - phi.min() # - np.mean(dx_v)/5.0 ## Why include np.mean(dx_v)?
-		assert((phi == 0).sum() == 1)
+        t = skfmm.travel_time(phi, v, dx=fmm_dx)
+        t1 = skfmm.travel_time(phi, v1, dx=fmm_dx)
+        return t, t1, phi, ind
 
-		v = np.copy(h).reshape(x11.shape) # correct?
-		v1 = np.copy(h1).reshape(x11.shape) # correct?
+    # -------------------------------------------------------------
+    # VARIANT B: COMPATIBLE WINDOWS SHAPE (Unpacks grids explicitly)
+    # -------------------------------------------------------------
+    def step_test_windows(args):
+        yval, dx_v, h, h1, x11_local, x12_local, x13_local, ind = args
+        
+        phi_xy = (x11_local - yval[0,0])**2 + (x12_local - yval[0,1])**2
+        phi_v = (x13_local - yval[0,2])**2
+        phi = np.sqrt(phi_xy + phi_v) # - phi.min()
+        phi = phi - phi.min()
+        assert((phi == 0).sum() == 1)
 
-		# t = skfmm.travel_time(phi, v, dx = [dx_v[0], dx_v[1], dx_v[2]])
-		# t1 = skfmm.travel_time(phi, v1, dx = [dx_v[0], dx_v[1], dx_v[2]])
+        v = np.copy(h).reshape(x11_local.shape)
+        v1 = np.copy(h1).reshape(x11_local.shape)
 
-		t = skfmm.travel_time(phi, v, dx = [dx_v[1], dx_v[0], dx_v[2]])
-		t1 = skfmm.travel_time(phi, v1, dx = [dx_v[1], dx_v[0], dx_v[2]])
+        fmm_dx = [
+            float(np.abs(x12_local[1, 0, 0] - x12_local[0, 0, 0])),
+            float(np.abs(x11_local[0, 1, 0] - x11_local[0, 0, 0])),
+            float(np.abs(x13_local[0, 0, 1] - x13_local[0, 0, 0]))
+        ]
 
-		return t, t1, phi, ind
+        t = skfmm.travel_time(phi, v, dx=fmm_dx)
+        t1 = skfmm.travel_time(phi, v1, dx=fmm_dx)
+        return t, t1, phi, ind
 
-	tp_times, ts_times = np.nan*np.zeros((h.shape[0], xx_r.shape[0])), np.nan*np.zeros((h.shape[0], xx_r.shape[0]))
+    # -------------------------------------------------------------
+    # RUNTIME CHECK & EXECUTION DISPATCH
+    # -------------------------------------------------------------
+    is_windows = (platform.system().lower() == 'windows')
 
-	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [xx_r[i,:][None,:], dx_v, h, h1, x11, x12, x13, i] ) for i in range(xx_r.shape[0]))
+    tp_times = np.nan * np.zeros((h.shape[0], xx_r.shape[0]))
+    ts_times = np.nan * np.zeros((h.shape[0], xx_r.shape[0]))
 
-	for i in range(xx_r.shape[0]):
+    if is_windows:
+        # Windows needs explicit payload serialization due to its 'spawn' process behavior
+        results = Parallel(n_jobs=num_cores)(
+            delayed(step_test_windows)([xx_r[i,:][None,:], dx_v, h, h1, x11, x12, x13, i]) 
+            for i in range(xx_r.shape[0])
+        )
+    else:
+        # Linux / macOS uses optimized lightweight fork streams
+        results = Parallel(n_jobs=num_cores)(
+            delayed(step_test_linux)([xx_r[i,:][None,:], dx_v, h, h1, i]) 
+            for i in range(xx_r.shape[0])
+        )
 
-		## Make sure to write results to correct station, based on ind
-		tp_times[:,results[i][-1]] = results[i][0].reshape(-1)
-		ts_times[:,results[i][-1]] = results[i][1].reshape(-1)
+    # Reconstruct outputs identically
+    for i in range(xx_r.shape[0]):
+        tp_times[:, results[i][-1]] = results[i][0].reshape(-1)
+        ts_times[:, results[i][-1]] = results[i][1].reshape(-1)
 
-	return tp_times, ts_times
+    return tp_times, ts_times
 
 
-def grid_loss_function(x, v_min, target_error, max_regional_R, depth_profile, cpu_point_budget, C):
+def grid_loss_function(x, v_min, target_error, span_x, span_y, span_z, cpu_point_budget, C):
+    """
+    Optimizes a 3-tier multi-resolution grid architecture for Eikonal solvers.
+    
+    Parameters:
+    -----------
+    x : array-like
+        The optimization variables [dx_1, dx_2, dx_3] representing cell sizes in meters.
+    v_min : float
+        Minimum wave velocity (m/s) in the domain.
+    target_error : float
+        Acceptable tracking error threshold (e.g., 0.02 for 2%).
+    span_x, span_y, span_z : float
+        True regional domain dimensions in meters (Cartesian coordinates).
+    cpu_point_budget : int
+        Maximum allowed grid points for a SINGLE tier (e.g., np.prod(n_optimal_points)).
+    C : float
+        Geometric error constant for the Fast Marching Method (typically 0.25).
+    """
     dx_1, dx_2, dx_3 = x[0], x[1], x[2]
     
-    # 1. Enforce strict hierarchy
+    # 1. Enforce strict grid resolution hierarchy
     if dx_1 >= dx_2 or dx_2 >= dx_3:
         return 1e12 
 
-    # 2. Physics boundaries
+    # 2. Physics boundaries (Maximum accurate tracking radii based on Eikonal error scaling)
     R_max_1 = (C * (dx_2 ** 2)) / (target_error * v_min)
     R_max_2 = (C * (dx_3 ** 2)) / (target_error * v_min)
 
-    # 3. Structural distance constraints (Adjusted for massive 3900km Lat/Lon domain)
-    # Let Tier 1 go up to 5%, Tier 2 up to 35% of total domain radius
-    if R_max_1 > (0.05 * max_regional_R) or R_max_1 < (0.001 * max_regional_R):
+    # 3. Structural nested constraints 
+    if R_max_1 >= R_max_2 or R_max_1 < 500.0:
         return 1e12  
         
-    if R_max_2 > (0.35 * max_regional_R) or R_max_2 <= R_max_1:
+    if R_max_2 <= R_max_1:
         return 1e12  
 
-    if R_max_2 >= max_regional_R:
-        return 1e12
+    # --- GEOGRAPHICALLY ACCURATE RECTANGULAR BOX POINT ESTIMATION ---
+    pad_cells = 8
 
-    # --- RECTANGULAR BOX POINT ESTIMATION (MATCHING YOUR REAL GRID CODE) ---
-    # Define padding rules exactly like your code
-    pad_xy = 20
-    pad_z = 4
+    # Tier 1 Box: Bounds dynamically adapt to wavefront radius horizontally AND vertically
+    t1_span_x = min(2.0 * R_max_1, span_x)
+    t1_span_y = min(2.0 * R_max_1, span_y)
+    t1_span_z = min(2.0 * R_max_1, span_z) # Dynamic depth-cap removes the skyscraper anomaly
+    points_1 = (int(np.ceil(t1_span_x / dx_1)) + pad_cells) * \
+               (int(np.ceil(t1_span_y / dx_1)) + pad_cells) * \
+               (int(np.ceil(t1_span_z / dx_1)) + pad_cells)
 
-    # Tier 1 Box: Extends from -R_max_1 to +R_max_1 relative to source
-    t1_x_points = ((2 * R_max_1) / dx_1) + (2 * pad_xy)
-    t1_y_points = ((2 * R_max_1) / dx_1) + (2 * pad_xy)
-    t1_z_points = (depth_profile / dx_1) + (2 * pad_z)
-    points_1 = max(1, t1_x_points) * max(1, t1_y_points) * max(1, t1_z_points)
+    # Tier 2 Box: Mid-range sub-grid
+    t2_span_x = min(2.0 * R_max_2, span_x)
+    t2_span_y = min(2.0 * R_max_2, span_y)
+    t2_span_z = min(2.0 * R_max_2, span_z) # Dynamic depth-cap
+    points_2 = (int(np.ceil(t2_span_x / dx_2)) + pad_cells) * \
+               (int(np.ceil(t2_span_y / dx_2)) + pad_cells) * \
+               (int(np.ceil(t2_span_z / dx_2)) + pad_cells)
 
-    # Tier 2 Box
-    t2_x_points = ((2 * R_max_2) / dx_2) + (2 * pad_xy)
-    t2_y_points = ((2 * R_max_2) / dx_2) + (2 * pad_xy)
-    t2_z_points = (depth_profile / dx_2) + (2 * pad_z)
-    points_2 = max(1, t2_x_points) * max(1, t2_y_points) * max(1, t2_z_points)
+    # Tier 3 Box: Natively covers the exact deep, non-square regional footprint
+    points_3 = (int(np.ceil(span_x / dx_3)) + pad_cells) * \
+               (int(np.ceil(span_y / dx_3)) + pad_cells) * \
+               (int(np.ceil(span_z / dx_3)) + pad_cells)
 
-    # Tier 3 Box (Covers the full regional domain size!)
-    # Your max_regional_R is a radius, so total span is 2 * max_regional_R
-    t3_x_points = ((2 * max_regional_R) / dx_3) + (2 * pad_xy)
-    t3_y_points = ((2 * max_regional_R) / dx_3) + (2 * pad_xy)
-    t3_z_points = (depth_profile / dx_3) + (2 * pad_z)
-    points_3 = max(1, t3_x_points) * max(1, t3_y_points) * max(1, t3_z_points)
+    # 4. Check memory/CPU constraints INDEPENDENTLY per tier
+    # Since grids run sequentially, we evaluate against the peak hardware bottleneck
+    max_tier_points = max(points_1, points_2, points_3)
+    if max_tier_points > cpu_point_budget:
+        # Direct penalization scaling if any single layer exceeds the memory budget
+        return (1e9 * (max_tier_points / cpu_point_budget)) 
 
-    # Total simulated points across all three grids
-    total_points = points_1 + points_2 + points_3
-
-    # 4. Check memory/CPU constraint
-    if total_points > cpu_point_budget:
-        return (1e9 * (total_points / cpu_point_budget)) # Direct penalty scaling
-
-    # 5. Combined objective: Minimize dx (Maximize resolution)
-    resolution_loss = dx_1 + dx_2 + dx_3
-    budget_utilization_loss = (cpu_point_budget - total_points) / cpu_point_budget
+    # 5. Multi-Objective (Pareto) Loss Optimization Loop
+    # Normalize resolutions against the coarse step so they share a comparable loss scale
+    resolution_loss = (dx_1 / dx_3) + (dx_2 / dx_3)
     
-    total_loss = resolution_loss + 1000.0 * budget_utilization_loss
+    # Calculate how well each tier maximizes its independent memory allocation pool
+    util_1 = (cpu_point_budget - points_1) / cpu_point_budget
+    util_2 = (cpu_point_budget - points_2) / cpu_point_budget
+    util_3 = (cpu_point_budget - points_3) / cpu_point_budget
+    avg_budget_utilization_loss = (util_1 + util_2 + util_3) / 3.0
+
+    # Dynamically scale aperture evaluation relative to total domain dimensions
+    domain_scale = (span_x + span_y) / 2.0
+    coverage_ratio_1 = R_max_1 / domain_scale
+    coverage_ratio_2 = R_max_2 / domain_scale
+
+    # Penalize the solver if physical apertures shrink too low relative to your map size.
+    # The inverse function creates a sharp wall preventing R_max from collapsing to 0.
+    aperture_loss = (1.0 / (coverage_ratio_1 + 1e-6)) + (1.0 / (coverage_ratio_2 + 1e-6))
+
+    # Balance all competitive forces (Resolution vs Aperture vs Memory)
+    total_loss = resolution_loss + (100.0 * aperture_loss) + (1000.0 * avg_budget_utilization_loss)
     
-    return float(np.asarray(total_loss).item())/1e7
+    return float(np.asarray(total_loss).item()) / 1e7
 
 
-def optimize_grid_resolutions(v_min, target_error=0.01, max_regional_R=150000.0, depth_profile=40000.0, cpu_point_budget=10_000_000):
+def optimize_grid_resolutions(v_min, target_error, span_x, span_y, span_z, cpu_point_budget):
     """
-    Main execution wrapper for the grid optimization pipeline.
+    Updated execution wrapper parsing true geometric aspect spans.
     """
     C = 0.25  # FMM geometric error constant
 
-    # Bundle all structural parameters into a tuple for the DE solver
-    optimization_args = (v_min, target_error, max_regional_R, depth_profile, cpu_point_budget, C)
+    optimization_args = (v_min, target_error, span_x, span_y, span_z, cpu_point_budget, C)
 
-    # Search boundaries for [dx_1, dx_2, dx_3] in meters
     bounds = [
-        (50.0, 500.0),     # Fine grid limits
-        (400.0, 2000.0),   # Mid grid limits
-        (1500.0, 10000.0)   # Coarse grid limits
+        (50.0, 500.0),     # Fine grid limits (meters)
+        (400.0, 2000.0),   # Mid grid limits (meters)
+        (1500.0, 15000.0)  # Coarse grid limits (meters)
     ]
 
-    print("--- Starting DE Multi-Res Grid Optimization ---")
+    print("--- Starting Geometrically Tailored Grid Optimization ---")
     soln = differential_evolution(
         grid_loss_function, 
         bounds, 
-        args=optimization_args,  # This injects the parameters safely into the loss loop
+        args=optimization_args,
         popsize=20, 
         maxiter=500, 
-        disp=True
+        disp=False
     )
     
-    # Process final results
     opt_dx1, opt_dx2, opt_dx3 = soln.x
     opt_R_max1 = (C * (opt_dx2 ** 2)) / (target_error * v_min)
     opt_R_max2 = (C * (opt_dx3 ** 2)) / (target_error * v_min)
     
-    print(f"\nOptimized Grid Architecture Settings:")
-    print(f"  Tier 1 (Short-Range Fine):   dx = {opt_dx1:.1f} m | Range: 0.00 to {opt_R_max1/1000:.2f} km")
-    print(f"  Tier 2 (Mid-Range Medium):   dx = {opt_dx2:.1f} m | Range: {opt_R_max1/1000:.2f} to {opt_R_max2/1000:.2f} km")
-    print(f"  Tier 3 (Long-Range Coarse):  dx = {opt_dx3:.1f} m | Range: {opt_R_max2/1000:.2f} to {max_regional_R/1000:.2f} km")
-    
     return soln.x, (opt_R_max1, opt_R_max2)
 
+def estimate_safe_cores(cpu_point_budget, safety_factor=0.8):
+    """
+    Estimates a safe number of CPU cores to utilize based on the maximum 
+    grid size budget and available system memory.
+    
+    Parameters:
+    -----------
+    cpu_point_budget : int
+        The maximum number of points allowed in a single grid tier.
+    safety_factor : float
+        The fraction of available memory allowed to be consumed by this script 
+        (defaults to 80% to leave room for the OS and background tasks).
+    """
+    # 1. Get system memory info
+    mem_info = psutil.virtual_memory()
+    available_mem_bytes = mem_info.available
+    
+    # 2. Calculate memory footprint per grid point
+    # 8 bytes per float64 * roughly 12 concurrent tracking arrays
+    BYTES_PER_POINT = 8 * 12
+    
+    # Base Python process overhead (roughly 100-150 MB for imports/compiled code)
+    BASE_OVERHEAD_BYTES = 150 * 1024 * 1024 
+    
+    # Estimated total bytes required for a single worker thread
+    estimated_worker_bytes = (cpu_point_budget * BYTES_PER_POINT) + BASE_OVERHEAD_BYTES
+    
+    # 3. Calculate how many workers can fit into the safe memory pool
+    safe_memory_pool = available_mem_bytes * safety_factor
+    mem_limited_cores = int(safe_memory_pool // estimated_worker_bytes)
+    
+    # 4. Get physical hardware constraints
+    hardware_cores = multiprocessing.cpu_count()
+    
+    # 5. The ideal number of cores is bounded by hardware limits and memory limits
+    optimal_cores = max(1, min(hardware_cores, mem_limited_cores))
+    
+    print("\n--- Dynamic Resource Allocation Analysis ---")
+    print(f"System Available Memory : {available_mem_bytes / (1024**3):.2f} GB")
+    print(f"Est. Memory Per Worker  : {estimated_worker_bytes / (1024**3):.2f} GB")
+    print(f"Hardware CPU Cores      : {hardware_cores}")
+    print(f"Memory-Safe Core Limit  : {mem_limited_cores}")
+    print(f"Selected 'num_cores'    : {optimal_cores}\n")
+    
+    return optimal_cores
 
 # Load configuration from YAML
 config = load_config('config.yaml')
 name_of_project = config['name_of_project']
-num_cores = config['num_cores']
+# num_cores = config['num_cores']
 
 
 ## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
@@ -218,13 +329,6 @@ query_proj = ftrns1(locs)
 
 ## Determine grid resolution
 
-# lat_grid = np.linspace(lat_range_extend[0], lat_range_extend[1], 2)  
-# lon_grid = np.linspace(lon_range_extend[0], lon_range_extend[1], 2)
-# depth_grid = np.linspace(depth_range[0], depth_range[1], 2)
-# x11, x12, x13 = np.meshgrid(lat_grid, lon_grid, depth_grid)
-# X = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-# query_proj = ftrns1(X)
-
 n_jobs = config['n_jobs']
 n_batch = int(np.ceil(len(locs)/n_jobs))
 ind_use = [np.arange(n_batch) + n_batch*i for i in range(n_jobs)]
@@ -233,11 +337,11 @@ if n_jobs > 1:
 ind_use = ind_use[int(argvs[1])]
 
 
-# n_optimal_points = config.get('target_grid_resolution', np.array([300, 300, 150])) # np.array([300, 300, 150])
-
 n_optimal_points = np.array([250, 250, 125])
 n_optimal_points = config.get('target_grid_resolution', n_optimal_points) # np.array([300, 300, 150])
-
+cpu_point_budget = np.prod(n_optimal_points)
+hardware_safe_cores = estimate_safe_cores(cpu_point_budget, safety_factor=0.8)
+num_cores = min(config['num_cores'], hardware_safe_cores)
 
 ## Load velocity model
 if vel_model_type == 1:
@@ -262,8 +366,8 @@ def initilize_velocity_model(x, vp, vs, xx, dx_res, vel_type = 1):
 
 		dx_depth = dx_res # config.get('dx_depth', dx)
 		depths_fine = np.arange(x.min(), x.max() + dx_depth/10.0, dx_depth/10.0)
-		vp_fine = np.interp(depths_fine, depths[iarg], vp[iarg])
-		vs_fine = np.interp(depths_fine, depths[iarg], vs[iarg])
+		vp_fine = np.interp(depths_fine, x[iarg], vp[iarg])
+		vs_fine = np.interp(depths_fine, x[iarg], vs[iarg])
 
 		tree = cKDTree(depths_fine.reshape(-1,1))
 		ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
@@ -287,30 +391,90 @@ def initilize_velocity_model(x, vp, vs, xx, dx_res, vel_type = 1):
 		return Vp, Vs
 
 
+if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.npz') == True):
+
+	## Load "Points" field that specifies surface elevation (columns of lat, lon, elevation (meters)). Points outside convex hull of Points will be treated as zero elevation.
+	z = np.load(path_to_file + 'surface_elevation.npz')
+	Points = z['Points']
+	z.close()
+	## Concatenate station elevations
+	Points = np.concatenate((Points, locs), axis = 0)
+
+	station_tree = cKDTree(ftrns1(locs))
+	nn_distances, _ = station_tree.query(ftrns1(locs), k=2)
+	nearest_neighbor_distances = nn_distances[:, 1]
+	# Set the baseline resolution to a conservative fraction of the average station spacing
+	# (e.g., Average spacing divided by 4, clamped safely between 250m and 2000m)
+	average_station_spacing = np.mean(nearest_neighbor_distances)
+	baseline_dx = np.clip(average_station_spacing / 4.0, 10.0, 10000.0)
+
+	d_deg = baseline_dx/110e3
+	## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
+	tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
+
+	x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg/5.0, d_deg/5.0), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg/5.0, d_deg/5.0)
+	x11_s, x12_s = np.meshgrid(x1_s, x2_s)
+	surface_profile = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
+	ip_match = tree.query(ftrns1(np.concatenate((surface_profile, np.zeros((len(surface_profile),1))), axis = 1)))
+	val = Points[ip_match[1],2] ## Surface elevations of regular grid
+	hull = ConvexHull(Points[:,0:2])
+	ioutside_hull = np.where(in_hull(surface_profile,  hull.points[hull.vertices]) == 0)[0]
+	val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
+	surface_profile = np.concatenate((surface_profile, val.reshape(-1,1)), axis = 1)
+	if os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == False:
+		np.savez_compressed(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project, surface_profile = surface_profile)
+		
+	## Check if stations are beneath surface
+	tol_elev_val = 150.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
+	tree = cKDTree(ftrns1(surface_profile))
+	unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
+	dist_near = tree.query(ftrns1(locs))[0]
+	dist_perturb = tree.query(unit_out)[0]
+	iabove_surface = np.where(dist_perturb > dist_near)[0]
+	if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - surface_profile[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
+
+
 for sta_ind in ind_use:
 
 	loc_proj = ftrns1(locs[sta_ind].reshape(1,-1))
 	max_dist = np.linalg.norm(query_proj - loc_proj, axis = 1) ## Create grid centered on point with this radius
 
+	print('\nLat range: %0.2f, %0.2f'%(lat_range_extend[0], lat_range_extend[1]))
+	print('Lon range: %0.2f, %0.2f'%(lon_range_extend[0], lon_range_extend[1]))
+	print('Depth range: %0.2f, %0.2f \n'%(depth_range[0], depth_range[1]))
+
+	# === PRE-COMPUTE GEOMETRY SPANS FOR THE OPTIMIZER ===
+	elev = locs[:,2].max() + 1000.0
+	z_corners = np.array([
+		[lat_range_extend[0], lon_range_extend[0], elev],
+		[lat_range_extend[1], lon_range_extend[1], depth_range[0]]
+	])
+	zz_corners = ftrns1(z_corners)
+	
+	# Extract true ground lengths in meters directly tracking polar warping
+	regional_span_x1 = float(np.abs(zz_corners[1, 0] - zz_corners[0, 0])) # East-West Span
+	regional_span_x2 = float(np.abs(zz_corners[1, 1] - zz_corners[0, 1])) # North-South Span
+	regional_span_x3 = float(np.abs(zz_corners[1, 2] - zz_corners[0, 2])) # Vertical Span
 
 	target_error = 0.02
 	n_optimal_points1 = np.prod(n_optimal_points)
-	print('Lat range: %0.2f, %0.2f'%(lat_range_extend[0], lat_range_extend[1]))
-	print('Lon range: %0.2f, %0.2f'%(lon_range_extend[0], lon_range_extend[1]))
-	# v_min = np.quantile(Vs.reshape(-1), 0.2)
-	optim, (opt_R_max1, opt_R_max2) = optimize_grid_resolutions(vs_min, target_error = target_error, max_regional_R = pd(query_proj).max().item(), depth_profile = 2.0*np.diff(depth_range)[0], cpu_point_budget = n_optimal_points1)
-	print('Optim')
-	print(optim)
+
+	# Run the geometrically updated optimizer
+	optim, (opt_R_max1, opt_R_max2) = optimize_grid_resolutions(
+		vs_min, 
+		target_error = target_error, 
+		span_x = regional_span_x1,
+		span_y = regional_span_x2,
+		span_z = regional_span_x3,
+		cpu_point_budget = n_optimal_points1
+	)
+	print('Optimized dx settings:', optim)
 
 	data = {}
 	data['res'] = optim
 	data['loc'] = locs[sta_ind].reshape(1,-1)
 	data['loc_proj'] = loc_proj
 
-	# Tp = [] # [[] for j in range(len(optim))]
-	# Ts = [] # [[] for j in range(len(optim))]
-	# X = [] # [[] for j in range(len(optim))]
-	# X_cart = [] # [[] for j in range(len(optim))]
 
 	for inc_res, dx_res in enumerate(optim):
 
@@ -333,28 +497,112 @@ for sta_ind in ind_use:
 		z = np.concatenate((z1, z2, z3, z4, z5, z6, z7, z8, z9), axis = 0)
 		zz = ftrns1(z)
 
-		n1 = n_optimal_points[0] + 1 if n_optimal_points[0] % 2 == 0 else n_optimal_points[0]
-		n2 = n_optimal_points[1] + 1 if n_optimal_points[1] % 2 == 0 else n_optimal_points[1]
-		n3 = n_optimal_points[2] + 1 if n_optimal_points[2] % 2 == 0 else n_optimal_points[2]
+		# === BEGIN GEOGRAPHICALLY AWARE NODE ESTIMATION ===
+		# 1. Map the absolute corners of your extended regional domain into your local Cartesian system
+		corners_lla = np.array([
+			[lat_range_extend[0], lon_range_extend[0], zz[:,2].max()],
+			[lat_range_extend[1], lon_range_extend[1], depth_range[0]]
+		])
+		corners_xyz = ftrns1(corners_lla)
+
+		# 2. Calculate the true physical dimensions of the regional domain in meters
+		regional_span_x1 = float(np.abs(corners_xyz[1, 0] - corners_xyz[0, 0])) # True East-West span
+		regional_span_x2 = float(np.abs(corners_xyz[1, 1] - corners_xyz[0, 1])) # True North-South span
+		regional_span_x3 = float(np.abs(corners_xyz[1, 2] - corners_xyz[0, 2])) # True Vertical span
+
+
+		# 3. Scale down BOTH horizontal and vertical spans for local fine tiers
+		if inc_res == 0:
+			span_x1 = np.minimum(2.0 * opt_R_max1, regional_span_x1)
+			span_x2 = np.minimum(2.0 * opt_R_max1, regional_span_x2)
+			# Capping depth: Look down only as far as the tier's horizontal range allows
+			span_x3 = np.minimum(2.0 * opt_R_max1, regional_span_x3)
+		elif inc_res == 1:
+			span_x1 = np.minimum(2.0 * opt_R_max2, regional_span_x1)
+			span_x2 = np.minimum(2.0 * opt_R_max2, regional_span_x2)
+			span_x3 = np.minimum(2.0 * opt_R_max2, regional_span_x3)
+		else:
+			# Tier 3 captures the full deep regional footprint
+			span_x1 = regional_span_x1
+			span_x2 = regional_span_x2
+			span_x3 = regional_span_x3
+
+		# 4. Derive grid counts ensuring dx == dy == dz (Perfect cubes)
+		n1_target = int(np.ceil(span_x1 / dx_res)) + 8
+		n2_target = int(np.ceil(span_x2 / dx_res)) + 8
+		n3_target = int(np.ceil(span_x3 / dx_res)) + 8
+
+		# 5. Force odd dimensions so the station source lands perfectly on a node center
+		n1 = n1_target + 1 if n1_target % 2 == 0 else n1_target
+		n2 = n2_target + 1 if n2_target % 2 == 0 else n2_target
+		n3 = n3_target + 1 if n3_target % 2 == 0 else n3_target
+
+		# moi
 
 		x1 = np.linspace(0, n1 - 1, n1)*dx_res
 		x2 = np.linspace(0, n2 - 1, n2)*dx_res
 		x3 = np.linspace(0, n3 - 1, n3)*dx_res
-		x1 = (x1 - x1.mean()) + loc_proj[0,0]
-		x2 = (x2 - x2.mean()) + loc_proj[0,1]
+
+		# Safety diagnostic printout
+		print(f"Grid Layout Settings [Tier {inc_res+1}]: Shape = ({n2}, {n1}, {n3}) | Spacing = {dx_res:.1f}m")
+		# === END GEOGRAPHICALLY AWARE NODE ESTIMATION ===
+
+
+		# === ADJUSTED CENTER SHIFT LOGIC ===
+		if inc_res < (len(optim) - 1):
+			# Tiers 1 & 2: Local sub-grids are centered directly on the station
+			x1 = (x1 - x1.mean()) + loc_proj[0,0]
+			x2 = (x2 - x2.mean()) + loc_proj[0,1]
+		else:
+			# Tier 3: Start by centering on the geographical domain center
+			domain_center_xyz = corners_xyz.mean(axis=0)
+			x1 = (x1 - x1.mean()) + domain_center_xyz[0]
+			x2 = (x2 - x2.mean()) + domain_center_xyz[1]
+
+			# --- PERFECT STATION ALIGNMENT SHIFT (TIER 3) ---
+			# Find how far the station is from the nearest unshifted grid lines
+			snap_idx_x1 = np.argmin(np.abs(x1 - loc_proj[0,0]))
+			snap_idx_x2 = np.argmin(np.abs(x2 - loc_proj[0,1]))
+			
+			# Calculate the sub-node tracking error (< 1.0 grid node)
+			shift_x1 = loc_proj[0,0] - x1[snap_idx_x1]
+			shift_x2 = loc_proj[0,1] - x2[snap_idx_x2]
+			
+			# Shift the entire grid space so a node lands EXACTLY on the station
+			x1 = x1 + shift_x1
+			x2 = x2 + shift_x2
+			# ------------------------------------------------
+
+		# Vertical axis processing (Applies safely across all tiers)
 		x3 = (x3 - x3.mean()) + loc_proj[0,2]
 		x3 = x3 - x3.max() + zz[:,2].max()
+		
+		# Align the nearest discrete vertical coordinate with the station's true depth profile
 		inearest = np.argmin(np.abs(x3 - loc_proj[0,2]))
 		diff_val = x3[inearest] - loc_proj[0,2]
 		x3 = x3 - diff_val
 
+		# Build your meshgrid geometry
 		x11, x12, x13 = np.meshgrid(x1, x2, x3)
 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 		dx_v = np.array([np.diff(x1)[0], np.diff(x2)[0], np.diff(x3)[0]])
-		assert(np.allclose(dx_v, dx_v.mean()))
-		assert(np.allclose(np.array([x1[int(n1/2)], x2[int(n2/2)], x3[inearest]]), loc_proj[0,:])) 
-		src_index = (int(n2/2) * n1 * n3) + (int(n1/2) * n3) + inearest
-		assert(np.allclose(xx[src_index], loc_proj[0,:]))
+		
+		assert(np.allclose(dx_v, dx_v.mean(), atol = 1e-3))
+		
+		# Dynamic Source Index Search
+		idx_x1_src = np.argmin(np.abs(x1 - loc_proj[0,0]))
+		idx_x2_src = np.argmin(np.abs(x2 - loc_proj[0,1]))
+		
+		# Strict verification: The tracking error must now be exactly 0.0
+		assert(np.isclose(x1[idx_x1_src], loc_proj[0,0], atol = 1e-3))
+		assert(np.isclose(x2[idx_x2_src], loc_proj[0,1], atol = 1e-3))
+		assert(np.allclose(np.array([x1[idx_x1_src], x2[idx_x2_src], x3[inearest]]), loc_proj[0,:], atol = 1e-3)) 
+
+		# Compute flat row-major index matching meshgrid shape (n2, n1, n3)
+		src_index = (idx_x2_src * n1 * n3) + (idx_x1_src * n3) + inearest
+		assert(np.allclose(xx[src_index], loc_proj[0,:], atol = 1e-3))
+		# === END ADJUSTED CENTER SHIFT LOGIC ===
+
 		print('dx_v')
 		print(dx_v)
 
@@ -365,38 +613,6 @@ for sta_ind in ind_use:
 
 		## Apply topography clipping to velocity model
 		if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.npz') == True):
-
-			## Load "Points" field that specifies surface elevation (columns of lat, lon, elevation (meters)). Points outside convex hull of Points will be treated as zero elevation.
-			z = np.load(path_to_file + 'surface_elevation.npz')
-			Points = z['Points']
-			z.close()
-
-			## Concatenate station elevations
-			Points = np.concatenate((Points, locs), axis = 0)
-			
-			d_deg = dx_res/110e3
-			## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
-			tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
-			x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg/5.0, d_deg/5.0), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg/5.0, d_deg/5.0)
-			x11_s, x12_s = np.meshgrid(x1_s, x2_s)
-			surface_profile = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
-			ip_match = tree.query(ftrns1(np.concatenate((surface_profile, np.zeros((len(surface_profile),1))), axis = 1)))
-			val = Points[ip_match[1],2] ## Surface elevations of regular grid
-			hull = ConvexHull(Points[:,0:2])
-			ioutside_hull = np.where(in_hull(surface_profile,  hull.points[hull.vertices]) == 0)[0]
-			val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
-			surface_profile = np.concatenate((surface_profile, val.reshape(-1,1)), axis = 1)
-			if os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == False:
-				np.savez_compressed(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project, surface_profile = surface_profile)
-				
-			## Check if stations are beneath surface
-			tol_elev_val = 150.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
-			tree = cKDTree(ftrns1(surface_profile))
-			unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
-			dist_near = tree.query(ftrns1(locs))[0]
-			dist_perturb = tree.query(unit_out)[0]
-			iabove_surface = np.where(dist_perturb > dist_near)[0]
-			if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - surface_profile[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
 
 			## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
 			inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
@@ -440,15 +656,16 @@ for sta_ind in ind_use:
 			# grab_interior_samples
 			p = 1.0*np.ones(X.shape[0]) # /np.maximum(Tp_interp[:,n].max() - Tp_interp[:,n], 0.1)
 			isample3 = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station1, len(p)), p = p/p.sum(), replace = False))
-			isample_vald = np.random.choice(np.delete(np.arange(len(p)), np.unique(np.concatenate((isample, isample1, isample2, isample3), axis = 0)), axis = 0), size = n_per_station)
+			# isample_vald = np.random.choice(np.delete(np.arange(len(p)), np.unique(np.concatenate((isample, isample1, isample2, isample3), axis = 0)), axis = 0), size = n_per_station)
 			
 			isample = np.random.permutation(np.concatenate((isample, isample1, isample2, isample3), axis = 0))
+			isample_vald = np.random.choice(np.delete(np.arange(len(p)), isample, axis = 0), size = n_per_station)
 
 			use_within_region = True
 			if use_within_region == True:
-				ikeep = np.where((X[isample][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample][:,1] < (lon_range_extend[1] - deg_pad)))[0]
+				ikeep = np.where((X[isample][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample][:,1] > (lon_range_extend[0] - deg_pad)))[0]
 				isample = isample[ikeep]
-				ikeep1 = np.where((X[isample_vald][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample_vald][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample_vald][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample_vald][:,1] < (lon_range_extend[1] - deg_pad)))[0]
+				ikeep1 = np.where((X[isample_vald][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample_vald][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample_vald][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample_vald][:,1] > (lon_range_extend[0] - deg_pad)))[0]
 				isample_vald = isample_vald[ikeep1]
 
 
@@ -513,6 +730,5 @@ for sta_ind in ind_use:
 
 print("All files saved successfully!")
 print("✔ Script execution: Done")
-
 
 
