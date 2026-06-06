@@ -542,10 +542,23 @@ for sta_ind in ind_use:
 			span_x2 = np.minimum(2.0 * opt_R_max2, regional_span_x2)
 			span_x3 = np.minimum(2.0 * opt_R_max2, regional_span_x3)
 		else:
-			# Tier 3 captures the full deep regional footprint
-			span_x1 = regional_span_x1
-			span_x2 = regional_span_x2
-			span_x3 = regional_span_x3
+			# # Tier 3 captures the full deep regional footprint
+			# span_x1 = regional_span_x1
+			# span_x2 = regional_span_x2
+			# span_x3 = regional_span_x3
+			# --- FIXED: TIER 3 BUDGET PROTECTION FOR VIRTUAL STATIONS ---
+			if sta_ind < len(locs):
+				# Regular stations capture the full deep regional footprint
+				span_x1 = regional_span_x1
+				span_x2 = regional_span_x2
+				span_x3 = regional_span_x3
+			else:
+				# Random stations get a physically cropped Tier 3 window 
+				# (e.g., restricted to a reasonable multi-resolution tracking radius)
+				span_x1 = np.minimum(4.0 * opt_R_max2, regional_span_x1)
+				span_x2 = np.minimum(4.0 * opt_R_max2, regional_span_x2)
+				span_x3 = np.minimum(4.0 * opt_R_max2, regional_span_x3)
+
 
 		# 4. Derive grid counts ensuring dx == dy == dz (Perfect cubes)
 		n1_target = int(np.ceil(span_x1 / dx_res)) + 8
@@ -568,30 +581,53 @@ for sta_ind in ind_use:
 		# === END GEOGRAPHICALLY AWARE NODE ESTIMATION ===
 
 
+		# # === ADJUSTED CENTER SHIFT LOGIC ===
+		# if inc_res < (len(optim) - 1):
+		# 	# Tiers 1 & 2: Local sub-grids are centered directly on the station
+		# 	x1 = (x1 - x1.mean()) + loc_proj[0,0]
+		# 	x2 = (x2 - x2.mean()) + loc_proj[0,1]
+		# else:
+		# 	# Tier 3: Start by centering on the geographical domain center
+		# 	domain_center_xyz = corners_xyz.mean(axis=0)
+		# 	x1 = (x1 - x1.mean()) + domain_center_xyz[0]
+		# 	x2 = (x2 - x2.mean()) + domain_center_xyz[1]
+
+		# 	# --- PERFECT STATION ALIGNMENT SHIFT (TIER 3) ---
+		# 	# Find how far the station is from the nearest unshifted grid lines
+		# 	snap_idx_x1 = np.argmin(np.abs(x1 - loc_proj[0,0]))
+		# 	snap_idx_x2 = np.argmin(np.abs(x2 - loc_proj[0,1]))
+			
+		# 	# Calculate the sub-node tracking error (< 1.0 grid node)
+		# 	shift_x1 = loc_proj[0,0] - x1[snap_idx_x1]
+		# 	shift_x2 = loc_proj[0,1] - x2[snap_idx_x2]
+			
+		# 	# Shift the entire grid space so a node lands EXACTLY on the station
+		# 	x1 = x1 + shift_x1
+		# 	x2 = x2 + shift_x2
+		# 	# ------------------------------------------------
+
 		# === ADJUSTED CENTER SHIFT LOGIC ===
-		if inc_res < (len(optim) - 1):
-			# Tiers 1 & 2: Local sub-grids are centered directly on the station
+		# Only use full regional domain centering if it's a real station using the full footprint
+		if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
+			# Tiers 1 & 2 (and virtual Tier 3): Local sub-grids center directly on the station source
 			x1 = (x1 - x1.mean()) + loc_proj[0,0]
 			x2 = (x2 - x2.mean()) + loc_proj[0,1]
 		else:
-			# Tier 3: Start by centering on the geographical domain center
+			# Real Station Tier 3: Centered on full geographical domain center
 			domain_center_xyz = corners_xyz.mean(axis=0)
 			x1 = (x1 - x1.mean()) + domain_center_xyz[0]
 			x2 = (x2 - x2.mean()) + domain_center_xyz[1]
 
 			# --- PERFECT STATION ALIGNMENT SHIFT (TIER 3) ---
-			# Find how far the station is from the nearest unshifted grid lines
 			snap_idx_x1 = np.argmin(np.abs(x1 - loc_proj[0,0]))
 			snap_idx_x2 = np.argmin(np.abs(x2 - loc_proj[0,1]))
 			
-			# Calculate the sub-node tracking error (< 1.0 grid node)
 			shift_x1 = loc_proj[0,0] - x1[snap_idx_x1]
 			shift_x2 = loc_proj[0,1] - x2[snap_idx_x2]
 			
-			# Shift the entire grid space so a node lands EXACTLY on the station
 			x1 = x1 + shift_x1
 			x2 = x2 + shift_x2
-			# ------------------------------------------------
+			
 
 		# Vertical axis processing (Applies safely across all tiers)
 		x3 = (x3 - x3.mean()) + loc_proj[0,2]
