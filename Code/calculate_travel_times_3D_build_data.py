@@ -721,20 +721,878 @@ def estimate_safe_cores(cpu_point_budget, safety_factor=0.8):
 #     return tp_times, ts_times
 
 
+# def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths, vp):
+#     """
+#     Computes travel times using ObsPy TauP by mapping a structural 3D point mesh
+#     to a temporary 2D distance-depth lookup table, then maps results back to xx.
+#     Integrates an angle-aware slant correction using the local ray parameter (p).
+#     """
+#     from scipy.interpolate import RegularGridInterpolator
+#     import numpy as np
+    
+#     # 1. Map local Cartesian inputs to true geographic coordinates (LLA)
+#     X_lla = ftrns2(xx)
+#     station_lla = ftrns2(loc_proj)[0]
+
+#     # Safe fallback navigation to locate the internal v_mod data structure
+#     if hasattr(taup_model.model, 'v_mod'):
+#         v_mod = taup_model.model.v_mod
+#     elif hasattr(taup_model.model, 's_mod') and hasattr(taup_model.model.s_mod, 'v_mod'):
+#         v_mod = taup_model.model.s_mod.v_mod
+#     else:
+#         v_mod = taup_model.model
+
+#     # Read the very first layer row (surface layer at 0.0 km depth) and convert to m/s
+#     vp_surface = v_mod.layers[0]['top_p_velocity'] * 1000.0
+#     vs_surface = v_mod.layers[0]['top_s_velocity'] * 1000.0
+
+#     # Track true elevations (Z)
+#     src_z = station_lla[2]
+#     grid_z = X_lla[:, 2]
+
+#     # Convert absolute coordinates to positive downward depths in km, clipping anything above 0
+#     source_depth_km = np.maximum(0.0, -src_z) / 1000.0
+#     target_depths_km = np.maximum(0.0, -grid_z) / 1000.0
+
+#     # 2. Vectorized True WGS84 Great-Circle Distance Calculation (in Degrees)
+#     lat1 = np.radians(station_lla[0])
+#     lon1 = np.radians(station_lla[1])
+#     lat2 = np.radians(X_lla[:, 0])
+#     lon2 = np.radians(X_lla[:, 1])
+
+#     dlon = lon2 - lon1
+#     cos_clat = np.sin(lat1) * np.sin(lat2) + np.cos(lat1) * np.cos(lat2) * np.cos(dlon)
+#     cos_clat = np.clip(cos_clat, -1.0, 1.0) 
+#     distances_deg = np.degrees(np.arccos(cos_clat))
+
+#     # =====================================================================
+#     # 3. Uncertainty-Driven Dynamic Step Size Estimation (~2% Error Bound)
+#     # =====================================================================
+#     max_deg = distances_deg.max()
+#     min_dep, max_dep = target_depths_km.min(), target_depths_km.max()
+#     dep_range = max_dep - min_dep
+
+#     # Geographically accurate km-to-degree conversion via WGS84 Meridian Radius
+#     mean_lat_rad = np.radians(np.mean(X_lla[:, 0]))
+#     a = 6378.137          # Equatorial radius in km
+#     b = 6356.7523142      # Polar radius in km
+#     e_sq = (a**2 - b**2) / (a**2)
+#     radius_meridian = (a * (1.0 - e_sq)) / (1.0 - e_sq * np.sin(mean_lat_rad)**2)**(1.5)
+#     km_per_deg = (np.pi / 180.0) * radius_meridian
+
+#     max_dist_km = max_deg * km_per_deg
+
+#     # Un-skewed velocity mask matching the active mesh depth limits
+#     mesh_min_dep_m = max(0.0, min_dep * 1000.0)
+#     mesh_max_dep_m = max_dep * 1000.0
+    
+#     positive_input_depths = np.abs(depths)
+#     active_depth_mask = (positive_input_depths >= mesh_min_dep_m) & (positive_input_depths <= mesh_max_dep_m)
+    
+#     if np.sum(active_depth_mask) == 0:
+#         active_depth_mask = positive_input_depths <= np.max(positive_input_depths)
+        
+#     v_representative = float(np.median(vp[active_depth_mask])) / 1000.0  # Convert m/s to km/s
+#     v_representative = max(1.5, v_representative)
+
+#     target_error_fraction = 0.02  
+
+#     # Physics-based steps sizing
+#     if max_dist_km > 0:
+#         ideal_dx_km = np.sqrt(8.0 * target_error_fraction * max_dist_km * v_representative)
+#         dist_step_km = np.clip(ideal_dx_km, 0.1, max_dist_km * 0.05)
+#         dist_step_deg = dist_step_km / km_per_deg
+#     else:
+#         dist_step_deg = 0.01
+
+#     if dep_range > 0:
+#         ideal_dz_km = np.sqrt(8.0 * target_error_fraction * dep_range * v_representative)
+#         depth_step_km = np.clip(ideal_dz_km, 0.1, dep_range * 0.05)
+#     else:
+#         depth_step_km = 0.5
+
+#     # Build lookup axes dynamically
+#     grid_deg = np.arange(0.0, max_deg + 2*dist_step_deg, dist_step_deg)
+#     grid_dep = np.arange(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, depth_step_km)
+
+#     if len(grid_deg) < 30:
+#         grid_deg = np.linspace(0.0, max_deg + 2*dist_step_deg, 30)
+#     if len(grid_dep) < 30:
+#         grid_dep = np.linspace(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, 30)
+
+#     # 5. Initialize Lookup Tables
+#     lookup_tp = np.nan * np.zeros((len(grid_deg), len(grid_dep)))
+#     lookup_ts = np.nan * np.zeros((len(grid_deg), len(grid_dep)))
+#     lookup_pp = np.zeros((len(grid_deg), len(grid_dep)))  
+#     lookup_ps = np.zeros((len(grid_deg), len(grid_dep)))  
+
+#     # 6. Your original, working Vectorized Lookup Grid Population Loop
+#     for i, deg in enumerate(grid_deg):
+#         if np.isclose(deg, 0.0, atol=1e-7):
+#             continue
+#         try:
+#             # Reverted to your exact working vectorized call structure
+#             arrivals = taup_model.get_travel_times(
+#                 source_depth_in_km=source_depth_km,
+#                 distance_in_degree=deg,
+#                 phase_list=["p", "P", "s", "S"], 
+#                 receiver_depth_in_km=grid_dep      
+#             )
+            
+#             for arrival in arrivals:
+#                 j = np.argmin(np.abs(grid_dep - arrival.receiver_depth))
+#                 phase = arrival.name.upper()
+#                 ray_param_sec_per_m = arrival.ray_param / 6371000.0
+                
+#                 if phase in ["P", "P"]:
+#                     if np.isnan(lookup_tp[i, j]) or arrival.time < lookup_tp[i, j]:
+#                         lookup_tp[i, j] = arrival.time
+#                         lookup_pp[i, j] = ray_param_sec_per_m
+#                 elif phase in ["S", "S"]:
+#                     if np.isnan(lookup_ts[i, j]) or arrival.time < lookup_ts[i, j]:
+#                         lookup_ts[i, j] = arrival.time
+#                         lookup_ps[i, j] = ray_param_sec_per_m
+                        
+#         except Exception:
+#             continue
+
+#     # === EXPLICIT SOURCE POSITION ENFORCEMENT ===
+#     idx_deg_zero = 0 
+#     for j, dep in enumerate(grid_dep):
+#         if np.isclose(dep, source_depth_km, atol=depth_step_km * 0.5):
+#             lookup_tp[idx_deg_zero, j] = 0.0
+#             lookup_ts[idx_deg_zero, j] = 0.0
+#         else:
+#             distance_km = np.abs(dep - source_depth_km)
+#             lookup_tp[idx_deg_zero, j] = distance_km / (vp_surface / 1000.0)
+#             lookup_ts[idx_deg_zero, j] = distance_km / (vs_surface / 1000.0)
+#         lookup_pp[idx_deg_zero, j] = 0.0
+#         lookup_ps[idx_deg_zero, j] = 0.0
+
+#     # 7. Clean up remaining NaN gaps safely
+#     for table in [lookup_tp, lookup_ts]:
+#         if np.any(np.isnan(table)):
+#             mask = np.isnan(table)
+#             table[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), table[~mask])
+
+#     # 8. High-Speed 2D Matrix Interpolation back to the structural 3D Mesh
+#     interp_tp = RegularGridInterpolator((grid_deg, grid_dep), lookup_tp, method='linear', bounds_error=False, fill_value=None)
+#     interp_ts = RegularGridInterpolator((grid_deg, grid_dep), lookup_ts, method='linear', bounds_error=False, fill_value=None)
+#     interp_pp = RegularGridInterpolator((grid_deg, grid_dep), lookup_pp, method='linear', bounds_error=False, fill_value=None)
+#     interp_ps = RegularGridInterpolator((grid_deg, grid_dep), lookup_ps, method='linear', bounds_error=False, fill_value=None)
+
+#     query_points = np.column_stack((distances_deg, target_depths_km))
+    
+#     tp_times = interp_tp(query_points)
+#     ts_times = interp_ts(query_points)
+#     p_wave_slowness = interp_pp(query_points)
+#     s_wave_slowness = interp_ps(query_points)
+
+#     # --- ANGLE-AWARE MOUNTAIN TOPOGRAPHIC TIME CORRECTIONS ---
+#     p_factor_src = np.sqrt(np.maximum(0.0, (1.0 / vp_surface**2) - p_wave_slowness**2))
+#     s_factor_src = np.sqrt(np.maximum(0.0, (1.0 / vs_surface**2) - s_wave_slowness**2))
+    
+#     src_correction_p = np.maximum(0.0, src_z) * p_factor_src
+#     src_correction_s = np.maximum(0.0, src_z) * s_factor_src
+
+#     node_corrections_p = np.maximum(0.0, grid_z) * p_factor_src
+#     node_corrections_s = np.maximum(0.0, grid_z) * s_factor_src
+
+#     tp_times = tp_times + src_correction_p + node_corrections_p
+#     ts_times = ts_times + src_correction_s + node_corrections_s
+
+#     # Force the source location analytically to 0.0 to prevent interpolation bleeding.
+#     station_idx = np.argmin(distances_deg + np.abs(target_depths_km - source_depth_km))
+#     if distances_deg[station_idx] < 1e-4:
+#         tp_times[station_idx] = 0.0
+#         ts_times[station_idx] = 0.0
+
+#     return tp_times, ts_times
+
+
+# def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths, vp):
+#     """
+#     Computes travel times using ObsPy TauP by mapping a structural 3D point mesh
+#     to a temporary 2D distance-depth lookup table, then maps results back to xx.
+#     Integrates an angle-aware slant correction using the local ray parameter (p).
+#     """
+#     from scipy.interpolate import RegularGridInterpolator
+#     import numpy as np
+    
+#     # 1. Map local Cartesian inputs to true geographic coordinates (LLA)
+#     X_lla = ftrns2(xx)
+#     station_lla = ftrns2(loc_proj)[0]
+
+#     # Safe fallback navigation to locate the internal v_mod data structure
+#     if hasattr(taup_model.model, 'v_mod'):
+#         v_mod = taup_model.model.v_mod
+#     elif hasattr(taup_model.model, 's_mod') and hasattr(taup_model.model.s_mod, 'v_mod'):
+#         v_mod = taup_model.model.s_mod.v_mod
+#     else:
+#         v_mod = taup_model.model
+
+#     # Read the very first layer row (surface layer at 0.0 km depth) and convert to m/s
+#     vp_surface = v_mod.layers[0]['top_p_velocity'] * 1000.0
+#     vs_surface = v_mod.layers[0]['top_s_velocity'] * 1000.0
+
+#     # Track true elevations (Z)
+#     src_z = station_lla[2]
+#     grid_z = X_lla[:, 2]
+
+#     # Convert absolute coordinates to positive downward depths in km, clipping anything above 0
+#     source_depth_km = np.maximum(0.0, -src_z) / 1000.0
+#     target_depths_km = np.maximum(0.0, -grid_z) / 1000.0
+
+#     # 2. Vectorized True WGS84 Great-Circle Distance Calculation (in Degrees)
+#     lat1 = np.radians(station_lla[0])
+#     lon1 = np.radians(station_lla[1])
+#     lat2 = np.radians(X_lla[:, 0])
+#     lon2 = np.radians(X_lla[:, 1])
+
+#     dlon = lon2 - lon1
+#     cos_clat = np.sin(lat1) * np.sin(lat2) + np.cos(lat1) * np.cos(lat2) * np.cos(dlon)
+#     cos_clat = np.clip(cos_clat, -1.0, 1.0) 
+#     distances_deg = np.degrees(np.arccos(cos_clat))
+
+#     # =====================================================================
+#     # 3. Uncertainty-Driven Dynamic Step Size Estimation (~2% Error Bound)
+#     # =====================================================================
+#     max_deg = distances_deg.max()
+#     min_dep, max_dep = target_depths_km.min(), target_depths_km.max()
+#     dep_range = max_dep - min_dep
+
+#     # Geographically accurate km-to-degree conversion via WGS84 Meridian Radius
+#     mean_lat_rad = np.radians(np.mean(X_lla[:, 0]))
+#     a = 6378.137          # Equatorial radius in km
+#     b = 6356.7523142      # Polar radius in km
+#     e_sq = (a**2 - b**2) / (a**2)
+#     radius_meridian = (a * (1.0 - e_sq)) / (1.0 - e_sq * np.sin(mean_lat_rad)**2)**(1.5)
+#     km_per_deg = (np.pi / 180.0) * radius_meridian
+
+#     max_dist_km = max_deg * km_per_deg
+
+#     # Un-skewed velocity mask matching the active mesh depth limits
+#     mesh_min_dep_m = max(0.0, min_dep * 1000.0)
+#     mesh_max_dep_m = max_dep * 1000.0
+    
+#     positive_input_depths = np.abs(depths)
+#     active_depth_mask = (positive_input_depths >= mesh_min_dep_m) & (positive_input_depths <= mesh_max_dep_m)
+    
+#     if np.sum(active_depth_mask) == 0:
+#         active_depth_mask = positive_input_depths <= np.max(positive_input_depths)
+        
+#     v_representative = float(np.median(vp[active_depth_mask])) / 1000.0  # Convert m/s to km/s
+#     v_representative = max(1.5, v_representative)
+
+#     target_error_fraction = 0.02  
+
+#     # Physics-based steps sizing
+#     if max_dist_km > 0:
+#         ideal_dx_km = np.sqrt(8.0 * target_error_fraction * max_dist_km * v_representative)
+#         dist_step_km = np.clip(ideal_dx_km, 0.1, max_dist_km * 0.05)
+#         dist_step_deg = dist_step_km / km_per_deg
+#     else:
+#         dist_step_deg = 0.01
+
+#     if dep_range > 0:
+#         ideal_dz_km = np.sqrt(8.0 * target_error_fraction * dep_range * v_representative)
+#         depth_step_km = np.clip(ideal_dz_km, 0.1, dep_range * 0.05)
+#     else:
+#         depth_step_km = 0.5
+
+#     # Build lookup axes dynamically
+#     grid_deg = np.arange(0.0, max_deg + 2*dist_step_deg, dist_step_deg)
+#     grid_dep = np.arange(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, depth_step_km)
+
+#     if len(grid_deg) < 30:
+#         grid_deg = np.linspace(0.0, max_deg + 2*dist_step_deg, 30)
+#     if len(grid_dep) < 30:
+#         grid_dep = np.linspace(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, 30)
+
+#     # 5. Initialize Lookup Tables
+#     lookup_tp = np.nan * np.zeros((len(grid_deg), len(grid_dep)))
+#     lookup_ts = np.nan * np.zeros((len(grid_deg), len(grid_dep)))
+#     lookup_pp = np.zeros((len(grid_deg), len(grid_dep)))  
+#     lookup_ps = np.zeros((len(grid_deg), len(grid_dep)))  
+
+#     # 6. Your original, working Vectorized Lookup Grid Population Loop
+#     for i, deg in enumerate(grid_deg):
+#         if np.isclose(deg, 0.0, atol=1e-7):
+#             continue
+#         try:
+#             # Reverted to your exact working vectorized call structure
+#             arrivals = taup_model.get_travel_times(
+#                 source_depth_in_km=source_depth_km,
+#                 distance_in_degree=deg,
+#                 phase_list=["p", "P", "s", "S"], 
+#                 receiver_depth_in_km=grid_dep      
+#             )
+            
+#             for arrival in arrivals:
+#                 j = np.argmin(np.abs(grid_dep - arrival.receiver_depth))
+#                 phase = arrival.name.upper()
+#                 ray_param_sec_per_m = arrival.ray_param / 6371000.0
+                
+#                 if phase in ["P", "P"]:
+#                     if np.isnan(lookup_tp[i, j]) or arrival.time < lookup_tp[i, j]:
+#                         lookup_tp[i, j] = arrival.time
+#                         lookup_pp[i, j] = ray_param_sec_per_m
+#                 elif phase in ["S", "S"]:
+#                     if np.isnan(lookup_ts[i, j]) or arrival.time < lookup_ts[i, j]:
+#                         lookup_ts[i, j] = arrival.time
+#                         lookup_ps[i, j] = ray_param_sec_per_m
+                        
+#         except Exception:
+#             continue
+
+#     # === EXPLICIT SOURCE POSITION ENFORCEMENT ===
+#     idx_deg_zero = 0 
+#     for j, dep in enumerate(grid_dep):
+#         if np.isclose(dep, source_depth_km, atol=depth_step_km * 0.5):
+#             lookup_tp[idx_deg_zero, j] = 0.0
+#             lookup_ts[idx_deg_zero, j] = 0.0
+#         else:
+#             distance_km = np.abs(dep - source_depth_km)
+#             lookup_tp[idx_deg_zero, j] = distance_km / (vp_surface / 1000.0)
+#             lookup_ts[idx_deg_zero, j] = distance_km / (vs_surface / 1000.0)
+#         lookup_pp[idx_deg_zero, j] = 0.0
+#         lookup_ps[idx_deg_zero, j] = 0.0
+
+#     # 7. Clean up remaining NaN gaps safely
+#     for table in [lookup_tp, lookup_ts]:
+#         if np.any(np.isnan(table)):
+#             mask = np.isnan(table)
+#             table[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), table[~mask])
+
+#     # 8. High-Speed 2D Matrix Interpolation back to the structural 3D Mesh
+#     interp_tp = RegularGridInterpolator((grid_deg, grid_dep), lookup_tp, method='linear', bounds_error=False, fill_value=None)
+#     interp_ts = RegularGridInterpolator((grid_deg, grid_dep), lookup_ts, method='linear', bounds_error=False, fill_value=None)
+#     interp_pp = RegularGridInterpolator((grid_deg, grid_dep), lookup_pp, method='linear', bounds_error=False, fill_value=None)
+#     interp_ps = RegularGridInterpolator((grid_deg, grid_dep), lookup_ps, method='linear', bounds_error=False, fill_value=None)
+
+#     query_points = np.column_stack((distances_deg, target_depths_km))
+    
+#     tp_times = interp_tp(query_points)
+#     ts_times = interp_ts(query_points)
+#     p_wave_slowness = interp_pp(query_points)
+#     s_wave_slowness = interp_ps(query_points)
+
+#     # --- ANGLE-AWARE MOUNTAIN TOPOGRAPHIC TIME CORRECTIONS ---
+#     p_factor_src = np.sqrt(np.maximum(0.0, (1.0 / vp_surface**2) - p_wave_slowness**2))
+#     s_factor_src = np.sqrt(np.maximum(0.0, (1.0 / vs_surface**2) - s_wave_slowness**2))
+    
+#     src_correction_p = np.maximum(0.0, src_z) * p_factor_src
+#     src_correction_s = np.maximum(0.0, src_z) * s_factor_src
+
+#     node_corrections_p = np.maximum(0.0, grid_z) * p_factor_src
+#     node_corrections_s = np.maximum(0.0, grid_z) * s_factor_src
+
+#     tp_times = tp_times + src_correction_p + node_corrections_p
+#     ts_times = ts_times + src_correction_s + node_corrections_s
+
+#     # Force the source location analytically to 0.0 to prevent interpolation bleeding.
+#     station_idx = np.argmin(distances_deg + np.abs(target_depths_km - source_depth_km))
+#     if distances_deg[station_idx] < 1e-4:
+#         tp_times[station_idx] = 0.0
+#         ts_times[station_idx] = 0.0
+
+#     return tp_times, ts_times
+
+
+
+# def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths, vp):
+#     """
+#     Computes travel times using ObsPy TauP by mapping a structural 3D point mesh
+#     to a temporary 2D distance-depth lookup table, then maps results back to xx.
+#     Integrates an angle-aware slant correction using the local ray parameter (p).
+#     """
+#     from scipy.interpolate import RegularGridInterpolator, griddata
+#     import numpy as np
+    
+#     # =====================================================================
+#     # 1. Coordinate Mapping and Surface Geometries
+#     # =====================================================================
+#     X_lla = ftrns2(xx)
+#     station_lla = ftrns2(loc_proj)[0]
+
+#     # Safe fallback navigation to locate the internal v_mod data structure
+#     if hasattr(taup_model.model, 'v_mod'):
+#         v_mod = taup_model.model.v_mod
+#     elif hasattr(taup_model.model, 's_mod') and hasattr(taup_model.model.s_mod, 'v_mod'):
+#         v_mod = taup_model.model.s_mod.v_mod
+#     else:
+#         v_mod = taup_model.model
+
+#     # Extract surface velocities from 1D profile and convert to m/s
+#     vp_surface = v_mod.layers[0]['top_p_velocity'] * 1000.0
+#     vs_surface = v_mod.layers[0]['top_s_velocity'] * 1000.0
+
+#     # Track true elevations (Z)
+#     src_z = station_lla[2]
+#     grid_z = X_lla[:, 2]
+
+#     # Convert absolute coordinates to positive downward depths in km (clip anything above sea level)
+#     source_depth_km = np.maximum(0.0, -src_z) / 1000.0
+#     target_depths_km = np.maximum(0.0, -grid_z) / 1000.0
+
+#     # =====================================================================
+#     # 2. Vectorized True WGS84 Great-Circle Distance Calculation
+#     # =====================================================================
+#     lat1 = np.radians(station_lla[0])
+#     lon1 = np.radians(station_lla[1])
+#     lat2 = np.radians(X_lla[:, 0])
+#     lon2 = np.radians(X_lla[:, 1])
+
+#     dlon = lon2 - lon1
+#     cos_clat = np.sin(lat1) * np.sin(lat2) + np.cos(lat1) * np.cos(lat2) * np.cos(dlon)
+#     cos_clat = np.clip(cos_clat, -1.0, 1.0) 
+#     distances_deg = np.degrees(np.arccos(cos_clat))
+
+#     # =====================================================================
+#     # 3. Dynamic Step Size Estimation (~2% Relative Uncertainty Bound)
+#     # =====================================================================
+#     max_deg = distances_deg.max()
+#     min_dep, max_dep = target_depths_km.min(), target_depths_km.max()
+#     dep_range = max_dep - min_dep
+
+#     # Geographically accurate km-to-degree conversion via WGS84 Meridian Radius
+#     mean_lat_rad = np.radians(np.mean(X_lla[:, 0]))
+#     a = 6378.137          # Equatorial radius in km
+#     b = 6356.7523142      # Polar radius in km
+#     e_sq = (a**2 - b**2) / (a**2)
+#     radius_meridian = (a * (1.0 - e_sq)) / (1.0 - e_sq * np.sin(mean_lat_rad)**2)**(1.5)
+#     km_per_deg = (np.pi / 180.0) * radius_meridian
+
+#     max_dist_km = max_deg * km_per_deg
+
+#     # Un-skewed velocity mask matching the active mesh depth limits
+#     mesh_min_dep_m = max(0.0, min_dep * 1000.0)
+#     mesh_max_dep_m = max_dep * 1000.0
+    
+#     positive_input_depths = np.abs(depths)
+#     active_depth_mask = (positive_input_depths >= mesh_min_dep_m) & (positive_input_depths <= mesh_max_dep_m)
+    
+#     if np.sum(active_depth_mask) == 0:
+#         active_depth_mask = positive_input_depths <= np.max(positive_input_depths)
+        
+#     v_representative = float(np.median(vp[active_depth_mask])) / 1000.0  # Convert m/s to km/s
+#     v_representative = max(1.5, v_representative)
+
+#     target_error_fraction = 0.02  
+
+#     # Physics-based spatial step selection
+#     if max_dist_km > 0:
+#         ideal_dx_km = np.sqrt(8.0 * target_error_fraction * max_dist_km * v_representative)
+#         dist_step_km = np.clip(ideal_dx_km, 0.1, max_dist_km * 0.05)
+#         dist_step_deg = dist_step_km / km_per_deg
+#     else:
+#         dist_step_deg = 0.01
+
+#     if dep_range > 0:
+#         ideal_dz_km = np.sqrt(8.0 * target_error_fraction * dep_range * v_representative)
+#         depth_step_km = np.clip(ideal_dz_km, 0.1, dep_range * 0.05)
+#     else:
+#         depth_step_km = 0.5
+
+#     # Build lookup axes dynamically
+#     grid_deg = np.arange(0.0, max_deg + 2*dist_step_deg, dist_step_deg)
+#     grid_dep = np.arange(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, depth_step_km)
+
+#     if len(grid_deg) < 30:
+#         grid_deg = np.linspace(0.0, max_deg + 2*dist_step_deg, 30)
+#     if len(grid_dep) < 30:
+#         grid_dep = np.linspace(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, 30)
+
+#     # =====================================================================
+#     # 4. Initialize Lookup Tables with Infinity (Enforces Minimum First Arrivals)
+#     # =====================================================================
+#     lookup_tp = np.full((len(grid_deg), len(grid_dep)), np.inf)
+#     lookup_ts = np.full((len(grid_deg), len(grid_dep)), np.inf)
+#     lookup_pp = np.zeros((len(grid_deg), len(grid_dep)))  
+#     lookup_ps = np.zeros((len(grid_deg), len(grid_dep)))  
+
+#     # =====================================================================
+#     # 5. Populate 2D Lookup Grid via TauP Ray-Tracing
+#     # =====================================================================
+#     for i, deg in enumerate(grid_deg):
+#         if np.isclose(deg, 0.0, atol=1e-7):
+#             continue
+#         try:
+#             arrivals = taup_model.get_travel_times(
+#                 source_depth_in_km=source_depth_km,
+#                 distance_in_degree=deg,
+#                 phase_list=["p", "P", "s", "S", "Pn", "Sn", "Pg", "Sg"], 
+#                 receiver_depth_in_km=grid_dep      
+#             )
+            
+#             for arrival in arrivals:
+#                 j = np.argmin(np.abs(grid_dep - arrival.receiver_depth))
+                
+#                 # Guard against depth-aliasing outside bounds
+#                 if np.abs(grid_dep[j] - arrival.receiver_depth) > (depth_step_km * 1.5):
+#                     continue
+                    
+#                 phase = arrival.name.upper()
+#                 ray_param_sec_per_m = arrival.ray_param / 6371000.0
+                
+#                 # Ensure we strictly capture the fastest first arrival path
+#                 if phase in ["P", "PN", "PG"]:
+#                     if arrival.time < lookup_tp[i, j]:
+#                         lookup_tp[i, j] = arrival.time
+#                         lookup_pp[i, j] = ray_param_sec_per_m
+#                 elif phase in ["S", "SN", "SG"]:
+#                     if arrival.time < lookup_ts[i, j]:
+#                         lookup_ts[i, j] = arrival.time
+#                         lookup_ps[i, j] = ray_param_sec_per_m
+                        
+#         except Exception:
+#             continue
+
+#     # =====================================================================
+#     # 6. Explicit Source Position & Vertical Path Enforcement
+#     # =====================================================================
+#     idx_deg_zero = 0 
+#     for j, dep in enumerate(grid_dep):
+#         distance_km = np.abs(dep - source_depth_km)
+#         # Check if we are inside the same cell block as the source anchor
+#         if np.isclose(dep, source_depth_km, atol=depth_step_km * 0.1) or distance_km < 1e-4:
+#             lookup_tp[idx_deg_zero, j] = 0.0
+#             lookup_ts[idx_deg_zero, j] = 0.0
+#         else:
+#             # Seed vertical un-reflected baseline columns
+#             t_p_vert = distance_km / (vp_surface / 1000.0)
+#             t_s_vert = distance_km / (vs_surface / 1000.0)
+            
+#             # Only update if it provides a faster valid pathway than ray tracing
+#             if t_p_vert < lookup_tp[idx_deg_zero, j]:
+#                 lookup_tp[idx_deg_zero, j] = t_p_vert
+#             if t_s_vert < lookup_ts[idx_deg_zero, j]:
+#                 lookup_ts[idx_deg_zero, j] = t_s_vert
+                
+#         lookup_pp[idx_deg_zero, j] = 0.0
+#         lookup_ps[idx_deg_zero, j] = 0.0
+
+#     # =====================================================================
+#     # 7. 2D Coordinate-Aware Grid Interpolation (Replaces Old 1D Flat Bleed)
+#     # =====================================================================
+#     # Convert unmapped infinity nodes to NaN values for grid data handling
+#     lookup_tp[np.isinf(lookup_tp)] = np.nan
+#     lookup_ts[np.isinf(lookup_ts)] = np.nan
+
+#     x_indices, y_indices = np.indices(lookup_tp.shape)
+
+#     for table in [lookup_tp, lookup_ts]:
+#         if np.any(np.isnan(table)):
+#             valid_mask = ~np.isnan(table)
+#             if np.sum(valid_mask) > 0:
+#                 # Map coordinate stencils in true 2D matrix layout space
+#                 coords_valid = np.column_stack((x_indices[valid_mask], y_indices[valid_mask]))
+#                 coords_missing = np.column_stack((x_indices[~valid_mask], y_indices[~valid_mask]))
+#                 # Fill gaps using nearest 2D neighbors to preserve structural gradients
+#                 table[~valid_mask] = griddata(coords_valid, table[valid_mask], coords_missing, method='nearest')
+
+#     # =====================================================================
+#     # 8. High-Speed 2D Matrix Interpolation back to the structural 3D Mesh
+#     # =====================================================================
+#     interp_tp = RegularGridInterpolator((grid_deg, grid_dep), lookup_tp, method='linear', bounds_error=False, fill_value=None)
+#     interp_ts = RegularGridInterpolator((grid_deg, grid_dep), lookup_ts, method='linear', bounds_error=False, fill_value=None)
+#     interp_pp = RegularGridInterpolator((grid_deg, grid_dep), lookup_pp, method='linear', bounds_error=False, fill_value=None)
+#     interp_ps = RegularGridInterpolator((grid_deg, grid_dep), lookup_ps, method='linear', bounds_error=False, fill_value=None)
+
+#     query_points = np.column_stack((distances_deg, target_depths_km))
+    
+#     tp_times = interp_tp(query_points)
+#     ts_times = interp_ts(query_points)
+#     p_wave_slowness = interp_pp(query_points)
+#     s_wave_slowness = interp_ps(query_points)
+
+#     # =====================================================================
+#     # 9. Angle-Aware Mountain Topographic Time Corrections
+#     # =====================================================================
+#     p_factor_src = np.sqrt(np.maximum(0.0, (1.0 / vp_surface**2) - p_wave_slowness**2))
+#     s_factor_src = np.sqrt(np.maximum(0.0, (1.0 / vs_surface**2) - s_wave_slowness**2))
+    
+#     src_correction_p = np.maximum(0.0, src_z) * p_factor_src
+#     src_correction_s = np.maximum(0.0, src_z) * s_factor_src
+
+#     node_corrections_p = np.maximum(0.0, grid_z) * p_factor_src
+#     node_corrections_s = np.maximum(0.0, grid_z) * s_factor_src
+
+#     tp_times = tp_times + src_correction_p + node_corrections_p
+#     ts_times = ts_times + src_correction_s + node_corrections_s
+
+#     # Force the precise source node location analytically to exactly 0.0
+#     station_idx = np.argmin(distances_deg + np.abs(target_depths_km - source_depth_km))
+#     if distances_deg[station_idx] < 1e-4:
+#         tp_times[station_idx] = 0.0
+#         ts_times[station_idx] = 0.0
+
+#     return tp_times, ts_times
+
+
+# def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths, vp):
+#     """
+#     Computes travel times using ObsPy TauP by mapping a structural 3D point mesh
+#     to a temporary 2D distance-depth lookup table, then maps results back to xx.
+#     Integrates an angle-aware slant correction using the local ray parameter (p).
+    
+#     Parameters:
+#     -----------
+#     xx : numpy.ndarray
+#         Mesh points in local Cartesian coordinates (meters), shape (N, 3).
+#     loc_proj : numpy.ndarray
+#         Station/Source point in local Cartesian coordinates (meters).
+#     taup_model : obspy.taup.TauPyModel
+#         The active TauP velocity model instance.
+#     ftrns2 : callable
+#         Transformation function mapping Cartesian [X, Y, Z] to Geodetic LLA [Lat, Lon, Alt].
+#     depths : numpy.ndarray
+#         Array of true upward-increasing Cartesian velocity depths/elevations (meters).
+#     vp : numpy.ndarray
+#         Array of P-wave velocities (m/s) corresponding to the input depths.
+#     """
+#     from scipy.interpolate import RegularGridInterpolator, griddata
+#     import numpy as np
+    
+#     # =====================================================================
+#     # 1. Coordinate Mapping and Surface Geometries
+#     # =====================================================================
+#     X_lla = ftrns2(xx)
+#     station_lla = ftrns2(loc_proj)[0]
+
+#     # Safe fallback navigation to locate the internal v_mod data structure
+#     if hasattr(taup_model.model, 'v_mod'):
+#         v_mod = taup_model.model.v_mod
+#     elif hasattr(taup_model.model, 's_mod') and hasattr(taup_model.model.s_mod, 'v_mod'):
+#         v_mod = taup_model.model.s_mod.v_mod
+#     else:
+#         v_mod = taup_model.model
+
+#     # Extract surface velocities from 1D profile and convert to m/s
+#     vp_surface = v_mod.layers[0]['top_p_velocity'] * 1000.0
+#     vs_surface = v_mod.layers[0]['top_s_velocity'] * 1000.0
+
+#     # Track true elevations (Z)
+#     src_z = station_lla[2]
+#     grid_z = X_lla[:, 2]
+
+#     # Convert absolute coordinates to positive downward depths in km (clip anything above sea level)
+#     source_depth_km = np.maximum(0.0, -src_z) / 1000.0
+#     target_depths_km = np.maximum(0.0, -grid_z) / 1000.0
+
+#     # =====================================================================
+#     # 2. Vectorized True WGS84 Great-Circle Distance Calculation
+#     # =====================================================================
+#     lat1 = np.radians(station_lla[0])
+#     lon1 = np.radians(station_lla[1])
+#     lat2 = np.radians(X_lla[:, 0])
+#     lon2 = np.radians(X_lla[:, 1])
+
+#     dlon = lon2 - lon1
+#     cos_clat = np.sin(lat1) * np.sin(lat2) + np.cos(lat1) * np.cos(lat2) * np.cos(dlon)
+#     cos_clat = np.clip(cos_clat, -1.0, 1.0) 
+#     distances_deg = np.degrees(np.arccos(cos_clat))
+
+#     # =====================================================================
+#     # 3. Dynamic Step Size Estimation (~2% Relative Uncertainty Bound)
+#     # =====================================================================
+#     max_deg = distances_deg.max()
+#     min_dep, max_dep = target_depths_km.min(), target_depths_km.max()
+#     dep_range = max_dep - min_dep
+
+#     # Geographically accurate km-to-degree conversion via WGS84 Meridian Radius
+#     mean_lat_rad = np.radians(np.mean(X_lla[:, 0]))
+#     a = 6378.137          # Equatorial radius in km
+#     b = 6356.7523142      # Polar radius in km
+#     e_sq = (a**2 - b**2) / (a**2)
+#     radius_meridian = (a * (1.0 - e_sq)) / (1.0 - e_sq * np.sin(mean_lat_rad)**2)**(1.5)
+#     km_per_deg = (np.pi / 180.0) * radius_meridian
+
+#     max_dist_km = max_deg * km_per_deg
+
+#     # Un-skewed velocity mask matching the active mesh depth limits
+#     mesh_min_dep_m = max(0.0, min_dep * 1000.0)
+#     mesh_max_dep_m = max_dep * 1000.0
+    
+#     positive_input_depths = np.abs(depths)
+#     active_depth_mask = (positive_input_depths >= mesh_min_dep_m) & (positive_input_depths <= mesh_max_dep_m)
+    
+#     if np.sum(active_depth_mask) == 0:
+#         active_depth_mask = positive_input_depths <= np.max(positive_input_depths)
+        
+#     v_representative = float(np.median(vp[active_depth_mask])) / 1000.0  # Convert m/s to km/s
+#     v_representative = max(1.5, v_representative)
+
+#     target_error_fraction = 0.02  
+
+#     # Physics-based spatial step selection
+#     if max_dist_km > 0:
+#         ideal_dx_km = np.sqrt(8.0 * target_error_fraction * max_dist_km * v_representative)
+#         dist_step_km = np.clip(ideal_dx_km, 0.1, max_dist_km * 0.05)
+#         dist_step_deg = dist_step_km / km_per_deg
+#     else:
+#         dist_step_deg = 0.01
+
+#     if dep_range > 0:
+#         ideal_dz_km = np.sqrt(8.0 * target_error_fraction * dep_range * v_representative)
+#         depth_step_km = np.clip(ideal_dz_km, 0.1, dep_range * 0.05)
+#     else:
+#         depth_step_km = 0.5
+
+#     # Build lookup axes dynamically
+#     grid_deg = np.arange(0.0, max_deg + 2*dist_step_deg, dist_step_deg)
+#     grid_dep = np.arange(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, depth_step_km)
+
+#     if len(grid_deg) < 30:
+#         grid_deg = np.linspace(0.0, max_deg + 2*dist_step_deg, 30)
+#     if len(grid_dep) < 30:
+#         grid_dep = np.linspace(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, 30)
+
+#     # =====================================================================
+#     # 4. Initialize Lookup Tables with Infinity (Enforces Minimum First Arrivals)
+#     # =====================================================================
+#     lookup_tp = np.full((len(grid_deg), len(grid_dep)), np.inf)
+#     lookup_ts = np.full((len(grid_deg), len(grid_dep)), np.inf)
+#     lookup_pp = np.zeros((len(grid_deg), len(grid_dep)))  
+#     lookup_ps = np.zeros((len(grid_deg), len(grid_dep)))  
+
+#     # =====================================================================
+#     # 5. Populate 2D Lookup Grid via TauP Ray-Tracing
+#     # =====================================================================
+#     for i, deg in enumerate(grid_deg):
+#         if np.isclose(deg, 0.0, atol=1e-7):
+#             continue
+#         try:
+#             # CRITICAL FIX: UPPERCASE phase lists only to block lowercase (p, s)
+#             # upgoing reflections from forcing regional travel times down to zero.
+#             arrivals = taup_model.get_travel_times(
+#                 source_depth_in_km=source_depth_km,
+#                 distance_in_degree=deg,
+#                 phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg"],
+#                 receiver_depth_in_km=grid_dep      
+#             )
+            
+#             for arrival in arrivals:
+#                 j = np.argmin(np.abs(grid_dep - arrival.receiver_depth))
+                
+#                 # Guard against depth-aliasing outside bounds
+#                 if np.abs(grid_dep[j] - arrival.receiver_depth) > (depth_step_km * 1.0):
+#                     continue
+                    
+#                 phase = arrival.name.upper()
+#                 ray_param_sec_per_m = arrival.ray_param / 6371000.0
+                
+#                 # Ensure we strictly capture the absolute fastest first arrival path minimum
+#                 if phase in ["P", "PN", "PG"]:
+#                     if arrival.time < lookup_tp[i, j]:
+#                         lookup_tp[i, j] = arrival.time
+#                         lookup_pp[i, j] = ray_param_sec_per_m
+#                 elif phase in ["S", "SN", "SG"]:
+#                     if arrival.time < lookup_ts[i, j]:
+#                         lookup_ts[i, j] = arrival.time
+#                         lookup_ps[i, j] = ray_param_sec_per_m
+                        
+#         except Exception:
+#             continue
+
+#     # =====================================================================
+#     # 6. Explicit Source Position & Vertical Path Enforcement
+#     # =====================================================================
+#     idx_deg_zero = 0 
+#     for j, dep in enumerate(grid_dep):
+#         distance_km = np.abs(dep - source_depth_km)
+#         if distance_km < 1e-4:
+#             lookup_tp[idx_deg_zero, j] = 0.0
+#             lookup_ts[idx_deg_zero, j] = 0.0
+#         else:
+#             # Seed vertical un-reflected baseline paths
+#             t_p_vert = distance_km / (vp_surface / 1000.0)
+#             t_s_vert = distance_km / (vs_surface / 1000.0)
+            
+#             # Only update if it provides a faster valid pathway than ray tracing
+#             if t_p_vert < lookup_tp[idx_deg_zero, j]:
+#                 lookup_tp[idx_deg_zero, j] = t_p_vert
+#             if t_s_vert < lookup_ts[idx_deg_zero, j]:
+#                 lookup_ts[idx_deg_zero, j] = t_s_vert
+                
+#         lookup_pp[idx_deg_zero, j] = 0.0
+#         lookup_ps[idx_deg_zero, j] = 0.0
+
+#     # =====================================================================
+#     # 7. Physical 2D Coordinate-Aware Grid Interpolation (No Index Warping)
+#     # =====================================================================
+#     lookup_tp[np.isinf(lookup_tp)] = np.nan
+#     lookup_ts[np.isinf(lookup_ts)] = np.nan
+
+#     # Create a coordinate mesh grid matching true physical degrees and depths
+#     deg_mesh, dep_mesh = np.meshgrid(grid_deg, grid_dep, indexing='ij')
+
+#     for table in [lookup_tp, lookup_ts]:
+#         if np.any(np.isnan(table)):
+#             valid_mask = ~np.isnan(table)
+#             if np.sum(valid_mask) > 0:
+#                 # CRITICAL FIX: Feed griddata true physical coordinates (deg, km)
+#                 # to prevent vertical bleeding artifacts across axis scale changes.
+#                 coords_valid = np.column_stack((deg_mesh[valid_mask], dep_mesh[valid_mask]))
+#                 coords_missing = np.column_stack((deg_mesh[~valid_mask], dep_mesh[~valid_mask]))
+                
+#                 table[~valid_mask] = griddata(coords_valid, table[valid_mask], coords_missing, method='nearest')
+
+#     # =====================================================================
+#     # 8. High-Speed 2D Matrix Interpolation back to the structural 3D Mesh
+#     # =====================================================================
+#     interp_tp = RegularGridInterpolator((grid_deg, grid_dep), lookup_tp, method='linear', bounds_error=False, fill_value=None)
+#     interp_ts = RegularGridInterpolator((grid_deg, grid_dep), lookup_ts, method='linear', bounds_error=False, fill_value=None)
+#     interp_pp = RegularGridInterpolator((grid_deg, grid_dep), lookup_pp, method='linear', bounds_error=False, fill_value=None)
+#     interp_ps = RegularGridInterpolator((grid_deg, grid_dep), lookup_ps, method='linear', bounds_error=False, fill_value=None)
+
+#     query_points = np.column_stack((distances_deg, target_depths_km))
+    
+#     tp_times = interp_tp(query_points)
+#     ts_times = interp_ts(query_points)
+#     p_wave_slowness = interp_pp(query_points)
+#     s_wave_slowness = interp_ps(query_points)
+
+#     # =====================================================================
+#     # 9. Angle-Aware Mountain Topographic Time Corrections
+#     # =====================================================================
+#     p_factor_src = np.sqrt(np.maximum(0.0, (1.0 / vp_surface**2) - p_wave_slowness**2))
+#     s_factor_src = np.sqrt(np.maximum(0.0, (1.0 / vs_surface**2) - s_wave_slowness**2))
+    
+#     src_correction_p = np.maximum(0.0, src_z) * p_factor_src
+#     src_correction_s = np.maximum(0.0, src_z) * s_factor_src
+
+#     node_corrections_p = np.maximum(0.0, grid_z) * p_factor_src
+#     node_corrections_s = np.maximum(0.0, grid_z) * s_factor_src
+
+#     tp_times = tp_times + src_correction_p + node_corrections_p
+#     ts_times = ts_times + src_correction_s + node_corrections_s
+
+#     # Force the precise source node location analytically to exactly 0.0
+#     station_idx = np.argmin(distances_deg + np.abs(target_depths_km - source_depth_km))
+#     if distances_deg[station_idx] < 1e-4:
+#         tp_times[station_idx] = 0.0
+#         ts_times[station_idx] = 0.0
+
+#     return tp_times, ts_times
+
+
 def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths, vp):
     """
-    Computes travel times using ObsPy TauP by mapping a structural 3D point mesh
-    to a temporary 2D distance-depth lookup table, then maps results back to xx.
-    Integrates an angle-aware slant correction using the local ray parameter (p).
+    Computes travel times using ObsPy TauP by querying a high-density 1D surface 
+    distance array to guarantee unbroken first-arrivals, then applies a rigorous 
+    multi-layer 1D integration over the velocity profile to handle depth variations.
     """
-    from scipy.interpolate import RegularGridInterpolator
+    from scipy.interpolate import interp1d, interp2d
     import numpy as np
     
-    # 1. Map local Cartesian inputs to true geographic coordinates (LLA)
+    # =====================================================================
+    # 1. Coordinate Mapping and Geometries
+    # =====================================================================
     X_lla = ftrns2(xx)
     station_lla = ftrns2(loc_proj)[0]
 
-    # Safe fallback navigation to locate the internal v_mod data structure
+    # Navigate the internal TauP 1D model profile
     if hasattr(taup_model.model, 'v_mod'):
         v_mod = taup_model.model.v_mod
     elif hasattr(taup_model.model, 's_mod') and hasattr(taup_model.model.s_mod, 'v_mod'):
@@ -742,23 +1600,39 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     else:
         v_mod = taup_model.model
 
-    # Read the very first layer row (surface layer at 0.0 km depth) and convert to m/s
-    vp_surface = v_mod.layers[0]['top_p_velocity'] * 1000.0
-    vs_surface = v_mod.layers[0]['top_s_velocity'] * 1000.0
+    # Extract all layers from the 1D model structure
+    model_depths_km = []
+    model_vp_km_s = []
+    model_vs_km_s = []
+    
+    for layer in v_mod.layers:
+        model_depths_km.append(layer['top_depth'])
+        model_vp_km_s.append(layer['top_p_velocity'])
+        model_vs_km_s.append(layer['top_s_velocity'])
+    
+    # Append bottom depth boundary to close out vectors
+    model_depths_km.append(v_mod.layers[-1]['bot_depth'])
+    model_vp_km_s.append(v_mod.layers[-1]['bot_p_velocity'])
+    model_vs_km_s.append(v_mod.layers[-1]['bot_s_velocity'])
+    
+    model_depths_m = np.array(model_depths_km) * 1000.0
+    model_vp_m_s = np.array(model_vp_km_s) * 1000.0
+    model_vs_m_s = np.array(model_vs_km_s) * 1000.0
 
-    # Track true elevations (Z)
+    vp_surface = model_vp_m_s[0]
+    vs_surface = model_vs_m_s[0]
+
     src_z = station_lla[2]
     grid_z = X_lla[:, 2]
 
-    # Convert absolute coordinates to positive downward depths in km, clipping anything above 0
-    source_depth_km = np.maximum(0.0, -src_z) / 1000.0
-    target_depths_km = np.maximum(0.0, -grid_z) / 1000.0
+    source_depth_m = np.maximum(0.0, -src_z)
+    target_depths_m = np.maximum(0.0, -grid_z)
 
-    # 2. Vectorized True WGS84 Great-Circle Distance Calculation (in Degrees)
-    lat1 = np.radians(station_lla[0])
-    lon1 = np.radians(station_lla[1])
-    lat2 = np.radians(X_lla[:, 0])
-    lon2 = np.radians(X_lla[:, 1])
+    # =====================================================================
+    # 2. Vectorized True WGS84 Great-Circle Distance Calculation (Degrees)
+    # =====================================================================
+    lat1, lon1 = np.radians(station_lla[0]), np.radians(station_lla[1])
+    lat2, lon2 = np.radians(X_lla[:, 0]), np.radians(X_lla[:, 1])
 
     dlon = lon2 - lon1
     cos_clat = np.sin(lat1) * np.sin(lat2) + np.cos(lat1) * np.cos(lat2) * np.cos(dlon)
@@ -766,143 +1640,115 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     distances_deg = np.degrees(np.arccos(cos_clat))
 
     # =====================================================================
-    # 3. Uncertainty-Driven Dynamic Step Size Estimation (~2% Error Bound)
+    # 3. Dense 1D Surface Distance Grid Seeding
     # =====================================================================
-    max_deg = distances_deg.max()
-    min_dep, max_dep = target_depths_km.min(), target_depths_km.max()
-    dep_range = max_dep - min_dep
-
-    # Geographically accurate km-to-degree conversion via WGS84 Meridian Radius
-    mean_lat_rad = np.radians(np.mean(X_lla[:, 0]))
-    a = 6378.137          # Equatorial radius in km
-    b = 6356.7523142      # Polar radius in km
-    e_sq = (a**2 - b**2) / (a**2)
-    radius_meridian = (a * (1.0 - e_sq)) / (1.0 - e_sq * np.sin(mean_lat_rad)**2)**(1.5)
-    km_per_deg = (np.pi / 180.0) * radius_meridian
-
-    max_dist_km = max_deg * km_per_deg
-
-    # Un-skewed velocity mask matching the active mesh depth limits
-    mesh_min_dep_m = max(0.0, min_dep * 1000.0)
-    mesh_max_dep_m = max_dep * 1000.0
+    max_deg = max(0.01, distances_deg.max())
+    dense_deg_axis = np.linspace(0.0, max_deg * 1.05, 300)
     
-    positive_input_depths = np.abs(depths)
-    active_depth_mask = (positive_input_depths >= mesh_min_dep_m) & (positive_input_depths <= mesh_max_dep_m)
-    
-    if np.sum(active_depth_mask) == 0:
-        active_depth_mask = positive_input_depths <= np.max(positive_input_depths)
-        
-    v_representative = float(np.median(vp[active_depth_mask])) / 1000.0  # Convert m/s to km/s
-    v_representative = max(1.5, v_representative)
+    surf_tp = np.full_like(dense_deg_axis, np.inf)
+    surf_ts = np.full_like(dense_deg_axis, np.inf)
+    surf_pp = np.zeros_like(dense_deg_axis)
+    surf_ps = np.zeros_like(dense_deg_axis)
 
-    target_error_fraction = 0.02  
+    surf_tp[0] = 0.0
+    surf_ts[0] = 0.0
 
-    # Physics-based steps sizing
-    if max_dist_km > 0:
-        ideal_dx_km = np.sqrt(8.0 * target_error_fraction * max_dist_km * v_representative)
-        dist_step_km = np.clip(ideal_dx_km, 0.1, max_dist_km * 0.05)
-        dist_step_deg = dist_step_km / km_per_deg
-    else:
-        dist_step_deg = 0.01
-
-    if dep_range > 0:
-        ideal_dz_km = np.sqrt(8.0 * target_error_fraction * dep_range * v_representative)
-        depth_step_km = np.clip(ideal_dz_km, 0.1, dep_range * 0.05)
-    else:
-        depth_step_km = 0.5
-
-    # Build lookup axes dynamically
-    grid_deg = np.arange(0.0, max_deg + 2*dist_step_deg, dist_step_deg)
-    grid_dep = np.arange(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, depth_step_km)
-
-    if len(grid_deg) < 30:
-        grid_deg = np.linspace(0.0, max_deg + 2*dist_step_deg, 30)
-    if len(grid_dep) < 30:
-        grid_dep = np.linspace(max(0.0, min_dep - 2*depth_step_km), max_dep + 2*depth_step_km, 30)
-
-    # 5. Initialize Lookup Tables
-    lookup_tp = np.nan * np.zeros((len(grid_deg), len(grid_dep)))
-    lookup_ts = np.nan * np.zeros((len(grid_deg), len(grid_dep)))
-    lookup_pp = np.zeros((len(grid_deg), len(grid_dep)))  
-    lookup_ps = np.zeros((len(grid_deg), len(grid_dep)))  
-
-    # 6. Your original, working Vectorized Lookup Grid Population Loop
-    for i, deg in enumerate(grid_deg):
-        if np.isclose(deg, 0.0, atol=1e-7):
+    # =====================================================================
+    # 4. Pure Surface First-Arrival Ray Population
+    # =====================================================================
+    for i, deg in enumerate(dense_deg_axis):
+        if i == 0:
             continue
         try:
-            # Reverted to your exact working vectorized call structure
             arrivals = taup_model.get_travel_times(
-                source_depth_in_km=source_depth_km,
+                source_depth_in_km=source_depth_m / 1000.0,
                 distance_in_degree=deg,
-                phase_list=["p", "P", "s", "S"], 
-                receiver_depth_in_km=grid_dep      
+                phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg"]
             )
             
             for arrival in arrivals:
-                j = np.argmin(np.abs(grid_dep - arrival.receiver_depth))
                 phase = arrival.name.upper()
                 ray_param_sec_per_m = arrival.ray_param / 6371000.0
                 
-                if phase in ["P", "P"]:
-                    if np.isnan(lookup_tp[i, j]) or arrival.time < lookup_tp[i, j]:
-                        lookup_tp[i, j] = arrival.time
-                        lookup_pp[i, j] = ray_param_sec_per_m
-                elif phase in ["S", "S"]:
-                    if np.isnan(lookup_ts[i, j]) or arrival.time < lookup_ts[i, j]:
-                        lookup_ts[i, j] = arrival.time
-                        lookup_ps[i, j] = ray_param_sec_per_m
-                        
+                if phase in ["P", "PN", "PG"]:
+                    if arrival.time < surf_tp[i]:
+                        surf_tp[i] = arrival.time
+                        surf_pp[i] = ray_param_sec_per_m
+                elif phase in ["S", "SN", "SG"]:
+                    if arrival.time < surf_ts[i]:
+                        surf_ts[i] = arrival.time
+                        surf_ps[i] = ray_param_sec_per_m
         except Exception:
             continue
 
-    # === EXPLICIT SOURCE POSITION ENFORCEMENT ===
-    idx_deg_zero = 0 
-    for j, dep in enumerate(grid_dep):
-        if np.isclose(dep, source_depth_km, atol=depth_step_km * 0.5):
-            lookup_tp[idx_deg_zero, j] = 0.0
-            lookup_ts[idx_deg_zero, j] = 0.0
-        else:
-            distance_km = np.abs(dep - source_depth_km)
-            lookup_tp[idx_deg_zero, j] = distance_km / (vp_surface / 1000.0)
-            lookup_ts[idx_deg_zero, j] = distance_km / (vs_surface / 1000.0)
-        lookup_pp[idx_deg_zero, j] = 0.0
-        lookup_ps[idx_deg_zero, j] = 0.0
+    # Clean up unpopulated ray slots via 1D linear interpolation
+    for surf_table in [surf_tp, surf_ts]:
+        inf_mask = np.isinf(surf_table)
+        if np.any(inf_mask):
+            surf_table[inf_mask] = np.interp(
+                np.flatnonzero(inf_mask), np.flatnonzero(~inf_mask), surf_table[~inf_mask]
+            )
 
-    # 7. Clean up remaining NaN gaps safely
-    for table in [lookup_tp, lookup_ts]:
-        if np.any(np.isnan(table)):
-            mask = np.isnan(table)
-            table[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), table[~mask])
+    # Map surface values back to individual mesh point distances
+    interp_surf_tp = interp1d(dense_deg_axis, surf_tp, kind='linear', fill_value="extrapolate")
+    interp_surf_ts = interp1d(dense_deg_axis, surf_ts, kind='linear', fill_value="extrapolate")
+    interp_surf_pp = interp1d(dense_deg_axis, surf_pp, kind='linear', fill_value="extrapolate")
+    interp_surf_ps = interp1d(dense_deg_axis, surf_ps, kind='linear', fill_value="extrapolate")
 
-    # 8. High-Speed 2D Matrix Interpolation back to the structural 3D Mesh
-    interp_tp = RegularGridInterpolator((grid_deg, grid_dep), lookup_tp, method='linear', bounds_error=False, fill_value=None)
-    interp_ts = RegularGridInterpolator((grid_deg, grid_dep), lookup_ts, method='linear', bounds_error=False, fill_value=None)
-    interp_pp = RegularGridInterpolator((grid_deg, grid_dep), lookup_pp, method='linear', bounds_error=False, fill_value=None)
-    interp_ps = RegularGridInterpolator((grid_deg, grid_dep), lookup_ps, method='linear', bounds_error=False, fill_value=None)
+    tp_base = interp_surf_tp(distances_deg)
+    ts_base = interp_surf_ts(distances_deg)
+    p_slowness = interp_surf_pp(distances_deg)
+    s_slowness = interp_surf_ps(distances_deg)
 
-    query_points = np.column_stack((distances_deg, target_depths_km))
-    
-    tp_times = interp_tp(query_points)
-    ts_times = interp_ts(query_points)
-    p_wave_slowness = interp_pp(query_points)
-    s_wave_slowness = interp_ps(query_points)
+    # =====================================================================
+    # 5. Rigorous Multi-Layer Vertical Integration Correction
+    # =====================================================================
+    # We evaluate the cumulative vertical integral layer-by-layer for every single node point
+    subsurface_correction_p = np.zeros_like(target_depths_m)
+    subsurface_correction_s = np.zeros_like(target_depths_m)
 
-    # --- ANGLE-AWARE MOUNTAIN TOPOGRAPHIC TIME CORRECTIONS ---
-    p_factor_src = np.sqrt(np.maximum(0.0, (1.0 / vp_surface**2) - p_wave_slowness**2))
-    s_factor_src = np.sqrt(np.maximum(0.0, (1.0 / vs_surface**2) - s_wave_slowness**2))
-    
-    src_correction_p = np.maximum(0.0, src_z) * p_factor_src
-    src_correction_s = np.maximum(0.0, src_z) * s_factor_src
+    for idx in range(len(model_depths_m) - 1):
+        z_top = model_depths_m[idx]
+        z_bot = model_depths_m[idx + 1]
+        v_p_layer = model_vp_m_s[idx]
+        v_s_layer = model_vs_m_s[idx]
 
-    node_corrections_p = np.maximum(0.0, grid_z) * p_factor_src
-    node_corrections_s = np.maximum(0.0, grid_z) * s_factor_src
+        # Determine which nodes have target depths that intercept this layer interval
+        active_nodes = target_depths_m > z_top
+        if not np.any(active_nodes):
+            continue
 
-    tp_times = tp_times + src_correction_p + node_corrections_p
-    ts_times = ts_times + src_correction_s + node_corrections_s
+        # Calculate the vertical distance segment traversing this layer block
+        thickness_in_layer = np.minimum(target_depths_m[active_nodes], z_bot) - z_top
 
-    # Force the source location analytically to 0.0 to prevent interpolation bleeding.
-    station_idx = np.argmin(distances_deg + np.abs(target_depths_km - source_depth_km))
+        # Evaluate the dynamic vertical slowness components (eta)
+        eta_p = np.sqrt(np.maximum(0.0, (1.0 / v_p_layer**2) - p_slowness[active_nodes]**2))
+        eta_s = np.sqrt(np.maximum(0.0, (1.0 / v_s_layer**2) - s_slowness[active_nodes]**2))
+
+        # Add the integrated time chunk to the running node totals
+        subsurface_correction_p[active_nodes] += thickness_in_layer * eta_p
+        subsurface_correction_s[active_nodes] += thickness_in_layer * eta_s
+
+    # =====================================================================
+    # 6. Station & Topography Angular Multipliers (Using Surface Velocities)
+    # =====================================================================
+    p_factor_surf = np.sqrt(np.maximum(0.0, (1.0 / vp_surface**2) - p_slowness**2))
+    s_factor_surf = np.sqrt(np.maximum(0.0, (1.0 / vs_surface**2) - s_slowness**2))
+
+    src_correction_p = np.maximum(0.0, src_z) * p_factor_surf
+    src_correction_s = np.maximum(0.0, src_z) * s_factor_surf
+
+    node_topo_p = np.maximum(0.0, grid_z) * p_factor_surf
+    node_topo_s = np.maximum(0.0, grid_z) * s_factor_surf
+
+    # =====================================================================
+    # 7. Consolidated Assembly
+    # =====================================================================
+    tp_times = tp_base + src_correction_p + node_topo_p + subsurface_correction_p
+    ts_times = ts_base + src_correction_s + node_topo_s + subsurface_correction_s
+
+    # Secure source coordinate anchor origin cleanly at 0.0
+    station_idx = np.argmin(distances_deg + np.abs(target_depths_m - source_depth_m))
     if distances_deg[station_idx] < 1e-4:
         tp_times[station_idx] = 0.0
         ts_times[station_idx] = 0.0
