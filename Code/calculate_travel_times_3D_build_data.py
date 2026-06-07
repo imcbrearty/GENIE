@@ -850,8 +850,8 @@ for sta_ind in ind_use:
 				span_x1 = np.minimum(4.0 * opt_R_max2, regional_span_x1)
 				span_x2 = np.minimum(4.0 * opt_R_max2, regional_span_x2)
 				span_x3 = np.minimum(4.0 * opt_R_max2, regional_span_x3)
-
-
+				
+	
 		# # 4. Derive grid counts ensuring dx == dy == dz (Perfect cubes)
 		# n1_target = int(np.ceil(span_x1 / dx_res)) + 8
 		# n2_target = int(np.ceil(span_x2 / dx_res)) + 8
@@ -861,7 +861,7 @@ for sta_ind in ind_use:
 		# n1 = n1_target + 1 if n1_target % 2 == 0 else n1_target
 		# n2 = n2_target + 1 if n2_target % 2 == 0 else n2_target
 		# n3 = n3_target + 1 if n3_target % 2 == 0 else n3_target
-
+		
 
 		# 4. Derive grid counts ensuring dx == dy == dz (Perfect cubes)
 		n1_target = int(np.ceil(span_x1 / dx_res)) + 8
@@ -1002,7 +1002,7 @@ for sta_ind in ind_use:
 			Vp[mountain_mask] = vp_surface_val
 			Vs[mountain_mask] = vs_surface_val
 
-
+		
 		else:
 
 			Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, [dx_res, dx_res, dz_res], vel_type=vel_model_type)
@@ -1020,7 +1020,7 @@ for sta_ind in ind_use:
 		assert(np.isclose(results[1][src_index,0], 0.0, atol=1e-2))
 
 
-
+		
 
 		sample_points = True
 		if sample_points == True:
