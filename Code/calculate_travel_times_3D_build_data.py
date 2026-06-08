@@ -719,10 +719,10 @@ if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.np
 		
 	## Check if stations are beneath surface
 	tol_elev_val = 150.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
-	tree = cKDTree(ftrns1(surface_profile))
+	topo_tree = cKDTree(ftrns1(surface_profile))
 	unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
-	dist_near = tree.query(ftrns1(locs))[0]
-	dist_perturb = tree.query(unit_out)[0]
+	dist_near = topo_tree.query(ftrns1(locs))[0]
+	dist_perturb = topo_tree.query(unit_out)[0]
 	iabove_surface = np.where(dist_perturb > dist_near)[0]
 	if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - surface_profile[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
 
@@ -1009,6 +1009,31 @@ for sta_ind in ind_use:
 			Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, [dx_res, dx_res, dz_res], vel_type=vel_model_type)
 			print('dx_v %0.4f %0.4f %0.4f \n'%(dx_res, dx_res, dz_res))
 			# print([dx_res, dx_res, dz_res])
+
+			# --- INSERT THE TOPOGRAPHY MASK HERE ---
+			if use_topography and ('surface_profile' in locals() or 'surface_profile' in globals()):
+			    print("--> Applying global topography envelope to Eikonal computational grid...")
+			    
+			    grid_lla = ftrns2(xx)
+			    grid_depths = grid_lla[:, 2] # Depth/Elevation of grid nodes in meters
+			    
+			    # Map horizontal grid positions to the surface plane
+			    grid_horizontal_proj = ftrns1(np.concatenate((grid_lla[:, 0:2], np.zeros((len(grid_lla), 1))), axis=1))
+			    
+			    # Safely query our unique topo_tree backup
+			    _, surface_match_indices = topo_tree.query(grid_horizontal_proj)
+			    true_surface_elevations = surface_profile[surface_match_indices, 2]
+			    
+			    # Find air nodes above ground
+			    air_mask = grid_depths > true_surface_elevations
+			    
+			    if np.any(air_mask):
+			        # Pad to your crustal velocity baselines (keeps Eikonal gradients stable)
+			        Vp[air_mask] = vp[0] if vel_model_type == 1 else 4571.0
+			        Vs[air_mask] = vs[0] if vel_model_type == 1 else 2648.0
+			        print(f"    Forced {np.sum(air_mask)} atmospheric grid nodes to surface velocity baselines.")
+			# ----------------------------------------
+
 
 			# Run parallel Eikonal solver explicitly with matrix grids
 			tp_grid, ts_grid = compute_travel_times_parallel(xx, loc_proj, Vp, Vs, [dx_res, dx_res, dz_res], x11, x12, x13, num_cores=num_cores)
