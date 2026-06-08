@@ -302,13 +302,13 @@ if train_travel_time_neural_network == True:
 		
 
 	# Concatenate training dataset
-	X_samples = np.vstack(X_samples)
+	X_samples = np.vstack(X_samples).astype(np.float32)
 	if compute_reference_times == True:
-		Tp_samples = np.hstack(Tp_samples)
-		Ts_samples = np.hstack(Ts_samples)
-	Locs_samples = np.vstack(Locs_samples)
-	Vp_samples = np.hstack(Vp_samples)
-	Vs_samples = np.hstack(Vs_samples)
+		Tp_samples = np.hstack(Tp_samples).astype(np.float32)
+		Ts_samples = np.hstack(Ts_samples).astype(np.float32)
+	Locs_samples = np.vstack(Locs_samples).astype(np.float32)
+	Vp_samples = np.hstack(Vp_samples).astype(np.float32)
+	Vs_samples = np.hstack(Vs_samples).astype(np.float32)
 	locs_unique = np.unique(Locs_samples, axis = 0)
 	# assert(len(locs_unique) == len(locs))
 	assert(cKDTree(ftrns1(locs_unique)).query(ftrns1(locs))[0].max() < 1e-2)
@@ -329,27 +329,27 @@ if train_travel_time_neural_network == True:
 	# Locs_unique = np.unique(Locs_samples, axis = 0)
 
 	# Concatenate boundary training data
-	X_samples_boundary = np.vstack(X_samples_boundary)
-	Locs_samples_boundary = np.vstack(Locs_samples_boundary)
-	Vp_samples_boundary = np.hstack(Vp_samples_boundary)
-	Vs_samples_boundary = np.hstack(Vs_samples_boundary)
+	X_samples_boundary = np.vstack(X_samples_boundary).astype(np.float32)
+	Locs_samples_boundary = np.vstack(Locs_samples_boundary).astype(np.float32)
+	Vp_samples_boundary = np.hstack(Vp_samples_boundary).astype(np.float32)
+	Vs_samples_boundary = np.hstack(Vs_samples_boundary).astype(np.float32)
 	n_dataset_boundary = len(X_samples_boundary)
 
 	# Concatenate boundary validation data
-	X_samples_boundary_vald = np.vstack(X_samples_boundary_vald)
-	Locs_samples_boundary_vald = np.vstack(Locs_samples_boundary_vald)
-	Vp_samples_boundary_vald = np.hstack(Vp_samples_boundary_vald)
-	Vs_samples_boundary_vald = np.hstack(Vs_samples_boundary_vald)
+	X_samples_boundary_vald = np.vstack(X_samples_boundary_vald).astype(np.float32)
+	Locs_samples_boundary_vald = np.vstack(Locs_samples_boundary_vald).astype(np.float32)
+	Vp_samples_boundary_vald = np.hstack(Vp_samples_boundary_vald).astype(np.float32)
+	Vs_samples_boundary_vald = np.hstack(Vs_samples_boundary_vald).astype(np.float32)
 	n_dataset_boundary_vald = len(X_samples_boundary_vald)
 
 	# Concatenate validation dataset
-	X_samples_vald = np.vstack(X_samples_vald)
+	X_samples_vald = np.vstack(X_samples_vald).astype(np.float32)
 	if compute_reference_times == True:
-		Tp_samples_vald = np.hstack(Tp_samples_vald)
-		Ts_samples_vald = np.hstack(Ts_samples_vald)
-	Locs_samples_vald = np.vstack(Locs_samples_vald)
-	Vp_samples_vald = np.hstack(Vp_samples_vald)
-	Vs_samples_vald = np.hstack(Vs_samples_vald)
+		Tp_samples_vald = np.hstack(Tp_samples_vald).astype(np.float32)
+		Ts_samples_vald = np.hstack(Ts_samples_vald).astype(np.float32)
+	Locs_samples_vald = np.vstack(Locs_samples_vald).astype(np.float32)
+	Vp_samples_vald = np.hstack(Vp_samples_vald).astype(np.float32)
+	Vs_samples_vald = np.hstack(Vs_samples_vald).astype(np.float32)
 
 
 	n_dataset = len(X_samples)
