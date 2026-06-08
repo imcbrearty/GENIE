@@ -4526,7 +4526,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
         return torch.Tensor(np.linalg.norm(np.expand_dims(lla2ecef(srcs.cpu().detach().numpy()), axis = 1) - np.expand_dims(lla2ecef(locs.cpu().detach().numpy()), axis = 0), axis = 2, keepdims = True)/Vs).to(srcs.device)
 
 
-    domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20, device = device)
+    domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20, use_global = use_global, device = device)
     lat_range, lon_range = domain['lat_range'], domain['lon_range']
 
 
@@ -5822,7 +5822,7 @@ def build_sampling_grid(lat_range, lon_range, lat_range_extend, lon_range_extend
     return x_grid
 
 
-def estimate_kernel_widths(domain, station_locs, z_range = (-40000, 2000), Vs = 3500.0, noise_level = 0.02, n_srcs = 250, n_test_per_src = 10000, n_neighbors_trgt = 20, device = 'cpu'):
+def estimate_kernel_widths1(domain, station_locs, z_range = (-40000, 2000), Vs = 3500.0, noise_level = 0.02, n_srcs = 250, n_test_per_src = 10000, n_neighbors_trgt = 20, device = 'cpu'):
     """
     Computes Gaussian coherency widths (W_phys, W_t) using a vectorized batch approach.
     Adaptive for any scale (Borehole to Global) with zero hard-coded temporal floors.
@@ -5958,6 +5958,160 @@ def estimate_kernel_widths(domain, station_locs, z_range = (-40000, 2000), Vs = 
         }
     }
 
+
+def estimate_kernel_widths(domain, station_locs, z_range = (-40000, 2000), Vs = 3500.0, noise_level = 0.02, n_srcs = 250, n_test_per_src = 10000, n_neighbors_trgt = 20, use_global = False, device = 'cpu'):
+    """
+    Computes Gaussian coherency widths (W_phys, W_t) using a vectorized batch approach.
+    Adaptive for any scale (Borehole to Global) with zero hard-coded temporal floors.
+    
+    Inputs:
+        domain: dict with 'lat_range', 'lon_range', 'is_wrapped'
+        station_locs: (n_stas, 3) LLA array
+        Vs: Reference velocity (m/s)
+        noise_level: Pick uncertainty (e.g., 0.02 for 2%)
+        use_global: If True, filters out antipodal/distant stations adaptively.
+    """
+    import torch
+    import numpy as np
+    from scipy.spatial.distance import cdist
+
+    lat_r, lon_r = domain['lat_range'], domain['lon_range']
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+    # Vectorized travel time helper
+    def trv(locs, srcs, Vs = 3500.0):
+        return torch.Tensor(
+            np.linalg.norm(
+                np.expand_dims(lla2ecef(srcs.cpu().detach().numpy()), axis = 1) - 
+                np.expand_dims(lla2ecef(locs.cpu().detach().numpy()), axis = 0), 
+                axis = 2, keepdims = True
+            ) / Vs
+        ).to(device)
+
+    # 1. Sample Reference Sources (S, 3)
+    if domain['is_wrapped']:
+        width = (lon_r[1] + 360) - lon_r[0]
+        lons = np.mod(np.random.uniform(lon_r[0], lon_r[0] + width, n_srcs), 360)
+        lons = ((lons + 180) % 360) - 180
+    else:
+        lons = np.random.uniform(lon_r[0], lon_r[1], n_srcs)
+        
+    lats = np.random.uniform(lat_r[0], lat_r[1], n_srcs)
+    zs = np.random.uniform(z_range[0], z_range[1], n_srcs)
+    src_refs_lla = np.stack([lats, lons, zs], axis=1)
+
+    st_ecef = lla2ecef(station_locs)
+    ref_ecef = lla2ecef(src_refs_lla)
+
+    # 2. Calculate Adaptive Search Limits per Source
+    all_dists = cdist(ref_ecef, st_ecef) # (S, N_stas)
+    
+    nearest_idx = np.zeros((n_srcs, n_neighbors_trgt), dtype=int)
+    local_scales = np.zeros(n_srcs)
+    time_limits = np.zeros(n_srcs)
+    cluster_apertures = []
+    
+    for s in range(n_srcs):
+        s_all_dists = all_dists[s]
+        
+        # --- ADAPTIVE GLOBAL FILTERING (No Hardcoded Limits) ---
+        if use_global:
+            # Dynamically find the distance threshold for the closest 10% of the network
+            # This filters out antipodal/far-mantle noise without dropping regional clusters
+            dist_threshold = np.quantile(s_all_dists, 0.10)
+            valid_indices = np.where(s_all_dists <= dist_threshold)[0]
+            
+            # Fallback constraint: Ensure we have enough stations to pull our target count
+            if len(valid_indices) < n_neighbors_trgt:
+                valid_indices = np.arange(len(s_all_dists))
+        else:
+            valid_indices = np.arange(len(s_all_dists))
+            
+        # Extract and sort only from the filtered valid subset
+        filtered_dists = s_all_dists[valid_indices]
+        local_sort = np.argsort(filtered_dists)[:n_neighbors_trgt]
+        chosen_idx = valid_indices[local_sort]
+        nearest_idx[s] = chosen_idx
+        
+        # --- Metric Extraction ---
+        s_dists = s_all_dists[chosen_idx]
+        local_scales[s] = s_dists[min(4, len(s_dists)-1)]
+        
+        # Calculate aperture based on the local array cluster footprint rather than global bounds
+        cluster_stas = st_ecef[chosen_idx]
+        cluster_apertures.append(cdist(cluster_stas, cluster_stas).max())
+        
+        # Temporal: Moveout across the local station cluster
+        moveout = (s_dists[-1] - s_dists[0]) / Vs
+        sigma_t_expected = np.mean(s_dists / Vs) * noise_level
+        time_limits[s] = max(moveout * 0.5, sigma_t_expected * 5.0)
+
+    # Median cluster footprint behaves as our real physical aperture
+    aperture_m = np.median(cluster_apertures)
+
+    # 3. Generate Batched Perturbations
+    space_offs = np.random.uniform(-1, 1, (n_srcs, n_test_per_src, 3)) * local_scales[:, None, None]
+    time_offs = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * time_limits[:, None]
+    
+    test_ecef_flat = (ref_ecef[:, None, :] + space_offs).reshape(-1, 3)
+    test_lla_flat = ecef2lla(test_ecef_flat)
+
+    # 4. Execute Vectorized trv Loops
+    t_obs_list = []
+    t_test_list = []
+    
+    for s in range(n_srcs):
+        s_stas = station_locs[nearest_idx[s]]
+        t_r = trv(torch.Tensor(s_stas).to(device), torch.Tensor(src_refs_lla[s:s+1]).to(device)).cpu().detach().numpy()
+        t_obs_list.append(t_r + np.random.normal(0, t_r * noise_level))
+        
+        t_t = trv(torch.Tensor(s_stas).to(device), torch.Tensor(test_lla_flat[s*n_test_per_src : (s+1)*n_test_per_src]).to(device)).cpu().detach().numpy()
+        t_test_list.append(t_t)
+
+    t_obs = np.concatenate(t_obs_list, axis=0) # (S, 20, P)
+    t_test = np.stack(t_test_list, axis=0)    # (S, T, 20, P)
+
+    # 5. Vectorized Chi-Square Misfit
+    residuals = t_obs[:, None, :, :] - (t_test + time_offs[:, :, None, None])
+    sigma_d = np.maximum(t_test * noise_level, 1e-6)
+    chi_error = np.sqrt(np.mean((residuals / sigma_d)**2, axis=(2, 3))) # (S, T)
+
+    # 6. Extract Widths
+    dist_s = np.linalg.norm(space_offs, axis=2) # (S, T)
+    dist_t = np.abs(time_offs) # (S, T)
+
+    mask = (chi_error > 0.1) & (chi_error < 5.0)
+    w_phys = np.median(dist_s[mask] / chi_error[mask])
+    w_t = np.median(dist_t[mask] / chi_error[mask])
+
+    rel_scale = w_phys / aperture_m
+    print(f"\n" + "="*55)
+    print(f"BATCHED ADAPTIVE COHERENCY ESTIMATION")
+    print(f"="*55)
+    print(f"Total Points Sampled:   {n_srcs * n_test_per_src}")
+    print(f"Spatial Width (W_phys): {w_phys/1000:.4f} km")
+    print(f"Temporal Width (W_t):   {w_t:.4f} s")
+    print(f"Computed Aperture:      {aperture_m/1000:.2f} km")
+    print(f"Relative Resolution:    {rel_scale:.4%}")
+    print(f"Noise Level Used:       {noise_level*100:.1f}%")
+    print(f"Global Filtering:       {'ACTIVE (10% Quantile)' if use_global else 'OFF (Regional Mode)'}")
+    
+    if rel_scale > 0.4:
+        print("!! WARNING: Broad coherency. Network may be critically sparse.")
+    elif rel_scale < 0.001:
+        print(">> NOTE: Highly localized resolution. Consider high-res voxels.")
+    print("="*55 + "\n")
+
+    return {
+        "W_phys_m": w_phys,
+        "W_t_s": w_t,
+        "rel_scale": rel_scale,
+        "metadata": {
+            "n_srcs": n_srcs,
+            "n_test_per_src": n_test_per_src,
+            "Vs": Vs
+        }
+    }
 
 
 # def probe_network_sidelobes_geodetic1(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
