@@ -524,7 +524,7 @@ def regular_sobolov(N, lat_range = None, lon_range = None, depth_range = None, t
             mask_points = mask_points[random_vals < keep_prob]
 
 
-        return x_grid, []
+        return x_grid, np.ones(len(x_grid))
 
 
 
