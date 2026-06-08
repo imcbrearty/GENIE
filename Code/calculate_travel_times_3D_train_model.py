@@ -116,7 +116,7 @@ def profile_seismic_dataset(name, X, Locs, Vp, Vs, Tp=None, Ts=None):
 		# Look for zero/negative values which ruin division or cause Eikonal singularity
 		zero_times = (Tp[sample_idx] <= 0).sum() + (Ts[sample_idx] <= 0).sum()
 		if zero_times > 0:
-			print(f"  ❌ WARNING: Detected {zero_times} travel time values <= 0.0 seconds!")
+			print(f"  WARNING: Detected {zero_times} travel time values <= 0.0 seconds!")
 			
 		print(f"  Sampled Avg Distance  : {distances.mean()/1000.0:.2f} km")
 		print(f"  Sampled Avg Apparent P: {(distances / np.clip(Tp[sample_idx], 1e-6, None)).mean():.2f} m/s")
