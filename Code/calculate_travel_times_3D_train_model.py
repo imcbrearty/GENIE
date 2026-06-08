@@ -38,87 +38,24 @@ def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908
 
 	return torch.cat((x.view(-1,1), y.view(-1,1), z.view(-1,1)), dim = 1)
 
-# def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores = 10):
 
-# 	def step_test(args):
+class Laplacian(MessagePassing):
 
-# 		yval, dx_v, h, h1, x11, x12, x13, ind = args
-# 		print(yval.shape); print(x11.shape); print(x12.shape); print(x13.shape)
+	def __init__(self, lap, lap_w):
+		super(Laplacian, self).__init__('sum', node_dim = 0) # consider mean
+		self.lap = lap # edges
+		self.lap_w = lap_w.reshape(-1,1) # edge weights
 
-# 		phi_xy = (x11 - yval[0,0])**2 + (x12 - yval[0,1])**2
-# 		phi_v = (x13 - yval[0,2])**2
+	def forward(self, x):
 
-# 		phi = np.sqrt(phi_xy + phi_v)
-# 		phi = phi - phi.min() - 100.0
+		## Assumes x is a square matrix
+		## (what about batch?, e.g. multiple stations)
 
-# 		v = np.copy(h).reshape(x11.shape) # correct?
-# 		v1 = np.copy(h1).reshape(x11.shape) # correct?
+		return self.propagate(self.lap, x = x, edge_attr = self.lap_w)
 
-# 		t = skfmm.travel_time(phi, v, dx = [dx_v[0], dx_v[1], dx_v[2]])
-# 		t1 = skfmm.travel_time(phi, v1, dx = [dx_v[0], dx_v[1], dx_v[2]])
+	def message(self, x_j, edge_attr):
 
-# 		return t, t1, phi, ind
-
-# 	tp_times, ts_times = np.nan*np.zeros((h.shape[0], xx_r.shape[0])), np.nan*np.zeros((h.shape[0], xx_r.shape[0]))
-
-# 	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [xx_r[i,:][None,:], dx_v, h, h1, x11, x12, x13, i] ) for i in range(xx_r.shape[0]))
-
-# 	for i in range(xx_r.shape[0]):
-
-# 		## Make sure to write results to correct station, based on ind
-# 		tp_times[:,results[i][-1]] = results[i][0].reshape(-1)
-# 		ts_times[:,results[i][-1]] = results[i][1].reshape(-1)
-
-# 	return tp_times, ts_times
-
-# def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = 10):
-
-# 	def step_test(args):
-
-# 		x1, x2, x3, tp, ts, X, ftrns1, ind = args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]
-
-# 		mp = RegularGridInterpolator((x1, x2, x3), tp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-# 		ms = RegularGridInterpolator((x1, x2, x3), ts.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-# 		tp_val = mp(ftrns1(X))
-# 		ts_val = ms(ftrns1(X))
-
-# 		print('Finished interpolation %d'%ind)
-		
-# 		return tp_val, ts_val, ind
-
-# 	n_grid = X.shape[0]
-# 	n_sta = Tp.shape[1]
-# 	Tp_interp = np.zeros((n_grid, n_sta))
-# 	Ts_interp = np.zeros((n_grid, n_sta))
-# 	assert(Tp_interp.shape[1] == Ts_interp.shape[1])
-
-# 	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [x1, x2, x3, Tp[:,i], Ts[:,i], X, lambda x: ftrns1(x), i] ) for i in range(n_sta))
-
-# 	for i in range(n_sta):
-
-# 		## Make sure to write results to correct station, based on ind
-# 		Tp_interp[:,results[i][2]] = results[i][0].reshape(-1)
-# 		Ts_interp[:,results[i][2]] = results[i][1].reshape(-1)
-
-# 	return Tp_interp, Ts_interp
-
-# class Laplacian(MessagePassing):
-
-# 	def __init__(self, lap, lap_w):
-# 		super(Laplacian, self).__init__('sum', node_dim = 0) # consider mean
-# 		self.lap = lap # edges
-# 		self.lap_w = lap_w.reshape(-1,1) # edge weights
-
-# 	def forward(self, x):
-
-# 		## Assumes x is a square matrix
-# 		## (what about batch?, e.g. multiple stations)
-
-# 		return self.propagate(self.lap, x = x, edge_attr = self.lap_w)
-
-# 	def message(self, x_j, edge_attr):
-
-# 		return edge_attr*x_j
+		return edge_attr*x_j
 
 # Load configuration from YAML
 config = load_config('config.yaml')
@@ -192,185 +129,10 @@ ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # map (lat,lon,depth) into l
 ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)  # invert ftrns1
 
 
-# lat_grid = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg)
-# lon_grid = np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
-# depth_grid = np.arange(depth_range[0], depth_range[1] + dx_depth, dx_depth)
-	
-# replace_zero = True
-# x11, x12, x13 = np.meshgrid(lat_grid, lon_grid, depth_grid)
-# X = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-
-# query_proj = ftrns1(X)
-
-# ## Check number of workers available. Note: should apply parallel threads for running over stations.
-# print('\n Total possible threads %d'%multiprocessing.cpu_count())
-# print(f'Actually using {num_cores} cores')
-
-# ## Boundary of domain, in Cartesian coordinates
-# elev = locs[:,2].max() + 1000.0
-# z1 = np.array([lat_range_extend[0], lon_range_extend[0], elev])[None,:]
-# z2 = np.array([lat_range_extend[0], lon_range_extend[1], elev])[None,:]
-# z3 = np.array([lat_range_extend[1], lon_range_extend[1], elev])[None,:]
-# z4 = np.array([lat_range_extend[1], lon_range_extend[0], elev])[None,:]
-# z = np.concatenate((z1, z2, z3, z4), axis = 0)
-# zz = ftrns1(z)
-
-# ip = np.where((query_proj[:,0] >= zz[:,0].min())*(query_proj[:,0] <= zz[:,0].max())*(query_proj[:,1] >= zz[:,1].min())*(query_proj[:,1] <= zz[:,1].max()))[0]
-# ys = query_proj[ip,:] # not actually used for anything (non-trivial.)
-
-# ## If the queries are out of bounts when calling 
-# x1 = np.arange(ys[:,0].min() - 20*dx, ys[:,0].max() + 20*dx, dx)
-# x2 = np.arange(ys[:,1].min() - 20*dx, ys[:,1].max() + 20*dx, dx)
-# x3 = np.arange(ys[:,2].min() - 4*dx, ys[:,2].max() + 4*dx, dx)
-# x11, x12, x13 = np.meshgrid(x1, x2, x3)
-# xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-# dx_v = np.array([np.diff(x1)[0], np.diff(x2)[0], np.diff(x3)[0]])
-
-# Xmin = xx.min(0)
-# Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
-# Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
-
-# ## Load velocity model
-# if vel_model_type == 1:
-# 	vp = np.array(config['velocity_model']['Vp'])
-# 	vs = np.array(config['velocity_model']['Vs'])
-# 	depths = np.array(config['velocity_model']['Depths'])
-# 	iarg = np.argsort(depths)
-# 	# z = np.load(path_to_file + '1d_velocity_model.npz')
-# 	# depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
-# 	# z.close()
-	
-# 	depths_fine = np.arange(depths.min(), depths.max() + dx_depth/10.0, dx_depth/10.0)
-# 	vp_fine = np.interp(depths_fine, depths[iarg], vp[iarg])
-# 	vs_fine = np.interp(depths_fine, depths[iarg], vs[iarg])
-
-# 	tree = cKDTree(depths_fine.reshape(-1,1))
-# 	ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
-# 	Vp = vp_fine[ip_nearest]
-# 	Vs = vs_fine[ip_nearest]
-
-# elif vel_model_type == 2:
-
-# 	z = np.load(path_to_file + '3d_velocity_model.npz')
-# 	x_vel, vp_vel, vs_vel = z['X'], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
-# 	z.close()
-
-# 	tree = cKDTree(ftrns1(x_vel)) ## Assigns the velocity values to the computation grid (xx) using nearest neighbors (e.g., the input 3D model can include any number of points, anywhere, and interpolation will fill in the values elsewhere)
-# 	ip_nearest = tree.query(xx)[1]
-# 	Vp = vp_vel[ip_nearest]
-# 	Vs = vs_vel[ip_nearest]
-
-# elif vel_model_type == 3:
-
-# 	z = h5py.File(path_to_file + 'Vel_models.hdf5', 'r') ## Using a series of 1d velocity models for different areas
-# 	Depths_l, Coor_l, Vp_l, Vs_l, Radius_l = [], [], [], [], []
-# 	keys = list(z.keys())
-# 	n_profiles = len(list(filter(lambda x: 'Depths' in x, keys)))
-# 	for n in range(n_profiles):
-# 		Depths_l.append(z['Depths_%d'%n][:])
-# 		Vp_l.append(z['Vp_%d'%n][:])
-# 		Vs_l.append(z['Vs_%d'%n][:])
-# 		Coor_l.append(z['Coor_%d'%n][:])
-# 		Radius_l.append(z['Radius_%d'%n][:])
-# 	z.close()
-
-# 	interp_type = 1
-# 	if interp_type == 1: ## Use depth coordinates with each coor point
-# 		dist_max = np.inf*np.ones(len(xx))
-# 		xx_ind = (-1*np.ones(len(xx))).astype('int')
-# 		xx_depth_ind = (-1*np.ones(len(xx))).astype('int')
-# 		Vp = np.inf*np.ones(len(xx))
-# 		Vs = np.inf*np.ones(len(xx))
-# 		for i in range(len(Depths_l)):
-# 			coors_slice = Coor_l[i].repeat(len(Depths_l[i]), axis = 0)
-# 			coors_slice = np.concatenate((coors_slice, np.tile(Depths_l[i].reshape(-1,1), (len(Coor_l[i]), 1))), axis = 1)
-# 			tree = cKDTree(ftrns1(coors_slice))
-# 			dist_v = tree.query(xx) # [0]/np.mean(Radius_l[i]*1000.0)
-# 			dist, dist_ind = dist_v[0]/np.mean(Radius_l[i]*1000.0), dist_v[1]
-# 			tree_depths = cKDTree(Depths_l[i].reshape(-1,1))
-# 			i1 = np.where(dist < dist_max)[0]
-# 			imatch_depth = tree_depths.query(coors_slice[dist_ind[i1],2].reshape(-1,1))[1]
-
-# 			## Update nearest matching point
-# 			dist_max[i1] = dist[i1]
-# 			xx_ind[i1] = i
-# 			xx_depth_ind[i1] = imatch_depth
-# 			Vp[i1] = Vp_l[i][imatch_depth]
-# 			Vs[i1] = Vs_l[i][imatch_depth]
-# 			print('Finished %d'%i)
-
-# ## Apply topography clipping to velocity model
-# if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.npz') == True):
-
-# 	## Load "Points" field that specifies surface elevation (columns of lat, lon, elevation (meters)). Points outside convex hull of Points will be treated as zero elevation.
-# 	z = np.load(path_to_file + 'surface_elevation.npz')
-# 	Points = z['Points']
-# 	z.close()
-
-# 	## Concatenate station elevations
-# 	Points = np.concatenate((Points, locs), axis = 0)
-	
-# 	## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
-# 	tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
-# 	x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg/5.0, d_deg/5.0), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg/5.0, d_deg/5.0)
-
-# 	x11_s, x12_s = np.meshgrid(x1_s, x2_s)
-# 	surface_profile = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
-# 	ip_match = tree.query(ftrns1(np.concatenate((surface_profile, np.zeros((len(surface_profile),1))), axis = 1)))
-# 	val = Points[ip_match[1],2] ## Surface elevations of regular grid
-# 	hull = ConvexHull(Points[:,0:2])
-# 	ioutside_hull = np.where(in_hull(surface_profile,  hull.points[hull.vertices]) == 0)[0]
-# 	val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
-# 	surface_profile = np.concatenate((surface_profile, val.reshape(-1,1)), axis = 1)
-# 	if os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == False:
-# 		np.savez_compressed(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project, surface_profile = surface_profile)
-		
-# 	## Check if stations are beneath surface
-# 	tol_elev_val = 150.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
-# 	tree = cKDTree(ftrns1(surface_profile))
-# 	unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
-# 	dist_near = tree.query(ftrns1(locs))[0]
-# 	dist_perturb = tree.query(unit_out)[0]
-# 	iabove_surface = np.where(dist_perturb > dist_near)[0]
-# 	if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - surface_profile[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
-
-# 	## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
-# 	inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
-# 	unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1.0*np.ones((len(inear_surface),1))), axis = 1))
-# 	dist_near = tree.query(xx[inear_surface])[0]
-# 	dist_perturb = tree.query(unit_out)[0]
-# 	iabove_surface = np.where(dist_perturb > dist_near)[0]
-	
-# 	## Set points above surface to air wave speeds (or find a way to mask)
-# 	Vp[inear_surface[iabove_surface]] = 343.0 ## Assumed acoustic p wave speed
-# 	Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
-
-# ## Using 3D domain, so must use actual station coordinates
 locs_ref = np.copy(locs)
 reciever_proj = ftrns1(locs_ref) # for all elevs.
 
 
-# hull = ConvexHull(xx)
-# inside_hull = in_hull(reciever_proj, hull.points[hull.vertices])
-# print('Num sta inside hull %d'%inside_hull.sum())
-# print('Num total sta %d'%len(locs_ref))
-# assert(inside_hull.sum() == locs_ref.shape[0])
-
-# mp = RegularGridInterpolator((x1, x2, x3), Vp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-# ms = RegularGridInterpolator((x1, x2, x3), Vs.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-# Vp_interp = mp(ftrns1(X))
-# Vs_interp = ms(ftrns1(X))
-
-
-# if compute_reference_times == True:
-# 	pass
-
-# ## Determine which stations have data
-# # ver_vel_model = 1
-# st_sta = glob.glob(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData' + seperator + '*station*ver_%d.npz'%vel_model_ver)
-# iarg = np.argsort([int(st_sta[j].split('/')[-1].split(name_of_project)[-1].split('_')[5]) for j in range(len(st_sta))])
-# st_sta = [st_sta[j] for j in iarg]
-# sta_ind = np.array([int(st_sta[j].split('/')[-1].split(name_of_project)[-1].split('_')[5]) for j in range(len(st_sta))]).astype('int')
 
 compute_reference_times = True
 
@@ -898,18 +660,22 @@ if train_travel_time_neural_network == True:
 			assert(pred_base_boundary.max().item() < 1e-2)
 			loss_boundary = loss_func(pred_perturb_boundary, torch.zeros(pred_perturb_boundary.shape).to(device))
 
-			if i > n_burn_in:
 
-				loss_vald = 0.25*loss_pde_p + 0.25*loss_pde_s + 0.5*loss_boundary
+			loss = alpha*(0.25*loss_pde_p + 0.25*loss_pde_s) + (1.0 - alpha*0.5)*loss_boundary
 
-			else:
+
+			# if i > n_burn_in:
+
+			# 	loss_vald = 0.25*loss_pde_p + 0.25*loss_pde_s + 0.5*loss_boundary
+
+			# else:
 
 				## Add loss of "null" prediction
 
 				# loss1 = loss_func(pred_perturb2, torch.zeros(pred_perturb2.shape).to(device))
 				# loss2 = loss_func(pred_perturb2, torch.zeros(pred_perturb2.shape).to(device))
 
-				loss_vald = loss_boundary ## Initialize model
+			# 	loss_vald = loss_boundary ## Initialize model
 
 				# loss = loss_boundary ## Initialize model
 
@@ -1155,7 +921,7 @@ if train_travel_time_neural_network == True:
 
 	r_vals1 = [r2_vp1, r2_vs1, r2_vp_vald1, r2_vs_vald1]
 
-	n_ver_save = 1
+	# n_ver_save = 1
 
 	m = m.cpu()
 	torch.save(m.state_dict(), path_save + 'travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_save))
@@ -1278,53 +1044,6 @@ if train_travel_time_neural_network == True:
 	
 	np.savez_compressed(path_to_file + 'training_results_ver_%d.npz'%n_ver_save, trv_out = trv_out.cpu().detach().numpy(), vel_pred = vel_pred, vel_pred_levels = vel_pred_levels, pos_contour = x_contour, xx1 = xx1, x3 = x3, losses = losses, losses_vald = losses_vald, losses_pde = losses_pde, losses_pde_vald = losses_pde_vald, losses_data = losses_data, losses_data_vald = losses_data_vald)
 
-
-	# 	for s in st_list:
-	# 		z = h5py.File(s, 'r')
-	# 		srcs_slice = z['srcs_trv'][:]
-	# 		locs_use = z['locs_use'][:]
-
-	# 		for j in range(len(srcs_slice)):
-
-	# 			arv_p, ind_p, arv_s, ind_s = z['Picks/%d_Picks_P_perm'%j][:,0], z['Picks/%d_Picks_P_perm'%j][:,1].astype('int'), z['Picks/%d_Picks_S_perm'%j][:,0], z['Picks/%d_Picks_S_perm'%j][:,1].astype('int')
-
-	# 			ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
-
-	# 			if len(ind_unique_arrivals) == 0:
-	# 				srcs_trv.append(np.nan*np.ones((1, 4)))
-	# 				continue			
-				
-	# 			perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
-	# 			perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
-	# 			locs_use_slice = locs_use[ind_unique_arrivals]
-	# 			ind_p_perm_slice = perm_vec_arrivals[ind_p]
-	# 			ind_s_perm_slice = perm_vec_arrivals[ind_s]
-	# 			if len(ind_p_perm_slice) > 0:
-	# 				assert(ind_p_perm_slice.min() > -1)
-	# 			if len(ind_s_perm_slice) > 0:
-	# 				assert(ind_s_perm_slice.min() > -1)
-
-	# 			xmle, logprob = differential_evolution_location(m, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, device = device)
-
-	# 			pred_out = m(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + srcs_slice[j,3]
-
-	# 			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
-	# 			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
-
-	# 			mean_shift = 0.0
-	# 			cnt_phases = 0
-	# 			if len(res_p) > 0:
-	# 				mean_shift += np.median(res_p)*(len(res_p)/(len(res_p) + len(res_s)))
-	# 				cnt_phases += 1
-
-	# 			if len(res_s) > 0:
-	# 				mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
-	# 				cnt_phases += 1
-
-	# 			Srcs_initial.append(srcs_slice[j,:])
-	# 			Srcs_relocate.append(np.concatenate((xmle, np.array([srcs_slice[j,3] - mean_shift]).reshape(1,-1)), axis = 1))
-
-	# 		z.close()
 
 
 	######################## Run FMM checks ########################
@@ -1458,3 +1177,298 @@ if train_travel_time_neural_network == True:
 
 print("All files saved successfully!")
 print("✔ Script execution: Done")
+
+
+
+
+	# 	for s in st_list:
+	# 		z = h5py.File(s, 'r')
+	# 		srcs_slice = z['srcs_trv'][:]
+	# 		locs_use = z['locs_use'][:]
+
+	# 		for j in range(len(srcs_slice)):
+
+	# 			arv_p, ind_p, arv_s, ind_s = z['Picks/%d_Picks_P_perm'%j][:,0], z['Picks/%d_Picks_P_perm'%j][:,1].astype('int'), z['Picks/%d_Picks_S_perm'%j][:,0], z['Picks/%d_Picks_S_perm'%j][:,1].astype('int')
+
+	# 			ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
+
+	# 			if len(ind_unique_arrivals) == 0:
+	# 				srcs_trv.append(np.nan*np.ones((1, 4)))
+	# 				continue			
+				
+	# 			perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
+	# 			perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
+	# 			locs_use_slice = locs_use[ind_unique_arrivals]
+	# 			ind_p_perm_slice = perm_vec_arrivals[ind_p]
+	# 			ind_s_perm_slice = perm_vec_arrivals[ind_s]
+	# 			if len(ind_p_perm_slice) > 0:
+	# 				assert(ind_p_perm_slice.min() > -1)
+	# 			if len(ind_s_perm_slice) > 0:
+	# 				assert(ind_s_perm_slice.min() > -1)
+
+	# 			xmle, logprob = differential_evolution_location(m, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, device = device)
+
+	# 			pred_out = m(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + srcs_slice[j,3]
+
+	# 			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+	# 			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+
+	# 			mean_shift = 0.0
+	# 			cnt_phases = 0
+	# 			if len(res_p) > 0:
+	# 				mean_shift += np.median(res_p)*(len(res_p)/(len(res_p) + len(res_s)))
+	# 				cnt_phases += 1
+
+	# 			if len(res_s) > 0:
+	# 				mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
+	# 				cnt_phases += 1
+
+	# 			Srcs_initial.append(srcs_slice[j,:])
+	# 			Srcs_relocate.append(np.concatenate((xmle, np.array([srcs_slice[j,3] - mean_shift]).reshape(1,-1)), axis = 1))
+
+	# 		z.close()
+
+
+# lat_grid = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg)
+# lon_grid = np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
+# depth_grid = np.arange(depth_range[0], depth_range[1] + dx_depth, dx_depth)
+	
+# replace_zero = True
+# x11, x12, x13 = np.meshgrid(lat_grid, lon_grid, depth_grid)
+# X = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+
+# query_proj = ftrns1(X)
+
+# ## Check number of workers available. Note: should apply parallel threads for running over stations.
+# print('\n Total possible threads %d'%multiprocessing.cpu_count())
+# print(f'Actually using {num_cores} cores')
+
+# ## Boundary of domain, in Cartesian coordinates
+# elev = locs[:,2].max() + 1000.0
+# z1 = np.array([lat_range_extend[0], lon_range_extend[0], elev])[None,:]
+# z2 = np.array([lat_range_extend[0], lon_range_extend[1], elev])[None,:]
+# z3 = np.array([lat_range_extend[1], lon_range_extend[1], elev])[None,:]
+# z4 = np.array([lat_range_extend[1], lon_range_extend[0], elev])[None,:]
+# z = np.concatenate((z1, z2, z3, z4), axis = 0)
+# zz = ftrns1(z)
+
+# ip = np.where((query_proj[:,0] >= zz[:,0].min())*(query_proj[:,0] <= zz[:,0].max())*(query_proj[:,1] >= zz[:,1].min())*(query_proj[:,1] <= zz[:,1].max()))[0]
+# ys = query_proj[ip,:] # not actually used for anything (non-trivial.)
+
+# ## If the queries are out of bounts when calling 
+# x1 = np.arange(ys[:,0].min() - 20*dx, ys[:,0].max() + 20*dx, dx)
+# x2 = np.arange(ys[:,1].min() - 20*dx, ys[:,1].max() + 20*dx, dx)
+# x3 = np.arange(ys[:,2].min() - 4*dx, ys[:,2].max() + 4*dx, dx)
+# x11, x12, x13 = np.meshgrid(x1, x2, x3)
+# xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+# dx_v = np.array([np.diff(x1)[0], np.diff(x2)[0], np.diff(x3)[0]])
+
+# Xmin = xx.min(0)
+# Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
+# Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
+
+# ## Load velocity model
+# if vel_model_type == 1:
+# 	vp = np.array(config['velocity_model']['Vp'])
+# 	vs = np.array(config['velocity_model']['Vs'])
+# 	depths = np.array(config['velocity_model']['Depths'])
+# 	iarg = np.argsort(depths)
+# 	# z = np.load(path_to_file + '1d_velocity_model.npz')
+# 	# depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+# 	# z.close()
+	
+# 	depths_fine = np.arange(depths.min(), depths.max() + dx_depth/10.0, dx_depth/10.0)
+# 	vp_fine = np.interp(depths_fine, depths[iarg], vp[iarg])
+# 	vs_fine = np.interp(depths_fine, depths[iarg], vs[iarg])
+
+# 	tree = cKDTree(depths_fine.reshape(-1,1))
+# 	ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
+# 	Vp = vp_fine[ip_nearest]
+# 	Vs = vs_fine[ip_nearest]
+
+# elif vel_model_type == 2:
+
+# 	z = np.load(path_to_file + '3d_velocity_model.npz')
+# 	x_vel, vp_vel, vs_vel = z['X'], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
+# 	z.close()
+
+# 	tree = cKDTree(ftrns1(x_vel)) ## Assigns the velocity values to the computation grid (xx) using nearest neighbors (e.g., the input 3D model can include any number of points, anywhere, and interpolation will fill in the values elsewhere)
+# 	ip_nearest = tree.query(xx)[1]
+# 	Vp = vp_vel[ip_nearest]
+# 	Vs = vs_vel[ip_nearest]
+
+# elif vel_model_type == 3:
+
+# 	z = h5py.File(path_to_file + 'Vel_models.hdf5', 'r') ## Using a series of 1d velocity models for different areas
+# 	Depths_l, Coor_l, Vp_l, Vs_l, Radius_l = [], [], [], [], []
+# 	keys = list(z.keys())
+# 	n_profiles = len(list(filter(lambda x: 'Depths' in x, keys)))
+# 	for n in range(n_profiles):
+# 		Depths_l.append(z['Depths_%d'%n][:])
+# 		Vp_l.append(z['Vp_%d'%n][:])
+# 		Vs_l.append(z['Vs_%d'%n][:])
+# 		Coor_l.append(z['Coor_%d'%n][:])
+# 		Radius_l.append(z['Radius_%d'%n][:])
+# 	z.close()
+
+# 	interp_type = 1
+# 	if interp_type == 1: ## Use depth coordinates with each coor point
+# 		dist_max = np.inf*np.ones(len(xx))
+# 		xx_ind = (-1*np.ones(len(xx))).astype('int')
+# 		xx_depth_ind = (-1*np.ones(len(xx))).astype('int')
+# 		Vp = np.inf*np.ones(len(xx))
+# 		Vs = np.inf*np.ones(len(xx))
+# 		for i in range(len(Depths_l)):
+# 			coors_slice = Coor_l[i].repeat(len(Depths_l[i]), axis = 0)
+# 			coors_slice = np.concatenate((coors_slice, np.tile(Depths_l[i].reshape(-1,1), (len(Coor_l[i]), 1))), axis = 1)
+# 			tree = cKDTree(ftrns1(coors_slice))
+# 			dist_v = tree.query(xx) # [0]/np.mean(Radius_l[i]*1000.0)
+# 			dist, dist_ind = dist_v[0]/np.mean(Radius_l[i]*1000.0), dist_v[1]
+# 			tree_depths = cKDTree(Depths_l[i].reshape(-1,1))
+# 			i1 = np.where(dist < dist_max)[0]
+# 			imatch_depth = tree_depths.query(coors_slice[dist_ind[i1],2].reshape(-1,1))[1]
+
+# 			## Update nearest matching point
+# 			dist_max[i1] = dist[i1]
+# 			xx_ind[i1] = i
+# 			xx_depth_ind[i1] = imatch_depth
+# 			Vp[i1] = Vp_l[i][imatch_depth]
+# 			Vs[i1] = Vs_l[i][imatch_depth]
+# 			print('Finished %d'%i)
+
+# ## Apply topography clipping to velocity model
+# if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.npz') == True):
+
+# 	## Load "Points" field that specifies surface elevation (columns of lat, lon, elevation (meters)). Points outside convex hull of Points will be treated as zero elevation.
+# 	z = np.load(path_to_file + 'surface_elevation.npz')
+# 	Points = z['Points']
+# 	z.close()
+
+# 	## Concatenate station elevations
+# 	Points = np.concatenate((Points, locs), axis = 0)
+	
+# 	## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
+# 	tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
+# 	x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg/5.0, d_deg/5.0), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg/5.0, d_deg/5.0)
+
+# 	x11_s, x12_s = np.meshgrid(x1_s, x2_s)
+# 	surface_profile = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
+# 	ip_match = tree.query(ftrns1(np.concatenate((surface_profile, np.zeros((len(surface_profile),1))), axis = 1)))
+# 	val = Points[ip_match[1],2] ## Surface elevations of regular grid
+# 	hull = ConvexHull(Points[:,0:2])
+# 	ioutside_hull = np.where(in_hull(surface_profile,  hull.points[hull.vertices]) == 0)[0]
+# 	val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
+# 	surface_profile = np.concatenate((surface_profile, val.reshape(-1,1)), axis = 1)
+# 	if os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == False:
+# 		np.savez_compressed(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project, surface_profile = surface_profile)
+		
+# 	## Check if stations are beneath surface
+# 	tol_elev_val = 150.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
+# 	tree = cKDTree(ftrns1(surface_profile))
+# 	unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
+# 	dist_near = tree.query(ftrns1(locs))[0]
+# 	dist_perturb = tree.query(unit_out)[0]
+# 	iabove_surface = np.where(dist_perturb > dist_near)[0]
+# 	if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - surface_profile[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
+
+# 	## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
+# 	inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
+# 	unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1.0*np.ones((len(inear_surface),1))), axis = 1))
+# 	dist_near = tree.query(xx[inear_surface])[0]
+# 	dist_perturb = tree.query(unit_out)[0]
+# 	iabove_surface = np.where(dist_perturb > dist_near)[0]
+	
+# 	## Set points above surface to air wave speeds (or find a way to mask)
+# 	Vp[inear_surface[iabove_surface]] = 343.0 ## Assumed acoustic p wave speed
+# 	Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
+
+# ## Using 3D domain, so must use actual station coordinates
+
+
+# hull = ConvexHull(xx)
+# inside_hull = in_hull(reciever_proj, hull.points[hull.vertices])
+# print('Num sta inside hull %d'%inside_hull.sum())
+# print('Num total sta %d'%len(locs_ref))
+# assert(inside_hull.sum() == locs_ref.shape[0])
+
+# mp = RegularGridInterpolator((x1, x2, x3), Vp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
+# ms = RegularGridInterpolator((x1, x2, x3), Vs.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
+# Vp_interp = mp(ftrns1(X))
+# Vs_interp = ms(ftrns1(X))
+
+
+# if compute_reference_times == True:
+# 	pass
+
+# ## Determine which stations have data
+# # ver_vel_model = 1
+# st_sta = glob.glob(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData' + seperator + '*station*ver_%d.npz'%vel_model_ver)
+# iarg = np.argsort([int(st_sta[j].split('/')[-1].split(name_of_project)[-1].split('_')[5]) for j in range(len(st_sta))])
+# st_sta = [st_sta[j] for j in iarg]
+# sta_ind = np.array([int(st_sta[j].split('/')[-1].split(name_of_project)[-1].split('_')[5]) for j in range(len(st_sta))]).astype('int')
+
+
+# def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores = 10):
+
+# 	def step_test(args):
+
+# 		yval, dx_v, h, h1, x11, x12, x13, ind = args
+# 		print(yval.shape); print(x11.shape); print(x12.shape); print(x13.shape)
+
+# 		phi_xy = (x11 - yval[0,0])**2 + (x12 - yval[0,1])**2
+# 		phi_v = (x13 - yval[0,2])**2
+
+# 		phi = np.sqrt(phi_xy + phi_v)
+# 		phi = phi - phi.min() - 100.0
+
+# 		v = np.copy(h).reshape(x11.shape) # correct?
+# 		v1 = np.copy(h1).reshape(x11.shape) # correct?
+
+# 		t = skfmm.travel_time(phi, v, dx = [dx_v[0], dx_v[1], dx_v[2]])
+# 		t1 = skfmm.travel_time(phi, v1, dx = [dx_v[0], dx_v[1], dx_v[2]])
+
+# 		return t, t1, phi, ind
+
+# 	tp_times, ts_times = np.nan*np.zeros((h.shape[0], xx_r.shape[0])), np.nan*np.zeros((h.shape[0], xx_r.shape[0]))
+
+# 	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [xx_r[i,:][None,:], dx_v, h, h1, x11, x12, x13, i] ) for i in range(xx_r.shape[0]))
+
+# 	for i in range(xx_r.shape[0]):
+
+# 		## Make sure to write results to correct station, based on ind
+# 		tp_times[:,results[i][-1]] = results[i][0].reshape(-1)
+# 		ts_times[:,results[i][-1]] = results[i][1].reshape(-1)
+
+# 	return tp_times, ts_times
+
+# def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = 10):
+
+# 	def step_test(args):
+
+# 		x1, x2, x3, tp, ts, X, ftrns1, ind = args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]
+
+# 		mp = RegularGridInterpolator((x1, x2, x3), tp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
+# 		ms = RegularGridInterpolator((x1, x2, x3), ts.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
+# 		tp_val = mp(ftrns1(X))
+# 		ts_val = ms(ftrns1(X))
+
+# 		print('Finished interpolation %d'%ind)
+		
+# 		return tp_val, ts_val, ind
+
+# 	n_grid = X.shape[0]
+# 	n_sta = Tp.shape[1]
+# 	Tp_interp = np.zeros((n_grid, n_sta))
+# 	Ts_interp = np.zeros((n_grid, n_sta))
+# 	assert(Tp_interp.shape[1] == Ts_interp.shape[1])
+
+# 	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [x1, x2, x3, Tp[:,i], Ts[:,i], X, lambda x: ftrns1(x), i] ) for i in range(n_sta))
+
+# 	for i in range(n_sta):
+
+# 		## Make sure to write results to correct station, based on ind
+# 		Tp_interp[:,results[i][2]] = results[i][0].reshape(-1)
+# 		Ts_interp[:,results[i][2]] = results[i][1].reshape(-1)
+
+# 	return Tp_interp, Ts_interp
+
