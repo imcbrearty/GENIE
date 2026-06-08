@@ -6551,6 +6551,7 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), Vs=3500
     # print(f" -> Dimensionless Relative Scale     : {rel_scale:.5f}")
     # print("="*60 + "\n")
 
+    rel_scale = w_phys / aperture_m
     print(f"\n" + "="*55)
     print(f"BATCHED ADAPTIVE COHERENCY ESTIMATION")
     print(f"="*55)
