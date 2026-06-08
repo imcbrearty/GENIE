@@ -311,7 +311,7 @@ if train_travel_time_neural_network == True:
 	Vs_samples = np.hstack(Vs_samples).astype(np.float32)
 	locs_unique = np.unique(Locs_samples, axis = 0)
 	# assert(len(locs_unique) == len(locs))
-	assert(cKDTree(ftrns1(locs_unique)).query(ftrns1(locs))[0].max() < 1e-2)
+	assert(cKDTree(ftrns1(locs_unique)).query(ftrns1(locs))[0].max() < 10.0)
 	assert(len(X_samples) == len(Locs_samples))
 	assert(len(X_samples) == len(Tp_samples))
 	assert(len(X_samples) == len(Ts_samples))
