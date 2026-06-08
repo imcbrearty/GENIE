@@ -341,9 +341,11 @@ else:
 	
 	## Add estimate of number of nodes / cartesian product size
 	deg_padding = np.nan ## Use hueristic
-	Vc = 3500.0
+	Vc = 3500.0 # Include this or not
 	scale_domain = 1.1
-	depth_range = [-40e3, 2e3]
+
+	## Include this or not
+	# depth_range = [-40e3, 2e3]
 
 	# n_trgt_nodes = int(200e3)
 	# number_of_spatial_nodes = 3000
@@ -2109,21 +2111,24 @@ for cnt, strs in enumerate([0]):
 	find_matched_events = True ## Check this if use_shift is true
 	if 	find_matched_events == True:
 
-		t0 = UTCDateTime(date[0], date[1], date[2])
-		min_magnitude = 0.1
-		srcs_known = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
-		print('Processing %d known events'%len(srcs_known))
-
-
-		temporal_win_match = 5.0
-		spatial_win_match = 35e3
-		matches1 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
-		if len(ifind_not_nan) > 0:
-			matches2 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv[ifind_not_nan], ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
-			matches2[:,1] = ifind_not_nan[matches2[:,1]]
-		else:
-			matches2 = np.nan*np.zeros((0,2))
-
+		try:
+			t0 = UTCDateTime(date[0], date[1], date[2])
+			min_magnitude = 0.1
+			srcs_known = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
+			print('Processing %d known events'%len(srcs_known))
+	
+	
+			temporal_win_match = 5.0
+			spatial_win_match = 35e3
+			matches1 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
+			if len(ifind_not_nan) > 0:
+				matches2 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv[ifind_not_nan], ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
+				matches2[:,1] = ifind_not_nan[matches2[:,1]]
+			else:
+				matches2 = np.nan*np.zeros((0,2))
+		except:
+			print('Failed on finding matched events')
+			find_matched_events = False
 	
 	extra_save = process_config.get('extra_save', False)
 	save_on = process_config.get('save_on', True)
