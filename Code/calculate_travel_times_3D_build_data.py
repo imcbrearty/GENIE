@@ -730,11 +730,12 @@ if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.np
 include_random_samples = True
 if include_random_samples == True:
 	ind_use_rand = np.random.choice(len(locs), size = int(3*len(ind_use)))
-	locs_nn = cKDTree(ftrns1(locs)).query(ftrns1(locs[ind_use_rand]), k = 2)[0][:,1]
-	locs_rand = ftrns2(locs_nn.reshape(-1,1)*np.random.randn(len(ind_use_rand),3) + ftrns1(locs[ind_use_rand]))
+	locs_dist = cKDTree(ftrns1(locs)).query(ftrns1(locs[ind_use_rand]), k = 2)[0][:,1]
+	locs_rand = ftrns2(locs_dist.reshape(-1,1)*np.random.randn(len(ind_use_rand),3) + ftrns1(locs[ind_use_rand]))
 	irand = np.sort(np.random.choice(len(ind_use_rand), size = int(np.floor(len(ind_use_rand)/2)), replace = False)) if int(np.floor(len(ind_use_rand)/2)) > 0 else np.zeros(0).astype('int')
-	locs_rand[irand] = np.random.uniform(offset_x_extend, offset_x_extend + scale_x_extend)
-	locs_rand = locs_rand.clip(offset_x_extend, offset_x_extend + scale_x_extend)
+	locs_rand[irand] = np.random.uniform(offset_x_extend, offset_x_extend + scale_x_extend, size=(len(irand), 3))
+	locs_rand = locs_rand.clip(offset_x_extend.squeeze(), (offset_x_extend + scale_x_extend).squeeze())
+	locs_rand[:,2] = np.random.uniform(locs[:,2].min() - 0.1*(locs[:,2].max() - locs[:,2].min()), locs[:,2].max(), size = len(locs_rand))
 	ind_use = np.concatenate((ind_use, np.arange(len(ind_use_rand)) + len(locs)), axis = 0)
 	locs_concat = np.concatenate((locs, locs_rand), axis = 0)
 else:
