@@ -661,9 +661,25 @@ if train_travel_time_neural_network == True:
 			loss_boundary = loss_func(pred_perturb_boundary, torch.zeros(pred_perturb_boundary.shape).to(device))
 
 
-			loss = alpha*(0.25*loss_pde_p + 0.25*loss_pde_s) + (1.0 - alpha*0.5)*loss_boundary
+			# loss = alpha*(0.25*loss_pde_p + 0.25*loss_pde_s) + (1.0 - alpha*0.5)*loss_boundary
 
 
+
+			if i > n_burn_in:
+
+				loss_vald = 0.25*loss_pde_p + 0.25*loss_pde_s + 0.5*loss_boundary
+
+			else:
+
+				## Add loss of "null" prediction
+
+				# loss1 = loss_func(pred_perturb2, torch.zeros(pred_perturb2.shape).to(device))
+				# loss2 = loss_func(pred_perturb2, torch.zeros(pred_perturb2.shape).to(device))
+
+				loss_vald = loss_boundary ## Initialize model
+			
+
+			
 			# if i > n_burn_in:
 
 			# 	loss_vald = 0.25*loss_pde_p + 0.25*loss_pde_s + 0.5*loss_boundary
