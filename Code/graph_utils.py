@@ -6542,6 +6542,25 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), Vs=3500
     w_phys = np.median(dist_s[mask] / chi_error[mask])
     w_t = np.median(np.abs(time_offs)[mask] / chi_error[mask])
 
+    # print("\n" + "="*60)
+    # print(" KERNEL WIDTH DISCOVERY SUMMARY")
+    # print("="*60)
+    # print(f" -> Spatial Kernel Width (W_phys_m) : {w_phys:,.2f} meters ({w_phys/1000.0:.2f} km)")
+    # print(f" -> Temporal Kernel Width (W_t_s)    : {w_t:.4f} seconds")
+    # print(f" -> Network Median Aperture          : {aperture_m/1000.0:,.2f} km")
+    # print(f" -> Dimensionless Relative Scale     : {rel_scale:.5f}")
+    # print("="*60 + "\n")
+
+    print(f"\n" + "="*55)
+    print(f"BATCHED ADAPTIVE COHERENCY ESTIMATION")
+    print(f"="*55)
+    print(f"Total Points Sampled:   {n_srcs * n_test_per_src}")
+    print(f"Spatial Width (W_phys): {w_phys/1000:.4f} km")
+    print(f"Temporal Width (W_t):   {w_t:.4f} s")
+    print(f"Computed Aperture:      {aperture_m/1000:.2f} km")
+    print(f"Relative Resolution:    {rel_scale:.4%}")
+    print(f"Noise Level Used:       {noise_level*100:.1f}%")
+    
     return {"W_phys_m": w_phys, "W_t_s": w_t, "rel_scale": w_phys / aperture_m}
 
 
