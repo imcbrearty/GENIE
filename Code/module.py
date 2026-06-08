@@ -2077,7 +2077,7 @@ class VModel(nn.Module):
 
 class TravelTimesPN(nn.Module):
 
-	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, corrs = None, locs_corr = None, device = 'cuda'):
+	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), scale_params = None, norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, corrs = None, locs_corr = None, device = 'cuda'):
 		super(TravelTimesPN, self).__init__()
 
 		## Relative offset prediction [2]
@@ -2113,16 +2113,53 @@ class TravelTimesPN(nn.Module):
 		## Projection functions
 		self.ftrns1 = ftrns1
 		self.ftrns2 = ftrns2
+
+		## Register Scale Parameters as Frozen Buffers
+		if scale_params is not None:
+			# scale_params = [max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor]
+			self.register_buffer('max_dist', torch.tensor(scale_params[0], dtype=torch.float32))
+			self.register_buffer('max_time', torch.tensor(scale_params[1], dtype=torch.float32))
+			self.register_buffer('vp_max', torch.tensor(scale_params[2], dtype=torch.float32))
+			self.register_buffer('vs_min', torch.tensor(scale_params[3], dtype=torch.float32))
+			self.register_buffer('scale_norm_factor', torch.tensor(scale_params[4], dtype=torch.float32))
+			self.register_buffer('conversion_factor', torch.tensor(scale_params[5], dtype=torch.float32))
+			self.register_buffer('v_mean', torch.tensor(v_mean, dtype=torch.float32))
+			
+			# Reconstruct internal scaling mechanics natively from the buffers
+			self.v_mean_norm = self.v_mean / self.vp_max
+			self.norm_pos = lambda x: x / self.max_dist
+			self.inorm_time = lambda t: t * self.max_time
+			self.norm_vel = lambda v: v / self.vp_max
+			self.inorm_pos = lambda x: x * self.max_dist  # Just in case you use it
+		
+		else:
+			# Fallback placeholder buffers so PyTorch has matching keys during load_state_dict
+			self.register_buffer('max_dist', torch.tensor(1.0, dtype=torch.float32))
+			self.register_buffer('max_time', torch.tensor(1.0, dtype=torch.float32))
+			self.register_buffer('vp_max', torch.tensor(1.0, dtype=torch.float32))
+			self.register_buffer('vs_min', torch.tensor(1.0, dtype=torch.float32))
+			self.register_buffer('scale_norm_factor', torch.tensor(1.0, dtype=torch.float32))
+			self.register_buffer('conversion_factor', torch.tensor(1.0, dtype=torch.float32))
+			self.register_buffer('v_mean', torch.tensor(v_mean, dtype=torch.float32))
+			
+			# Fallback assignments using the raw passed lambdas/arguments
+			self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device) if norm_vel is not None else self.v_mean
+			self.norm_pos = norm_pos
+			self.inorm_pos = inorm_pos
+			self.inorm_time = inorm_time
+			self.norm_vel = norm_vel
+			self.conversion_factor = conversion_factor
+
 		# self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
 		# self.tscale = torch.Tensor([trav_val]).to(device)
-		self.v_mean = torch.Tensor(v_mean).to(device)
-		self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
+		# self.v_mean = torch.Tensor(v_mean).to(device)
+		# self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
 		self.device = device
-		self.norm_pos = norm_pos
-		self.inorm_pos = inorm_pos
-		self.inorm_time = inorm_time
-		self.norm_vel = norm_vel
-		self.conversion_factor = conversion_factor
+		# self.norm_pos = norm_pos
+		# self.inorm_pos = inorm_pos
+		# self.inorm_time = inorm_time
+		# self.norm_vel = norm_vel
+		# self.conversion_factor = conversion_factor
 		self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
 		self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
 		self.scale_angles = torch.Tensor([180.0, 180.0]).reshape(1,-1).to(device) ## Make these adaptive
@@ -2137,7 +2174,7 @@ class TravelTimesPN(nn.Module):
 		if n_srcs > 0:
 			self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))) # .to(device)
 			self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))) # .to(device)
-
+	
 		# self.Tp_average
 
 	def fc1_block(self, x):
@@ -2234,7 +2271,20 @@ class TravelTimesPN(nn.Module):
 					return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred) + self.corrs[imatch,:].unsqueeze(0))		
 
 				return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
-				# return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
+
+	def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+		super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+		
+		# Automatically rebuild your transformation logic directly from the loaded tensors!
+		self.v_mean_norm = self.v_mean / self.vp_max
+		self.norm_pos = lambda x: x / self.max_dist
+		self.inorm_time = lambda t: t * self.max_time
+		self.norm_vel = lambda v: v / self.vp_max
+		self.inorm_pos = lambda x: x * self.max_dist
+		
+		# Update your standard scalar properties from the state dict keys
+		self.conversion_factor = state_dict[prefix + 'conversion_factor']
+		# return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
 
 
 ## Magnitude class
