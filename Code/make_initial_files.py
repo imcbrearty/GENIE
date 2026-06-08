@@ -175,7 +175,10 @@ if __name__ == '__main__':
     soln = optimize_with_differential_evolution(center_loc)
     rbest = rotation_matrix_full_precision(soln.x[0], soln.x[1], soln.x[2])
     mn = soln.x[3::].reshape(1,-1)
-
+    if use_global == True:
+        mn = np.zeros((1,3))
+        rbest = np.eye(3)
+    
     ## Fit projection coordinates and create spatial grids
     if use_spherical == True:
         earth_radius = 6371e3
