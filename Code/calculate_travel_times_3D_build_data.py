@@ -1029,8 +1029,8 @@ for sta_ind in ind_use:
 			    
 			    if np.any(air_mask):
 			        # Pad to your crustal velocity baselines (keeps Eikonal gradients stable)
-			        Vp[air_mask] = vp[0] if vel_model_type == 1 else 4571.0
-			        Vs[air_mask] = vs[0] if vel_model_type == 1 else 2648.0
+			        Vp[air_mask] = Vp.min() # or 343 # if vel_model_type == 1 else 4571.0
+			        Vs[air_mask] = Vs.min() # or 343 #  if vel_model_type == 1 else 2648.0
 			        print(f"    Forced {np.sum(air_mask)} atmospheric grid nodes to surface velocity baselines.")
 			# ----------------------------------------
 
