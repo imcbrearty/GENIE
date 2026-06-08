@@ -56,6 +56,99 @@ class Laplacian(MessagePassing):
 	def message(self, x_j, edge_attr):
 
 		return edge_attr*x_j
+		
+
+def profile_seismic_dataset(name, X, Locs, Vp, Vs, Tp=None, Ts=None):
+	"""
+	Performs comprehensive diagnostic checks on spatial and travel time datasets
+	to catch formatting errors, NaNs, infinities, and unphysical outliers.
+	"""
+	print(f"\n" + "="*60)
+	print(f" DIAGNOSTIC PROFILE: {name.upper()} DATASET")
+	print("="*60)
+	
+	arrays = {'X (Source)': X, 'Locs (Station)': Locs, 'Vp': Vp, 'Vs': Vs}
+	if Tp is not None: arrays['Tp'] = Tp
+	if Ts is not None: arrays['Ts'] = Ts
+
+	# 1. Shape and Data Type Checks
+	print("--- Structure & Types ---")
+	for lbl, arr in arrays.items():
+		print(f"  {lbl:<15} | Shape: {str(arr.shape):<18} | Type: {arr.dtype}")
+		
+	# 2. Check for Critical Numerical Faults (NaNs, Infs)
+	print("\n--- Numerical Integrity ---")
+	faults_found = False
+	for lbl, arr in arrays.items():
+		nans = np.isnan(arr).sum()
+		infs = np.isinf(arr).sum()
+		if nans > 0 or infs > 0:
+			print(f"  ❌ CRITICAL FAULT in {lbl}: {nans} NaNs, {infs} Infs found!")
+			faults_found = True
+	if not faults_found:
+		print("  ✔ No NaNs or Infs detected across arrays.")
+
+	# 3. Physical Value & Outlier Analysis
+	print("\n--- Distribution Metrics ---")
+	print(f"  {'Array/Axis':<15} | {'Min':<10} | {'25% (Q1)':<10} | {'50% (Med)':<10} | {'75% (Q3)':<10} | {'Max':<10}")
+	print(f"  {'-'*15}-|-{'-'*10}-|-{'-'*10}-|-{'-'*10}-|-{'-'*10}-|-{'-'*10}")
+	
+	for lbl, arr in arrays.items():
+		# Handle multidimensional coordinate arrays (X, Locs) by profiling columns
+		if arr.ndim > 1:
+			axes_labels = ['Lat', 'Lon', 'Depth'] if arr.shape[1] == 3 else [f'Dim_{k}' for k in range(arr.shape[1])]
+			for idx, axis_lbl in enumerate(axes_labels):
+				col = arr[:, idx]
+				q = np.percentile(col, [25, 50, 75])
+				print(f"  {f'{lbl} ({axis_lbl})':<15} | {col.min():<10.3f} | {q[0]:<10.3f} | {q[1]:<10.3f} | {q[2]:<10.3f} | {col.max():<10.3f}")
+		else:
+			q = np.percentile(arr, [25, 50, 75])
+			print(f"  {lbl:<15} | {arr.min():<10.3f} | {q[0]:<10.3f} | {q[1]:<10.3f} | {q[2]:<10.3f} | {arr.max():<10.3f}")
+
+	# 4. Relational Sanity Check (Distance vs Travel Time)
+	if Tp is not None and Ts is not None:
+		print("\n--- Physical Consistency Check ---")
+		# Sample spatial distances to check velocity/time scaling
+		sample_idx = np.random.choice(len(X), size=min(5000, len(X)), replace=False)
+		# Using a simple element-wise Euclidean distance check for raw flagging
+		distances = np.linalg.norm(X[sample_idx] - Locs[sample_idx], axis=1)
+		
+		# Look for zero/negative values which ruin division or cause Eikonal singularity
+		zero_times = (Tp[sample_idx] <= 0).sum() + (Ts[sample_idx] <= 0).sum()
+		if zero_times > 0:
+			print(f"  ❌ WARNING: Detected {zero_times} travel time values <= 0.0 seconds!")
+			
+		print(f"  Sampled Avg Distance  : {distances.mean()/1000.0:.2f} km")
+		print(f"  Sampled Avg Apparent P: {(distances / np.clip(Tp[sample_idx], 1e-6, None)).mean():.2f} m/s")
+		print(f"  Sampled Avg Apparent S: {(distances / np.clip(Ts[sample_idx], 1e-6, None)).mean():.2f} m/s")
+	
+	print("="*60 + "\n")
+
+
+
+# # ==========================================
+# #  TRIGGER DIAGNOSTIC PROFILER 
+# # ==========================================
+# profile_seismic_dataset(
+# 	name="Primary Training Set", 
+# 	X=X_samples, Locs=Locs_samples, Vp=Vp_samples, Vs=Vs_samples,
+# 	Tp=Tp_samples if compute_reference_times else None,
+# 	Ts=Ts_samples if compute_reference_times else None
+# )
+
+# profile_seismic_dataset(
+# 	name="Validation Set", 
+# 	X=X_samples_vald, Locs=Locs_samples_vald, Vp=Vp_samples_vald, Vs=Vs_samples_vald,
+# 	Tp=Tp_samples_vald if compute_reference_times else None,
+# 	Ts=Ts_samples_vald if compute_reference_times else None
+# )
+
+# profile_seismic_dataset(
+# 	name="Boundary Training Set",
+# 	X=X_samples_boundary, Locs=Locs_samples_boundary, Vp=Vp_samples_boundary, Vs=Vs_samples_boundary
+# )
+# # ==========================================
+
 
 # Load configuration from YAML
 config = load_config('config.yaml')
