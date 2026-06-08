@@ -1084,8 +1084,8 @@ for sta_ind in ind_use:
 			Ts_boundary = np.zeros((n_zero_inputs, 1))
 			Vp_boundary = Vp[src_index].repeat(n_zero_inputs, axis = 0)
 			Vs_boundary = Vs[src_index].repeat(n_zero_inputs, axis = 0)
-			X_boundary = X[src_index].repeat(n_zero_inputs, axis = 0)
-			xx_boundary = xx[src_index].repeat(n_zero_inputs, axis = 0)
+			X_boundary = X[src_index].reshape(1,-1).repeat(n_zero_inputs, axis = 0)
+			xx_boundary = xx[src_index].reshape(1,-1).repeat(n_zero_inputs, axis = 0)
 
 			data['Tp_%d'%inc_res] = Tp_sample
 			data['Ts_%d'%inc_res] = Ts_sample
