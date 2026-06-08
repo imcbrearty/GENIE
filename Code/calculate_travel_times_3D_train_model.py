@@ -1172,7 +1172,7 @@ if train_travel_time_neural_network == True:
 
 	remove_travel_time_files = True
 	if remove_travel_time_files == True:
-		for s in st_sta:
+		for s in st_files:
 			os.remove(s)
 
 print("All files saved successfully!")
