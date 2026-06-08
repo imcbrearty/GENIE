@@ -1124,6 +1124,29 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		
 			return trv		
 
+
+# load_travel_time_neural_network
+# def load_travel_time_future(path_to_file, ftrns1, ftrns2, device='cuda', method='relative pairs'):
+#     from module import TravelTimesPN
+    
+#     # 1. Initialize a blank skeleton model architecture.
+#     # (We pass scale_params=None so it sets up the empty placeholder buffers)
+#     m = TravelTimesPN(ftrns1, ftrns2, scale_params=None, device=device).to(device)
+    
+#     # 2. Load the state dict. 
+#     # This automatically fills the buffers AND triggers the internal hook 
+#     # to rebuild your norm_pos, inorm_time, and conversion_factor perfectly!
+#     m.load_state_dict(torch.load(path_to_file, map_location=torch.device(device)))
+#     m.eval()
+    
+#     # 3. Return the functional execution lambdas
+#     if method == 'relative pairs':
+#         return lambda sta_pos, src_pos: m(sta_pos, src_pos, method='pairs')
+#     elif method == 'direct':
+#         return lambda sta_pos, src_pos: m(sta_pos, src_pos, method='direct')
+
+
+
 # def load_travel_time_neural_network_physics_informed(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
 
 # 	from module import TravelTimesPN
