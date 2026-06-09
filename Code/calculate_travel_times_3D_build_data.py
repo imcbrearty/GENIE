@@ -571,7 +571,10 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     else:
         # Fallback allocation for exceptionally small domains
         dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
-	
+
+	surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+    surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+
     for i, deg in enumerate(dense_deg_axis):
         try:
             # FIXED: Expanded phase tracking to handle full-Earth core phases seamlessly
