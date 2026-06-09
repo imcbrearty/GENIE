@@ -1422,70 +1422,70 @@ for sta_ind in ind_use:
 			data['Vs_%d'%inc_res] = Vs			
 
 	
-		# =========================================================================
-		# CONCATENATION OUTSIDE THE LOOP (Combines Tier 0, Tier 1, and Tier 2)
-		# =========================================================================
-		if sample_points == True:
-	
-			# Gather keys across all tiers dynamically
-			tiers = range(len(optim))
-			
-			# 1. Spatial Matrices (Shape: N, 3)
-			data['X'] = np.concatenate([data['X_%d' % i] for i in tiers], axis=0)
-			data['X_cart'] = np.concatenate([data['X_cart_%d' % i] for i in tiers], axis=0)
-			
-			data['X_vald'] = np.concatenate([data['X_vald_%d' % i] for i in tiers], axis=0)
-			data['X_cart_vald'] = np.concatenate([data['X_cart_vald_%d' % i] for i in tiers], axis=0)
-			
-			data['X_boundary'] = np.concatenate([data['X_boundary_%d' % i] for i in tiers], axis=0)
-			data['X_cart_boundary'] = np.concatenate([data['X_cart_boundary_%d' % i] for i in tiers], axis=0)
-	
-			# 2. Vectors (Handles 1D flat vs 2D column arrays identically)
-			if len(data['Tp_0'].shape) == 1:
-				data['Tp'] = np.concatenate([data['Tp_%d' % i] for i in tiers], axis=0)
-				data['Ts'] = np.concatenate([data['Ts_%d' % i] for i in tiers], axis=0)
-				data['Vp'] = np.concatenate([data['Vp_%d' % i] for i in tiers], axis=0)
-				data['Vs'] = np.concatenate([data['Vs_%d' % i] for i in tiers], axis=0)
-				data['Dist'] = np.concatenate([data['Dist_%d' % i] for i in tiers], axis=0)
-	
-				data['Tp_vald'] = np.concatenate([data['Tp_vald_%d' % i] for i in tiers], axis=0)
-				data['Ts_vald'] = np.concatenate([data['Ts_vald_%d' % i] for i in tiers], axis=0)
-				data['Vp_vald'] = np.concatenate([data['Vp_vald_%d' % i] for i in tiers], axis=0)
-				data['Vs_vald'] = np.concatenate([data['Vs_vald_%d' % i] for i in tiers], axis=0)
-				data['Dist_vald'] = np.concatenate([data['Dist_vald_%d' % i] for i in tiers], axis=0)
-	
-				data['Tp_boundary'] = np.concatenate([data['Tp_boundary_%d' % i] for i in tiers], axis=0)
-				data['Ts_boundary'] = np.concatenate([data['Ts_boundary_%d' % i] for i in tiers], axis=0)
-				data['Vp_boundary'] = np.concatenate([data['Vp_boundary_%d' % i] for i in tiers], axis=0)
-				data['Vs_boundary'] = np.concatenate([data['Vs_boundary_%d' % i] for i in tiers], axis=0)
-			else:
-				# Assumes 2D column formatting (N, 1)
-				data['Tp'] = np.concatenate([data['Tp_%d' % i] for i in tiers], axis=0)
-				data['Ts'] = np.concatenate([data['Ts_%d' % i] for i in tiers], axis=0)
-				data['Vp'] = np.concatenate([data['Vp_%d' % i] for i in tiers], axis=0)
-				data['Vs'] = np.concatenate([data['Vs_%d' % i] for i in tiers], axis=0)
-				data['Dist'] = np.concatenate([data['Dist_%d' % i].reshape(-1, 1) for i in tiers], axis=0)
-	
-				data['Tp_vald'] = np.concatenate([data['Tp_vald_%d' % i] for i in tiers], axis=0)
-				data['Ts_vald'] = np.concatenate([data['Ts_vald_%d' % i] for i in tiers], axis=0)
-				data['Vp_vald'] = np.concatenate([data['Vp_vald_%d' % i] for i in tiers], axis=0)
-				data['Vs_vald'] = np.concatenate([data['Vs_vald_%d' % i] for i in tiers], axis=0)
-				data['Dist_vald'] = np.concatenate([data['Dist_vald_%d' % i].reshape(-1, 1) for i in tiers], axis=0)
-	
-				data['Tp_boundary'] = np.concatenate([data['Tp_boundary_%d' % i] for i in tiers], axis=0)
-				data['Ts_boundary'] = np.concatenate([data['Ts_boundary_%d' % i] for i in tiers], axis=0)
-				data['Vp_boundary'] = np.concatenate([data['Vp_boundary_%d' % i] for i in tiers], axis=0)
-				data['Vs_boundary'] = np.concatenate([data['Vs_boundary_%d' % i] for i in tiers], axis=0)
-	
-		else:
-			# If you aren't sampling points, concatenate raw un-sampled grids
-			tiers = range(len(optim))
+	# =========================================================================
+	# CONCATENATION OUTSIDE THE LOOP (Combines Tier 0, Tier 1, and Tier 2)
+	# =========================================================================
+	if sample_points == True:
+
+		# Gather keys across all tiers dynamically
+		tiers = range(len(optim))
+		
+		# 1. Spatial Matrices (Shape: N, 3)
+		data['X'] = np.concatenate([data['X_%d' % i] for i in tiers], axis=0)
+		data['X_cart'] = np.concatenate([data['X_cart_%d' % i] for i in tiers], axis=0)
+		
+		data['X_vald'] = np.concatenate([data['X_vald_%d' % i] for i in tiers], axis=0)
+		data['X_cart_vald'] = np.concatenate([data['X_cart_vald_%d' % i] for i in tiers], axis=0)
+		
+		data['X_boundary'] = np.concatenate([data['X_boundary_%d' % i] for i in tiers], axis=0)
+		data['X_cart_boundary'] = np.concatenate([data['X_cart_boundary_%d' % i] for i in tiers], axis=0)
+
+		# 2. Vectors (Handles 1D flat vs 2D column arrays identically)
+		if len(data['Tp_0'].shape) == 1:
 			data['Tp'] = np.concatenate([data['Tp_%d' % i] for i in tiers], axis=0)
 			data['Ts'] = np.concatenate([data['Ts_%d' % i] for i in tiers], axis=0)
-			data['X'] = np.concatenate([data['X_%d' % i] for i in tiers], axis=0)
-			data['X_cart'] = np.concatenate([data['X_cart_%d' % i] for i in tiers], axis=0)
 			data['Vp'] = np.concatenate([data['Vp_%d' % i] for i in tiers], axis=0)
-			data['Vs'] = np.concatenate([data['Vs_%d' % i] for i in tiers], axis=0)	
+			data['Vs'] = np.concatenate([data['Vs_%d' % i] for i in tiers], axis=0)
+			data['Dist'] = np.concatenate([data['Dist_%d' % i] for i in tiers], axis=0)
+
+			data['Tp_vald'] = np.concatenate([data['Tp_vald_%d' % i] for i in tiers], axis=0)
+			data['Ts_vald'] = np.concatenate([data['Ts_vald_%d' % i] for i in tiers], axis=0)
+			data['Vp_vald'] = np.concatenate([data['Vp_vald_%d' % i] for i in tiers], axis=0)
+			data['Vs_vald'] = np.concatenate([data['Vs_vald_%d' % i] for i in tiers], axis=0)
+			data['Dist_vald'] = np.concatenate([data['Dist_vald_%d' % i] for i in tiers], axis=0)
+
+			data['Tp_boundary'] = np.concatenate([data['Tp_boundary_%d' % i] for i in tiers], axis=0)
+			data['Ts_boundary'] = np.concatenate([data['Ts_boundary_%d' % i] for i in tiers], axis=0)
+			data['Vp_boundary'] = np.concatenate([data['Vp_boundary_%d' % i] for i in tiers], axis=0)
+			data['Vs_boundary'] = np.concatenate([data['Vs_boundary_%d' % i] for i in tiers], axis=0)
+		else:
+			# Assumes 2D column formatting (N, 1)
+			data['Tp'] = np.concatenate([data['Tp_%d' % i] for i in tiers], axis=0)
+			data['Ts'] = np.concatenate([data['Ts_%d' % i] for i in tiers], axis=0)
+			data['Vp'] = np.concatenate([data['Vp_%d' % i] for i in tiers], axis=0)
+			data['Vs'] = np.concatenate([data['Vs_%d' % i] for i in tiers], axis=0)
+			data['Dist'] = np.concatenate([data['Dist_%d' % i].reshape(-1, 1) for i in tiers], axis=0)
+
+			data['Tp_vald'] = np.concatenate([data['Tp_vald_%d' % i] for i in tiers], axis=0)
+			data['Ts_vald'] = np.concatenate([data['Ts_vald_%d' % i] for i in tiers], axis=0)
+			data['Vp_vald'] = np.concatenate([data['Vp_vald_%d' % i] for i in tiers], axis=0)
+			data['Vs_vald'] = np.concatenate([data['Vs_vald_%d' % i] for i in tiers], axis=0)
+			data['Dist_vald'] = np.concatenate([data['Dist_vald_%d' % i].reshape(-1, 1) for i in tiers], axis=0)
+
+			data['Tp_boundary'] = np.concatenate([data['Tp_boundary_%d' % i] for i in tiers], axis=0)
+			data['Ts_boundary'] = np.concatenate([data['Ts_boundary_%d' % i] for i in tiers], axis=0)
+			data['Vp_boundary'] = np.concatenate([data['Vp_boundary_%d' % i] for i in tiers], axis=0)
+			data['Vs_boundary'] = np.concatenate([data['Vs_boundary_%d' % i] for i in tiers], axis=0)
+
+	else:
+		# If you aren't sampling points, concatenate raw un-sampled grids
+		tiers = range(len(optim))
+		data['Tp'] = np.concatenate([data['Tp_%d' % i] for i in tiers], axis=0)
+		data['Ts'] = np.concatenate([data['Ts_%d' % i] for i in tiers], axis=0)
+		data['X'] = np.concatenate([data['X_%d' % i] for i in tiers], axis=0)
+		data['X_cart'] = np.concatenate([data['X_cart_%d' % i] for i in tiers], axis=0)
+		data['Vp'] = np.concatenate([data['Vp_%d' % i] for i in tiers], axis=0)
+		data['Vs'] = np.concatenate([data['Vs_%d' % i] for i in tiers], axis=0)	
 
 	if sta_ind >= len(locs):
 		sta_ind += len(ind_use_rand)*int(argvs[1])
