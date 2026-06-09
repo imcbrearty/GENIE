@@ -6701,7 +6701,7 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), Vs=3500
 #     return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
 
 
-def probe_network_sidelobes_geodetic1(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
+def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
                                      k_stations=20, vel_avg=3500.0, vel_min=2500.0,
                                      scan_step_m=1000.0, W_phys_m=1000.0, W_t=3.0, r_min = None, r_max = None, use_global = False, num_candidates = 50000, device='cpu'): # scale_time = 3500.0
     
@@ -7230,7 +7230,7 @@ def probe_network_sidelobes_geodetic1(station_latlonz, domain_lat_range, domain_
 #     return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
 
 
-def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
+def probe_network_sidelobes_geodetic1(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
                                      k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, W_t=3.0, vel_avg=3500.0, vel_min=2500.0,
                                      r_min=None, r_max=None, use_global=False, num_candidates=50000, device='cpu'):
     import torch
