@@ -1472,10 +1472,29 @@ for sta_ind in ind_use:
 					print(f" Warning: xx size ({xx.shape[0]}) exceeds maximum budget. Downsampling to {MAX_TIER3_NODES} points...")
 					# Generating a uniform random choice of indices to preserve spatial distribution
 					# rng = np.random.default_rng(42) # Fixed seed for reproducibility
-					keep_indices = np.random.choice(xx.shape[0], size=MAX_TIER3_NODES, replace=False)
+					# keep_indices = np.random.choice(xx.shape[0], size=MAX_TIER3_NODES, replace=False)
+
+					X = ftrns2(xx)
+					dist_pad_depth = 0.2 * deg_pad * 110e3
+					
+					# Identify every node in the entire grid that physically sits within your bounds
+					valid_region_mask = (
+						(X[:, 0] < (lat_range_extend[1] + deg_pad)) & 
+						(X[:, 0] > (lat_range_extend[0] - deg_pad)) & 
+						(X[:, 1] < (lon_range_extend[1] + deg_pad)) & 
+						(X[:, 1] > (lon_range_extend[0] - deg_pad)) & 
+						(X[:, 2] <= (depth_range[1] + dist_pad_depth)) & 
+						(X[:, 2] >= (depth_range[0] - dist_pad_depth))
+					)
+
+					keep_indices = np.random.choice(np.where(valid_region_mask == 1)[0], size = min(MAX_TIER3_NODES, int(valid_region_mask.sum())), replace = False)
+					
 					if src_index not in keep_indices:
 						keep_indices[0] = src_index
+						
 					xx = xx[keep_indices]
+					X = X[keep_indices]
+					
 					# X = ftrns2(xx)
 					src_index = np.argmin(np.linalg.norm(xx - loc_proj, axis=1))
 
