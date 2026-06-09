@@ -1123,6 +1123,39 @@ for sta_ind in ind_use:
 			span_lat_deg = lat_max - lat_min
 			span_lon_deg = lon_max - lon_min
 
+			# # Determine the grid center based on the resolution tier
+			# if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
+			# 	# Fine local tiers stay centered right on the station
+			# 	center_lat = station_lla[0]
+			# 	center_lon = station_lla[1]
+				
+			# 	# Derive scaling factors from the station's local curvature metrics
+			# 	METERS_PER_LAT_DEG = 111195.0
+			# 	METERS_PER_LON_DEG = 111195.0 * np.cos(np.radians(station_lla[0]))
+				
+			# 	# Convert the meter spans to local angular equivalents safely
+			# 	half_span_lat_deg = (span_x1 / 2.0) / METERS_PER_LAT_DEG
+			# 	half_span_lon_deg = (span_x2 / 2.0) / METERS_PER_LON_DEG
+			# else:
+			# 	# Massive global/regional tiers center on the overall geographic area
+			# 	center_lat = (lat_min + lat_max) / 2.0
+			# 	center_lon = (lon_min + lon_max) / 2.0
+				
+			# 	# Map to the absolute physical limits of your specified window
+			# 	half_span_lat_deg = span_lat_deg / 2.0
+			# 	half_span_lon_deg = span_lon_deg / 2.0
+
+			# # Generate uniform angular coordinates
+			# lats_uniform = np.linspace(center_lat - half_span_lat_deg, center_lat + half_span_lat_deg, n1)
+			# lons_uniform = np.linspace(center_lon - half_span_lon_deg, center_lon + half_span_lon_deg, n2)
+			
+			# # For fine tiers, snap a node line to cross the station location precisely
+			# if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
+			# 	snap_idx_lat = np.argmin(np.abs(lats_uniform - station_lla[0]))
+			# 	snap_idx_lon = np.argmin(np.abs(lons_uniform - station_lla[1]))
+			# 	lats_uniform += (station_lla[0] - lats_uniform[snap_idx_lat])
+			# 	lons_uniform += (station_lla[1] - lons_uniform[snap_idx_lon])
+
 			# Determine the grid center based on the resolution tier
 			if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
 				# Fine local tiers stay centered right on the station
@@ -1149,13 +1182,12 @@ for sta_ind in ind_use:
 			lats_uniform = np.linspace(center_lat - half_span_lat_deg, center_lat + half_span_lat_deg, n1)
 			lons_uniform = np.linspace(center_lon - half_span_lon_deg, center_lon + half_span_lon_deg, n2)
 			
-			# For fine tiers, snap a node line to cross the station location precisely
-			if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
-				snap_idx_lat = np.argmin(np.abs(lats_uniform - station_lla[0]))
-				snap_idx_lon = np.argmin(np.abs(lons_uniform - station_lla[1]))
-				lats_uniform += (station_lla[0] - lats_uniform[snap_idx_lat])
-				lons_uniform += (station_lla[1] - lons_uniform[snap_idx_lon])
-
+			# === FIXED: SNAP STATION TO NODE CENTERS UNCONDITIONALLY ACROSS ALL TIERS ===
+			snap_idx_lat = np.argmin(np.abs(lats_uniform - station_lla[0]))
+			snap_idx_lon = np.argmin(np.abs(lons_uniform - station_lla[1]))
+			lats_uniform += (station_lla[0] - lats_uniform[snap_idx_lat])
+			lons_uniform += (station_lla[1] - lons_uniform[snap_idx_lon])
+			
 			# Set up the vertical geodetic altitude coordinates
 			elev_lla = locs[:, 2].max() + 1000.0  
 			altitudes_base = np.linspace(0, n3 - 1, n3) * dz_res
