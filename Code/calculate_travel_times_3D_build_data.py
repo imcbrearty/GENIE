@@ -455,19 +455,31 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     tp_times += np.maximum(0.0, grid_z) / vp_surface
     ts_times += np.maximum(0.0, grid_z) / vs_surface
 
-    # Identify source index using the raw coordinate system
+    # # Identify source index using the raw coordinate system
+    # dx_raw = xx[:, 0] - loc_proj[0, 0]
+    # dy_raw = xx[:, 1] - loc_proj[0, 1]
+    # if xx.shape[1] >= 3:
+    #     dz_raw = xx[:, 2] - loc_proj[0, 2]
+    # else:
+    #     dz_raw = target_depths_m - source_depth_m
+        
+    # true_src_idx = np.argmin(dx_raw**2 + dy_raw**2 + dz_raw**2)
+    
+    # tp_times[true_src_idx] = 0.0
+    # ts_times[true_src_idx] = 0.0
+
+	# Locate the source node globally instead of assuming it sits inside the slice
     dx_raw = xx[:, 0] - loc_proj[0, 0]
     dy_raw = xx[:, 1] - loc_proj[0, 1]
-    if xx.shape[1] >= 3:
-        dz_raw = xx[:, 2] - loc_proj[0, 2]
-    else:
-        dz_raw = target_depths_m - source_depth_m
-        
-    true_src_idx = np.argmin(dx_raw**2 + dy_raw**2 + dz_raw**2)
+    dz_raw = xx[:, 2] - loc_proj[0, 2] if xx.shape[1] >= 3 else target_depths_m - source_depth_m
     
-    tp_times[true_src_idx] = 0.0
-    ts_times[true_src_idx] = 0.0
-
+    dist_sq = dx_raw**2 + dy_raw**2 + dz_raw**2
+    # Only zero it out if the true source point physically falls inside this specific chunk
+    if np.min(dist_sq) < 1e-3:
+        true_src_idx = np.argmin(dist_sq)
+        tp_times[true_src_idx] = 0.0
+        ts_times[true_src_idx] = 0.0
+	
     return tp_times, ts_times
 
 
@@ -960,9 +972,42 @@ for sta_ind in ind_use:
 		# =====================================================================
 		if engine_type == 'taup':
 			# Resolve times using the 1D model interpolator mapped to the 3D grid
-			tp_flattened, ts_flattened = compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, -1.0*x_vel, vp)
-			tp_flattened = np.asarray(tp_flattened).ravel()
-			ts_flattened = np.asarray(ts_flattened).ravel()
+
+			if inc_res == (len(optim) - 1):
+
+				# =====================================================================
+				# MEMORY-SAFE CHUNKED EXECUTION FOR TIER 3
+				# =====================================================================
+				# If xx is massive, process it in smaller, safe blocks
+				chunk_size = 500000  # 500k nodes at a time keeps memory under ~100MB per batch
+				total_nodes = xx.shape[0]
+				
+				tp_times_all = np.zeros(total_nodes, dtype=np.float32)
+				ts_times_all = np.zeros(total_nodes, dtype=np.float32)
+				
+				print(f"Processing {total_nodes} nodes in {int(np.ceil(total_nodes/chunk_size))} memory batches...")
+				
+				for chunk_idx in range(0, total_nodes, chunk_size):
+				    end_idx = min(chunk_idx + chunk_size, total_nodes)
+				    xx_chunk = xx[chunk_idx:end_idx]
+				    
+				    # Run your exact TauP function on just this small slice
+				    tp_chunk, ts_chunk = compute_travel_times_taup_optimized(
+				        xx_chunk, loc_proj, taup_model, ftrns2, -1.0 * x_vel, vp # depths, vp
+				    )
+				    
+				    tp_times_all[chunk_idx:end_idx] = tp_chunk
+				    ts_times_all[chunk_idx:end_idx] = ts_chunk
+				
+				# Now replace your original single-call tracking with the consolidated arrays
+				tp_flattened = tp_times_all.ravel()
+				ts_flattened = ts_times_all.ravel()
+
+			else:
+			
+				tp_flattened, ts_flattened = compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, -1.0*x_vel, vp)
+				tp_flattened = np.asarray(tp_flattened).ravel()
+				ts_flattened = np.asarray(ts_flattened).ravel()
 
 
 			# 2. OVERRIDE VP AND VS FOR THE PINN TO ENSURE 100% MATHEMATICAL CONSISTENCY
