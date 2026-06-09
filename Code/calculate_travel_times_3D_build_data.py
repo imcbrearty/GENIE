@@ -562,7 +562,7 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     # surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
     # surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
 
-	# --- HYBRID AXIS WITH DOMAIN SIZE PROTECTION ---
+    # --- HYBRID AXIS WITH DOMAIN SIZE PROTECTION ---
     if max_deg * 1.1 > 0.2:
         # Standard hybrid setup for normal and massive domains
         near_field = np.geomspace(1e-7, 0.2, 200)
@@ -570,12 +570,13 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
         dense_deg_axis = np.concatenate((near_field, far_field))
     else:
         # Fallback allocation for exceptionally small domains
-        dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
+    	dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
 
-	surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+    surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
     surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
 
-    for i, deg in enumerate(dense_deg_axis):
+
+	for i, deg in enumerate(dense_deg_axis):
         try:
             # FIXED: Expanded phase tracking to handle full-Earth core phases seamlessly
             arrivals = taup_model.get_travel_times(
