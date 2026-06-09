@@ -1036,7 +1036,7 @@ if train_travel_time_neural_network == True:
 	torch.save(m.state_dict(), path_save + 'travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_save))
 	torch.save(optimizer.state_dict(), path_save + 'travel_time_neural_network_physics_informed_%s_optimizer_ver_%d.h5'%(phase, n_ver_save))
 	# np.savez_compressed(path_save + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_save), out1 = out1, out2 = out2, trgt1 = trgt1, trgt2 = trgt2, sta_pos1 = sta_pos1.cpu().detach().numpy(), src_pos1 = src_pos1.cpu().detach().numpy(), sta_pos2 = sta_pos2.cpu().detach().numpy(), src_pos2 = src_pos2.cpu().detach().numpy(), v_mean = v_mean, scale_params = scale_params, losses = losses, losses_vald = losses_vald)
-	np.savez_compressed(path_save + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_save), out1 = out1, out2 = out2, trgt1 = trgt1, trgt2 = trgt2, sta_pos1 = sta_pos1, src_pos1 = src_pos1, sta_pos2 = sta_pos2, src_pos2 = src_pos2, v_mean = v_mean, scale_params = scale_params, r_vals = r_vals, losses = losses, losses_vald = losses_vald)
+	np.savez_compressed(path_save + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_save), out1 = out1, out2 = out2, trgt1 = trgt1, trgt2 = trgt2, sta_pos1 = sta_pos1, src_pos1 = src_pos1, sta_pos2 = sta_pos2, src_pos2 = src_pos2, v_mean = v_mean, scale_params = scale_params, r_vals = r_vals, rbest = rbest, mn = mn, losses = losses, losses_vald = losses_vald)
 	m = m.to(device)
 
 	make_plot = True
