@@ -1136,7 +1136,8 @@ for sta_ind in ind_use:
 			xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis=1)
 			X = ftrns2(xx)
 
-		print(f'\nGenerated Tier {inc_res} [{engine_type.upper()}]: {dx_res*n1:0.2f}m x {dx_res*n2:0.2f}m x {dz_res*n3:0.2f}m')		
+		# print(f'\nGenerated Tier {inc_res} [{engine_type.upper()}]: {dx_res*n1:0.2f}m x {dx_res*n2:0.2f}m x {dz_res*n3:0.2f}m')		
+		print(f'\nGenerated Tier {inc_res}: {dx_res*n1:0.2f} m x {dx_res*n2:0.2f} m x {dz_res*n3:0.2f} m')		
 
 		# Universal geometric fallback locator across both engine types
 		src_index = np.argmin(np.linalg.norm(xx - loc_proj, axis=1))
