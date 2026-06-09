@@ -858,24 +858,63 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     		surf_t[mask] = (dense_deg_axis[mask] * 111195.0) / v_surf
     		surf_p[mask] = 1.0 / v_surf
 
-    # =====================================================================
-    # INSERTED SANITY FIX: Explicitly pin the 0.0 surface boundary condition
-    # =====================================================================
-    # Force the absolute first index (closest to delta=0) to be a true direct wave
-    surf_t_p[0] = (dense_deg_axis[0] * 111195.0) / vp_surface
-    surf_p_p[0] = 1.0 / vp_surface
+    # # =====================================================================
+    # # INSERTED SANITY FIX: Explicitly pin the 0.0 surface boundary condition
+    # # =====================================================================
+    # # Force the absolute first index (closest to delta=0) to be a true direct wave
+    # surf_t_p[0] = (dense_deg_axis[0] * 111195.0) / vp_surface
+    # surf_p_p[0] = 1.0 / vp_surface
 
-    surf_t_s[0] = (dense_deg_axis[0] * 111195.0) / vs_surface
-    surf_p_s[0] = 1.0 / vs_surface
+    # surf_t_s[0] = (dense_deg_axis[0] * 111195.0) / vs_surface
+    # surf_p_s[0] = 1.0 / vs_surface
 
-    # Clean up any trailing near-field S-wave dropouts (< 0.05 degrees)
-    direct_s_limit = (dense_deg_axis * 111195.0) / vs_surface
-    broken_s_mask = (dense_deg_axis < 0.05) & (surf_t_s > direct_s_limit * 1.5)
+    # # Clean up any trailing near-field S-wave dropouts (< 0.05 degrees)
+    # direct_s_limit = (dense_deg_axis * 111195.0) / vs_surface
+    # broken_s_mask = (dense_deg_axis < 0.05) & (surf_t_s > direct_s_limit * 1.5)
+    # if np.any(broken_s_mask):
+    # 	surf_t_s[broken_s_mask] = direct_s_limit[broken_s_mask]
+    # 	surf_p_s[broken_s_mask] = 1.0 / vs_surface
+    # # =====================================================================
+
+	# =====================================================================
+    # LOCAL-ARRAY-SAFE NEAR-FIELD FALLBACK PATHS
+    # =====================================================================
+    # Find the average velocity from surface down to station depth for true direct-wave fallbacks
+    z_limit = source_depth_m
+    active_layers = model_depths_m[:-1] <= z_limit
+    
+    if np.any(active_layers):
+        avg_vp_near = np.mean(model_vp_m_s[:-1][active_layers])
+        avg_vs_near = np.mean(model_vs_m_s[:-1][active_layers])
+    else:
+        avg_vp_near, avg_vs_near = vp_surface, vs_surface
+
+    # Fill fallback channels using depth-averaged velocities for near-field precision
+    for surf_t, surf_p, v_near in [(surf_t_p, surf_p_p, avg_vp_near), (surf_t_s, surf_p_s, avg_vs_near)]:
+        mask = np.isinf(surf_t)
+        if np.any(mask):
+            surf_t[mask] = (dense_deg_axis[mask] * 111195.0) / v_near
+            surf_p[mask] = 1.0 / v_near
+
+    # Clean up near-field S-wave dropouts dynamically scaled to your station depth
+    # Max direct wave distance is physically bounded by a ~45-degree takeoff angle from depth
+    max_direct_deg = (source_depth_m / 111195.0) 
+    
+    direct_s_limit = (dense_deg_axis * 111195.0) / avg_vs_near
+    # If TauP skipped the direct wave inside this local radius and grabbed a deep reflection, override it
+    broken_s_mask = (dense_deg_axis <= max_direct_deg) & (surf_t_s > direct_s_limit * 1.2)
     if np.any(broken_s_mask):
-    	surf_t_s[broken_s_mask] = direct_s_limit[broken_s_mask]
-    	surf_p_s[broken_s_mask] = 1.0 / vs_surface
-    # =====================================================================
+        surf_t_s[broken_s_mask] = direct_s_limit[broken_s_mask]
+        surf_p_s[broken_s_mask] = 1.0 / avg_vs_near
 
+    # Do the exact same for P-wave near-field dropouts
+    direct_p_limit = (dense_deg_axis * 111195.0) / avg_vp_near
+    broken_p_mask = (dense_deg_axis <= max_direct_deg) & (surf_t_p > direct_p_limit * 1.2)
+    if np.any(broken_p_mask):
+        surf_t_p[broken_p_mask] = direct_p_limit[broken_p_mask]
+        surf_p_p[broken_p_mask] = 1.0 / avg_vp_near
+    # =====================================================================
+	
     final_deg_axis = np.insert(dense_deg_axis, 0, 0.0)
     
     # RESTORED: These baseline interpolations are vital for depth projection steps!
@@ -953,8 +992,8 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     # =====================================================================
     # 4. Topography and Absolute Origin Pinning
     # =====================================================================
-    tp_times += np.maximum(0.0, src_z) / vp_surface
-    ts_times += np.maximum(0.0, vs_surface) / vs_surface
+    # tp_times += np.maximum(0.0, src_z) / vp_surface
+    # ts_times += np.maximum(0.0, src_z) / vs_surface
     tp_times += np.maximum(0.0, grid_z) / vp_surface
     ts_times += np.maximum(0.0, grid_z) / vs_surface
 
