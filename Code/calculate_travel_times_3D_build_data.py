@@ -539,12 +539,39 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     # =====================================================================
     # 2. Seed a Single Dense Surface Profile (Run TauP exactly ONCE)
     # =====================================================================
-    max_deg = max(0.1, distances_deg.max())
-    dense_deg_axis = np.linspace(1e-8, max_deg * 1.1, 500)
+    # max_deg = max(0.1, distances_deg.max())
+    # dense_deg_axis = np.linspace(1e-8, max_deg * 1.1, 500)
     
-    surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
-    surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+    # surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+    # surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
 
+	# =====================================================================
+    # 2. Seed a Single Dense Surface Profile (Run TauP exactly ONCE)
+    # =====================================================================
+    max_deg = max(0.1, distances_deg.max())
+    
+    # # --- HYBRID AXIS: Sharp near-source cluster + Stable wide-angle span ---
+    # # 200 points packed tightly between ~10 meters and 0.2 degrees
+    # near_field = np.geomspace(1e-7, 0.2, 200)
+    # # 300 points distributed evenly from 0.2 degrees out to the domain edge
+    # far_field = np.linspace(0.2001, max_deg * 1.1, 300)
+    
+    # # Combine them into a single monotonic sampling axis
+    # dense_deg_axis = np.concatenate((near_field, far_field))
+    
+    # surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+    # surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+
+	# --- HYBRID AXIS WITH DOMAIN SIZE PROTECTION ---
+    if max_deg * 1.1 > 0.2:
+        # Standard hybrid setup for normal and massive domains
+        near_field = np.geomspace(1e-7, 0.2, 200)
+        far_field = np.linspace(0.2001, max_deg * 1.1, 300)
+        dense_deg_axis = np.concatenate((near_field, far_field))
+    else:
+        # Fallback allocation for exceptionally small domains
+        dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
+	
     for i, deg in enumerate(dense_deg_axis):
         try:
             # FIXED: Expanded phase tracking to handle full-Earth core phases seamlessly
