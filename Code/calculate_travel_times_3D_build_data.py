@@ -549,10 +549,10 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     # Exact 3D chord distance linking source and target across the ellipsoid
     # chord_dist = np.sqrt(r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad))
 
-	# Force floating-point precision dipping below zero to be safely clipped at 0.0
-	# inside_sqrt = r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad)
-	chord_dist = np.sqrt(np.maximum(r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad), 0.0))
-	
+    # Force floating-point precision dipping below zero to be safely clipped at 0.0
+    # inside_sqrt = r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad)
+    chord_dist = np.sqrt(np.maximum(r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad), 0.0))
+
     safe_chord = np.where(chord_dist < 1e-3, 1.0, chord_dist)
     
     # True ellipsoidal angular take-off correction factor
@@ -1065,50 +1065,115 @@ for sta_ind in ind_use:
 		# =====================================================================
 		# ENGINE-DEPENDENT GEOMETRIC MESH GENERATION (WITH TIER TRUNCATION)
 		# =====================================================================
+		# if engine_type == 'taup':
+		# 	# -----------------------------------------------------------------
+		# 	# GEOGRAPHIC PATH: Uniform Lat/Lon/Depth + Tier-Specific Scaling
+		# 	# -----------------------------------------------------------------
+		# 	METERS_PER_LAT_DEG = 111195.0
+		# 	station_lla = ftrns2(loc_proj)[0]
+		# 	METERS_PER_LON_DEG = 111195.0 * np.cos(np.radians(station_lla[0]))
+
+		# 	half_span_lat_deg = (span_x1 / 2.0) / METERS_PER_LAT_DEG
+		# 	half_span_lon_deg = (span_x2 / 2.0) / METERS_PER_LON_DEG
+
+		# 	if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
+		# 		center_lat = station_lla[0]
+		# 		center_lon = station_lla[1]
+		# 	else:
+		# 		center_lat = np.mean(lat_range_extend).item()
+		# 		center_lon = np.mean(lon_range_extend).item()
+
+		# 	lats_uniform = np.linspace(center_lat - half_span_lat_deg, center_lat + half_span_lat_deg, n1)
+		# 	lons_uniform = np.linspace(center_lon - half_span_lon_deg, center_lon + half_span_lon_deg, n2)
+			
+		# 	snap_idx_lat = np.argmin(np.abs(lats_uniform - station_lla[0]))
+		# 	snap_idx_lon = np.argmin(np.abs(lons_uniform - station_lla[1]))
+		# 	lats_uniform += (station_lla[0] - lats_uniform[snap_idx_lat])
+		# 	lons_uniform += (station_lla[1] - lons_uniform[snap_idx_lon])
+
+		# 	# Convert your maximum elevation boundary to geodetic altitude if it isn't already
+		# 	# (Assuming elev was originally calculated in Cartesian space)
+		# 	elev_lla = locs[:, 2].max() + 1000.0  # Make sure this matches your LLA elevation datum
+		# 	altitudes_base = np.linspace(0, n3 - 1, n3) * dz_res
+		# 	altitudes_base = (altitudes_base - altitudes_base.mean()) + station_lla[2]
+		# 	altitudes_base = altitudes_base - altitudes_base.max() + elev_lla
+			
+		# 	# Perfectly snap a node line to intercept the station's geodetic altitude
+		# 	inearest = np.argmin(np.abs(altitudes_base - station_lla[2]))
+		# 	altitudes_uniform = altitudes_base - (altitudes_base[inearest] - station_lla[2])
+
+		# 	lat_mesh, lon_mesh, alt_mesh = np.meshgrid(lats_uniform, lons_uniform, altitudes_uniform, indexing='ij')
+		# 	X = np.concatenate((lat_mesh.reshape(-1,1), lon_mesh.reshape(-1,1), alt_mesh.reshape(-1,1)), axis=1)
+		# 	xx = ftrns1(X)
+			
+		# 	# Define placeholders to keep Eikonal function inputs from breaking downstream
+		# 	x11, x12, x13 = None, None, None
+
 		if engine_type == 'taup':
 			# -----------------------------------------------------------------
-			# GEOGRAPHIC PATH: Uniform Lat/Lon/Depth + Tier-Specific Scaling
+			# GEOGRAPHIC PATH: True Spherical/Ellipsoidal Angular Grid Setup
 			# -----------------------------------------------------------------
-			METERS_PER_LAT_DEG = 111195.0
 			station_lla = ftrns2(loc_proj)[0]
-			METERS_PER_LON_DEG = 111195.0 * np.cos(np.radians(station_lla[0]))
 
-			half_span_lat_deg = (span_x1 / 2.0) / METERS_PER_LAT_DEG
-			half_span_lon_deg = (span_x2 / 2.0) / METERS_PER_LON_DEG
+			# Extract your domain boundaries directly from the true geodetic extent
+			lat_min, lat_max = lat_range_extend[0], lat_range_extend[1]
+			lon_min, lon_max = lon_range_extend[0], lon_range_extend[1]
 
+			# Calculate the total true angular spans of your region
+			span_lat_deg = lat_max - lat_min
+			span_lon_deg = lon_max - lon_min
+
+			# Determine the grid center based on the resolution tier
 			if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
+				# Fine local tiers stay centered right on the station
 				center_lat = station_lla[0]
 				center_lon = station_lla[1]
+				
+				# Derive scaling factors from the station's local curvature metrics
+				METERS_PER_LAT_DEG = 111195.0
+				METERS_PER_LON_DEG = 111195.0 * np.cos(np.radians(station_lla[0]))
+				
+				# Convert the meter spans to local angular equivalents safely
+				half_span_lat_deg = (span_x1 / 2.0) / METERS_PER_LAT_DEG
+				half_span_lon_deg = (span_x2 / 2.0) / METERS_PER_LON_DEG
 			else:
-				center_lat = np.mean(lat_range_extend).item()
-				center_lon = np.mean(lon_range_extend).item()
+				# Massive global/regional tiers center on the overall geographic area
+				center_lat = (lat_min + lat_max) / 2.0
+				center_lon = (lon_min + lon_max) / 2.0
+				
+				# Map to the absolute physical limits of your specified window
+				half_span_lat_deg = span_lat_deg / 2.0
+				half_span_lon_deg = span_lon_deg / 2.0
 
+			# Generate uniform angular coordinates
 			lats_uniform = np.linspace(center_lat - half_span_lat_deg, center_lat + half_span_lat_deg, n1)
 			lons_uniform = np.linspace(center_lon - half_span_lon_deg, center_lon + half_span_lon_deg, n2)
 			
-			snap_idx_lat = np.argmin(np.abs(lats_uniform - station_lla[0]))
-			snap_idx_lon = np.argmin(np.abs(lons_uniform - station_lla[1]))
-			lats_uniform += (station_lla[0] - lats_uniform[snap_idx_lat])
-			lons_uniform += (station_lla[1] - lons_uniform[snap_idx_lon])
+			# For fine tiers, snap a node line to cross the station location precisely
+			if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
+				snap_idx_lat = np.argmin(np.abs(lats_uniform - station_lla[0]))
+				snap_idx_lon = np.argmin(np.abs(lons_uniform - station_lla[1]))
+				lats_uniform += (station_lla[0] - lats_uniform[snap_idx_lat])
+				lons_uniform += (station_lla[1] - lons_uniform[snap_idx_lon])
 
-			# Convert your maximum elevation boundary to geodetic altitude if it isn't already
-			# (Assuming elev was originally calculated in Cartesian space)
-			elev_lla = locs[:, 2].max() + 1000.0  # Make sure this matches your LLA elevation datum
+			# Set up the vertical geodetic altitude coordinates
+			elev_lla = locs[:, 2].max() + 1000.0  
 			altitudes_base = np.linspace(0, n3 - 1, n3) * dz_res
 			altitudes_base = (altitudes_base - altitudes_base.mean()) + station_lla[2]
 			altitudes_base = altitudes_base - altitudes_base.max() + elev_lla
 			
-			# Perfectly snap a node line to intercept the station's geodetic altitude
 			inearest = np.argmin(np.abs(altitudes_base - station_lla[2]))
 			altitudes_uniform = altitudes_base - (altitudes_base[inearest] - station_lla[2])
 
+			# Mesh grid assembly
 			lat_mesh, lon_mesh, alt_mesh = np.meshgrid(lats_uniform, lons_uniform, altitudes_uniform, indexing='ij')
 			X = np.concatenate((lat_mesh.reshape(-1,1), lon_mesh.reshape(-1,1), alt_mesh.reshape(-1,1)), axis=1)
+			
+			# Forward project to local meters so your Eikonal PINN handles uniform physical spacing
 			xx = ftrns1(X)
 			
-			# Define placeholders to keep Eikonal function inputs from breaking downstream
 			x11, x12, x13 = None, None, None
-			
+	
 		else:
 			# -----------------------------------------------------------------
 			# CARTESIAN PATH: Strict dX/dY/dZ for Eikonal/FMM Finite Differences
