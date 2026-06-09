@@ -1051,7 +1051,8 @@ for sta_ind in ind_use:
 		sample_points = True
 		if sample_points == True:
 
-			scale_factor = len(locs)/25
+			# scale_factor = len(locs)/25
+			scale_factor = 1.0
 			n_zero_inputs = int(int(100000/scale_factor) / (len(optim) - 1))
 			n_per_station = int(int(150000/scale_factor) / (len(optim) - 1))
 			n_per_station1 = int(int(100000/scale_factor) / (len(optim) - 1))
