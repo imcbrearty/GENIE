@@ -1632,31 +1632,68 @@ for sta_ind in ind_use:
 			# p[sta_ind] = 1
 			# isample = np.sort(np.random.choice(len(p), size = n_zero_inputs, p = p/p.sum(), replace = True))
 
-			p = 1.0/np.maximum(results[0][:,0], 0.1)
-			isample = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station, len(p)), p = p/p.sum(), replace = False))
 
-			p = (1.0/np.maximum(results[0][:,0], 0.1))**2
-			isample1 = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station1, len(p)), p = p/p.sum(), replace = False))
+			# =====================================================================
+			# 1. GENERATE THE REGIONAL VALID MASK UPFRONT
+			# =====================================================================
+			dist_pad_depth = 0.2 * deg_pad * 110e3
+			
+			# Identify every node in the entire grid that physically sits within your bounds
+			valid_region_mask = (
+				(X[:, 0] < (lat_range_extend[1] + deg_pad)) & 
+				(X[:, 0] > (lat_range_extend[0] - deg_pad)) & 
+				(X[:, 1] < (lon_range_extend[1] + deg_pad)) & 
+				(X[:, 1] > (lon_range_extend[0] - deg_pad)) & 
+				(X[:, 2] <= (depth_range[1] + dist_pad_depth)) & 
+				(X[:, 2] >= (depth_range[0] - dist_pad_depth))
+			)
+			
+			# Get a list of indices that are inside your target box
+			valid_indices = np.where(valid_region_mask)[0]
+			
+			# Fallback protection: if the box is empty, use the whole grid
+			if len(valid_indices) == 0:
+				valid_indices = np.arange(X.shape[0])
+				
+			p_mask = np.zeros(len(X))
+			p_mask[valid_indices] = 1.0
+			p_mask_int = int(p_mask.sum())
+			
+			p = p_mask*(1.0/np.maximum(results[0][:,0], 0.1))
+			isample = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station, p_mask_int), p = p/p.sum(), replace = False))
+
+			p = p_mask*((1.0/np.maximum(results[0][:,0], 0.1))**2)
+			isample1 = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station1, p_mask_int), p = p/p.sum(), replace = False))
 
 			# grab_near_boundaries_samples
-			p = 1.0/np.maximum(results[0].max() - results[0][:,0], 0.1)
-			isample2 = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station1, len(p)), p = p/p.sum(), replace = False))
+			p = p_mask*(1.0/np.maximum(results[0].max() - results[0][:,0], 0.1))
+			isample2 = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station1, p_mask_int), p = p/p.sum(), replace = False))
 
 			# grab_interior_samples
-			p = 1.0*np.ones(X.shape[0]) # /np.maximum(Tp_interp[:,n].max() - Tp_interp[:,n], 0.1)
-			isample3 = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station1, len(p)), p = p/p.sum(), replace = False))
+			p = p_mask*(1.0*np.ones(X.shape[0])) # /np.maximum(Tp_interp[:,n].max() - Tp_interp[:,n], 0.1)
+			isample3 = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station1, p_mask_int), p = p/p.sum(), replace = False))
 			# isample_vald = np.random.choice(np.delete(np.arange(len(p)), np.unique(np.concatenate((isample, isample1, isample2, isample3), axis = 0)), axis = 0), size = n_per_station)
 			
 			isample = np.random.permutation(np.concatenate((isample, isample1, isample2, isample3), axis = 0))
-			isample_vald = np.random.choice(np.delete(np.arange(len(p)), isample, axis = 0), size = n_per_station)
+			# isample_vald = np.random.choice(np.delete(np.arange(len(p)), isample, axis = 0), size = n_per_station)
 
-			use_within_region = True
-			if use_within_region == True:
-				ikeep = np.where((X[isample][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample][:,1] > (lon_range_extend[0] - deg_pad)))[0]
-				isample = isample[ikeep]
+			valid_ind = np.setdiff1d(valid_indices, isample)
+			
+			# If you ran out of unique points, fall back to all valid indices
+			if len(valid_ind) == 0:
+				valid_ind = valid_indices
 				
-				ikeep1 = np.where((X[isample_vald][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample_vald][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample_vald][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample_vald][:,1] > (lon_range_extend[0] - deg_pad)))[0]
-				isample_vald = isample_vald[ikeep1]
+			isample_vald = np.random.choice(valid_ind, size=np.minimum(n_per_station, len(valid_ind)), replace = False)
+
+			# use_within_region = True
+			# if use_within_region == True:
+
+			# 	dist_pad_depth = 0.2*deg_pad*110e3
+			# 	ikeep = np.where((X[isample][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample][:,1] > (lon_range_extend[0] - deg_pad))*(X[isample][:,2] <= (depth_range[1] + dist_pad_depth))*(X[isample][:,2] >= (depth_range[0] - dist_pad_depth)))[0]
+			# 	isample = isample[ikeep]
+				
+			# 	ikeep1 = np.where((X[isample_vald][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample_vald][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample_vald][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample_vald][:,1] > (lon_range_extend[0] - deg_pad))*(X[isample_vald][:,2] <= (depth_range[1] + dist_pad_depth))*(X[isample_vald][:,2] >= (depth_range[0] - dist_pad_depth)))[0]
+			# 	isample_vald = isample_vald[ikeep1]
 
 
 			Tp_sample = results[0][isample] # np.concatenate((results[0][isample], results[0][isample1], results[0][isample2], results[0][isample3]), axis = 0)
