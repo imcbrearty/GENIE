@@ -1086,11 +1086,16 @@ for sta_ind in ind_use:
 			lats_uniform += (station_lla[0] - lats_uniform[snap_idx_lat])
 			lons_uniform += (station_lla[1] - lons_uniform[snap_idx_lon])
 
+			# Convert your maximum elevation boundary to geodetic altitude if it isn't already
+			# (Assuming elev was originally calculated in Cartesian space)
+			elev_lla = locs[:, 2].max() + 1000.0  # Make sure this matches your LLA elevation datum
 			altitudes_base = np.linspace(0, n3 - 1, n3) * dz_res
-			altitudes_base = (altitudes_base - altitudes_base.mean()) + loc_proj[0,2]
-			altitudes_base = altitudes_base - altitudes_base.max() + elev
-			inearest = np.argmin(np.abs(altitudes_base - loc_proj[0,2]))
-			altitudes_uniform = altitudes_base - (altitudes_base[inearest] - loc_proj[0,2])
+			altitudes_base = (altitudes_base - altitudes_base.mean()) + station_lla[2]
+			altitudes_base = altitudes_base - altitudes_base.max() + elev_lla
+			
+			# Perfectly snap a node line to intercept the station's geodetic altitude
+			inearest = np.argmin(np.abs(altitudes_base - station_lla[2]))
+			altitudes_uniform = altitudes_base - (altitudes_base[inearest] - station_lla[2])
 
 			lat_mesh, lon_mesh, alt_mesh = np.meshgrid(lats_uniform, lons_uniform, altitudes_uniform, indexing='ij')
 			X = np.concatenate((lat_mesh.reshape(-1,1), lon_mesh.reshape(-1,1), alt_mesh.reshape(-1,1)), axis=1)
