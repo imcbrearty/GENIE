@@ -698,6 +698,7 @@ def estimate_safe_cores(cpu_point_budget, safety_factor=0.8):
     
 #     return tp_times, ts_times
 
+
 def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths, vp):
     """
     Computes travel times using TauP surface references. Corrects the horizontal 
@@ -763,59 +764,117 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     # =====================================================================
     # 2. Seed a Single Dense Surface Profile (Run TauP exactly ONCE)
     # =====================================================================
-    max_deg = max(0.1, distances_deg.max())
+    # max_deg = max(0.1, distances_deg.max())
     
-    # # --- HYBRID AXIS: Sharp near-source cluster + Stable wide-angle span ---
-    # # 200 points packed tightly between ~10 meters and 0.2 degrees
-    # near_field = np.geomspace(1e-7, 0.2, 200)
-    # # 300 points distributed evenly from 0.2 degrees out to the domain edge
-    # far_field = np.linspace(0.2001, max_deg * 1.1, 300)
+    # # # --- HYBRID AXIS: Sharp near-source cluster + Stable wide-angle span ---
+    # # # 200 points packed tightly between ~10 meters and 0.2 degrees
+    # # near_field = np.geomspace(1e-7, 0.2, 200)
+    # # # 300 points distributed evenly from 0.2 degrees out to the domain edge
+    # # far_field = np.linspace(0.2001, max_deg * 1.1, 300)
     
-    # # Combine them into a single monotonic sampling axis
-    # dense_deg_axis = np.concatenate((near_field, far_field))
+    # # # Combine them into a single monotonic sampling axis
+    # # dense_deg_axis = np.concatenate((near_field, far_field))
     
+    # # surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+    # # surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+
+    # # --- HYBRID AXIS WITH DOMAIN SIZE PROTECTION ---
+    # if max_deg * 1.1 > 0.2:
+    #     # Standard hybrid setup for normal and massive domains
+    #     near_field = np.geomspace(1e-7, 0.2, 200)
+    #     far_field = np.linspace(0.2001, max_deg * 1.1, 300)
+    #     dense_deg_axis = np.concatenate((near_field, far_field))
+    # else:
+    #     # Fallback allocation for exceptionally small domains
+    #     dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
+
     # surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
     # surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
 
+
+    # for i, deg in enumerate(dense_deg_axis):
+    #     try:
+    #         # FIXED: Expanded phase tracking to handle full-Earth core phases seamlessly
+    #         arrivals = taup_model.get_travel_times(
+    #             source_depth_in_km=0.0,
+    #             distance_in_degree=deg,
+    #             phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
+    #             # phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
+    #         )
+    #         for arrival in arrivals:
+    #             phase = arrival.name.upper()
+    #             p_m = arrival.ray_param / 6371000.0
+    #             if phase in ["P", "PN", "PG", "PKP", "PDIFF"] and arrival.time < surf_t_p[i]:
+    #                 surf_t_p[i], surf_p_p[i] = arrival.time, p_m
+    #             elif phase in ["S", "SN", "SG", "SKS", "SDIFF"] and arrival.time < surf_t_s[i]:
+    #                 surf_t_s[i], surf_p_s[i] = arrival.time, p_m
+    #     except Exception:
+    #         continue
+
+    # # Fill fallback channels
+    # for surf_t, surf_p, v_surf in [(surf_t_p, surf_p_p, vp_surface), (surf_t_s, surf_p_s, vs_surface)]:
+    #     mask = np.isinf(surf_t)
+    #     if np.any(mask):
+    #         surf_t[mask] = (dense_deg_axis[mask] * 111195.0) / v_surf
+    #         surf_p[mask] = 1.0 / v_surf
+
+    # =====================================================================
+    # 2. Seed a Single Dense Surface Profile (Run TauP exactly ONCE)
+    # =====================================================================
+    max_deg = max(0.1, distances_deg.max())
+
     # --- HYBRID AXIS WITH DOMAIN SIZE PROTECTION ---
     if max_deg * 1.1 > 0.2:
-        # Standard hybrid setup for normal and massive domains
-        near_field = np.geomspace(1e-7, 0.2, 200)
-        far_field = np.linspace(0.2001, max_deg * 1.1, 300)
-        dense_deg_axis = np.concatenate((near_field, far_field))
+    	near_field = np.geomspace(1e-7, 0.2, 200)
+    	far_field = np.linspace(0.2001, max_deg * 1.1, 300)
+    	dense_deg_axis = np.concatenate((near_field, far_field))
     else:
-        # Fallback allocation for exceptionally small domains
-        dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
+    	dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
 
     surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
     surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
 
-
     for i, deg in enumerate(dense_deg_axis):
-        try:
-            # FIXED: Expanded phase tracking to handle full-Earth core phases seamlessly
-            arrivals = taup_model.get_travel_times(
-                source_depth_in_km=0.0,
-                distance_in_degree=deg,
-                phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
-                # phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
-            )
-            for arrival in arrivals:
-                phase = arrival.name.upper()
-                p_m = arrival.ray_param / 6371000.0
-                if phase in ["P", "PN", "PG", "PKP", "PDIFF"] and arrival.time < surf_t_p[i]:
-                    surf_t_p[i], surf_p_p[i] = arrival.time, p_m
-                elif phase in ["S", "SN", "SG", "SKS", "SDIFF"] and arrival.time < surf_t_s[i]:
-                    surf_t_s[i], surf_p_s[i] = arrival.time, p_m
-        except Exception:
-            continue
+    	try:
+    		arrivals = taup_model.get_travel_times(
+    			source_depth_in_km=0.0,
+    			distance_in_degree=deg,
+    			phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
+    		)
+    		for arrival in arrivals:
+    			phase = arrival.name.upper()
+    			p_m = arrival.ray_param / 6371000.0
+    			if phase in ["P", "PN", "PG", "PKP", "PDIFF"] and arrival.time < surf_t_p[i]:
+    				surf_t_p[i], surf_p_p[i] = arrival.time, p_m
+    			elif phase in ["S", "SN", "SG", "SKS", "SDIFF"] and arrival.time < surf_t_s[i]:
+    				surf_t_s[i], surf_p_s[i] = arrival.time, p_m
+    	except Exception:
+    		continue
 
     # Fill fallback channels
     for surf_t, surf_p, v_surf in [(surf_t_p, surf_p_p, vp_surface), (surf_t_s, surf_p_s, vs_surface)]:
-        mask = np.isinf(surf_t)
-        if np.any(mask):
-            surf_t[mask] = (dense_deg_axis[mask] * 111195.0) / v_surf
-            surf_p[mask] = 1.0 / v_surf
+    	mask = np.isinf(surf_t)
+    	if np.any(mask):
+    		surf_t[mask] = (dense_deg_axis[mask] * 111195.0) / v_surf
+    		surf_p[mask] = 1.0 / v_surf
+
+    # =====================================================================
+    # INSERTED SANITY FIX: Explicitly pin the 0.0 surface boundary condition
+    # =====================================================================
+    # Force the absolute first index (closest to delta=0) to be a true direct wave
+    surf_t_p[0] = (dense_deg_axis[0] * 111195.0) / vp_surface
+    surf_p_p[0] = 1.0 / vp_surface
+
+    surf_t_s[0] = (dense_deg_axis[0] * 111195.0) / vs_surface
+    surf_p_s[0] = 1.0 / vs_surface
+
+    # Clean up any trailing near-field S-wave dropouts (< 0.05 degrees)
+    direct_s_limit = (dense_deg_axis * 111195.0) / vs_surface
+    broken_s_mask = (dense_deg_axis < 0.05) & (surf_t_s > direct_s_limit * 1.5)
+    if np.any(broken_s_mask):
+    	surf_t_s[broken_s_mask] = direct_s_limit[broken_s_mask]
+    	surf_p_s[broken_s_mask] = 1.0 / vs_surface
+    # =====================================================================
 
     final_deg_axis = np.insert(dense_deg_axis, 0, 0.0)
     
@@ -912,6 +971,7 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
         ts_times[true_src_idx] = 0.0
     
     return tp_times, ts_times
+
 
 def create_custom_taup_model(depths, vp, vs, model_name):
     import os
