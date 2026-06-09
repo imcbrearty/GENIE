@@ -1132,7 +1132,7 @@ for sta_ind in ind_use:
 		# Matrix indexing assigned properly for asymmetric cases
 		x11, x12, x13 = np.meshgrid(x1, x2, x3, indexing='ij')
 		xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis=1)
-		X = ftrns2(xx)
+		# X = ftrns2(xx)
 
 		print('\nDomain: %0.4f, %0.4f, %0.4f'%(dx_res*len(x1), dx_res*len(x2), dz_res*len(x3)))
 
@@ -1160,10 +1160,27 @@ for sta_ind in ind_use:
 			if inc_res == (len(optim) - 1):
 
 				# =====================================================================
+				# VOLUMETRIC SAFETY VALVE FOR GIANT DOMAINS
+				# =====================================================================
+				MAX_TIER3_NODES = 30000000  # Strict cap of 30 Million nodes maximum
+				if xx.shape[0] > MAX_TIER3_NODES:
+					print(f" Warning: xx size ({xx.shape[0]}) exceeds maximum budget. Downsampling to {MAX_TIER3_NODES} points...")
+					# Generating a uniform random choice of indices to preserve spatial distribution
+					# rng = np.random.default_rng(42) # Fixed seed for reproducibility
+					keep_indices = np.random.choice(xx.shape[0], size=MAX_TIER3_NODES, replace=False)
+					if src_index not in keep_indices:
+						keep_indices[0] = src_index
+					xx = xx[keep_indices]
+					# X = ftrns2(xx)
+					src_index = np.argmin(np.linalg.norm(xx - loc_proj, axis=1))
+
+				# =====================================================================
 				# MEMORY-SAFE CHUNKED EXECUTION FOR TIER 3
 				# =====================================================================
 				# If xx is massive, process it in smaller, safe blocks
-				chunk_size = 500000  # 500k nodes at a time keeps memory under ~100MB per batch
+				# chunk_size = 500000  # 500k nodes at a time keeps memory under ~100MB per batch
+
+				chunk_size = 10000000  # 500k nodes at a time keeps memory under ~100MB per batch
 				total_nodes = xx.shape[0]
 				
 				tp_times_all = np.zeros(total_nodes, dtype=np.float32)
@@ -1193,13 +1210,13 @@ for sta_ind in ind_use:
 				tp_flattened = np.asarray(tp_flattened).ravel()
 				ts_flattened = np.asarray(ts_flattened).ravel()
 
-
 			# 2. OVERRIDE VP AND VS FOR THE PINN TO ENSURE 100% MATHEMATICAL CONSISTENCY
 			if hasattr(taup_model.model, 'v_mod'):
 				compiled_v_mod = taup_model.model.v_mod
 			else:
 				compiled_v_mod = taup_model.model.s_mod.v_mod
 
+			X = ftrns2(xx)
 			taup_internal_depths = np.array([layer['top_depth'] for layer in compiled_v_mod.layers])
 			taup_internal_vp = np.array([layer['top_p_velocity'] for layer in compiled_v_mod.layers]) * 1000.0 # to m/s
 			taup_internal_vs = np.array([layer['top_s_velocity'] for layer in compiled_v_mod.layers]) * 1000.0 # to m/s
@@ -1214,7 +1231,7 @@ for sta_ind in ind_use:
 					taup_internal_depths[idx] = taup_internal_depths[idx - 1] + 1e-6
 
 			# Map your xx grid points to true LLA to find their absolute elevations (Z)
-			X_lla_mesh = ftrns2(xx)
+			X_lla_mesh = np.copy(X) # ftrns2(xx)
 			true_z = X_lla_mesh[:, 2]
 
 			# Convert your increasing-upward Z coordinate to TauP's positive-downward depth in km
@@ -1237,6 +1254,8 @@ for sta_ind in ind_use:
 
 			Vp, Vs = initilize_velocity_model(x_vel, vp, vs, xx, [dx_res, dx_res, dz_res], vel_type=vel_model_type)
 			print('dx_v %0.4f %0.4f %0.4f \n'%(dx_res, dx_res, dz_res))
+			X = ftrns2(xx)
+		
 			# print([dx_res, dx_res, dz_res])
 
 			# --- INSERT THE TOPOGRAPHY MASK HERE ---
@@ -1330,6 +1349,7 @@ for sta_ind in ind_use:
 			if use_within_region == True:
 				ikeep = np.where((X[isample][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample][:,1] > (lon_range_extend[0] - deg_pad)))[0]
 				isample = isample[ikeep]
+				
 				ikeep1 = np.where((X[isample_vald][:,0] < (lat_range_extend[1] + deg_pad))*(X[isample_vald][:,0] > (lat_range_extend[0] - deg_pad))*(X[isample_vald][:,1] < (lon_range_extend[1] + deg_pad))*(X[isample_vald][:,1] > (lon_range_extend[0] - deg_pad)))[0]
 				isample_vald = isample_vald[ikeep1]
 
@@ -1351,11 +1371,16 @@ for sta_ind in ind_use:
 
 			Tp_boundary = np.zeros((n_zero_inputs, 1))
 			Ts_boundary = np.zeros((n_zero_inputs, 1))
-			Vp_boundary = Vp[src_index].repeat(n_zero_inputs, axis = 0)
-			Vs_boundary = Vs[src_index].repeat(n_zero_inputs, axis = 0)
-			X_boundary = X[src_index].reshape(1,-1).repeat(n_zero_inputs, axis = 0)
-			xx_boundary = xx[src_index].reshape(1,-1).repeat(n_zero_inputs, axis = 0)
+			# Vp_boundary = Vp[src_index].repeat(n_zero_inputs, axis = 0)
+			# Vs_boundary = Vs[src_index].repeat(n_zero_inputs, axis = 0)
+			# X_boundary = X[src_index].reshape(1,-1).repeat(n_zero_inputs, axis = 0)
+			# xx_boundary = xx[src_index].reshape(1,-1).repeat(n_zero_inputs, axis = 0)
 
+			Vp_boundary = np.tile(Vp[src_index], (n_zero_inputs, 1))
+			Vs_boundary = np.tile(Vs[src_index], (n_zero_inputs, 1))
+			X_boundary = np.tile(X[src_index].reshape(1, -1), (n_zero_inputs, 1))
+			xx_boundary = np.tile(xx[src_index].reshape(1, -1), (n_zero_inputs, 1))
+			
 			data['Tp_%d'%inc_res] = Tp_sample
 			data['Ts_%d'%inc_res] = Ts_sample
 			data['X_%d'%inc_res] = X_sample
