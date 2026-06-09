@@ -547,7 +547,12 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     delta_rad = np.radians(distances_deg)
     
     # Exact 3D chord distance linking source and target across the ellipsoid
-    chord_dist = np.sqrt(r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad))
+    # chord_dist = np.sqrt(r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad))
+
+	# Force floating-point precision dipping below zero to be safely clipped at 0.0
+	# inside_sqrt = r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad)
+	chord_dist = np.sqrt(np.maximum(r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad), 0.0))
+	
     safe_chord = np.where(chord_dist < 1e-3, 1.0, chord_dist)
     
     # True ellipsoidal angular take-off correction factor
