@@ -1281,11 +1281,24 @@ for sta_ind in ind_use:
 		if sample_points == True:
 
 			# scale_factor = len(locs)/25
-			scale_factor = 1.0
+			# scale_factor = 1.0
+
+			scale_factor = np.log1p(len(locs) / 25.0)
+			# Ensure the scale_factor never shrinks below 1.0 for small networks
+			scale_factor = max(1.0, scale_factor)
+			
 			n_zero_inputs = int(int(100000/scale_factor) / (len(optim) - 1))
 			n_per_station = int(int(150000/scale_factor) / (len(optim) - 1))
 			n_per_station1 = int(int(100000/scale_factor) / (len(optim) - 1))
 
+			
+			# 3. Dynamic Floor Guard: Ensure counts never drop below a physics-informed baseline
+			# Even on massive domains, a station needs a core skeleton of nodes to resolve details.
+			n_zero_inputs = max(500, n_zero_inputs)
+			n_per_station = max(1000, n_per_station)
+			n_per_station1 = max(500, n_per_station1)
+
+			
 			if sta_ind >= len(locs):
 				n_zero_inputs = int(n_zero_inputs/3)
 				n_per_station = int(n_per_station/3)
