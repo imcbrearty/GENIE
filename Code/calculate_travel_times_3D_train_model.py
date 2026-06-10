@@ -438,7 +438,7 @@ if train_travel_time_neural_network == True:
 	conversion_factor = conversion_factor/max_time
 
 	scale_params = [max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor]
-	m = TravelTimesPN(ftrns1_diff, ftrns2_diff, n_phases = 2, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
+	m = TravelTimesPN(ftrns1_diff, ftrns2_diff, n_phases = 2, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, rbest = rbest_cuda, mn = mn_cuda, device = device).to(device)
 
 	## The travel time model is trained with PINN loss (Raissi et al., 2017) and synthetic data simulated with the fast marching method (Sethian. 1996).
 	## It follows a similar approach as the original PINN for travel times in seismology (Smith et al., 2020). However it uses several architechtural features
