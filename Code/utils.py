@@ -1046,8 +1046,21 @@ def load_files_with_travel_times(path_to_file, name_of_project, template_ver, ve
 
 	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
 
-def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs', corrs = None, locs_corr = None, return_model = False, use_physics_informed = False):
+# def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs', corrs = None, locs_corr = None, return_model = False, use_physics_informed = False):
 
+def load_travel_time_neural_network(
+    path_to_file, 
+    ftrns1 = None,       # Keeps its original 2nd position
+    ftrns2 = None,       # Keeps its original 3rd position
+    n_ver_load = 1,      # Keeps its original 4th position (added a default just in case)
+    phase = 'p_s', 
+    device = 'cuda', 
+    method = 'relative pairs', 
+    corrs = None, 
+    locs_corr = None, 
+    return_model = False, 
+    use_physics_informed = False):
+	
 	if use_physics_informed == False:
 	
 		from module import TravelTimes
@@ -1081,48 +1094,94 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		
 			return trv
 
+	
 	else:
-
+		
 		from module import VModel, TravelTimesPN
 		seperator = '\\' if '\\' in path_to_file else '/'
 		
 		z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_load))
 		n_phases = len(z['v_mean'])
 		v_mean, scale_params = z['v_mean'], z['scale_params']
-		# scale_val = float(z['scale_val'])
-		# trav_val = float(z['trav_val'])
 		z.close()
 	
-		max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor = scale_params
+		# --- REMOVED THE MANUAL LOCAL LAMBDAS FROM HERE ---
 		
-		norm_pos = lambda x: x/max_dist
-		norm_time = lambda t: t/max_time
-		norm_vel = lambda v: v/vp_max
-	
-		inorm_pos = lambda x: x*max_dist
-		inorm_time = lambda t: t*max_time
-		inorm_vel = lambda v: v*vp_max	
+		# Pass scale_params as an array/list directly into the constructor!
+		m = TravelTimesPN(
+			ftrns1=ftrns1, 
+			ftrns2=ftrns2, 
+			n_phases=n_phases, 
+			v_mean=v_mean, 
+			scale_params=scale_params,  # <--- Let the class handle everything internally
+			corrs=corrs, 
+			locs_corr=locs_corr, 
+			device=device
+		).to(device)
 		
-		m = TravelTimesPN(ftrns1, ftrns2, n_phases = n_phases, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, corrs = corrs, locs_corr = locs_corr, device = device).to(device)
+		# This completely overwrites placeholders with saved model state parameters
 		m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
+		
 		if return_model == False:
 			m.eval()
 	
 		if method == 'relative pairs':
-	
 			trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'pairs')
 	
 		if method == 'direct':
-	
 			trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'direct')
 
 		if return_model == True:
-
 			return m
-
 		else:
+			return trv
+
+
+
+
+
+	# else:
+
+		# from module import VModel, TravelTimesPN
+		# seperator = '\\' if '\\' in path_to_file else '/'
 		
-			return trv		
+		# z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+		# n_phases = len(z['v_mean'])
+		# v_mean, scale_params = z['v_mean'], z['scale_params']
+		# # scale_val = float(z['scale_val'])
+		# # trav_val = float(z['trav_val'])
+		# z.close()
+	
+		# max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor = scale_params
+		
+		# norm_pos = lambda x: x/max_dist
+		# norm_time = lambda t: t/max_time
+		# norm_vel = lambda v: v/vp_max
+	
+		# inorm_pos = lambda x: x*max_dist
+		# inorm_time = lambda t: t*max_time
+		# inorm_vel = lambda v: v*vp_max	
+		
+		# m = TravelTimesPN(ftrns1, ftrns2, n_phases = n_phases, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, corrs = corrs, locs_corr = locs_corr, device = device).to(device)
+		# m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
+		# if return_model == False:
+		# 	m.eval()
+	
+		# if method == 'relative pairs':
+	
+		# 	trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'pairs')
+	
+		# if method == 'direct':
+	
+		# 	trv = lambda sta_pos, src_pos: m(sta_pos, src_pos, method = 'direct')
+
+		# if return_model == True:
+
+		# 	return m
+
+		# else:
+		
+		# 	return trv		
 
 
 # load_travel_time_neural_network
