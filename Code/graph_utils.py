@@ -6431,6 +6431,7 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), Vs=3500
 
     lat_r, lon_r = domain['lat_range'], domain['lon_range']
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    n_neighbors_trgt = min(len(station_locs) - 1, n_neighbors_trgt)
 
     # --- FIXED: Scale-Agnostic Vectorized Travel Time Engine ---
     def trv(locs, srcs, Vs=3500.0):
