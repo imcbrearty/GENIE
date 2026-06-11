@@ -298,23 +298,20 @@ def estimate_safe_cores(cpu_point_budget, safety_factor=0.8):
 
 
 
+
 def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths, vp, vs=None):
     """
     Computes P and S travel times using TauP surface references across an arbitrary
-    space-filling irregular grid. Corrects the horizontal slowness parameter natively
-    using ellipsoidal geodesic chord projections to preserve 3D near-vertical paths
-    without grid-size or coordinate dependency.
+    space-filling grid. Corrects for WGS84 ellipsoidal radius variation and preserves
+    1D ray integration physics across variable topography completely natively.
     """
-    from scipy.interpolate import interp1d
-    import numpy as np
-    
+
     # =====================================================================
-    # 1. Coordinate and Velocity Framework Extraction (WGS84 Geocentric Fix)
+    # 1. Coordinate and Velocity Framework Extraction
     # =====================================================================
     X_lla = ftrns2(xx)
     station_lla = ftrns2(loc_proj)[0]
 
-    # WGS84 Constants
     A_EQUATOR = 6378137.0
     B_POLE = 6356752.3142
     ELLIPSOIDAL_FLATTENING = 1.0 / 298.257223563
@@ -323,14 +320,12 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     station_lat_geo, station_lon_geo = station_lla[0], station_lla[1]
     mesh_lats_geo, mesh_lons_geo = X_lla[:, 0], X_lla[:, 1]
 
-    # Convert geodetic latitudes to geocentric parameters to find exact earth radius
     station_lat_centric = np.degrees(np.arctan(LAT_SCALE_FACTOR * np.tan(np.radians(station_lat_geo))))
     mesh_lats_centric = np.degrees(np.arctan(LAT_SCALE_FACTOR * np.tan(np.radians(mesh_lats_geo))))
 
     lat1, lon1 = np.radians(station_lat_centric), np.radians(station_lon_geo)
     lat2, lon2 = np.radians(mesh_lats_centric), np.radians(mesh_lons_geo)
     
-    # Calculate exact great-circle angular separation (Delta) across the ellipsoid
     dlon = lon2 - lon1
     cos_clat = np.clip(np.sin(lat1) * np.sin(lat2) + np.cos(lat1) * np.cos(lat2) * np.cos(dlon), -1.0, 1.0)
     distances_deg = np.degrees(np.arccos(cos_clat))
@@ -351,29 +346,25 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     vp_surface, vs_surface = model_vp_m_s[0], model_vs_m_s[0]
     src_z, grid_z = station_lla[2], X_lla[:, 2]
     
-    # Calculate true ellipsoidal surface radius at the station and mesh positions
     r_surface_mesh = (A_EQUATOR * B_POLE) / np.sqrt((B_POLE * np.cos(lat2))**2 + (A_EQUATOR * np.sin(lat2))**2)
     r_surface_station = (A_EQUATOR * B_POLE) / np.sqrt((B_POLE * np.cos(lat1))**2 + (A_EQUATOR * np.sin(lat1))**2)
     
-    # Radii from Earth's center to absolute 3D nodes
     r_source = r_surface_station + src_z
     r_target = r_surface_mesh + grid_z
     
-    # Track physical depth coordinates (Negative values represent nodes inside topography)
+    # Absolute physical depths relative to local sea-level datums
     source_depth_m = r_surface_station - r_source
     target_depths_m = r_surface_mesh - r_target
 
-    # Map the reference source depth to TauP's standard 6371km sphere (always positive for TauP)
-    source_depth_taup_km = np.maximum(0.0, (6371000.0 - r_source) / 1000.0)
-
     # =====================================================================
-    # 2. Seed a Single Dense Surface Profile (With Restored Teleseismic Phases)
+    # 2. Seed a Single Surface-to-Surface Profile (Pure Reciprocity Baseline)
     # =====================================================================
     max_deg = max(0.1, distances_deg.max())
+    split_deg = np.clip(max_deg * 0.05, 0.05, 0.5)
 
-    if max_deg * 1.1 > 0.2:
-        near_field = np.geomspace(1e-7, 0.2, 200)
-        far_field = np.linspace(0.2001, max_deg * 1.1, 300)
+    if max_deg * 1.1 > split_deg:
+        near_field = np.geomspace(1e-7, split_deg, 200)
+        far_field = np.linspace(split_deg + 1e-4, max_deg * 1.1, 300)
         dense_deg_axis = np.concatenate((near_field, far_field))
     else:
         dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
@@ -385,11 +376,11 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
 
     for i, deg in enumerate(dense_deg_axis):
         try:
-            # Full phase spectrum restored to ensure regional and global coverage
+            # FORCE source_depth_in_km=0.0 so TauP acts as a pure surface-to-surface lookup
             arrivals = taup_model.get_travel_times(
-                source_depth_in_km=source_depth_taup_km,
+                source_depth_in_km=0.0, 
                 distance_in_degree=deg,
-                phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
+                phase_list=["p", "s", "P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
             )
             for arrival in arrivals:
                 phase = arrival.name.upper()
@@ -405,23 +396,18 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
         except Exception:
             continue
 
-    z_limit = np.maximum(0.0, source_depth_m)
-    active_layers = model_depths_m[:-1] <= z_limit
-    
-    if np.any(active_layers):
-        avg_vp_near = np.mean(model_vp_m_s[:-1][active_layers])
-        avg_vs_near = np.mean(model_vs_m_s[:-1][active_layers])
-    else:
-        avg_vp_near, avg_vs_near = vp_surface, vs_surface
-
-    for surf_t, surf_p, v_near in [(surf_t_p, surf_p_p, avg_vp_near), (surf_t_s, surf_p_s, avg_vs_near)]:
+    # Clean fallbacks for missing values
+    for surf_t, surf_p, v_surf in [(surf_t_p, surf_p_p, vp_surface), (surf_t_s, surf_p_s, vs_surface)]:
         mask = np.isinf(surf_t)
         if np.any(mask):
-            surf_t[mask] = (np.radians(dense_deg_axis[mask]) * r_surface_station) / v_near
-            surf_p[mask] = 1.0 / v_near
+            surf_t[mask] = (np.radians(dense_deg_axis[mask]) * r_surface_station) / v_surf
+            surf_p[mask] = 1.0 / v_surf
+
+
 
     final_deg_axis = np.insert(dense_deg_axis, 0, 0.0)
     
+    # Interpolate background values across the irregular spatial points
     interp_tp_base = interp1d(final_deg_axis, np.insert(surf_t_p, 0, 0.0), kind='linear', fill_value="extrapolate")(distances_deg)
     p_slowness_raw = interp1d(final_deg_axis, np.insert(surf_p_p, 0, 1.0/vp_surface), kind='linear', fill_value="extrapolate")(distances_deg)
     
@@ -429,19 +415,27 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     s_slowness_raw = interp1d(final_deg_axis, np.insert(surf_p_s, 0, 1.0/vs_surface), kind='linear', fill_value="extrapolate")(distances_deg)
 
     # =====================================================================
-    # 3. True Geodesic Chord Projection (No Coordinate Subtractions)
+    # 3. Adaptive Near-Vertical Conditioning Framework
     # =====================================================================
-    delta_rad = np.radians(distances_deg)
-    chord_dist = np.sqrt(np.maximum(r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad), 0.0))
-    safe_chord = np.where(chord_dist < 1e-3, 1.0, chord_dist)
-    
-    sin_theta_ellipsoidal = (r_target * np.sin(delta_rad)) / safe_chord
-    
-    interp_p_slowness = p_slowness_raw * np.abs(sin_theta_ellipsoidal)
-    interp_s_slowness = s_slowness_raw * np.abs(sin_theta_ellipsoidal)
+    dx_m = xx[:, 0] - loc_proj[0, 0]
+    dy_m = xx[:, 1] - loc_proj[0, 1]
+    horizontal_distances_m = np.sqrt(dx_m**2 + dy_m**2)
+
+    # Determine the adaptive threshold based on grid resolution cell size
+    nonzero_horiz = horizontal_distances_m[horizontal_distances_m > 1e-2]
+    adaptive_threshold_m = np.min(nonzero_horiz) * 1.5 if len(nonzero_horiz) > 0 else 500.0
+
+    # Flag and condition variables inside the near-vertical mask
+    vertical_mask = horizontal_distances_m <= adaptive_threshold_m
+
+    if np.any(vertical_mask):
+        interp_tp_base[vertical_mask] = 0.0
+        interp_ts_base[vertical_mask] = 0.0
+        p_slowness_raw[vertical_mask] = 0.0
+        s_slowness_raw[vertical_mask] = 0.0
 
     # =====================================================================
-    # 4. Vectorized Directional Depth Integration Loop
+    # 4. Vectorized Directional Depth Integration Loop (With Topography)
     # =====================================================================
     def integrate_between_bounds(p_slowness, z_start, z_end, is_s_wave=False):
         dt = np.zeros_like(z_start)
@@ -451,16 +445,23 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
         z_top_arr = np.minimum(z_start, z_end)
         z_bot_arr = np.maximum(z_start, z_end)
         
-        # STEP A: Natively integrate through topography layers above datum line (depth < 0)
+        # STEP A: Natively integrate through topography layers (depth < 0)
         topo_active = (z_top_arr < 0.0)
         if np.any(topo_active):
             thick_topo = 0.0 - np.minimum(z_top_arr[topo_active], 0.0)
             thick_topo -= np.maximum(0.0 - z_bot_arr[topo_active], 0.0)
             
-            eta_topo = np.sqrt(np.maximum(1e-12, (1.0 / v_surf**2) - p_slowness[topo_active]**2))
+            slowness_sq_topo = 1.0 / v_surf**2
+            valid_ray_topo = slowness_sq_topo > (p_slowness[topo_active]**2)
+            
+            eta_topo = np.zeros_like(thick_topo)
+            if np.any(valid_ray_topo):
+                eta_topo[valid_ray_topo] = np.sqrt(
+                    slowness_sq_topo - p_slowness[topo_active][valid_ray_topo]**2
+                )
             dt[topo_active] += thick_topo * eta_topo
             
-        # STEP B: Core integration for subsurface crustal/mantle layers (depth >= 0)
+        # STEP B: Core structural integration for subsurface crustal layers (depth >= 0)
         for idx in range(len(model_depths_m) - 1):
             z_layer_top, z_layer_bot = model_depths_m[idx], model_depths_m[idx + 1]
             v_layer = v_profile[idx]
@@ -472,28 +473,46 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
             effective_bot = np.minimum(z_bot_arr[active], z_layer_bot)
             thick = effective_bot - effective_top
             
-            eta = np.sqrt(np.maximum(1e-12, (1.0 / v_layer**2) - p_slowness[active]**2))
+            slowness_sq_layer = 1.0 / v_layer**2
+            valid_ray_layer = slowness_sq_layer > (p_slowness[active]**2)
+            
+            eta = np.zeros_like(thick)
+            if np.any(valid_ray_layer):
+                eta[valid_ray_layer] = np.sqrt(
+                    slowness_sq_layer - p_slowness[active][valid_ray_layer]**2
+                )
+                
             dt[active] += thick * eta
         return dt
 
     z_source_vector = np.full_like(target_depths_m, source_depth_m)
     
-    tp_times = interp_tp_base + integrate_between_bounds(interp_p_slowness, z_source_vector, target_depths_m, False)
-    ts_times = interp_ts_base + integrate_between_bounds(interp_s_slowness, z_source_vector, target_depths_m, True)
+    # Execute integration sweeps
+    tp_times = interp_tp_base + integrate_between_bounds(p_slowness_raw, z_source_vector, target_depths_m, False)
+    ts_times = interp_ts_base + integrate_between_bounds(s_slowness_raw, z_source_vector, target_depths_m, True)
 
     # =====================================================================
-    # 5. Absolute Origin Pinning
+    # 5. Absolute Spatial Pinning (Fixed Cartesian Distance Tracking)
     # =====================================================================
-    r_local_mean = (r_surface_mesh + r_surface_station) / 2.0
-    horizontal_distances_m = np.radians(distances_deg) * r_local_mean
-    dist_sq = horizontal_distances_m**2 + (target_depths_m - source_depth_m)**2
-    
-    if np.min(dist_sq) < 1e-3:
-        true_src_idx = np.argmin(dist_sq)
+    dx_raw = xx[:, 0] - loc_proj[0, 0]
+    dy_raw = xx[:, 1] - loc_proj[0, 1]
+
+    if xx.shape[1] >= 3:
+        dz_raw = xx[:, 2] - loc_proj[0, 2]
+    else:
+        dz_raw = target_depths_m - source_depth_m
+        
+    dist_sq = dx_raw**2 + dy_raw**2 + dz_raw**2
+
+    # Pin the absolute closest node to zero
+    true_src_idx = np.argmin(dist_sq)
+    if dist_sq[true_src_idx] < 1.0:  # 1 meter tolerance threshold
         tp_times[true_src_idx] = 0.0
         ts_times[true_src_idx] = 0.0
-        
+
     return tp_times, ts_times
+
+
 
 
 def create_custom_taup_model(depths, vp, vs, model_name):
