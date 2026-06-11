@@ -24,6 +24,7 @@ from scipy.optimize import differential_evolution
 # from scipy.metrics import pairwise_distances as pd
 from sklearn.metrics import pairwise_distances as pd
 from process_utils import * # differential_evolution_location
+from scipy.interpolate import interp1d
 import platform
 import psutil
 import glob
@@ -297,37 +298,38 @@ def estimate_safe_cores(cpu_point_budget, safety_factor=0.8):
 
 
 
-def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths, vp):
+def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths, vp, vs=None):
     """
-    Computes travel times using TauP surface references. Corrects the horizontal 
-    slowness parameter p using ellipsoidal geodesic chord projections to prevent 
-    near-vertical paths from zeroing out vertical travel times.
-    Features geocentric latitude mapping and variable earth radius for WGS84 accuracy.
+    Computes P and S travel times using TauP surface references across an arbitrary
+    space-filling grid. Corrects for WGS84 ellipsoidal radius variation and preserves
+    1D ray integration physics across variable topography completely natively.
     """
     from scipy.interpolate import interp1d
     import numpy as np
     
     # =====================================================================
-    # 1. Coordinate and Velocity Framework Extraction (With Ellipsoidal Correction)
+    # 1. Coordinate and Velocity Framework Extraction (WGS84 Geocentric Fix)
     # =====================================================================
     X_lla = ftrns2(xx)
     station_lla = ftrns2(loc_proj)[0]
 
-    # WGS84 Flattening factor integration
+    # WGS84 Constants
+    A_EQUATOR = 6378137.0
+    B_POLE = 6356752.3142
     ELLIPSOIDAL_FLATTENING = 1.0 / 298.257223563
     LAT_SCALE_FACTOR = (1.0 - ELLIPSOIDAL_FLATTENING)**2
 
     station_lat_geo, station_lon_geo = station_lla[0], station_lla[1]
     mesh_lats_geo, mesh_lons_geo = X_lla[:, 0], X_lla[:, 1]
 
-    # Convert geodetic surface latitudes to geocentric parameters
+    # Convert geodetic latitudes to geocentric parameters to find exact earth radius
     station_lat_centric = np.degrees(np.arctan(LAT_SCALE_FACTOR * np.tan(np.radians(station_lat_geo))))
     mesh_lats_centric = np.degrees(np.arctan(LAT_SCALE_FACTOR * np.tan(np.radians(mesh_lats_geo))))
 
     lat1, lon1 = np.radians(station_lat_centric), np.radians(station_lon_geo)
     lat2, lon2 = np.radians(mesh_lats_centric), np.radians(mesh_lons_geo)
     
-    # Calculate exact great-circle angles using the elliptically-corrected latitudes
+    # Calculate exact great-circle angular separation (Delta) across the ellipsoid
     dlon = lon2 - lon1
     cos_clat = np.clip(np.sin(lat1) * np.sin(lat2) + np.cos(lat1) * np.cos(lat2) * np.cos(dlon), -1.0, 1.0)
     distances_deg = np.degrees(np.arccos(cos_clat))
@@ -347,138 +349,68 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
 
     vp_surface, vs_surface = model_vp_m_s[0], model_vs_m_s[0]
     src_z, grid_z = station_lla[2], X_lla[:, 2]
-    source_depth_m = np.maximum(0.0, -src_z)
-    target_depths_m = np.maximum(0.0, -grid_z)
-
-    # =====================================================================
-    # 2. Seed a Single Dense Surface Profile (Run TauP exactly ONCE)
-    # =====================================================================
-    # max_deg = max(0.1, distances_deg.max())
-    # dense_deg_axis = np.linspace(1e-8, max_deg * 1.1, 500)
     
-    # surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
-    # surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
-
-    # =====================================================================
-    # 2. Seed a Single Dense Surface Profile (Run TauP exactly ONCE)
-    # =====================================================================
-    # max_deg = max(0.1, distances_deg.max())
+    # Calculate true ellipsoidal surface radius at the station and mesh positions
+    r_surface_mesh = (A_EQUATOR * B_POLE) / np.sqrt(
+        (B_POLE * np.cos(lat2))**2 + (A_EQUATOR * np.sin(lat2))**2
+    )
+    r_surface_station = (A_EQUATOR * B_POLE) / np.sqrt(
+        (B_POLE * np.cos(lat1))**2 + (A_EQUATOR * np.sin(lat1))**2
+    )
     
-    # # # --- HYBRID AXIS: Sharp near-source cluster + Stable wide-angle span ---
-    # # # 200 points packed tightly between ~10 meters and 0.2 degrees
-    # # near_field = np.geomspace(1e-7, 0.2, 200)
-    # # # 300 points distributed evenly from 0.2 degrees out to the domain edge
-    # # far_field = np.linspace(0.2001, max_deg * 1.1, 300)
+    # Radii from Earth's center to absolute 3D nodes
+    r_source = r_surface_station + src_z
+    r_target = r_surface_mesh + grid_z
     
-    # # # Combine them into a single monotonic sampling axis
-    # # dense_deg_axis = np.concatenate((near_field, far_field))
-    
-    # # surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
-    # # surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+    # Convert depth metrics relative to local columns.
+    # Note: We allow negative values here to represent nodes up in the topography!
+    source_depth_m = r_surface_station - r_source
+    target_depths_m = r_surface_mesh - r_target
 
-    # # --- HYBRID AXIS WITH DOMAIN SIZE PROTECTION ---
-    # if max_deg * 1.1 > 0.2:
-    #     # Standard hybrid setup for normal and massive domains
-    #     near_field = np.geomspace(1e-7, 0.2, 200)
-    #     far_field = np.linspace(0.2001, max_deg * 1.1, 300)
-    #     dense_deg_axis = np.concatenate((near_field, far_field))
-    # else:
-    #     # Fallback allocation for exceptionally small domains
-    #     dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
-
-    # surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
-    # surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
-
-
-    # for i, deg in enumerate(dense_deg_axis):
-    #     try:
-    #         # FIXED: Expanded phase tracking to handle full-Earth core phases seamlessly
-    #         arrivals = taup_model.get_travel_times(
-    #             source_depth_in_km=0.0,
-    #             distance_in_degree=deg,
-    #             phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
-    #             # phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
-    #         )
-    #         for arrival in arrivals:
-    #             phase = arrival.name.upper()
-    #             p_m = arrival.ray_param / 6371000.0
-    #             if phase in ["P", "PN", "PG", "PKP", "PDIFF"] and arrival.time < surf_t_p[i]:
-    #                 surf_t_p[i], surf_p_p[i] = arrival.time, p_m
-    #             elif phase in ["S", "SN", "SG", "SKS", "SDIFF"] and arrival.time < surf_t_s[i]:
-    #                 surf_t_s[i], surf_p_s[i] = arrival.time, p_m
-    #     except Exception:
-    #         continue
-
-    # # Fill fallback channels
-    # for surf_t, surf_p, v_surf in [(surf_t_p, surf_p_p, vp_surface), (surf_t_s, surf_p_s, vs_surface)]:
-    #     mask = np.isinf(surf_t)
-    #     if np.any(mask):
-    #         surf_t[mask] = (dense_deg_axis[mask] * 111195.0) / v_surf
-    #         surf_p[mask] = 1.0 / v_surf
+    # Map the reference source depth to TauP's standard 6371km sphere (always positive for TauP)
+    source_depth_taup_km = np.maximum(0.0, (6371000.0 - r_source) / 1000.0)
 
     # =====================================================================
     # 2. Seed a Single Dense Surface Profile (Run TauP exactly ONCE)
     # =====================================================================
     max_deg = max(0.1, distances_deg.max())
 
-    # --- HYBRID AXIS WITH DOMAIN SIZE PROTECTION ---
     if max_deg * 1.1 > 0.2:
-    	near_field = np.geomspace(1e-7, 0.2, 200)
-    	far_field = np.linspace(0.2001, max_deg * 1.1, 300)
-    	dense_deg_axis = np.concatenate((near_field, far_field))
+        near_field = np.geomspace(1e-7, 0.2, 200)
+        far_field = np.linspace(0.2001, max_deg * 1.1, 300)
+        dense_deg_axis = np.concatenate((near_field, far_field))
     else:
-    	dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
+        dense_deg_axis = np.geomspace(1e-7, max_deg * 1.1, 500)
 
-    surf_t_p, surf_p_p = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
-    surf_t_s, surf_p_s = np.full_like(dense_deg_axis, np.inf), np.zeros_like(dense_deg_axis)
+    surf_t_p = np.full_like(dense_deg_axis, np.inf)
+    surf_p_p = np.zeros_like(dense_deg_axis)
+    surf_t_s = np.full_like(dense_deg_axis, np.inf)
+    surf_p_s = np.zeros_like(dense_deg_axis)
 
     for i, deg in enumerate(dense_deg_axis):
-    	try:
-    		arrivals = taup_model.get_travel_times(
-    			source_depth_in_km=0.0,
-    			distance_in_degree=deg,
-    			phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
-    		)
-    		for arrival in arrivals:
-    			phase = arrival.name.upper()
-    			p_m = arrival.ray_param / 6371000.0
-    			if phase in ["P", "PN", "PG", "PKP", "PDIFF"] and arrival.time < surf_t_p[i]:
-    				surf_t_p[i], surf_p_p[i] = arrival.time, p_m
-    			elif phase in ["S", "SN", "SG", "SKS", "SDIFF"] and arrival.time < surf_t_s[i]:
-    				surf_t_s[i], surf_p_s[i] = arrival.time, p_m
-    	except Exception:
-    		continue
+        try:
+            arrivals = taup_model.get_travel_times(
+                source_depth_in_km=source_depth_taup_km,
+                distance_in_degree=deg,
+                phase_list=["P", "S", "Pn", "Sn", "Pg", "Sg", "PKP", "SKS", "Pdiff", "Sdiff"]
+            )
+            for arrival in arrivals:
+                phase = arrival.name.upper()
+                p_m = arrival.ray_param / 6371000.0
+                base_type = phase[0] if len(phase) > 0 else ""
+                
+                # Robust character prefix parsing avoids silent dropouts
+                if base_type == "P" and "S" not in phase:
+                    if arrival.time < surf_t_p[i]:
+                        surf_t_p[i], surf_p_p[i] = arrival.time, p_m
+                elif base_type == "S" and "P" not in phase:
+                    if arrival.time < surf_t_s[i]:
+                        surf_t_s[i], surf_p_s[i] = arrival.time, p_m
+        except Exception:
+            continue
 
-    # Fill fallback channels
-    for surf_t, surf_p, v_surf in [(surf_t_p, surf_p_p, vp_surface), (surf_t_s, surf_p_s, vs_surface)]:
-    	mask = np.isinf(surf_t)
-    	if np.any(mask):
-    		surf_t[mask] = (dense_deg_axis[mask] * 111195.0) / v_surf
-    		surf_p[mask] = 1.0 / v_surf
-
-    # # =====================================================================
-    # # INSERTED SANITY FIX: Explicitly pin the 0.0 surface boundary condition
-    # # =====================================================================
-    # # Force the absolute first index (closest to delta=0) to be a true direct wave
-    # surf_t_p[0] = (dense_deg_axis[0] * 111195.0) / vp_surface
-    # surf_p_p[0] = 1.0 / vp_surface
-
-    # surf_t_s[0] = (dense_deg_axis[0] * 111195.0) / vs_surface
-    # surf_p_s[0] = 1.0 / vs_surface
-
-    # # Clean up any trailing near-field S-wave dropouts (< 0.05 degrees)
-    # direct_s_limit = (dense_deg_axis * 111195.0) / vs_surface
-    # broken_s_mask = (dense_deg_axis < 0.05) & (surf_t_s > direct_s_limit * 1.5)
-    # if np.any(broken_s_mask):
-    # 	surf_t_s[broken_s_mask] = direct_s_limit[broken_s_mask]
-    # 	surf_p_s[broken_s_mask] = 1.0 / vs_surface
-    # # =====================================================================
-
-	# =====================================================================
-    # LOCAL-ARRAY-SAFE NEAR-FIELD FALLBACK PATHS
-    # =====================================================================
-    # Find the average velocity from surface down to station depth for true direct-wave fallbacks
-    z_limit = source_depth_m
+    # Near-field dynamic fallback paths if TauP drops below local threshold
+    z_limit = np.maximum(0.0, source_depth_m)
     active_layers = model_depths_m[:-1] <= z_limit
     
     if np.any(active_layers):
@@ -487,91 +419,90 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     else:
         avg_vp_near, avg_vs_near = vp_surface, vs_surface
 
-    # Fill fallback channels using depth-averaged velocities for near-field precision
     for surf_t, surf_p, v_near in [(surf_t_p, surf_p_p, avg_vp_near), (surf_t_s, surf_p_s, avg_vs_near)]:
         mask = np.isinf(surf_t)
         if np.any(mask):
-            surf_t[mask] = (dense_deg_axis[mask] * 111195.0) / v_near
+            surf_t[mask] = (np.radians(dense_deg_axis[mask]) * r_surface_station) / v_near
             surf_p[mask] = 1.0 / v_near
 
-    # Clean up near-field S-wave dropouts dynamically scaled to your station depth
-    # Max direct wave distance is physically bounded by a ~45-degree takeoff angle from depth
-    max_direct_deg = (source_depth_m / 111195.0) 
-    
-    direct_s_limit = (dense_deg_axis * 111195.0) / avg_vs_near
-    # If TauP skipped the direct wave inside this local radius and grabbed a deep reflection, override it
-    broken_s_mask = (dense_deg_axis <= max_direct_deg) & (surf_t_s > direct_s_limit * 1.2)
-    if np.any(broken_s_mask):
-        surf_t_s[broken_s_mask] = direct_s_limit[broken_s_mask]
-        surf_p_s[broken_s_mask] = 1.0 / avg_vs_near
-
-    # Do the exact same for P-wave near-field dropouts
-    direct_p_limit = (dense_deg_axis * 111195.0) / avg_vp_near
-    broken_p_mask = (dense_deg_axis <= max_direct_deg) & (surf_t_p > direct_p_limit * 1.2)
-    if np.any(broken_p_mask):
-        surf_t_p[broken_p_mask] = direct_p_limit[broken_p_mask]
-        surf_p_p[broken_p_mask] = 1.0 / avg_vp_near
-    # =====================================================================
-	
     final_deg_axis = np.insert(dense_deg_axis, 0, 0.0)
     
-    # RESTORED: These baseline interpolations are vital for depth projection steps!
+    # Interpolate background values across the irregular spatial points
     interp_tp_base = interp1d(final_deg_axis, np.insert(surf_t_p, 0, 0.0), kind='linear', fill_value="extrapolate")(distances_deg)
     p_slowness_raw = interp1d(final_deg_axis, np.insert(surf_p_p, 0, 1.0/vp_surface), kind='linear', fill_value="extrapolate")(distances_deg)
     
     interp_ts_base = interp1d(final_deg_axis, np.insert(surf_t_s, 0, 0.0), kind='linear', fill_value="extrapolate")(distances_deg)
     s_slowness_raw = interp1d(final_deg_axis, np.insert(surf_p_s, 0, 1.0/vs_surface), kind='linear', fill_value="extrapolate")(distances_deg)
 
-    # === ELLIPSOIDAL EARTH RADIUS GENERATION ===
-    # WGS84 Defining Semi-major (equator) and Semi-minor (pole) axes in meters
-    A_EQUATOR = 6378137.0
-    B_POLE = 6356752.3142
-    
-    # Convert geocentric degrees to radians for radius calculation
-    mesh_lats_rad = np.radians(mesh_lats_centric)
-    station_lat_rad = np.radians(station_lat_centric)
-    
-    # Calculate true ellipsoidal surface radius at the station and mesh positions
-    r_surface_mesh = (A_EQUATOR * B_POLE) / np.sqrt(
-        (B_POLE * np.cos(mesh_lats_rad))**2 + (A_EQUATOR * np.sin(mesh_lats_rad))**2
-    )
-    r_surface_station = (A_EQUATOR * B_POLE) / np.sqrt(
-        (B_POLE * np.cos(station_lat_rad))**2 + (A_EQUATOR * np.sin(station_lat_rad))**2
-    )
-    
-    # Radii from Earth's center to the absolute 3D position at depth
-    r_source = r_surface_station - source_depth_m
-    r_target = r_surface_mesh - target_depths_m  # Array matching the current chunk
-    
-    # === TRUE GEODESIC CHORD PROJECTION ===
-    delta_rad = np.radians(distances_deg)
-    
-    # Exact 3D chord distance linking source and target across the ellipsoid
-    # chord_dist = np.sqrt(r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad))
-
-    # Force floating-point precision dipping below zero to be safely clipped at 0.0
-    # inside_sqrt = r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad)
-    chord_dist = np.sqrt(np.maximum(r_source**2 + r_target**2 - 2.0 * r_source * r_target * np.cos(delta_rad), 0.0))
-
-    safe_chord = np.where(chord_dist < 1e-3, 1.0, chord_dist)
-    
-    # True ellipsoidal angular take-off correction factor
-    sin_theta_ellipsoidal = (r_target * np.sin(delta_rad)) / safe_chord
-    
-    # Apply the ellipsoidal projection to your horizontal slowness array
-    interp_p_slowness = p_slowness_raw * np.abs(sin_theta_ellipsoidal)
-    interp_s_slowness = s_slowness_raw * np.abs(sin_theta_ellipsoidal)
-
     # =====================================================================
-    # 3. Vectorized Directional Depth Integration Loop
+    # 3. Vectorized Directional Depth Integration Loop (With Topography)
     # =====================================================================
+    # def integrate_between_bounds(p_slowness, z_start, z_end, is_s_wave=False):
+    #     dt = np.zeros_like(z_start)
+    #     v_profile = model_vs_m_s if is_s_wave else model_vp_m_s
+    #     v_surf = vs_surface if is_s_wave else vp_surface
+        
+    #     # Standard structural depth profile boundaries
+    #     z_top_arr = np.minimum(z_start, z_end)
+    #     z_bot_arr = np.maximum(z_start, z_end)
+        
+    #     # STEP A: Natively integrate through topography layers (depth < 0)
+    #     # If any node extends above sea level, calculate the time through the surface layer material
+    #     topo_active = (z_top_arr < 0.0)
+    #     if np.any(topo_active):
+    #         # Compute thickness between the highest point and the sea-level datum (0.0)
+    #         thick_topo = 0.0 - np.minimum(z_top_arr[topo_active], 0.0)
+    #         # Clip the bottom boundary to ensure we don't bleed into the regular ground layers yet
+    #         thick_topo -= np.maximum(0.0 - z_bot_arr[topo_active], 0.0)
+            
+    #         eta_topo = np.sqrt(np.maximum(1e-12, (1.0 / v_surf**2) - p_slowness[topo_active]**2))
+    #         dt[topo_active] += thick_topo * eta_topo
+            
+    #     # STEP B: Core structural integration for subsurface crustal layers (depth >= 0)
+    #     for idx in range(len(model_depths_m) - 1):
+    #         z_layer_top, z_layer_bot = model_depths_m[idx], model_depths_m[idx + 1]
+    #         v_layer = v_profile[idx]
+            
+    #         active = (z_bot_arr > z_layer_top) & (z_top_arr < z_layer_bot)
+    #         if not np.any(active): continue
+            
+    #         effective_top = np.maximum(z_top_arr[active], z_layer_top)
+    #         effective_bot = np.minimum(z_bot_arr[active], z_layer_bot)
+    #         thick = effective_bot - effective_top
+            
+    #         eta = np.sqrt(np.maximum(1e-12, (1.0 / v_layer**2) - p_slowness[active]**2))
+    #         dt[active] += thick * eta
+    #     return dt
+
     def integrate_between_bounds(p_slowness, z_start, z_end, is_s_wave=False):
         dt = np.zeros_like(z_start)
         v_profile = model_vs_m_s if is_s_wave else model_vp_m_s
+        v_surf = vs_surface if is_s_wave else vp_surface
         
         z_top_arr = np.minimum(z_start, z_end)
         z_bot_arr = np.maximum(z_start, z_end)
         
+        # STEP A: Natively integrate through topography layers (depth < 0)
+        topo_active = (z_top_arr < 0.0)
+        if np.any(topo_active):
+            thick_topo = 0.0 - np.minimum(z_top_arr[topo_active], 0.0)
+            thick_topo -= np.maximum(0.0 - z_bot_arr[topo_active], 0.0)
+            
+            # --- SAFETY GAURD: Detect turning point violations inside topography ---
+            slowness_sq_topo = 1.0 / v_surf**2
+            valid_ray_topo = slowness_sq_topo > (p_slowness[topo_active]**2)
+            
+            eta_topo = np.zeros_like(thick_topo)
+            if np.any(valid_ray_topo):
+                eta_topo[valid_ray_topo] = np.sqrt(
+                    slowness_sq_topo - p_slowness[topo_active][valid_ray_topo]**2
+                )
+            
+            # Critically, nodes where valid_ray_topo is False retain eta_topo = 0.0,
+            # ensuring they don't corrupt the background TauP baseline times.
+            dt[topo_active] += thick_topo * eta_topo
+            
+        # STEP B: Core structural integration for subsurface crustal layers (depth >= 0)
         for idx in range(len(model_depths_m) - 1):
             z_layer_top, z_layer_bot = model_depths_m[idx], model_depths_m[idx + 1]
             v_layer = v_profile[idx]
@@ -583,36 +514,41 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
             effective_bot = np.minimum(z_bot_arr[active], z_layer_bot)
             thick = effective_bot - effective_top
             
-            eta = np.sqrt(np.maximum(1e-12, (1.0 / v_layer**2) - p_slowness[active]**2))
+            # --- SAFETY GAURD: Detect turning point violations in subsurface layers ---
+            slowness_sq_layer = 1.0 / v_layer**2
+            valid_ray_layer = slowness_sq_layer > (p_slowness[active]**2)
+            
+            eta = np.zeros_like(thick)
+            if np.any(valid_ray_layer):
+                eta[valid_ray_layer] = np.sqrt(
+                    slowness_sq_layer - p_slowness[active][valid_ray_layer]**2
+                )
+                
             dt[active] += thick * eta
         return dt
 
+
     z_source_vector = np.full_like(target_depths_m, source_depth_m)
     
-    tp_times = interp_tp_base + integrate_between_bounds(interp_p_slowness, z_source_vector, target_depths_m, False)
-    ts_times = interp_ts_base + integrate_between_bounds(interp_s_slowness, z_source_vector, target_depths_m, True)
+    # Run integration loops using uncorrupted baseline slownesses
+    tp_times = interp_tp_base + integrate_between_bounds(p_slowness_raw, z_source_vector, target_depths_m, False)
+    ts_times = interp_ts_base + integrate_between_bounds(s_slowness_raw, z_source_vector, target_depths_m, True)
 
     # =====================================================================
-    # 4. Topography and Absolute Origin Pinning
+    # 4. Absolute Spatial Pinning
     # =====================================================================
-    # tp_times += np.maximum(0.0, src_z) / vp_surface
-    # ts_times += np.maximum(0.0, src_z) / vs_surface
-    tp_times += np.maximum(0.0, grid_z) / vp_surface
-    ts_times += np.maximum(0.0, grid_z) / vs_surface
-
-    # Locate the source node globally instead of assuming it sits inside the slice
     dx_raw = xx[:, 0] - loc_proj[0, 0]
     dy_raw = xx[:, 1] - loc_proj[0, 1]
     dz_raw = xx[:, 2] - loc_proj[0, 2] if xx.shape[1] >= 3 else target_depths_m - source_depth_m
     
     dist_sq = dx_raw**2 + dy_raw**2 + dz_raw**2
-    # Only zero it out if the true source point physically falls inside this specific chunk
     if np.min(dist_sq) < 1e-3:
         true_src_idx = np.argmin(dist_sq)
         tp_times[true_src_idx] = 0.0
         ts_times[true_src_idx] = 0.0
-    
+        
     return tp_times, ts_times
+
 
 
 def create_custom_taup_model(depths, vp, vs, model_name):
@@ -991,45 +927,7 @@ for sta_ind in ind_use:
 		n1_target = int(np.ceil(span_x1 / dx_res)) + 8
 		n2_target = int(np.ceil(span_x2 / dx_res)) + 8
 		
-		# use_asymmetric_depths = True
-		# if (inc_res == (len(optim) - 1)) and use_asymmetric_depths:
-		# 	min_vertical_layers = 60 
-		# 	dz_from_layers = span_x3 / min_vertical_layers
-			
-		# 	max_aspect_ratio = 4.0
-		# 	dz_from_aspect = dx_res / max_aspect_ratio
-			
-		# 	dz_res = min(dz_from_layers, dz_from_aspect, dx_res)
-		# 	if inc_res > 0:
-		# 		dz_res = max(dz_res, optim[inc_res - 1]) 
-				
-		# 	n3_target = int(np.ceil(span_x3 / dz_res)) + 8
-		# else:
-		# 	dz_res = dx_res
-		# 	n3_target = int(np.ceil(span_x3 / dx_res)) + 8
 
-		# # Enable asymmetric vertical nodes for all deeper/regional tiers (Tier 2 and Tier 3)
-		# use_asymmetric_depths = True
-		# if use_asymmetric_depths and inc_res >= 1:
-		# 	# 1. Guarantee a minimum number of vertical layers
-		# 	min_vertical_layers = 60 
-		# 	dz_from_layers = span_x3 / min_vertical_layers
-			
-		# 	# 2. Prevent the cell aspect ratio (dx/dz) from exceeding 4:1
-		# 	max_aspect_ratio = 4.0
-		# 	dz_from_aspect = dx_res / max_aspect_ratio
-			
-		# 	# Pick the finer dz constraint, but never make it coarser than the horizontal dx_res
-		# 	dz_res = min(dz_from_layers, dz_from_aspect, dx_res)
-			
-		# 	# Sanity floor: Never let dz become sharper than a reasonable absolute physical limit (e.g., 250m)
-		# 	# This keeps your node count from exploding into billions if span_x3 is tiny.
-		# 	dz_res = max(dz_res, 250.0) 
-				
-		# 	n3_target = int(np.ceil(span_x3 / dz_res)) + 8
-		# else:
-		# 	dz_res = dx_res
-		# 	n3_target = int(np.ceil(span_x3 / dx_res)) + 8
 
 		# Enable asymmetric vertical nodes for all deeper/regional tiers (Tier 2 and Tier 3)
 		use_asymmetric_depths = True
@@ -1065,49 +963,6 @@ for sta_ind in ind_use:
 		# =====================================================================
 		# ENGINE-DEPENDENT GEOMETRIC MESH GENERATION (WITH TIER TRUNCATION)
 		# =====================================================================
-		# if engine_type == 'taup':
-		# 	# -----------------------------------------------------------------
-		# 	# GEOGRAPHIC PATH: Uniform Lat/Lon/Depth + Tier-Specific Scaling
-		# 	# -----------------------------------------------------------------
-		# 	METERS_PER_LAT_DEG = 111195.0
-		# 	station_lla = ftrns2(loc_proj)[0]
-		# 	METERS_PER_LON_DEG = 111195.0 * np.cos(np.radians(station_lla[0]))
-
-		# 	half_span_lat_deg = (span_x1 / 2.0) / METERS_PER_LAT_DEG
-		# 	half_span_lon_deg = (span_x2 / 2.0) / METERS_PER_LON_DEG
-
-		# 	if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
-		# 		center_lat = station_lla[0]
-		# 		center_lon = station_lla[1]
-		# 	else:
-		# 		center_lat = np.mean(lat_range_extend).item()
-		# 		center_lon = np.mean(lon_range_extend).item()
-
-		# 	lats_uniform = np.linspace(center_lat - half_span_lat_deg, center_lat + half_span_lat_deg, n1)
-		# 	lons_uniform = np.linspace(center_lon - half_span_lon_deg, center_lon + half_span_lon_deg, n2)
-			
-		# 	snap_idx_lat = np.argmin(np.abs(lats_uniform - station_lla[0]))
-		# 	snap_idx_lon = np.argmin(np.abs(lons_uniform - station_lla[1]))
-		# 	lats_uniform += (station_lla[0] - lats_uniform[snap_idx_lat])
-		# 	lons_uniform += (station_lla[1] - lons_uniform[snap_idx_lon])
-
-		# 	# Convert your maximum elevation boundary to geodetic altitude if it isn't already
-		# 	# (Assuming elev was originally calculated in Cartesian space)
-		# 	elev_lla = locs[:, 2].max() + 1000.0  # Make sure this matches your LLA elevation datum
-		# 	altitudes_base = np.linspace(0, n3 - 1, n3) * dz_res
-		# 	altitudes_base = (altitudes_base - altitudes_base.mean()) + station_lla[2]
-		# 	altitudes_base = altitudes_base - altitudes_base.max() + elev_lla
-			
-		# 	# Perfectly snap a node line to intercept the station's geodetic altitude
-		# 	inearest = np.argmin(np.abs(altitudes_base - station_lla[2]))
-		# 	altitudes_uniform = altitudes_base - (altitudes_base[inearest] - station_lla[2])
-
-		# 	lat_mesh, lon_mesh, alt_mesh = np.meshgrid(lats_uniform, lons_uniform, altitudes_uniform, indexing='ij')
-		# 	X = np.concatenate((lat_mesh.reshape(-1,1), lon_mesh.reshape(-1,1), alt_mesh.reshape(-1,1)), axis=1)
-		# 	xx = ftrns1(X)
-			
-		# 	# Define placeholders to keep Eikonal function inputs from breaking downstream
-		# 	x11, x12, x13 = None, None, None
 
 		if engine_type == 'taup':
 			# -----------------------------------------------------------------
@@ -1123,38 +978,7 @@ for sta_ind in ind_use:
 			span_lat_deg = lat_max - lat_min
 			span_lon_deg = lon_max - lon_min
 
-			# # Determine the grid center based on the resolution tier
-			# if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
-			# 	# Fine local tiers stay centered right on the station
-			# 	center_lat = station_lla[0]
-			# 	center_lon = station_lla[1]
-				
-			# 	# Derive scaling factors from the station's local curvature metrics
-			# 	METERS_PER_LAT_DEG = 111195.0
-			# 	METERS_PER_LON_DEG = 111195.0 * np.cos(np.radians(station_lla[0]))
-				
-			# 	# Convert the meter spans to local angular equivalents safely
-			# 	half_span_lat_deg = (span_x1 / 2.0) / METERS_PER_LAT_DEG
-			# 	half_span_lon_deg = (span_x2 / 2.0) / METERS_PER_LON_DEG
-			# else:
-			# 	# Massive global/regional tiers center on the overall geographic area
-			# 	center_lat = (lat_min + lat_max) / 2.0
-			# 	center_lon = (lon_min + lon_max) / 2.0
-				
-			# 	# Map to the absolute physical limits of your specified window
-			# 	half_span_lat_deg = span_lat_deg / 2.0
-			# 	half_span_lon_deg = span_lon_deg / 2.0
 
-			# # Generate uniform angular coordinates
-			# lats_uniform = np.linspace(center_lat - half_span_lat_deg, center_lat + half_span_lat_deg, n1)
-			# lons_uniform = np.linspace(center_lon - half_span_lon_deg, center_lon + half_span_lon_deg, n2)
-			
-			# # For fine tiers, snap a node line to cross the station location precisely
-			# if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
-			# 	snap_idx_lat = np.argmin(np.abs(lats_uniform - station_lla[0]))
-			# 	snap_idx_lon = np.argmin(np.abs(lons_uniform - station_lla[1]))
-			# 	lats_uniform += (station_lla[0] - lats_uniform[snap_idx_lat])
-			# 	lons_uniform += (station_lla[1] - lons_uniform[snap_idx_lon])
 
 			# Determine the grid center based on the resolution tier
 			if inc_res < (len(optim) - 1) or sta_ind >= len(locs):
@@ -1294,7 +1118,7 @@ for sta_ind in ind_use:
 					xx_chunk = xx[chunk_idx:end_idx]
 					
 					tp_chunk, ts_chunk = compute_travel_times_taup_optimized(
-						xx_chunk, loc_proj, taup_model, ftrns2, -1.0 * x_vel, vp
+						xx_chunk, loc_proj, taup_model, ftrns2, x_vel, vp
 					)
 					tp_times_all[chunk_idx:end_idx] = tp_chunk
 					ts_times_all[chunk_idx:end_idx] = ts_chunk
@@ -1303,7 +1127,7 @@ for sta_ind in ind_use:
 				ts_flattened = ts_times_all.ravel()
 
 			else:
-				tp_flattened, ts_flattened = compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, -1.0*x_vel, vp)
+				tp_flattened, ts_flattened = compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, x_vel, vp)
 				tp_flattened = np.asarray(tp_flattened).ravel()
 				ts_flattened = np.asarray(ts_flattened).ravel()
 
@@ -1324,7 +1148,7 @@ for sta_ind in ind_use:
 
 			for idx in range(1, len(taup_internal_depths)):
 				if taup_internal_depths[idx] <= taup_internal_depths[idx - 1]:
-					taup_internal_depths[idx] = taup_internal_depths[idx - 1] + 1e-6
+					taup_internal_depths[idx] = taup_internal_depths[idx - 1] + 1e-5
 
 			true_z = X[:, 2]
 			subsurface_depths_km = np.maximum(0.0, -true_z) / 1000.0
