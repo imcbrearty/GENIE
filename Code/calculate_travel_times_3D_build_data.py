@@ -298,6 +298,7 @@ def estimate_safe_cores(cpu_point_budget, safety_factor=0.8):
 
 
 
+
 def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths, vp, vs=None):
     """
     Computes P and S travel times using TauP surface references across an arbitrary
@@ -363,12 +364,11 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     r_target = r_surface_mesh + grid_z
     
     # Convert depth metrics relative to local columns.
-    # Note: We allow negative values here to represent nodes up in the topography!
     source_depth_m = r_surface_station - r_source
     target_depths_m = r_surface_mesh - r_target
 
-    # Map the reference source depth to TauP's standard 6371km sphere (always positive for TauP)
-    source_depth_taup_km = np.maximum(0.0, (6371000.0 - r_source) / 1000.0)
+    # Map the reference source depth cleanly to TauP's standard 1D column space
+    source_depth_taup_km = np.maximum(0.0, source_depth_m / 1000.0)
 
     # =====================================================================
     # 2. Seed a Single Dense Surface Profile (Run TauP exactly ONCE)
@@ -399,7 +399,6 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
                 p_m = arrival.ray_param / 6371000.0
                 base_type = phase[0] if len(phase) > 0 else ""
                 
-                # Robust character prefix parsing avoids silent dropouts
                 if base_type == "P" and "S" not in phase:
                     if arrival.time < surf_t_p[i]:
                         surf_t_p[i], surf_p_p[i] = arrival.time, p_m
@@ -435,45 +434,28 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
     s_slowness_raw = interp1d(final_deg_axis, np.insert(surf_p_s, 0, 1.0/vs_surface), kind='linear', fill_value="extrapolate")(distances_deg)
 
     # =====================================================================
-    # 3. Vectorized Directional Depth Integration Loop (With Topography)
+    # 3. Adaptive Near-Vertical Conditioning Framework
     # =====================================================================
-    # def integrate_between_bounds(p_slowness, z_start, z_end, is_s_wave=False):
-    #     dt = np.zeros_like(z_start)
-    #     v_profile = model_vs_m_s if is_s_wave else model_vp_m_s
-    #     v_surf = vs_surface if is_s_wave else vp_surface
-        
-    #     # Standard structural depth profile boundaries
-    #     z_top_arr = np.minimum(z_start, z_end)
-    #     z_bot_arr = np.maximum(z_start, z_end)
-        
-    #     # STEP A: Natively integrate through topography layers (depth < 0)
-    #     # If any node extends above sea level, calculate the time through the surface layer material
-    #     topo_active = (z_top_arr < 0.0)
-    #     if np.any(topo_active):
-    #         # Compute thickness between the highest point and the sea-level datum (0.0)
-    #         thick_topo = 0.0 - np.minimum(z_top_arr[topo_active], 0.0)
-    #         # Clip the bottom boundary to ensure we don't bleed into the regular ground layers yet
-    #         thick_topo -= np.maximum(0.0 - z_bot_arr[topo_active], 0.0)
-            
-    #         eta_topo = np.sqrt(np.maximum(1e-12, (1.0 / v_surf**2) - p_slowness[topo_active]**2))
-    #         dt[topo_active] += thick_topo * eta_topo
-            
-    #     # STEP B: Core structural integration for subsurface crustal layers (depth >= 0)
-    #     for idx in range(len(model_depths_m) - 1):
-    #         z_layer_top, z_layer_bot = model_depths_m[idx], model_depths_m[idx + 1]
-    #         v_layer = v_profile[idx]
-            
-    #         active = (z_bot_arr > z_layer_top) & (z_top_arr < z_layer_bot)
-    #         if not np.any(active): continue
-            
-    #         effective_top = np.maximum(z_top_arr[active], z_layer_top)
-    #         effective_bot = np.minimum(z_bot_arr[active], z_layer_bot)
-    #         thick = effective_bot - effective_top
-            
-    #         eta = np.sqrt(np.maximum(1e-12, (1.0 / v_layer**2) - p_slowness[active]**2))
-    #         dt[active] += thick * eta
-    #     return dt
+    dx_m = xx[:, 0] - loc_proj[0, 0]
+    dy_m = xx[:, 1] - loc_proj[0, 1]
+    horizontal_distances_m = np.sqrt(dx_m**2 + dy_m**2)
 
+    # Determine the adaptive threshold based on grid resolution cell size
+    nonzero_horiz = horizontal_distances_m[horizontal_distances_m > 1e-2]
+    adaptive_threshold_m = np.min(nonzero_horiz) * 1.5 if len(nonzero_horiz) > 0 else 500.0
+
+    # Flag and condition variables inside the near-vertical mask
+    vertical_mask = horizontal_distances_m <= adaptive_threshold_m
+
+    if np.any(vertical_mask):
+        interp_tp_base[vertical_mask] = 0.0
+        interp_ts_base[vertical_mask] = 0.0
+        p_slowness_raw[vertical_mask] = 0.0
+        s_slowness_raw[vertical_mask] = 0.0
+
+    # =====================================================================
+    # 4. Vectorized Directional Depth Integration Loop (With Topography)
+    # =====================================================================
     def integrate_between_bounds(p_slowness, z_start, z_end, is_s_wave=False):
         dt = np.zeros_like(z_start)
         v_profile = model_vs_m_s if is_s_wave else model_vp_m_s
@@ -488,7 +470,6 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
             thick_topo = 0.0 - np.minimum(z_top_arr[topo_active], 0.0)
             thick_topo -= np.maximum(0.0 - z_bot_arr[topo_active], 0.0)
             
-            # --- SAFETY GAURD: Detect turning point violations inside topography ---
             slowness_sq_topo = 1.0 / v_surf**2
             valid_ray_topo = slowness_sq_topo > (p_slowness[topo_active]**2)
             
@@ -497,9 +478,6 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
                 eta_topo[valid_ray_topo] = np.sqrt(
                     slowness_sq_topo - p_slowness[topo_active][valid_ray_topo]**2
                 )
-            
-            # Critically, nodes where valid_ray_topo is False retain eta_topo = 0.0,
-            # ensuring they don't corrupt the background TauP baseline times.
             dt[topo_active] += thick_topo * eta_topo
             
         # STEP B: Core structural integration for subsurface crustal layers (depth >= 0)
@@ -514,7 +492,6 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
             effective_bot = np.minimum(z_bot_arr[active], z_layer_bot)
             thick = effective_bot - effective_top
             
-            # --- SAFETY GAURD: Detect turning point violations in subsurface layers ---
             slowness_sq_layer = 1.0 / v_layer**2
             valid_ray_layer = slowness_sq_layer > (p_slowness[active]**2)
             
@@ -527,27 +504,33 @@ def compute_travel_times_taup_optimized(xx, loc_proj, taup_model, ftrns2, depths
             dt[active] += thick * eta
         return dt
 
-
     z_source_vector = np.full_like(target_depths_m, source_depth_m)
     
-    # Run integration loops using uncorrupted baseline slownesses
+    # Execute integration sweeps
     tp_times = interp_tp_base + integrate_between_bounds(p_slowness_raw, z_source_vector, target_depths_m, False)
     ts_times = interp_ts_base + integrate_between_bounds(s_slowness_raw, z_source_vector, target_depths_m, True)
 
     # =====================================================================
-    # 4. Absolute Spatial Pinning
+    # 5. Absolute Spatial Pinning (Fixed Cartesian Distance Tracking)
     # =====================================================================
     dx_raw = xx[:, 0] - loc_proj[0, 0]
     dy_raw = xx[:, 1] - loc_proj[0, 1]
-    dz_raw = xx[:, 2] - loc_proj[0, 2] if xx.shape[1] >= 3 else target_depths_m - source_depth_m
-    
+
+    if xx.shape[1] >= 3:
+        dz_raw = xx[:, 2] - loc_proj[0, 2]
+    else:
+        dz_raw = target_depths_m - source_depth_m
+        
     dist_sq = dx_raw**2 + dy_raw**2 + dz_raw**2
-    if np.min(dist_sq) < 1e-3:
-        true_src_idx = np.argmin(dist_sq)
+
+    # Pin the absolute closest node to zero
+    true_src_idx = np.argmin(dist_sq)
+    if dist_sq[true_src_idx] < 1.0:  # 1 meter tolerance threshold
         tp_times[true_src_idx] = 0.0
         ts_times[true_src_idx] = 0.0
-        
+
     return tp_times, ts_times
+
 
 
 
