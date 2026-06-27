@@ -4451,6 +4451,9 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
         # folder_path = "path/to/your/folder"
         os.makedirs('Grids', exist_ok = True)
         np.savez_compressed('Grids/%s_seismic_network_templates_ver_1.npz'%(name_of_project), **data_save) # ind_use = np.arange(len(locs_use)) # metrics_product = metrics_product
+        if build_expander == True:
+            np.savez_compressed('Grids/%s_seismic_network_expanders_ver_1.npz'%(name_of_project), Ac = Ac) # ind_use = np.arange(len(locs_use)) # metrics_product = metrics_product
+        
         # os.remove('Grids/grid_parameters_ver_1.npz')
         ## Also write parameters to relevant config files (and set parameters in module.py)
 
