@@ -3852,6 +3852,10 @@ for batch_idx, inputs in enumerate(loader):
 		zlosses.close()
 
 	
+	if use_variable_domain == False:
+		mz.set_scale_coefficients(src_x_kernel*2.0, scale_time, kernel_sig_t, kernel_sig_t*3.0, src_x_kernel, src_t_kernel, time_shift_range)
+		
+	
 	if (((np.mod(i, 1000) == 0) or (i == (n_epochs - 1)))*(i != n_restart_step)) or (batch_idx == (len_loader - 1)):
 
 		## Add save state of loss balancer so can re load
