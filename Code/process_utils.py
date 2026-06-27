@@ -98,10 +98,12 @@ class LocalMarching(MessagePassing):
 
         vtol = 1e9
         nt = 0
+        num_nodes = srcs_tensor.size(0)
 
+		
         while (vtol > tol) and (nt < n_steps_max):
             vals0 = vals.clone()
-            vals = self.propagate(edges, x=vals)
+            vals = self.propagate(edges, x=vals, size = (num_nodes, num_nodes))
             vtol = torch.max(torch.abs(vals - vals0)).item()
             nt += 1
 
