@@ -40,9 +40,81 @@ with open('train_config.yaml', 'r') as file:
 eps = train_config['kernel_sig_t']*5.0 # Use this value to set resolution for the temporal embedding grid
 # scale_time = train_config['scale_time']
 
-class LocalMarching(MessagePassing): # make equivelent version with sum operations.
+class LocalMarching(MessagePassing):
+
+    def __init__(self, device="cpu"):
+        super(LocalMarching, self).__init__(aggr="max")  # node dim
+        self.device = device
+
+    def forward(
+        self,
+        srcs,
+        ftrns1,
+        tc_win=5,
+        sp_win=35e3,
+        n_steps_max=100,
+        tol=1e-12,
+        scale_depth=1.0,
+        use_directed=True,
+    ):
+        if len(srcs) == 0:
+            return srcs
+        if len(srcs) == 1:
+            return srcs  # Direct fallback matching your single node preservation logic
+
+        # Convert to tensor on target device
+        srcs_tensor = torch.tensor(srcs, dtype=torch.float32, device=self.device)
+
+        # 1. Coordinate calculation (identical to original scale vector logic)
+        scale_vec = torch.tensor(
+            [1.0, 1.0, scale_depth], dtype=torch.float32, device=self.device
+        )
+        xyz = (
+            torch.tensor(ftrns1(srcs[:, 0:3]), dtype=torch.float32, device=self.device)
+            * scale_vec
+        )
+        times = srcs_tensor[:, 3].view(-1, 1)
+
+        # 2. Replicate cKDTree dual radius queries via broadcast masking
+        time_mask = torch.abs(times - times.T) <= tc_win
+        space_mask = torch.cdist(xyz, xyz, p=2.0) <= sp_win
+
+        # Intersect masks (replaces the set intersection step)
+        combined_mask = time_mask & space_mask
+        edges = torch.nonzero(combined_mask).t().long().contiguous()
+
+        # 3. Handle directionality if requested
+        if use_directed:
+            # Matches your original logic: srcs_tensor[edges[1], -1] <= srcs_tensor[edges[0], -1]
+            # Assumes column -1 is the comparison weight/maxima attribute
+            max_val = torch.where(
+                srcs_tensor[edges[1], -1] <= srcs_tensor[edges[0], -1]
+            )[0]
+            edges = edges[:, max_val]
+
+        # 4. Global Propagation (Bypasses NetworkX completely since this is an isolated cluster)
+        vals = srcs_tensor[:, 4].view(-1, 1)  # original: srcs[nodes, 4]
+        vals_initial = vals.clone()
+
+        vtol = 1e9
+        nt = 0
+
+        while (vtol > tol) and (nt < n_steps_max):
+            vals0 = vals.clone()
+            vals = self.propagate(edges, x=vals)
+            vtol = torch.max(torch.abs(vals - vals0)).item()
+            nt += 1
+
+        # 5. Extract results matching your starting state mask
+        ip_slice = torch.where(torch.isclose(vals_initial[:, 0], vals[:, 0], rtol=tol))[
+            0
+        ]
+
+        return srcs[ip_slice.cpu().numpy()]
+
+class LocalMarching1(MessagePassing): # make equivelent version with sum operations.
 	def __init__(self, device = 'cpu'):
-		super(LocalMarching, self).__init__(aggr = 'max') # node dim
+		super(LocalMarching1, self).__init__(aggr = 'max') # node dim
 		self.device = device
 
 	## Changed dt to 5 s
