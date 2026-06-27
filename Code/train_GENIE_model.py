@@ -146,7 +146,7 @@ use_real_data = train_config.get('use_real_data', True)
 n_real_fraction = train_config.get('n_real_fraction', 0.3)
 
 use_fixed_graphs = train_config.get('use_fixed_graphs', True) # True # True
-use_variable_domain = train_config.get('use_real_data', True) # True
+use_variable_domain = train_config.get('use_variable_domain', True) # True
 if use_variable_domain == True: assert(use_fixed_graphs == True)
 
 if (use_variable_domain == False) or (1 == 1): ## Initilize so inputs exist
@@ -172,13 +172,15 @@ if use_real_data == True: ## If using real data, mask the labels near the source
 	st2 = glob.glob(path_to_file + 'Calibration/20*')
 	st = np.concatenate((st1, st2), axis = 0)
 	st_calibration = np.hstack([glob.glob(s + '/*ver_%d.npz'%n_reference_ver) for s in st])
-	dates_calibration = np.vstack([[int(j) for j in s.strip().split('/')[-1].split('_')[2:5]] for s in st_calibration])
-	iarg = np.lexsort((dates_calibration[:,0], dates_calibration[:,1], dates_calibration[:,2]))
-	dates_calibration = dates_calibration[iarg]
-	st_calibration = st_calibration[iarg]
 	if len(st_calibration) == 0: 
 		use_real_data = False
+
 	else:
+		dates_calibration = np.vstack([[int(j) for j in s.strip().split('/')[-1].split('_')[2:5]] for s in st_calibration])
+		iarg = np.lexsort((dates_calibration[:,0], dates_calibration[:,1], dates_calibration[:,2]))
+		dates_calibration = dates_calibration[iarg]
+		st_calibration = st_calibration[iarg]
+		
 		iperm_list = np.random.permutation(len(st_calibration))
 		st_calibration = st_calibration[iperm_list]
 		dates_calibration = dates_calibration[iperm_list]
@@ -352,6 +354,8 @@ if (use_variable_domain == False) or (1 == 1):
 	z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
 	x_grids = z['x_grids']
 	scale_time = z['scale_time']/1000.0
+	time_shift_range = z['time_shift_range']
+	Ac = z['Ac']
 	z.close()
 
 	# Load stations
@@ -656,10 +660,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	k_sta_edges, k_spc_edges, k_time_edges = graph_params
 	t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel = pred_params
 
+	global dt_win, time_shift_range
 	n_spc_query, n_src_query = training_params
 	spc_random, sig_t, spc_thresh_rand, min_sta_arrival, coda_rate, coda_win, max_num_spikes, spike_time_spread, s_extra, use_stable_association_labels, thresh_noise_max, min_misfit_allowed, total_bias = training_params_2
 	n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts = training_params_3
-
+	
 	if use_variable_domain == True:
 
 		ichoose_domain = np.random.choice(st_graphs)
@@ -696,6 +701,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		depth_boost = zfile['depth_boost']
 		rbest = zfile['rbest']
 		mn = zfile['mn']
+		if use_expanded == True:
+			Ac = zfile['Ac']
+		
 		# zfile.close()
 
 		# z.close()
@@ -1617,6 +1625,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 				i0 = np.random.randint(0, high = len(x_grids))
 				n_spc = x_grids[i0].shape[0]
+				Ac_src_src_l.append(Ac)
 
 
 		# if use_time_shift == False:
@@ -1647,10 +1656,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		active_sources_per_slice_l.append(active_sources_per_slice)
 
 
-	if use_expanded == True:
-		Ac = zfile['Ac']
-
-	zfile.close()
+	if use_variable_domain == True:
+		zfile.close()
 
 
 	Trv_subset_p = np.vstack(Trv_subset_p)
@@ -2971,6 +2978,7 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 	# if use_variable_domain == True:
 	# 	lat_range_extend, lon_range_extend, lat_range_interior, lon_range_interior, depth_range, src_t_kernel, scale_x_extend, offset_x_extend, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, rbest, mn, ftrns1, ftrns2 = params_extra
 
+	global ftrns1, ftrns2, locs, stas, lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t, rbest, mn, ftrns1, ftrns2, ftrns1_diff, ftrns2_diff
 	## Extract domain specific parameters
 	if use_variable_domain == True:
 		locs, stas, lat_range_extend, lon_range_extend, lat_range, lon_range, depth_range, scale_x_extend, offset_x_extend, scale_time, t_win, dt_win, time_shift_range, kernel_sig_t, src_x_kernel, src_t_kernel, src_depth_kernel, src_x_arv_kernel, src_t_arv_kernel, x_grids, x_grids_trv, x_grids_trv_refs, max_t, min_t, rbest, mn, ftrns1, ftrns2, ftrns1_diff, ftrns2_diff = params_extra
