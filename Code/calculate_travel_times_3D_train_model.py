@@ -38,6 +38,69 @@ def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908
 
 	return torch.cat((x.view(-1,1), y.view(-1,1), z.view(-1,1)), dim = 1)
 
+def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores = 10):
+
+	def step_test(args):
+
+		yval, dx_v, h, h1, x11, x12, x13, ind = args
+		print(yval.shape); print(x11.shape); print(x12.shape); print(x13.shape)
+
+		phi_xy = (x11 - yval[0,0])**2 + (x12 - yval[0,1])**2
+		phi_v = (x13 - yval[0,2])**2
+
+		phi = np.sqrt(phi_xy + phi_v)
+		phi = phi - phi.min() - 100.0
+
+		v = np.copy(h).reshape(x11.shape) # correct?
+		v1 = np.copy(h1).reshape(x11.shape) # correct?
+
+		t = skfmm.travel_time(phi, v, dx = [dx_v[0], dx_v[1], dx_v[2]])
+		t1 = skfmm.travel_time(phi, v1, dx = [dx_v[0], dx_v[1], dx_v[2]])
+
+		return t, t1, phi, ind
+
+	tp_times, ts_times = np.nan*np.zeros((h.shape[0], xx_r.shape[0])), np.nan*np.zeros((h.shape[0], xx_r.shape[0]))
+
+	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [xx_r[i,:][None,:], dx_v, h, h1, x11, x12, x13, i] ) for i in range(xx_r.shape[0]))
+
+	for i in range(xx_r.shape[0]):
+
+		## Make sure to write results to correct station, based on ind
+		tp_times[:,results[i][-1]] = results[i][0].reshape(-1)
+		ts_times[:,results[i][-1]] = results[i][1].reshape(-1)
+
+	return tp_times, ts_times
+
+def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = 10):
+
+	def step_test(args):
+
+		x1, x2, x3, tp, ts, X, ftrns1, ind = args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]
+
+		mp = RegularGridInterpolator((x1, x2, x3), tp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
+		ms = RegularGridInterpolator((x1, x2, x3), ts.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
+		tp_val = mp(ftrns1(X))
+		ts_val = ms(ftrns1(X))
+
+		print('Finished interpolation %d'%ind)
+		
+		return tp_val, ts_val, ind
+
+	n_grid = X.shape[0]
+	n_sta = Tp.shape[1]
+	Tp_interp = np.zeros((n_grid, n_sta))
+	Ts_interp = np.zeros((n_grid, n_sta))
+	assert(Tp_interp.shape[1] == Ts_interp.shape[1])
+
+	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [x1, x2, x3, Tp[:,i], Ts[:,i], X, lambda x: ftrns1(x), i] ) for i in range(n_sta))
+
+	for i in range(n_sta):
+
+		## Make sure to write results to correct station, based on ind
+		Tp_interp[:,results[i][2]] = results[i][0].reshape(-1)
+		Ts_interp[:,results[i][2]] = results[i][1].reshape(-1)
+
+	return Tp_interp, Ts_interp
 
 class Laplacian(MessagePassing):
 
@@ -56,99 +119,6 @@ class Laplacian(MessagePassing):
 	def message(self, x_j, edge_attr):
 
 		return edge_attr*x_j
-		
-
-def profile_seismic_dataset(name, X, Locs, Vp, Vs, Tp=None, Ts=None):
-	"""
-	Performs comprehensive diagnostic checks on spatial and travel time datasets
-	to catch formatting errors, NaNs, infinities, and unphysical outliers.
-	"""
-	print(f"\n" + "="*60)
-	print(f" DIAGNOSTIC PROFILE: {name.upper()} DATASET")
-	print("="*60)
-	
-	arrays = {'X (Source)': X, 'Locs (Station)': Locs, 'Vp': Vp, 'Vs': Vs}
-	if Tp is not None: arrays['Tp'] = Tp
-	if Ts is not None: arrays['Ts'] = Ts
-
-	# 1. Shape and Data Type Checks
-	print("--- Structure & Types ---")
-	for lbl, arr in arrays.items():
-		print(f"  {lbl:<15} | Shape: {str(arr.shape):<18} | Type: {arr.dtype}")
-		
-	# 2. Check for Critical Numerical Faults (NaNs, Infs)
-	print("\n--- Numerical Integrity ---")
-	faults_found = False
-	for lbl, arr in arrays.items():
-		nans = np.isnan(arr).sum()
-		infs = np.isinf(arr).sum()
-		if nans > 0 or infs > 0:
-			print(f"  ❌ CRITICAL FAULT in {lbl}: {nans} NaNs, {infs} Infs found!")
-			faults_found = True
-	if not faults_found:
-		print("  ✔ No NaNs or Infs detected across arrays.")
-
-	# 3. Physical Value & Outlier Analysis
-	print("\n--- Distribution Metrics ---")
-	print(f"  {'Array/Axis':<15} | {'Min':<10} | {'25% (Q1)':<10} | {'50% (Med)':<10} | {'75% (Q3)':<10} | {'Max':<10}")
-	print(f"  {'-'*15}-|-{'-'*10}-|-{'-'*10}-|-{'-'*10}-|-{'-'*10}-|-{'-'*10}")
-	
-	for lbl, arr in arrays.items():
-		# Handle multidimensional coordinate arrays (X, Locs) by profiling columns
-		if arr.ndim > 1:
-			axes_labels = ['Lat', 'Lon', 'Depth'] if arr.shape[1] == 3 else [f'Dim_{k}' for k in range(arr.shape[1])]
-			for idx, axis_lbl in enumerate(axes_labels):
-				col = arr[:, idx]
-				q = np.percentile(col, [25, 50, 75])
-				print(f"  {f'{lbl} ({axis_lbl})':<15} | {col.min():<10.3f} | {q[0]:<10.3f} | {q[1]:<10.3f} | {q[2]:<10.3f} | {col.max():<10.3f}")
-		else:
-			q = np.percentile(arr, [25, 50, 75])
-			print(f"  {lbl:<15} | {arr.min():<10.3f} | {q[0]:<10.3f} | {q[1]:<10.3f} | {q[2]:<10.3f} | {arr.max():<10.3f}")
-
-	# 4. Relational Sanity Check (Distance vs Travel Time)
-	if Tp is not None and Ts is not None:
-		print("\n--- Physical Consistency Check ---")
-		# Sample spatial distances to check velocity/time scaling
-		sample_idx = np.random.choice(len(X), size=min(5000, len(X)), replace=False)
-		# Using a simple element-wise Euclidean distance check for raw flagging
-		distances = np.linalg.norm(X[sample_idx] - Locs[sample_idx], axis=1)
-		
-		# Look for zero/negative values which ruin division or cause Eikonal singularity
-		zero_times = (Tp[sample_idx] <= 0).sum() + (Ts[sample_idx] <= 0).sum()
-		if zero_times > 0:
-			print(f"  WARNING: Detected {zero_times} travel time values <= 0.0 seconds!")
-			
-		print(f"  Sampled Avg Distance  : {distances.mean()/1000.0:.2f} km")
-		print(f"  Sampled Avg Apparent P: {(distances / np.clip(Tp[sample_idx], 1e-6, None)).mean():.2f} m/s")
-		print(f"  Sampled Avg Apparent S: {(distances / np.clip(Ts[sample_idx], 1e-6, None)).mean():.2f} m/s")
-	
-	print("="*60 + "\n")
-
-
-
-# # ==========================================
-# #  TRIGGER DIAGNOSTIC PROFILER 
-# # ==========================================
-# profile_seismic_dataset(
-# 	name="Primary Training Set", 
-# 	X=X_samples, Locs=Locs_samples, Vp=Vp_samples, Vs=Vs_samples,
-# 	Tp=Tp_samples if compute_reference_times else None,
-# 	Ts=Ts_samples if compute_reference_times else None
-# )
-
-# profile_seismic_dataset(
-# 	name="Validation Set", 
-# 	X=X_samples_vald, Locs=Locs_samples_vald, Vp=Vp_samples_vald, Vs=Vs_samples_vald,
-# 	Tp=Tp_samples_vald if compute_reference_times else None,
-# 	Ts=Ts_samples_vald if compute_reference_times else None
-# )
-
-# profile_seismic_dataset(
-# 	name="Boundary Training Set",
-# 	X=X_samples_boundary, Locs=Locs_samples_boundary, Vp=Vp_samples_boundary, Vs=Vs_samples_boundary
-# )
-# # ==========================================
-
 
 # Load configuration from YAML
 config = load_config('config.yaml')
@@ -164,8 +134,6 @@ dx_depth = config.get('dx_depth', dx)
 save_dense_travel_time_data = config['save_dense_travel_time_data']
 train_travel_time_neural_network = config['train_travel_time_neural_network']
 use_relative_1d_profile = config['use_relative_1d_profile']
-vel_model_ver = config.get('vel_model_ver', 1)
-
 # using_3D = config['using_3D']
 # using_1D = config['using_1D']
 
@@ -183,7 +151,7 @@ seperator =  '\\' if '\\' in path_to_file else '/'
 path_to_file += seperator
 
 # template_ver = 1
-# vel_model_ver = config['vel_model_ver']
+vel_model_ver = config['vel_model_ver']
 vel_model_type = config['vel_model_type']
 use_topography = config['use_topography']
 ## Load Files
@@ -221,13 +189,186 @@ offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_rang
 ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
 ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)  # invert ftrns1
 
+lat_grid = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg)
+lon_grid = np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
+depth_grid = np.arange(depth_range[0], depth_range[1] + dx_depth, dx_depth)
+	
+replace_zero = True
+x11, x12, x13 = np.meshgrid(lat_grid, lon_grid, depth_grid)
+X = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 
+query_proj = ftrns1(X)
+
+## Check number of workers available. Note: should apply parallel threads for running over stations.
+print('\n Total possible threads %d'%multiprocessing.cpu_count())
+print(f'Actually using {num_cores} cores')
+
+## Boundary of domain, in Cartesian coordinates
+elev = locs[:,2].max() + 1000.0
+z1 = np.array([lat_range_extend[0], lon_range_extend[0], elev])[None,:]
+z2 = np.array([lat_range_extend[0], lon_range_extend[1], elev])[None,:]
+z3 = np.array([lat_range_extend[1], lon_range_extend[1], elev])[None,:]
+z4 = np.array([lat_range_extend[1], lon_range_extend[0], elev])[None,:]
+z = np.concatenate((z1, z2, z3, z4), axis = 0)
+zz = ftrns1(z)
+
+ip = np.where((query_proj[:,0] >= zz[:,0].min())*(query_proj[:,0] <= zz[:,0].max())*(query_proj[:,1] >= zz[:,1].min())*(query_proj[:,1] <= zz[:,1].max()))[0]
+ys = query_proj[ip,:] # not actually used for anything (non-trivial.)
+
+## If the queries are out of bounts when calling 
+x1 = np.arange(ys[:,0].min() - 20*dx, ys[:,0].max() + 20*dx, dx)
+x2 = np.arange(ys[:,1].min() - 20*dx, ys[:,1].max() + 20*dx, dx)
+x3 = np.arange(ys[:,2].min() - 4*dx, ys[:,2].max() + 4*dx, dx)
+x11, x12, x13 = np.meshgrid(x1, x2, x3)
+xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+dx_v = np.array([np.diff(x1)[0], np.diff(x2)[0], np.diff(x3)[0]])
+
+Xmin = xx.min(0)
+Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
+Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
+
+## Load velocity model
+if vel_model_type == 1:
+	vp = np.array(config['velocity_model']['Vp'])
+	vs = np.array(config['velocity_model']['Vs'])
+	depths = np.array(config['velocity_model']['Depths'])
+	iarg = np.argsort(depths)
+	# z = np.load(path_to_file + '1d_velocity_model.npz')
+	# depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
+	# z.close()
+	
+	depths_fine = np.arange(depths.min(), depths.max() + dx_depth/10.0, dx_depth/10.0)
+	vp_fine = np.interp(depths_fine, depths[iarg], vp[iarg])
+	vs_fine = np.interp(depths_fine, depths[iarg], vs[iarg])
+
+	tree = cKDTree(depths_fine.reshape(-1,1))
+	ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
+	Vp = vp_fine[ip_nearest]
+	Vs = vs_fine[ip_nearest]
+
+elif vel_model_type == 2:
+
+	z = np.load(path_to_file + '3d_velocity_model.npz')
+	x_vel, vp_vel, vs_vel = z['X'], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
+	z.close()
+
+	tree = cKDTree(ftrns1(x_vel)) ## Assigns the velocity values to the computation grid (xx) using nearest neighbors (e.g., the input 3D model can include any number of points, anywhere, and interpolation will fill in the values elsewhere)
+	ip_nearest = tree.query(xx)[1]
+	Vp = vp_vel[ip_nearest]
+	Vs = vs_vel[ip_nearest]
+
+elif vel_model_type == 3:
+
+	z = h5py.File(path_to_file + 'Vel_models.hdf5', 'r') ## Using a series of 1d velocity models for different areas
+	Depths_l, Coor_l, Vp_l, Vs_l, Radius_l = [], [], [], [], []
+	keys = list(z.keys())
+	n_profiles = len(list(filter(lambda x: 'Depths' in x, keys)))
+	for n in range(n_profiles):
+		Depths_l.append(z['Depths_%d'%n][:])
+		Vp_l.append(z['Vp_%d'%n][:])
+		Vs_l.append(z['Vs_%d'%n][:])
+		Coor_l.append(z['Coor_%d'%n][:])
+		Radius_l.append(z['Radius_%d'%n][:])
+	z.close()
+
+	interp_type = 1
+	if interp_type == 1: ## Use depth coordinates with each coor point
+		dist_max = np.inf*np.ones(len(xx))
+		xx_ind = (-1*np.ones(len(xx))).astype('int')
+		xx_depth_ind = (-1*np.ones(len(xx))).astype('int')
+		Vp = np.inf*np.ones(len(xx))
+		Vs = np.inf*np.ones(len(xx))
+		for i in range(len(Depths_l)):
+			coors_slice = Coor_l[i].repeat(len(Depths_l[i]), axis = 0)
+			coors_slice = np.concatenate((coors_slice, np.tile(Depths_l[i].reshape(-1,1), (len(Coor_l[i]), 1))), axis = 1)
+			tree = cKDTree(ftrns1(coors_slice))
+			dist_v = tree.query(xx) # [0]/np.mean(Radius_l[i]*1000.0)
+			dist, dist_ind = dist_v[0]/np.mean(Radius_l[i]*1000.0), dist_v[1]
+			tree_depths = cKDTree(Depths_l[i].reshape(-1,1))
+			i1 = np.where(dist < dist_max)[0]
+			imatch_depth = tree_depths.query(coors_slice[dist_ind[i1],2].reshape(-1,1))[1]
+
+			## Update nearest matching point
+			dist_max[i1] = dist[i1]
+			xx_ind[i1] = i
+			xx_depth_ind[i1] = imatch_depth
+			Vp[i1] = Vp_l[i][imatch_depth]
+			Vs[i1] = Vs_l[i][imatch_depth]
+			print('Finished %d'%i)
+
+## Apply topography clipping to velocity model
+if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.npz') == True):
+
+	## Load "Points" field that specifies surface elevation (columns of lat, lon, elevation (meters)). Points outside convex hull of Points will be treated as zero elevation.
+	z = np.load(path_to_file + 'surface_elevation.npz')
+	Points = z['Points']
+	z.close()
+
+	## Concatenate station elevations
+	Points = np.concatenate((Points, locs), axis = 0)
+	
+	## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
+	tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
+	x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg/5.0, d_deg/5.0), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg/5.0, d_deg/5.0)
+
+	x11_s, x12_s = np.meshgrid(x1_s, x2_s)
+	surface_profile = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
+	ip_match = tree.query(ftrns1(np.concatenate((surface_profile, np.zeros((len(surface_profile),1))), axis = 1)))
+	val = Points[ip_match[1],2] ## Surface elevations of regular grid
+	hull = ConvexHull(Points[:,0:2])
+	ioutside_hull = np.where(in_hull(surface_profile,  hull.points[hull.vertices]) == 0)[0]
+	val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
+	surface_profile = np.concatenate((surface_profile, val.reshape(-1,1)), axis = 1)
+	if os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == False:
+		np.savez_compressed(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project, surface_profile = surface_profile)
+		
+	## Check if stations are beneath surface
+	tol_elev_val = 150.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
+	tree = cKDTree(ftrns1(surface_profile))
+	unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
+	dist_near = tree.query(ftrns1(locs))[0]
+	dist_perturb = tree.query(unit_out)[0]
+	iabove_surface = np.where(dist_perturb > dist_near)[0]
+	if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - surface_profile[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
+
+	## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
+	inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
+	unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1.0*np.ones((len(inear_surface),1))), axis = 1))
+	dist_near = tree.query(xx[inear_surface])[0]
+	dist_perturb = tree.query(unit_out)[0]
+	iabove_surface = np.where(dist_perturb > dist_near)[0]
+	
+	## Set points above surface to air wave speeds (or find a way to mask)
+	Vp[inear_surface[iabove_surface]] = 343.0 ## Assumed acoustic p wave speed
+	Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
+
+## Using 3D domain, so must use actual station coordinates
 locs_ref = np.copy(locs)
 reciever_proj = ftrns1(locs_ref) # for all elevs.
 
 
+hull = ConvexHull(xx)
+inside_hull = in_hull(reciever_proj, hull.points[hull.vertices])
+print('Num sta inside hull %d'%inside_hull.sum())
+print('Num total sta %d'%len(locs_ref))
+# assert(inside_hull.sum() == locs_ref.shape[0])
+
+mp = RegularGridInterpolator((x1, x2, x3), Vp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
+ms = RegularGridInterpolator((x1, x2, x3), Vs.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
+Vp_interp = mp(ftrns1(X))
+Vs_interp = ms(ftrns1(X))
+
 
 compute_reference_times = True
+if compute_reference_times == True:
+	pass
+
+## Determine which stations have data
+# ver_vel_model = 1
+st_sta = glob.glob(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData' + seperator + '*station*ver_%d.npz'%vel_model_ver)
+iarg = np.argsort([int(st_sta[j].split('/')[-1].split(name_of_project)[-1].split('_')[5]) for j in range(len(st_sta))])
+st_sta = [st_sta[j] for j in iarg]
+sta_ind = np.array([int(st_sta[j].split('/')[-1].split(name_of_project)[-1].split('_')[5]) for j in range(len(st_sta))]).astype('int')
 
 
 if train_travel_time_neural_network == True:
@@ -265,91 +406,192 @@ if train_travel_time_neural_network == True:
 	X_samples_boundary_vald, Locs_samples_boundary_vald = [], []
 
 
-	st_files = glob.glob(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData/*velocity_model_station*ver_%d.npz'%(vel_model_ver))
-	for s in st_files:
-		z = np.load(s)
-		X_samples.append(z['X'])
-		Locs_samples.append(z['loc'].repeat(len(X_samples[-1]), axis = 0))
-		Vp_samples.append(z['Vp'].reshape(-1))
-		Vs_samples.append(z['Vs'].reshape(-1))
-		if compute_reference_times == True:
-			Tp_samples.append(z['Tp'].reshape(-1))
-			Ts_samples.append(z['Ts'].reshape(-1))
+	using_3D = True
+	using_1D = False
+	if using_3D == True:
 
-		X_samples_vald.append(z['X_vald'])
-		Locs_samples_vald.append(z['loc'].repeat(len(X_samples_vald[-1]), axis = 0))
-		Vp_samples_vald.append(z['Vp_vald'].reshape(-1))
-		Vs_samples_vald.append(z['Vs_vald'].reshape(-1))
-		if compute_reference_times == True:
-			Tp_samples_vald.append(z['Tp_vald'].reshape(-1))
-			Ts_samples_vald.append(z['Ts_vald'].reshape(-1))
+		print('Check if locs_ref are fixed or span 3D space')
 
-		X_samples_boundary.append(z['X_boundary'])
-		Locs_samples_boundary.append(z['loc'].repeat(len(X_samples_boundary[-1]), axis = 0))
-		Vp_samples_boundary.append(z['Vp_boundary'].reshape(-1))
-		Vs_samples_boundary.append(z['Vs_boundary'].reshape(-1))
 
-		## Boundary samples are fixed
-		X_samples_boundary_vald.append(z['X_boundary'])
-		Locs_samples_boundary_vald.append(z['loc'].repeat(len(X_samples_boundary[-1]), axis = 0))
-		Vp_samples_boundary_vald.append(z['Vp_boundary'].reshape(-1))
-		Vs_samples_boundary_vald.append(z['Vs_boundary'].reshape(-1))
-		z.close()
+		grab_near_station_samples = True
+		print('Starting near station samples')
+		if grab_near_station_samples == True:
 
-		# if compute_reference_times == True:
-		# 	Tp_samples_boundary.append(z['Tp'])
-		# 	Ts_samples_boundary.append(z['Ts'])
+			## Usually locs_ref ~= 25, so N * 25 = Target; 
+			scale_factor = len(sta_ind)/25
+
+			n_zero_inputs = int(100000/scale_factor)
+
+			use_source_zero_points = False
+			if use_source_zero_points == True: ## We shouldn't add zero travel time points at the "sources", as then the "slot" for station locations is corrupted in the feature space
+				
+				for inc, n in enumerate(sta_ind):
+
+					p = np.zeros(locs_ref.shape[0])
+					p[sta_ind] = 1
+
+					# p1 = np.ones(locs.shape[0])
+					isample = np.sort(np.random.choice(len(p), size = n_zero_inputs, p = p/p.sum(), replace = False))
+					isample_vald = np.random.choice(np.delete(np.arange(len(p)), isample, axis = 0), size = 10000)
+					# isample1 = np.sort(np.random.choice(len(p1), size = n_zero_inputs, p = p1/p1.sum(), replace = False))
+
+
+					X_samples_boundary.append(X[isample])
+					Locs_samples_boundary.append(X[isample])
+					Vp_samples_boundary.append(Vp_interp[isample])
+					Vs_samples_boundary.append(Vs_interp[isample])
+
+					X_samples_boundary_vald.append(X[isample_vald])
+					Locs_samples_boundary_vald.append(X[isample_vald])
+					Vp_samples_boundary_vald.append(Vp_interp[isample_vald])
+					Vs_samples_boundary_vald.append(Vs_interp[isample_vald])
+
+			else:
+
+				for inc, n in enumerate(sta_ind):
+
+					p = np.zeros(locs_ref.shape[0])
+					p[sta_ind] = 1
+
+					# p1 = np.ones(locs.shape[0])
+					isample = np.sort(np.random.choice(len(p), size = n_zero_inputs, p = p/p.sum(), replace = True))
+					# isample_vald = np.random.choice(np.delete(np.arange(len(p)), isample, axis = 0), size = 10000)
+
+					## Can't really use validation samples for fixed station boundary conditions
+					isample_vald = np.sort(np.random.choice(len(p), size = n_zero_inputs, p = p/p.sum(), replace = True))
+
+
+					X_samples_boundary.append(locs_ref[isample])
+					Locs_samples_boundary.append(locs_ref[isample])
+					Vp_samples_boundary.append(Vp_interp[isample])
+					Vs_samples_boundary.append(Vs_interp[isample])
+
+					X_samples_boundary_vald.append(locs_ref[isample_vald])
+					Locs_samples_boundary_vald.append(locs_ref[isample_vald])
+					Vp_samples_boundary_vald.append(Vp_interp[isample_vald])
+					Vs_samples_boundary_vald.append(Vs_interp[isample_vald])
+
+
+
+			for inc, n in enumerate(sta_ind):
+
+				n_per_station = int(150000/scale_factor)
+
+				z = np.load(st_sta[inc])
+				tp = z['Tp_interp']
+				ts = z['Ts_interp']
+
+				z = np.load(st_sta[inc])
+				p = 1.0/np.maximum(tp, 0.1)
+				isample = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station, len(p)), p = p/p.sum(), replace = False))
+
+				X_samples.append(X[isample])
+				if compute_reference_times == True:
+					Tp_samples.append(tp[isample])
+					Ts_samples.append(ts[isample])
+				Locs_samples.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample), axis = 0))
+				Locs_samples_inds.append(n*np.ones(len(isample)))
+				Vp_samples.append(Vp_interp[isample])
+				Vs_samples.append(Vs_interp[isample])
+
+
+				n_per_station = int(100000/scale_factor)
+				# z = np.load(st_sta[inc])
+				p = (1.0/np.maximum(tp, 0.1))**2
+				isample = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station, len(p)), p = p/p.sum(), replace = False))
+
+				X_samples.append(X[isample])
+				if compute_reference_times == True:
+					Tp_samples.append(tp[isample])
+					Ts_samples.append(ts[isample])
+				Locs_samples.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample), axis = 0))
+				Locs_samples_inds.append(n*np.ones(len(isample)))
+				Vp_samples.append(Vp_interp[isample])
+				Vs_samples.append(Vs_interp[isample])
+
+
+				# grab_near_boundaries_samples
+				n_per_station = int(100000/scale_factor)
+				# z = np.load(st_sta[inc])
+				p = 1.0/np.maximum(tp.max() - tp, 0.1)
+				isample = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station, len(p)), p = p/p.sum(), replace = False))
+
+				X_samples.append(X[isample])
+				if compute_reference_times == True:
+					Tp_samples.append(tp[isample])
+					Ts_samples.append(ts[isample])
+				Locs_samples.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample), axis = 0))
+				Locs_samples_inds.append(n*np.ones(len(isample)))
+				Vp_samples.append(Vp_interp[isample])
+				Vs_samples.append(Vs_interp[isample])
+
+				# grab_interior_samples
+				n_per_station = int(100000/scale_factor)
+				# z = np.load(st_sta[inc])
+				p = 1.0*np.ones(X.shape[0]) # /np.maximum(Tp_interp[:,n].max() - Tp_interp[:,n], 0.1)
+				isample = np.sort(np.random.choice(len(p), size = np.minimum(n_per_station, len(p)), p = p/p.sum(), replace = False))
+				isample_vald = np.random.choice(np.delete(np.arange(len(p)), isample, axis = 0), size = 10000)
+
+				X_samples.append(X[isample])
+				if compute_reference_times == True:
+					Tp_samples.append(tp[isample])
+					Ts_samples.append(ts[isample])
+				Locs_samples.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample), axis = 0))
+				Locs_samples_inds.append(n*np.ones(len(isample)))
+				Vp_samples.append(Vp_interp[isample])
+				Vs_samples.append(Vs_interp[isample])
+
+				X_samples_vald.append(X[isample_vald])
+				if compute_reference_times == True:
+					Tp_samples_vald.append(tp[isample_vald])
+					Ts_samples_vald.append(ts[isample_vald])
+				Locs_samples_vald.append(locs_ref[n,:].reshape(1,-1).repeat(len(isample_vald), axis = 0))
+				Vp_samples_vald.append(Vp_interp[isample_vald])
+				Vs_samples_vald.append(Vs_interp[isample_vald])
+				z.close()
+
+				print('Finished station %d'%n)
 		
-
 	# Concatenate training dataset
-	X_samples = np.vstack(X_samples).astype(np.float32)
+	X_samples = np.vstack(X_samples)
 	if compute_reference_times == True:
-		Tp_samples = np.hstack(Tp_samples).astype(np.float32)
-		Ts_samples = np.hstack(Ts_samples).astype(np.float32)
-	Locs_samples = np.vstack(Locs_samples).astype(np.float32)
-	Vp_samples = np.hstack(Vp_samples).astype(np.float32)
-	Vs_samples = np.hstack(Vs_samples).astype(np.float32)
-	locs_unique = np.unique(Locs_samples, axis = 0)
-	# assert(len(locs_unique) == len(locs))
-	assert(cKDTree(ftrns1(locs_unique)).query(ftrns1(locs))[0].max() < 10.0)
-	assert(len(X_samples) == len(Locs_samples))
-	assert(len(X_samples) == len(Tp_samples))
-	assert(len(X_samples) == len(Ts_samples))
-	assert(len(X_samples) == len(Vp_samples))
-	assert(len(X_samples) == len(Vs_samples))
-
-	# Locs_samples_inds = np.hstack(Locs_samples_inds)
-	# Inds_fixed_station = []
-	# for n in sta_ind:
-	# 	i1 = np.where(Locs_samples_inds == n)[0]
-	# 	Inds_fixed_station.append(np.concatenate((i1.reshape(1,-1), n*np.ones((1, len(i1)))), axis = 0))
-	# Inds_fixed_station = torch.Tensor(np.hstack(Inds_fixed_station)).long().to(device)
-	# assert(Inds_fixed_station.shape[1] == len(Locs_samples_inds))
-	# assert(len(Locs_samples) == len(Locs_samples_inds))
+		Tp_samples = np.hstack(Tp_samples)
+		Ts_samples = np.hstack(Ts_samples)
+	Locs_samples = np.vstack(Locs_samples)
+	Vp_samples = np.hstack(Vp_samples)
+	Vs_samples = np.hstack(Vs_samples)
+	Locs_samples_inds = np.hstack(Locs_samples_inds)
+	Inds_fixed_station = []
+	for n in sta_ind:
+		i1 = np.where(Locs_samples_inds == n)[0]
+		Inds_fixed_station.append(np.concatenate((i1.reshape(1,-1), n*np.ones((1, len(i1)))), axis = 0))
+	Inds_fixed_station = torch.Tensor(np.hstack(Inds_fixed_station)).long().to(device)
+	assert(Inds_fixed_station.shape[1] == len(Locs_samples_inds))
+	assert(len(Locs_samples) == len(Locs_samples_inds))
 	# Locs_unique = np.unique(Locs_samples, axis = 0)
 
 	# Concatenate boundary training data
-	X_samples_boundary = np.vstack(X_samples_boundary).astype(np.float32)
-	Locs_samples_boundary = np.vstack(Locs_samples_boundary).astype(np.float32)
-	Vp_samples_boundary = np.hstack(Vp_samples_boundary).astype(np.float32)
-	Vs_samples_boundary = np.hstack(Vs_samples_boundary).astype(np.float32)
+	X_samples_boundary = np.vstack(X_samples_boundary)
+	Locs_samples_boundary = np.vstack(Locs_samples_boundary)
+	Vp_samples_boundary = np.hstack(Vp_samples_boundary)
+	Vs_samples_boundary = np.hstack(Vs_samples_boundary)
 	n_dataset_boundary = len(X_samples_boundary)
 
 	# Concatenate boundary validation data
-	X_samples_boundary_vald = np.vstack(X_samples_boundary_vald).astype(np.float32)
-	Locs_samples_boundary_vald = np.vstack(Locs_samples_boundary_vald).astype(np.float32)
-	Vp_samples_boundary_vald = np.hstack(Vp_samples_boundary_vald).astype(np.float32)
-	Vs_samples_boundary_vald = np.hstack(Vs_samples_boundary_vald).astype(np.float32)
+	X_samples_boundary_vald = np.vstack(X_samples_boundary_vald)
+	Locs_samples_boundary_vald = np.vstack(Locs_samples_boundary_vald)
+	Vp_samples_boundary_vald = np.hstack(Vp_samples_boundary_vald)
+	Vs_samples_boundary_vald = np.hstack(Vs_samples_boundary_vald)
 	n_dataset_boundary_vald = len(X_samples_boundary_vald)
 
 	# Concatenate validation dataset
-	X_samples_vald = np.vstack(X_samples_vald).astype(np.float32)
+	X_samples_vald = np.vstack(X_samples_vald)
 	if compute_reference_times == True:
-		Tp_samples_vald = np.hstack(Tp_samples_vald).astype(np.float32)
-		Ts_samples_vald = np.hstack(Ts_samples_vald).astype(np.float32)
-	Locs_samples_vald = np.vstack(Locs_samples_vald).astype(np.float32)
-	Vp_samples_vald = np.hstack(Vp_samples_vald).astype(np.float32)
-	Vs_samples_vald = np.hstack(Vs_samples_vald).astype(np.float32)
+		Tp_samples_vald = np.hstack(Tp_samples_vald)
+		Ts_samples_vald = np.hstack(Ts_samples_vald)
+	Locs_samples_vald = np.vstack(Locs_samples_vald)
+	Vp_samples_vald = np.hstack(Vp_samples_vald)
+	Vs_samples_vald = np.hstack(Vs_samples_vald)
 
 
 	n_dataset = len(X_samples)
@@ -366,7 +608,7 @@ if train_travel_time_neural_network == True:
 
 	t_scale_val = trav_val*0.03
 	
-	v_mean = np.array([Vp_samples.mean(), Vs_samples.mean()])
+	v_mean = np.array([Vp_interp.mean(), Vs_interp.mean()])
 
 	print('Using a single model for both phase types')
 	# Note: training a seperate model for either phase type can be more accurate
@@ -412,8 +654,8 @@ if train_travel_time_neural_network == True:
 		# Src_pos.append()
 
 
-	vp_max = Vp_samples.max() ## 9000.0
-	vs_min = Vs_samples.min() ## 1000.0
+	vp_max = Vp.max() ## 9000.0
+	vs_min = Vs.min() ## 1000.0
 	x_pos = np.vstack([np.array([lat_range[0], lon_range[0], depth_range[0]]), np.array([lat_range[0], lon_range[1], depth_range[0]]), np.array([lat_range[1], lon_range[1], depth_range[0]]), np.array([lat_range[1], lon_range[0], depth_range[0]])])
 	x_pos = np.concatenate((x_pos, np.concatenate((x_pos[:,0:2], depth_range[1]*np.ones((len(x_pos),1))), axis = 1)), axis = 0)
 	max_dist = np.linalg.norm(np.expand_dims(ftrns1(x_pos), axis = 0) - np.expand_dims(ftrns1(x_pos), axis = 1), axis = 2).max()
@@ -438,7 +680,7 @@ if train_travel_time_neural_network == True:
 	conversion_factor = conversion_factor/max_time
 
 	scale_params = [max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor]
-	m = TravelTimesPN(ftrns1_diff, ftrns2_diff, n_phases = 2, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, rbest = rbest_cuda, mn = mn_cuda, device = device).to(device)
+	m = TravelTimesPN(ftrns1_diff, ftrns2_diff, n_phases = 2, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
 
 	## The travel time model is trained with PINN loss (Raissi et al., 2017) and synthetic data simulated with the fast marching method (Sethian. 1996).
 	## It follows a similar approach as the original PINN for travel times in seismology (Smith et al., 2020). However it uses several architechtural features
@@ -495,8 +737,6 @@ if train_travel_time_neural_network == True:
 	losses_data_vald = []
 	loss_data = torch.Tensor([0.0]).to(device)
 	loss_data_vald = torch.Tensor([0.0]).to(device)
-
-	# moi
 
 	## Note: also don't have to sample input on regular grid
 	## (especially if velocity can be sampled continuously, e.g., with the interp function)
@@ -599,24 +839,15 @@ if train_travel_time_neural_network == True:
 		assert(pred_base_boundary.max().item() < 1e-2)
 		loss_boundary = loss_func(pred_perturb_boundary, torch.zeros(pred_perturb_boundary.shape).to(device))
 
+		if i > n_burn_in:
 
-		# Smooth S-curve transition centered halfway through the burn-in period
-		if i < n_burn_in:
-			center = n_burn_in / 2
-			steepness = n_burn_in / 10  # Controls the width of the transition zone
-			alpha = 1.0 / (1.0 + np.exp(-(i - center) / steepness))
+			loss = 0.25*loss_pde_p + 0.25*loss_pde_s + 0.5*loss_boundary
+
 		else:
-			alpha = 1.0
-
-		# if i > n_burn_in:
-
-		loss = alpha*(0.25*loss_pde_p + 0.25*loss_pde_s) + (1.0 - alpha*0.5)*loss_boundary
-
-		# else:
 
 			## Add loss of "null" prediction
 
-		# loss = loss_boundary ## Initialize model
+			loss = loss_boundary ## Initialize model
 
 		if compute_reference_times == True:
 
@@ -753,11 +984,6 @@ if train_travel_time_neural_network == True:
 			assert(pred_base_boundary.max().item() < 1e-2)
 			loss_boundary = loss_func(pred_perturb_boundary, torch.zeros(pred_perturb_boundary.shape).to(device))
 
-
-			# loss = alpha*(0.25*loss_pde_p + 0.25*loss_pde_s) + (1.0 - alpha*0.5)*loss_boundary
-
-
-
 			if i > n_burn_in:
 
 				loss_vald = 0.25*loss_pde_p + 0.25*loss_pde_s + 0.5*loss_boundary
@@ -770,21 +996,6 @@ if train_travel_time_neural_network == True:
 				# loss2 = loss_func(pred_perturb2, torch.zeros(pred_perturb2.shape).to(device))
 
 				loss_vald = loss_boundary ## Initialize model
-			
-
-			
-			# if i > n_burn_in:
-
-			# 	loss_vald = 0.25*loss_pde_p + 0.25*loss_pde_s + 0.5*loss_boundary
-
-			# else:
-
-				## Add loss of "null" prediction
-
-				# loss1 = loss_func(pred_perturb2, torch.zeros(pred_perturb2.shape).to(device))
-				# loss2 = loss_func(pred_perturb2, torch.zeros(pred_perturb2.shape).to(device))
-
-			# 	loss_vald = loss_boundary ## Initialize model
 
 				# loss = loss_boundary ## Initialize model
 
@@ -1030,13 +1241,13 @@ if train_travel_time_neural_network == True:
 
 	r_vals1 = [r2_vp1, r2_vs1, r2_vp_vald1, r2_vs_vald1]
 
-	# n_ver_save = 1
+	n_ver_save = 1
 
 	m = m.cpu()
 	torch.save(m.state_dict(), path_save + 'travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_save))
 	torch.save(optimizer.state_dict(), path_save + 'travel_time_neural_network_physics_informed_%s_optimizer_ver_%d.h5'%(phase, n_ver_save))
 	# np.savez_compressed(path_save + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_save), out1 = out1, out2 = out2, trgt1 = trgt1, trgt2 = trgt2, sta_pos1 = sta_pos1.cpu().detach().numpy(), src_pos1 = src_pos1.cpu().detach().numpy(), sta_pos2 = sta_pos2.cpu().detach().numpy(), src_pos2 = src_pos2.cpu().detach().numpy(), v_mean = v_mean, scale_params = scale_params, losses = losses, losses_vald = losses_vald)
-	np.savez_compressed(path_save + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_save), out1 = out1, out2 = out2, trgt1 = trgt1, trgt2 = trgt2, sta_pos1 = sta_pos1, src_pos1 = src_pos1, sta_pos2 = sta_pos2, src_pos2 = src_pos2, v_mean = v_mean, scale_params = scale_params, r_vals = r_vals, rbest = rbest, mn = mn, losses = losses, losses_vald = losses_vald)
+	np.savez_compressed(path_save + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_save), out1 = out1, out2 = out2, trgt1 = trgt1, trgt2 = trgt2, sta_pos1 = sta_pos1, src_pos1 = src_pos1, sta_pos2 = sta_pos2, src_pos2 = src_pos2, v_mean = v_mean, scale_params = scale_params, r_vals = r_vals, losses = losses, losses_vald = losses_vald)
 	m = m.to(device)
 
 	make_plot = True
@@ -1153,6 +1364,53 @@ if train_travel_time_neural_network == True:
 	
 	np.savez_compressed(path_to_file + 'training_results_ver_%d.npz'%n_ver_save, trv_out = trv_out.cpu().detach().numpy(), vel_pred = vel_pred, vel_pred_levels = vel_pred_levels, pos_contour = x_contour, xx1 = xx1, x3 = x3, losses = losses, losses_vald = losses_vald, losses_pde = losses_pde, losses_pde_vald = losses_pde_vald, losses_data = losses_data, losses_data_vald = losses_data_vald)
 
+
+	# 	for s in st_list:
+	# 		z = h5py.File(s, 'r')
+	# 		srcs_slice = z['srcs_trv'][:]
+	# 		locs_use = z['locs_use'][:]
+
+	# 		for j in range(len(srcs_slice)):
+
+	# 			arv_p, ind_p, arv_s, ind_s = z['Picks/%d_Picks_P_perm'%j][:,0], z['Picks/%d_Picks_P_perm'%j][:,1].astype('int'), z['Picks/%d_Picks_S_perm'%j][:,0], z['Picks/%d_Picks_S_perm'%j][:,1].astype('int')
+
+	# 			ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
+
+	# 			if len(ind_unique_arrivals) == 0:
+	# 				srcs_trv.append(np.nan*np.ones((1, 4)))
+	# 				continue			
+				
+	# 			perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
+	# 			perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
+	# 			locs_use_slice = locs_use[ind_unique_arrivals]
+	# 			ind_p_perm_slice = perm_vec_arrivals[ind_p]
+	# 			ind_s_perm_slice = perm_vec_arrivals[ind_s]
+	# 			if len(ind_p_perm_slice) > 0:
+	# 				assert(ind_p_perm_slice.min() > -1)
+	# 			if len(ind_s_perm_slice) > 0:
+	# 				assert(ind_s_perm_slice.min() > -1)
+
+	# 			xmle, logprob = differential_evolution_location(m, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, device = device)
+
+	# 			pred_out = m(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + srcs_slice[j,3]
+
+	# 			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+	# 			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+
+	# 			mean_shift = 0.0
+	# 			cnt_phases = 0
+	# 			if len(res_p) > 0:
+	# 				mean_shift += np.median(res_p)*(len(res_p)/(len(res_p) + len(res_s)))
+	# 				cnt_phases += 1
+
+	# 			if len(res_s) > 0:
+	# 				mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
+	# 				cnt_phases += 1
+
+	# 			Srcs_initial.append(srcs_slice[j,:])
+	# 			Srcs_relocate.append(np.concatenate((xmle, np.array([srcs_slice[j,3] - mean_shift]).reshape(1,-1)), axis = 1))
+
+	# 		z.close()
 
 
 	######################## Run FMM checks ########################
@@ -1281,303 +1539,8 @@ if train_travel_time_neural_network == True:
 
 	remove_travel_time_files = True
 	if remove_travel_time_files == True:
-		for s in st_files:
+		for s in st_sta:
 			os.remove(s)
 
 print("All files saved successfully!")
 print("✔ Script execution: Done")
-
-
-
-
-	# 	for s in st_list:
-	# 		z = h5py.File(s, 'r')
-	# 		srcs_slice = z['srcs_trv'][:]
-	# 		locs_use = z['locs_use'][:]
-
-	# 		for j in range(len(srcs_slice)):
-
-	# 			arv_p, ind_p, arv_s, ind_s = z['Picks/%d_Picks_P_perm'%j][:,0], z['Picks/%d_Picks_P_perm'%j][:,1].astype('int'), z['Picks/%d_Picks_S_perm'%j][:,0], z['Picks/%d_Picks_S_perm'%j][:,1].astype('int')
-
-	# 			ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
-
-	# 			if len(ind_unique_arrivals) == 0:
-	# 				srcs_trv.append(np.nan*np.ones((1, 4)))
-	# 				continue			
-				
-	# 			perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
-	# 			perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
-	# 			locs_use_slice = locs_use[ind_unique_arrivals]
-	# 			ind_p_perm_slice = perm_vec_arrivals[ind_p]
-	# 			ind_s_perm_slice = perm_vec_arrivals[ind_s]
-	# 			if len(ind_p_perm_slice) > 0:
-	# 				assert(ind_p_perm_slice.min() > -1)
-	# 			if len(ind_s_perm_slice) > 0:
-	# 				assert(ind_s_perm_slice.min() > -1)
-
-	# 			xmle, logprob = differential_evolution_location(m, locs_use_slice, arv_p, ind_p_perm_slice, arv_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, device = device)
-
-	# 			pred_out = m(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + srcs_slice[j,3]
-
-	# 			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
-	# 			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
-
-	# 			mean_shift = 0.0
-	# 			cnt_phases = 0
-	# 			if len(res_p) > 0:
-	# 				mean_shift += np.median(res_p)*(len(res_p)/(len(res_p) + len(res_s)))
-	# 				cnt_phases += 1
-
-	# 			if len(res_s) > 0:
-	# 				mean_shift += np.median(res_s)*(len(res_s)/(len(res_p) + len(res_s)))
-	# 				cnt_phases += 1
-
-	# 			Srcs_initial.append(srcs_slice[j,:])
-	# 			Srcs_relocate.append(np.concatenate((xmle, np.array([srcs_slice[j,3] - mean_shift]).reshape(1,-1)), axis = 1))
-
-	# 		z.close()
-
-
-# lat_grid = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg)
-# lon_grid = np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
-# depth_grid = np.arange(depth_range[0], depth_range[1] + dx_depth, dx_depth)
-	
-# replace_zero = True
-# x11, x12, x13 = np.meshgrid(lat_grid, lon_grid, depth_grid)
-# X = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-
-# query_proj = ftrns1(X)
-
-# ## Check number of workers available. Note: should apply parallel threads for running over stations.
-# print('\n Total possible threads %d'%multiprocessing.cpu_count())
-# print(f'Actually using {num_cores} cores')
-
-# ## Boundary of domain, in Cartesian coordinates
-# elev = locs[:,2].max() + 1000.0
-# z1 = np.array([lat_range_extend[0], lon_range_extend[0], elev])[None,:]
-# z2 = np.array([lat_range_extend[0], lon_range_extend[1], elev])[None,:]
-# z3 = np.array([lat_range_extend[1], lon_range_extend[1], elev])[None,:]
-# z4 = np.array([lat_range_extend[1], lon_range_extend[0], elev])[None,:]
-# z = np.concatenate((z1, z2, z3, z4), axis = 0)
-# zz = ftrns1(z)
-
-# ip = np.where((query_proj[:,0] >= zz[:,0].min())*(query_proj[:,0] <= zz[:,0].max())*(query_proj[:,1] >= zz[:,1].min())*(query_proj[:,1] <= zz[:,1].max()))[0]
-# ys = query_proj[ip,:] # not actually used for anything (non-trivial.)
-
-# ## If the queries are out of bounts when calling 
-# x1 = np.arange(ys[:,0].min() - 20*dx, ys[:,0].max() + 20*dx, dx)
-# x2 = np.arange(ys[:,1].min() - 20*dx, ys[:,1].max() + 20*dx, dx)
-# x3 = np.arange(ys[:,2].min() - 4*dx, ys[:,2].max() + 4*dx, dx)
-# x11, x12, x13 = np.meshgrid(x1, x2, x3)
-# xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-# dx_v = np.array([np.diff(x1)[0], np.diff(x2)[0], np.diff(x3)[0]])
-
-# Xmin = xx.min(0)
-# Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
-# Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
-
-# ## Load velocity model
-# if vel_model_type == 1:
-# 	vp = np.array(config['velocity_model']['Vp'])
-# 	vs = np.array(config['velocity_model']['Vs'])
-# 	depths = np.array(config['velocity_model']['Depths'])
-# 	iarg = np.argsort(depths)
-# 	# z = np.load(path_to_file + '1d_velocity_model.npz')
-# 	# depths, vp, vs = z['Depths'], z['Vp'], z['Vs']
-# 	# z.close()
-	
-# 	depths_fine = np.arange(depths.min(), depths.max() + dx_depth/10.0, dx_depth/10.0)
-# 	vp_fine = np.interp(depths_fine, depths[iarg], vp[iarg])
-# 	vs_fine = np.interp(depths_fine, depths[iarg], vs[iarg])
-
-# 	tree = cKDTree(depths_fine.reshape(-1,1))
-# 	ip_nearest = tree.query(ftrns2(xx)[:,2].reshape(-1,1))[1]
-# 	Vp = vp_fine[ip_nearest]
-# 	Vs = vs_fine[ip_nearest]
-
-# elif vel_model_type == 2:
-
-# 	z = np.load(path_to_file + '3d_velocity_model.npz')
-# 	x_vel, vp_vel, vs_vel = z['X'], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
-# 	z.close()
-
-# 	tree = cKDTree(ftrns1(x_vel)) ## Assigns the velocity values to the computation grid (xx) using nearest neighbors (e.g., the input 3D model can include any number of points, anywhere, and interpolation will fill in the values elsewhere)
-# 	ip_nearest = tree.query(xx)[1]
-# 	Vp = vp_vel[ip_nearest]
-# 	Vs = vs_vel[ip_nearest]
-
-# elif vel_model_type == 3:
-
-# 	z = h5py.File(path_to_file + 'Vel_models.hdf5', 'r') ## Using a series of 1d velocity models for different areas
-# 	Depths_l, Coor_l, Vp_l, Vs_l, Radius_l = [], [], [], [], []
-# 	keys = list(z.keys())
-# 	n_profiles = len(list(filter(lambda x: 'Depths' in x, keys)))
-# 	for n in range(n_profiles):
-# 		Depths_l.append(z['Depths_%d'%n][:])
-# 		Vp_l.append(z['Vp_%d'%n][:])
-# 		Vs_l.append(z['Vs_%d'%n][:])
-# 		Coor_l.append(z['Coor_%d'%n][:])
-# 		Radius_l.append(z['Radius_%d'%n][:])
-# 	z.close()
-
-# 	interp_type = 1
-# 	if interp_type == 1: ## Use depth coordinates with each coor point
-# 		dist_max = np.inf*np.ones(len(xx))
-# 		xx_ind = (-1*np.ones(len(xx))).astype('int')
-# 		xx_depth_ind = (-1*np.ones(len(xx))).astype('int')
-# 		Vp = np.inf*np.ones(len(xx))
-# 		Vs = np.inf*np.ones(len(xx))
-# 		for i in range(len(Depths_l)):
-# 			coors_slice = Coor_l[i].repeat(len(Depths_l[i]), axis = 0)
-# 			coors_slice = np.concatenate((coors_slice, np.tile(Depths_l[i].reshape(-1,1), (len(Coor_l[i]), 1))), axis = 1)
-# 			tree = cKDTree(ftrns1(coors_slice))
-# 			dist_v = tree.query(xx) # [0]/np.mean(Radius_l[i]*1000.0)
-# 			dist, dist_ind = dist_v[0]/np.mean(Radius_l[i]*1000.0), dist_v[1]
-# 			tree_depths = cKDTree(Depths_l[i].reshape(-1,1))
-# 			i1 = np.where(dist < dist_max)[0]
-# 			imatch_depth = tree_depths.query(coors_slice[dist_ind[i1],2].reshape(-1,1))[1]
-
-# 			## Update nearest matching point
-# 			dist_max[i1] = dist[i1]
-# 			xx_ind[i1] = i
-# 			xx_depth_ind[i1] = imatch_depth
-# 			Vp[i1] = Vp_l[i][imatch_depth]
-# 			Vs[i1] = Vs_l[i][imatch_depth]
-# 			print('Finished %d'%i)
-
-# ## Apply topography clipping to velocity model
-# if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.npz') == True):
-
-# 	## Load "Points" field that specifies surface elevation (columns of lat, lon, elevation (meters)). Points outside convex hull of Points will be treated as zero elevation.
-# 	z = np.load(path_to_file + 'surface_elevation.npz')
-# 	Points = z['Points']
-# 	z.close()
-
-# 	## Concatenate station elevations
-# 	Points = np.concatenate((Points, locs), axis = 0)
-	
-# 	## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
-# 	tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
-# 	x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg/5.0, d_deg/5.0), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg/5.0, d_deg/5.0)
-
-# 	x11_s, x12_s = np.meshgrid(x1_s, x2_s)
-# 	surface_profile = np.concatenate((x11_s.reshape(-1,1), x12_s.reshape(-1,1)), axis = 1)
-# 	ip_match = tree.query(ftrns1(np.concatenate((surface_profile, np.zeros((len(surface_profile),1))), axis = 1)))
-# 	val = Points[ip_match[1],2] ## Surface elevations of regular grid
-# 	hull = ConvexHull(Points[:,0:2])
-# 	ioutside_hull = np.where(in_hull(surface_profile,  hull.points[hull.vertices]) == 0)[0]
-# 	val[ioutside_hull] = 0.0 ## Setting points on regular grid far from reference points to sea level
-# 	surface_profile = np.concatenate((surface_profile, val.reshape(-1,1)), axis = 1)
-# 	if os.path.isfile(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project) == False:
-# 		np.savez_compressed(path_to_file + 'Grids/%s_surface_elevation.npz'%name_of_project, surface_profile = surface_profile)
-		
-# 	## Check if stations are beneath surface
-# 	tol_elev_val = 150.0 ## Stations must be within 100 meters of being beneath surface or else assume there is an error
-# 	tree = cKDTree(ftrns1(surface_profile))
-# 	unit_out = ftrns1(locs + np.concatenate((np.zeros((len(locs),2)), 1.0*np.ones((len(locs),1))), axis = 1))
-# 	dist_near = tree.query(ftrns1(locs))[0]
-# 	dist_perturb = tree.query(unit_out)[0]
-# 	iabove_surface = np.where(dist_perturb > dist_near)[0]
-# 	if len(iabove_surface) > 0: assert(np.abs(locs[iabove_surface,2] - surface_profile[tree.query(ftrns1(locs))[1][iabove_surface],2]).max() < tol_elev_val)
-
-# 	## Add a pertubation to elevation, check if the point is moving further away or closer to the nearest point on the surface		
-# 	inear_surface = np.where(ftrns2(xx)[:,2] >= np.minimum((0.8*(depth_range[1] - depth_range[0]) + depth_range[0]), 0.0))[0]
-# 	unit_out = ftrns1(ftrns2(xx[inear_surface]) + np.concatenate((np.zeros((len(inear_surface),2)), 1.0*np.ones((len(inear_surface),1))), axis = 1))
-# 	dist_near = tree.query(xx[inear_surface])[0]
-# 	dist_perturb = tree.query(unit_out)[0]
-# 	iabove_surface = np.where(dist_perturb > dist_near)[0]
-	
-# 	## Set points above surface to air wave speeds (or find a way to mask)
-# 	Vp[inear_surface[iabove_surface]] = 343.0 ## Assumed acoustic p wave speed
-# 	Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
-
-# ## Using 3D domain, so must use actual station coordinates
-
-
-# hull = ConvexHull(xx)
-# inside_hull = in_hull(reciever_proj, hull.points[hull.vertices])
-# print('Num sta inside hull %d'%inside_hull.sum())
-# print('Num total sta %d'%len(locs_ref))
-# assert(inside_hull.sum() == locs_ref.shape[0])
-
-# mp = RegularGridInterpolator((x1, x2, x3), Vp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-# ms = RegularGridInterpolator((x1, x2, x3), Vs.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-# Vp_interp = mp(ftrns1(X))
-# Vs_interp = ms(ftrns1(X))
-
-
-# if compute_reference_times == True:
-# 	pass
-
-# ## Determine which stations have data
-# # ver_vel_model = 1
-# st_sta = glob.glob(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData' + seperator + '*station*ver_%d.npz'%vel_model_ver)
-# iarg = np.argsort([int(st_sta[j].split('/')[-1].split(name_of_project)[-1].split('_')[5]) for j in range(len(st_sta))])
-# st_sta = [st_sta[j] for j in iarg]
-# sta_ind = np.array([int(st_sta[j].split('/')[-1].split(name_of_project)[-1].split('_')[5]) for j in range(len(st_sta))]).astype('int')
-
-
-# def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores = 10):
-
-# 	def step_test(args):
-
-# 		yval, dx_v, h, h1, x11, x12, x13, ind = args
-# 		print(yval.shape); print(x11.shape); print(x12.shape); print(x13.shape)
-
-# 		phi_xy = (x11 - yval[0,0])**2 + (x12 - yval[0,1])**2
-# 		phi_v = (x13 - yval[0,2])**2
-
-# 		phi = np.sqrt(phi_xy + phi_v)
-# 		phi = phi - phi.min() - 100.0
-
-# 		v = np.copy(h).reshape(x11.shape) # correct?
-# 		v1 = np.copy(h1).reshape(x11.shape) # correct?
-
-# 		t = skfmm.travel_time(phi, v, dx = [dx_v[0], dx_v[1], dx_v[2]])
-# 		t1 = skfmm.travel_time(phi, v1, dx = [dx_v[0], dx_v[1], dx_v[2]])
-
-# 		return t, t1, phi, ind
-
-# 	tp_times, ts_times = np.nan*np.zeros((h.shape[0], xx_r.shape[0])), np.nan*np.zeros((h.shape[0], xx_r.shape[0]))
-
-# 	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [xx_r[i,:][None,:], dx_v, h, h1, x11, x12, x13, i] ) for i in range(xx_r.shape[0]))
-
-# 	for i in range(xx_r.shape[0]):
-
-# 		## Make sure to write results to correct station, based on ind
-# 		tp_times[:,results[i][-1]] = results[i][0].reshape(-1)
-# 		ts_times[:,results[i][-1]] = results[i][1].reshape(-1)
-
-# 	return tp_times, ts_times
-
-# def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = 10):
-
-# 	def step_test(args):
-
-# 		x1, x2, x3, tp, ts, X, ftrns1, ind = args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]
-
-# 		mp = RegularGridInterpolator((x1, x2, x3), tp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-# 		ms = RegularGridInterpolator((x1, x2, x3), ts.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-# 		tp_val = mp(ftrns1(X))
-# 		ts_val = ms(ftrns1(X))
-
-# 		print('Finished interpolation %d'%ind)
-		
-# 		return tp_val, ts_val, ind
-
-# 	n_grid = X.shape[0]
-# 	n_sta = Tp.shape[1]
-# 	Tp_interp = np.zeros((n_grid, n_sta))
-# 	Ts_interp = np.zeros((n_grid, n_sta))
-# 	assert(Tp_interp.shape[1] == Ts_interp.shape[1])
-
-# 	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [x1, x2, x3, Tp[:,i], Ts[:,i], X, lambda x: ftrns1(x), i] ) for i in range(n_sta))
-
-# 	for i in range(n_sta):
-
-# 		## Make sure to write results to correct station, based on ind
-# 		Tp_interp[:,results[i][2]] = results[i][0].reshape(-1)
-# 		Ts_interp[:,results[i][2]] = results[i][1].reshape(-1)
-
-# 	return Tp_interp, Ts_interp
-
