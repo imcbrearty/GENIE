@@ -1067,7 +1067,7 @@ for cnt, strs in enumerate([0]):
 		lon_deg_span = target_width / (np.deg2rad(1) * earth_radius * np.cos(lat_rad))
 		lat_range_slice = np.array([lat_val - lat_deg_span/2.0, lat_val + lat_deg_span/2.0])
 		lon_range_slice = np.array([np.mean(lon_range) - lon_deg_span/2.0, np.mean(lon_range) + lon_deg_span/2.0])
-		X_query_slice = build_sampling_grid(lat_range_slice, lon_range_slice, lat_range_slice, lon_range_slice, [np.mean(depth_range) - target_width/2.0, np.mean(depth_range) + target_width/2.0], tc_win/2.0, 1000.0*scale_time, 2*n_query_grid, ftrns1, ftrns2, verbose = False if inc > 0 else True, depth_upscale_factor = 2.0, buffer_scale = 2.0)
+		X_query_slice = build_sampling_grid(lat_range_slice, lon_range_slice, lat_range_slice, lon_range_slice, [np.mean(depth_range) - target_width/2.0, np.mean(depth_range) + target_width/2.0], tc_win/2.0, 1000.0*scale_time, 2*n_query_grid, ftrns1, ftrns2, verbose = False if inc > 0 else True, use_global = use_global, depth_upscale_factor = 2.0, buffer_scale = 2.0)
 		X_query_grid.append(X_query_slice)
 
 
