@@ -351,8 +351,10 @@ locs_ref = np.copy(locs)
 reciever_proj = ftrns1(locs_ref) # for all elevs.
 
 
-hull = ConvexHull(xx)
-inside_hull = in_hull(reciever_proj, hull.points[hull.vertices])
+## xx is a full regular grid built from the axes x1, x2, x3, so its convex hull
+## is exactly its axis-aligned bounding box; test the bounds directly instead of
+## building a ConvexHull of the entire grid
+inside_hull = np.all((reciever_proj >= xx.min(0))*(reciever_proj <= xx.max(0)), axis = 1)
 print('Num sta inside hull %d'%inside_hull.sum())
 print('Num total sta %d'%len(locs_ref))
 # assert(inside_hull.sum() == locs_ref.shape[0])
