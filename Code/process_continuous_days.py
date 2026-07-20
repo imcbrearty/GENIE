@@ -192,6 +192,14 @@ z = np.load(path_to_file + '%s_region.npz'%name_of_project)
 lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
 z.close()
 
+## Check if using full Earth, set target sampling bounds ##
+if (lat_range[0] <= -89.98)*(lat_range[1] >= 89.98)*(lon_range[0] <= -179.98)*(lon_range[1] >= 179.98):
+	use_global = True
+	lat_range_extend = [-90.0, 90.0]
+	lon_range_extend = [-180.0, 180.0]
+else:
+	use_global = False
+
 ### Begin automated processing ###
 
 print('\nName of program is %s'%argvs[0])
@@ -611,7 +619,7 @@ else:
 
 # use_efficient_sampling_grid = True
 # X_query = build_sampling_grid(lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, t_win/2.0, 1000.0*scale_time, 2*n_query_grid, ftrns1, ftrns2, depth_upscale_factor = 2.0, buffer_scale = 2.0)
-X_query = build_sampling_grid(lat_range, lon_range, lat_range, lon_range, depth_range, t_win/2.0, 1000.0*scale_time, 3*n_query_grid, ftrns1, ftrns2, depth_upscale_factor = 2.0, buffer_scale = 2.0)
+X_query = build_sampling_grid(lat_range, lon_range, lat_range, lon_range, depth_range, t_win/2.0, 1000.0*scale_time, 3*n_query_grid, ftrns1, ftrns2, use_global = use_global, depth_upscale_factor = 2.0, buffer_scale = 2.0)
 X_query_cart = torch.Tensor(ftrns1(X_query)).to(device)
 
 ## Estimate average grid spacing
