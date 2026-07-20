@@ -1239,8 +1239,6 @@ if train_travel_time_neural_network == True:
 
 	r_vals1 = [r2_vp1, r2_vs1, r2_vp_vald1, r2_vs_vald1]
 
-	n_ver_save = 1
-
 	m = m.cpu()
 	torch.save(m.state_dict(), path_save + 'travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_save))
 	torch.save(optimizer.state_dict(), path_save + 'travel_time_neural_network_physics_informed_%s_optimizer_ver_%d.h5'%(phase, n_ver_save))
