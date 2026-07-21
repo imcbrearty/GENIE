@@ -48,7 +48,7 @@ use_sigmoid: False ## Use sigmoid outputs instead of linear (not currently train
 
 ## Graph params
 k_sta_edges: 8 # or 10 are reasonable choices
-k_spc_edges: 15
+k_spc_edges: 18
 k_time_edges: 10 ## No longer used
 
 
