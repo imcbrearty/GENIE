@@ -1434,7 +1434,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		for j in range(n_batch):
 			if (np.random.rand() > 0.5) or (use_real_data_sample == True): # 30% of samples, re-focus time. # 0.7
 				# time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*src_t_kernel*np.random.laplace()
-				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*(time_shift_range/2.0)*np.random.laplace()
+				# time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*(time_shift_range/2.0)*np.random.laplace()
+				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (3.0/3.0)*(src_t_kernel)*np.random.laplace()
 
 	time_samples = np.sort(time_samples)
 
@@ -3041,7 +3042,8 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 			# A_src_in_prod_l = Data(torch.Tensor(A_src_in_prod_x_l).to(device), edge_index = torch.Tensor(A_src_in_prod_edges_l).long().to(device))
 			trv_out = trv_pairwise(torch.Tensor(Locs[A_src_in_sta_l[0].cpu().detach().numpy()]).to(device), torch.Tensor(X_fixed[A_src_in_sta_l[1].cpu().detach().numpy()]).to(device))
 		else:
-			trv_out = trv_pairwise(torch.Tensor(Locs[A_src_in_sta_l[0].cpu().detach().numpy()]).to(device), torch.Tensor(X_fixed[A_src_in_sta_l[1].cpu().detach().numpy()]).to(device)) + torch.Tensor(time_shifts[grid_match, A_src_in_sta_l[1].cpu().detach().numpy()]).reshape(-1,1).to(device)
+			# trv_out = trv_pairwise(torch.Tensor(Locs[A_src_in_sta_l[0].cpu().detach().numpy()]).to(device), torch.Tensor(X_fixed[A_src_in_sta_l[1].cpu().detach().numpy()]).to(device)) + torch.Tensor(time_shifts[grid_match, A_src_in_sta_l[1].cpu().detach().numpy()]).reshape(-1,1).to(device)
+			trv_out = trv_pairwise(torch.Tensor(Locs[A_src_in_sta_l[0].cpu().detach().numpy()]).to(device), torch.Tensor(X_fixed[A_src_in_sta_l[1].cpu().detach().numpy()]).to(device)) + torch.Tensor(X_fixed[A_src_in_sta_l[1].cpu().detach().numpy(),3]).reshape(-1,1).to(device)
 
 		## Consider changing spatial_vals to proportional to labels
 		## Updating spatial vals to use scaled Cartesian coordinates
@@ -3053,7 +3055,8 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 		if use_time_shift == False:
 			trv_out = trv(torch.Tensor(Locs).to(device), torch.Tensor(X_fixed).to(device)).detach().reshape(-1,2) ## Note: could also just take this from x_grids_trv
 		else:
-			trv_out = (trv(torch.Tensor(Locs).to(device), torch.Tensor(X_fixed).to(device)).detach() + torch.Tensor(np.expand_dims(time_shift[[grid_match],:], axis = 0)).to(device)).reshape(-1,2) ## Note: could also just take this from x_grids_trv
+			# trv_out = (trv(torch.Tensor(Locs).to(device), torch.Tensor(X_fixed).to(device)).detach() + torch.Tensor(np.expand_dims(time_shift[[grid_match],:], axis = 0)).to(device)).reshape(-1,2) ## Note: could also just take this from x_grids_trv
+			trv_out = (trv(torch.Tensor(Locs).to(device), torch.Tensor(X_fixed).to(device)).detach() + torch.Tensor(X_fixed[:,3].reshape(-1,1,1)).to(device)).reshape(-1,2) ## Note: could also just take this from x_grids_trv
 
 		## Consider changing spatial_vals to proportional to labels
 		## Updating spatial vals to use scaled Cartesian coordinates
