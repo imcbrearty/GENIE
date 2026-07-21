@@ -1434,8 +1434,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		for j in range(n_batch):
 			if (np.random.rand() > 0.5) or (use_real_data_sample == True): # 30% of samples, re-focus time. # 0.7
 				# time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*src_t_kernel*np.random.laplace()
-				# time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*(time_shift_range/2.0)*np.random.laplace()
-				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (3.0/3.0)*(src_t_kernel)*np.random.laplace()
+				# time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (3.0/3.0)*(src_t_kernel)*np.random.laplace()
+				time_samples[j] = src_times_active[np.random.randint(0, high = l_src_times_active)] + (2.0/3.0)*(time_shift_range/2.0)*np.random.laplace()
 
 	time_samples = np.sort(time_samples)
 
