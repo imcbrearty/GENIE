@@ -1910,7 +1910,7 @@ def initialize_sensor_graph(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt
         for n in nodes_sorted:
             G.nodes[n]['comp_id'] = comp_id
             
-        if len(nodes_sorted) > 2:
+        if (len(nodes_sorted) > 2)*(init_knn != k_trgt): ## Adding (init_knn != k_trgt) to avoid computing laplacian on large matrices
             # Compute local Fiedler
 
             L = nx.laplacian_matrix(subG, weight='weight').astype(float)
@@ -1940,6 +1940,9 @@ def initialize_sensor_graph(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt
             # except:
             #     for node_idx in nodes_sorted: G.nodes[node_idx]['fiedler'] = 0.0
         else:
+            fiedler_value = 0.0
+            fiedler_graph = fiedler_value
+            G.graph['fiedler_value'] = 0.0 ## Adding this to avoid error
             for node_idx in nodes_sorted: G.nodes[node_idx]['fiedler'] = 0.0
 
 
