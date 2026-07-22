@@ -736,6 +736,67 @@ def knn_distance(
 		return distances, indices  # distances: [M, k], indices: [M, k] (into db)
 
 
+# def generate_travel_time_noise(
+#     t_r, phase_type="P", sigma_pick=0.05, sigma_path_max=1.20, T_c=150.0, scale_extra = 1.0
+# ):
+#     """Generates path-independent, scale-invariant travel-time noise.
+
+#     Noise for a given ray path depends ONLY on its own travel time t_r.
+#     Default parameters reflect global P-wave residual budgets (e.g. AK135 /
+#     IASP91).
+#     """
+#     multiplier = 2.2 if str(phase_type).upper() == "S" else 1.0
+
+#     # Calculate per-ray sigma (strictly local to each t_r value)
+#     sigma_sec = (
+#         sigma_pick + sigma_path_max * (1.0 - np.exp(-t_r / T_c))
+#     ) * multiplier
+
+#     return np.random.normal(loc=0.0, scale = scale_extra*sigma_sec)
+
+
+import numpy as np
+
+
+def generate_travel_time_noise(
+    t_r,
+    phase_type="P",
+    distribution="laplace",  # Options: "laplace" or "gaussian"
+    sigma_pick=0.05,
+    sigma_path_max=1.20,
+    T_c=150.0,
+	scale_extra = 1.0
+):
+    """Generates path-independent travel-time noise using either Laplace (heavy-
+
+    tailed) or Gaussian distributions.
+
+    Parameters:
+        t_r (np.ndarray): Travel times in seconds.
+        phase_type (str): "P" or "S".
+        distribution (str): "laplace" (realistic, L1 robust) or "gaussian" (L2).
+        sigma_pick (float): Base picking/clock error in seconds.
+        sigma_path_max (float): Asymptote for global path heterogeneity in
+          seconds.
+        T_c (float): Characteristic saturation time scale in seconds.
+    """
+    # 1. S-wave variance multiplier (~2.2x)
+    multiplier = 2.2 if str(phase_type).upper() == "S" else 1.0
+
+    # 2. Calculate per-ray target standard deviation (sigma)
+    sigma_sec = (
+        sigma_pick + sigma_path_max * (1.0 - np.exp(-t_r / T_c))
+    ) * multiplier
+
+    # 3. Sample based on requested distribution
+    if distribution.lower() == "laplace":
+        # For Laplace: std_dev = sqrt(2) * beta  =>  beta = sigma / sqrt(2)
+        beta = sigma_sec / np.sqrt(2.0)
+        return np.random.laplace(loc=0.0, scale = scale_extra*beta)
+    elif distribution.lower() in ["gaussian", "normal"]:
+        return np.random.normal(loc=0.0, scale = scale_extra*sigma_sec)
+    else:
+        raise ValueError(f"Unsupported distribution: {distribution}")
 
 
 ### TRAVEL TIMES ###
