@@ -755,48 +755,124 @@ def knn_distance(
 #     return np.random.normal(loc=0.0, scale = scale_extra*sigma_sec)
 
 
+# import numpy as np
+
+
+# def generate_travel_time_noise(
+#     t_r,
+#     phase_type = "P",
+#     distribution = "laplace",  # Options: "laplace" or "gaussian"
+#     sigma_pick = 0.08, # 0.05 (or 0.1)
+#     sigma_path_max = 1.20,
+#     T_c = 150.0,
+# 	scale_extra = 1.0
+# ): # Clean / Benchmark Data (Current Defaults):sigma_pick = 0.05, sigma_path_max = 1.2 $\rightarrow$ ($\text{Core Spread } \approx \pm 2\text{s}$)Noisy / Automated Picker Data:sigma_pick = 0.15, sigma_path_max = 2.0 $\rightarrow$ ($\text{Core Spread } \approx \pm 3.5\text{s}$)
+#     """Generates path-independent travel-time noise using either Laplace (heavy-
+
+#     tailed) or Gaussian distributions.
+
+#     Parameters:
+#         t_r (np.ndarray): Travel times in seconds.
+#         phase_type (str): "P" or "S".
+#         distribution (str): "laplace" (realistic, L1 robust) or "gaussian" (L2).
+#         sigma_pick (float): Base picking/clock error in seconds.
+#         sigma_path_max (float): Asymptote for global path heterogeneity in
+#           seconds.
+#         T_c (float): Characteristic saturation time scale in seconds.
+#     """
+#     # 1. S-wave variance multiplier (~2.2x)
+#     multiplier = 2.2 if str(phase_type).upper() == "S" else 1.0
+
+#     # 2. Calculate per-ray target standard deviation (sigma)
+#     sigma_sec = (
+#         sigma_pick + sigma_path_max * (1.0 - np.exp(-t_r / T_c))
+#     ) * multiplier
+
+#     # 3. Sample based on requested distribution
+#     if distribution.lower() == "laplace":
+#         # For Laplace: std_dev = sqrt(2) * beta  =>  beta = sigma / sqrt(2)
+#         beta = sigma_sec / np.sqrt(2.0)
+#         return np.random.laplace(loc=0.0, scale = scale_extra*beta)
+#     elif distribution.lower() in ["gaussian", "normal"]:
+#         return np.random.normal(loc=0.0, scale = scale_extra*sigma_sec)
+#     else:
+#         raise ValueError(f"Unsupported distribution: {distribution}")
+
+
 import numpy as np
 
 
 def generate_travel_time_noise(
     t_r,
-    phase_type = "P",
-    distribution = "laplace",  # Options: "laplace" or "gaussian"
-    sigma_pick = 0.08, # 0.05 (or 0.1)
-    sigma_path_max = 1.20,
-    T_c = 150.0,
-	scale_extra = 1.0
-): # Clean / Benchmark Data (Current Defaults):sigma_pick = 0.05, sigma_path_max = 1.2 $\rightarrow$ ($\text{Core Spread } \approx \pm 2\text{s}$)Noisy / Automated Picker Data:sigma_pick = 0.15, sigma_path_max = 2.0 $\rightarrow$ ($\text{Core Spread } \approx \pm 3.5\text{s}$)
-    """Generates path-independent travel-time noise using either Laplace (heavy-
+    phase_input="P",  # Can be a string ("P"/"S") OR an array/list of 0s and 1s
+    distribution="laplace",  # Options: "laplace" or "gaussian"
+    sigma_pick=0.08,  # ~80ms base jitter for ML auto-pickers
+    sigma_path_max=1.20,  # Asymptote for global path heterogeneity
+    T_c=150.0,  # Characteristic saturation time scale
+    scale_extra=1.0,  # Global multiplier to scale noise up/down
+    s_wave_multiplier=2.2,  # Relative variance factor for S-waves
+    excess_threshold_sigma=3.5,  # Outlier threshold factor (N * sigma)
+    return_sigma=False,  # Option to return sigma_sec array
+):
+    """Generates path-independent travel-time noise for single-phase strings or
 
-    tailed) or Gaussian distributions.
+    mixed P/S phase arrays.
 
     Parameters:
-        t_r (np.ndarray): Travel times in seconds.
-        phase_type (str): "P" or "S".
-        distribution (str): "laplace" (realistic, L1 robust) or "gaussian" (L2).
-        sigma_pick (float): Base picking/clock error in seconds.
+        t_r (np.ndarray or float): Exact travel times in seconds.
+        phase_input (str, list, or np.ndarray): Either "P"/"S" string for all
+          picks, OR array-like of 0s (P) and 1s (S).
+        distribution (str): "laplace" (heavy-tailed) or "gaussian".
+        sigma_pick (float): Base picking/clock error in seconds for P-waves.
         sigma_path_max (float): Asymptote for global path heterogeneity in
-          seconds.
+          seconds for P-waves.
         T_c (float): Characteristic saturation time scale in seconds.
+        scale_extra (float): Global multiplier applied to noise level.
+        s_wave_multiplier (float): Factor applied to S-wave noise (default:
+          2.2).
+        excess_threshold_sigma (float): Multiplier on sigma_sec to flag
+          excess-noise outliers.
+        return_sigma (bool): Whether to return sigma_sec alongside noise and
+          masks.
     """
-    # 1. S-wave variance multiplier (~2.2x)
-    multiplier = 2.2 if str(phase_type).upper() == "S" else 1.0
+    t_r = np.asarray(t_r)
 
-    # 2. Calculate per-ray target standard deviation (sigma)
+    # 1. Parse phase_input: Handle String vs. Vector Array
+    if isinstance(phase_input, str):
+        # String case: e.g., "P" or "S"
+        mult_val = s_wave_multiplier if phase_input.upper() == "S" else 1.0
+        multiplier = mult_val  # Scalar or broadcasted array
+    else:
+        # Array/Vector case: 0 for P, 1 for S
+        phase_mask = np.asarray(phase_input)
+        multiplier = np.where(phase_mask == 1, s_wave_multiplier, 1.0)
+
+    # 2. Vectorized pointwise target standard deviation (sigma_sec)
     sigma_sec = (
-        sigma_pick + sigma_path_max * (1.0 - np.exp(-t_r / T_c))
-    ) * multiplier
+        (sigma_pick + sigma_path_max * (1.0 - np.exp(-t_r / T_c)))
+        * multiplier
+        * scale_extra
+    )
 
-    # 3. Sample based on requested distribution
+    # 3. Sample noise based on distribution
     if distribution.lower() == "laplace":
         # For Laplace: std_dev = sqrt(2) * beta  =>  beta = sigma / sqrt(2)
         beta = sigma_sec / np.sqrt(2.0)
-        return np.random.laplace(loc=0.0, scale = scale_extra*beta)
+        noise_values = np.random.laplace(loc=0.0, scale=beta)
     elif distribution.lower() in ["gaussian", "normal"]:
-        return np.random.normal(loc=0.0, scale = scale_extra*sigma_sec)
+        noise_values = np.random.normal(loc=0.0, scale=sigma_sec)
     else:
         raise ValueError(f"Unsupported distribution: {distribution}")
+
+    # 4. Pointwise excess noise flag (|noise| > N * sigma_sec)
+    threshold = excess_threshold_sigma * sigma_sec
+    is_excess = np.abs(noise_values) > threshold
+
+    if return_sigma:
+        return noise_values, is_excess, sigma_sec
+    return noise_values, is_excess
+
+
 
 
 ### TRAVEL TIMES ###
