@@ -1052,7 +1052,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		add_bias_scaled_travel_time_noise = True ## This way, some "true moveouts" will have travel time 
 		## errors that are from a velocity model different than used for sampling, training, and application, etc.
 		## Uses a different bias for both p and s waves, but constant for all stations, for each event
-		if add_bias_scaled_travel_time_noise == True:
+		if (add_bias_scaled_travel_time_noise == True)*(use_real_data_sample == False):
 			# # total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
 			# # scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
 			# # avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
