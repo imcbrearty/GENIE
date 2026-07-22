@@ -811,7 +811,7 @@ def generate_travel_time_noise(
     T_c=150.0,  # Characteristic saturation time scale
     scale_extra=1.0,  # Global multiplier to scale noise up/down
     s_wave_multiplier=2.2,  # Relative variance factor for S-waves
-    excess_threshold_sigma=3.5,  # Outlier threshold factor (N * sigma)
+    excess_threshold_sigma=2.0,  # Outlier threshold factor (N * sigma)
     return_sigma=False,  # Option to return sigma_sec array
 ):
     """Generates path-independent travel-time noise for single-phase strings or
@@ -873,6 +873,77 @@ def generate_travel_time_noise(
     return noise_values, is_excess
 
 
+
+## With correlated bias
+# def generate_travel_time_noise(
+#     t_r,
+#     phase_input="P",  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+#     distribution="laplace",
+#     sigma_pick=0.08,
+#     sigma_path_max=1.20,
+#     T_c=150.0,
+#     scale_extra=1.0,
+#     s_wave_multiplier=2.2,
+#     excess_threshold_sigma=2.0,  # Tightened conservative threshold
+#     # --- Systemic Model Bias Parameters ---
+#     origin_shift_std=0.8,  # Systemic constant offset (seconds) per event
+#     velocity_scale_std=0.03,  # Systemic velocity error (e.g., +/- 3% scale factor)
+#     apply_systemic_bias=True,  # Set True during training to simulate bad velocity models
+#     return_sigma=False,
+# ):
+#     """Generates uncorrelated Laplace travel-time noise AND optional systemic
+
+#     velocity model bias (origin shifts and slowness scaling).
+#     """
+#     t_r = np.asarray(t_r)
+
+#     # 1. Parse Phase Multiplier
+#     if isinstance(phase_input, str):
+#         multiplier = s_wave_multiplier if phase_input.upper() == "S" else 1.0
+#     else:
+#         phase_mask = np.asarray(phase_input)
+#         multiplier = np.where(phase_mask == 1, s_wave_multiplier, 1.0)
+
+#     # 2. Uncorrelated Per-Ray Standard Deviation (sigma_sec)
+#     sigma_sec = (
+#         (sigma_pick + sigma_path_max * (1.0 - np.exp(-t_r / T_c)))
+#         * multiplier
+#         * scale_extra
+#     )
+
+#     # 3. Uncorrelated Random Noise (Pick-level)
+#     if distribution.lower() == "laplace":
+#         beta = sigma_sec / np.sqrt(2.0)
+#         uncorrelated_noise = np.random.laplace(loc=0.0, scale=beta)
+#     elif distribution.lower() in ["gaussian", "normal"]:
+#         uncorrelated_noise = np.random.normal(loc=0.0, scale=sigma_sec)
+#     else:
+#         raise ValueError(f"Unsupported distribution: {distribution}")
+
+#     # 4. Inject Systemic / Correlated Model Bias (Event-level)
+#     if apply_systemic_bias:
+#         # A. Baseline Shift: Shifts ALL picks for this event by a common offset
+#         systemic_shift = np.random.normal(0.0, origin_shift_std)
+
+#         # B. Slowness Scale Perturbation: Simulates reference velocity being e.g. 3% too fast/slow
+#         systemic_scale = np.random.normal(0.0, velocity_scale_std)
+#         slowness_error = t_r * systemic_scale
+
+#         correlated_bias = systemic_shift + slowness_error
+#     else:
+#         correlated_bias = 0.0
+
+#     # Total synthetic noise
+#     total_noise = uncorrelated_noise + correlated_bias
+
+#     # 5. Outlier Detection: Evaluated ONLY against the uncorrelated component!
+#     # (Because systemic shifts do NOT invalidate phase coherence/associations)
+#     threshold = excess_threshold_sigma * sigma_sec
+#     is_excess = np.abs(uncorrelated_noise) > threshold
+
+#     if return_sigma:
+#         return total_noise, is_excess, sigma_sec
+#     return total_noise, is_excess
 
 
 ### TRAVEL TIMES ###
