@@ -799,79 +799,183 @@ def knn_distance(
 #         raise ValueError(f"Unsupported distribution: {distribution}")
 
 
+# import numpy as np
+
+
+# def generate_travel_time_noise(
+#     t_r,
+#     phase_input="P",  # Can be a string ("P"/"S") OR an array/list of 0s and 1s
+#     distribution="laplace",  # Options: "laplace" or "gaussian"
+#     sigma_pick=0.08,  # ~80ms base jitter for ML auto-pickers
+#     sigma_path_max=1.20,  # Asymptote for global path heterogeneity
+#     T_c=150.0,  # Characteristic saturation time scale
+#     scale_extra=1.0,  # Global multiplier to scale noise up/down
+#     s_wave_multiplier=2.2,  # Relative variance factor for S-waves
+#     excess_threshold_sigma=2.0,  # Outlier threshold factor (N * sigma)
+#     return_sigma=False,  # Option to return sigma_sec array
+# ):
+#     """Generates path-independent travel-time noise for single-phase strings or
+
+#     mixed P/S phase arrays.
+
+#     Parameters:
+#         t_r (np.ndarray or float): Exact travel times in seconds.
+#         phase_input (str, list, or np.ndarray): Either "P"/"S" string for all
+#           picks, OR array-like of 0s (P) and 1s (S).
+#         distribution (str): "laplace" (heavy-tailed) or "gaussian".
+#         sigma_pick (float): Base picking/clock error in seconds for P-waves.
+#         sigma_path_max (float): Asymptote for global path heterogeneity in
+#           seconds for P-waves.
+#         T_c (float): Characteristic saturation time scale in seconds.
+#         scale_extra (float): Global multiplier applied to noise level.
+#         s_wave_multiplier (float): Factor applied to S-wave noise (default:
+#           2.2).
+#         excess_threshold_sigma (float): Multiplier on sigma_sec to flag
+#           excess-noise outliers.
+#         return_sigma (bool): Whether to return sigma_sec alongside noise and
+#           masks.
+#     """
+#     t_r = np.asarray(t_r)
+
+#     # 1. Parse phase_input: Handle String vs. Vector Array
+#     if isinstance(phase_input, str):
+#         # String case: e.g., "P" or "S"
+#         mult_val = s_wave_multiplier if phase_input.upper() == "S" else 1.0
+#         multiplier = mult_val  # Scalar or broadcasted array
+#     else:
+#         # Array/Vector case: 0 for P, 1 for S
+#         phase_mask = np.asarray(phase_input)
+#         multiplier = np.where(phase_mask == 1, s_wave_multiplier, 1.0)
+
+#     # 2. Vectorized pointwise target standard deviation (sigma_sec)
+#     sigma_sec = (
+#         (sigma_pick + sigma_path_max * (1.0 - np.exp(-t_r / T_c)))
+#         * multiplier
+#         * scale_extra
+#     )
+
+#     # 3. Sample noise based on distribution
+#     if distribution.lower() == "laplace":
+#         # For Laplace: std_dev = sqrt(2) * beta  =>  beta = sigma / sqrt(2)
+#         beta = sigma_sec / np.sqrt(2.0)
+#         noise_values = np.random.laplace(loc=0.0, scale=beta)
+#     elif distribution.lower() in ["gaussian", "normal"]:
+#         noise_values = np.random.normal(loc=0.0, scale=sigma_sec)
+#     else:
+#         raise ValueError(f"Unsupported distribution: {distribution}")
+
+#     # 4. Pointwise excess noise flag (|noise| > N * sigma_sec)
+#     threshold = excess_threshold_sigma * sigma_sec
+#     is_excess = np.abs(noise_values) > threshold
+
+#     if return_sigma:
+#         return noise_values, is_excess, sigma_sec
+#     return noise_values, is_excess
+
+
 import numpy as np
 
 
 def generate_travel_time_noise(
     t_r,
-    phase_input="P",  # Can be a string ("P"/"S") OR an array/list of 0s and 1s
-    distribution="laplace",  # Options: "laplace" or "gaussian"
-    sigma_pick=0.08,  # ~80ms base jitter for ML auto-pickers
-    sigma_path_max=1.20,  # Asymptote for global path heterogeneity
-    T_c=150.0,  # Characteristic saturation time scale
-    scale_extra=1.0,  # Global multiplier to scale noise up/down
-    s_wave_multiplier=2.2,  # Relative variance factor for S-waves
-    excess_threshold_sigma=2.0,  # Outlier threshold factor (N * sigma)
-    return_sigma=False,  # Option to return sigma_sec array
+    phase_input="P",  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+    event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
+    distribution="laplace",
+    sigma_pick=0.08,
+    sigma_path_max=1.20,
+    T_c=150.0,
+    scale_extra=1.0,
+    s_wave_multiplier=2.2,
+    excess_threshold_sigma=2.0,
+    # --- Systemic Velocity Model Bias Parameters ---
+    apply_systemic_bias=False,  # Set True if applying bias inside this function
+    total_bias=0.03,  # ~3% velocity perturbation range
+    frac_bias_s_ratio=0.3,
+    origin_shift_std=0.1,  # Baseline origin shift in seconds
+    return_sigma=False,
 ):
-    """Generates path-independent travel-time noise for single-phase strings or
+    """Generates path-dependent Laplace pick noise with optional event-grouped
 
-    mixed P/S phase arrays.
-
-    Parameters:
-        t_r (np.ndarray or float): Exact travel times in seconds.
-        phase_input (str, list, or np.ndarray): Either "P"/"S" string for all
-          picks, OR array-like of 0s (P) and 1s (S).
-        distribution (str): "laplace" (heavy-tailed) or "gaussian".
-        sigma_pick (float): Base picking/clock error in seconds for P-waves.
-        sigma_path_max (float): Asymptote for global path heterogeneity in
-          seconds for P-waves.
-        T_c (float): Characteristic saturation time scale in seconds.
-        scale_extra (float): Global multiplier applied to noise level.
-        s_wave_multiplier (float): Factor applied to S-wave noise (default:
-          2.2).
-        excess_threshold_sigma (float): Multiplier on sigma_sec to flag
-          excess-noise outliers.
-        return_sigma (bool): Whether to return sigma_sec alongside noise and
-          masks.
+    systemic velocity model bias.
     """
     t_r = np.asarray(t_r)
 
-    # 1. Parse phase_input: Handle String vs. Vector Array
+    # 1. Parse Phase Multiplier & S-wave Mask
     if isinstance(phase_input, str):
-        # String case: e.g., "P" or "S"
-        mult_val = s_wave_multiplier if phase_input.upper() == "S" else 1.0
-        multiplier = mult_val  # Scalar or broadcasted array
+        is_s = phase_input.upper() == "S"
+        multiplier = s_wave_multiplier if is_s else 1.0
+        s_mask = np.full_like(t_r, fill_value=1.0 if is_s else 0.0)
     else:
-        # Array/Vector case: 0 for P, 1 for S
-        phase_mask = np.asarray(phase_input)
-        multiplier = np.where(phase_mask == 1, s_wave_multiplier, 1.0)
+        s_mask = np.asarray(phase_input)
+        multiplier = np.where(s_mask == 1, s_wave_multiplier, 1.0)
 
-    # 2. Vectorized pointwise target standard deviation (sigma_sec)
+    # 2. Uncorrelated Per-Ray Standard Deviation (sigma_sec)
     sigma_sec = (
         (sigma_pick + sigma_path_max * (1.0 - np.exp(-t_r / T_c)))
         * multiplier
         * scale_extra
     )
 
-    # 3. Sample noise based on distribution
+    # 3. Sample Uncorrelated Pick-Level Noise
     if distribution.lower() == "laplace":
-        # For Laplace: std_dev = sqrt(2) * beta  =>  beta = sigma / sqrt(2)
         beta = sigma_sec / np.sqrt(2.0)
-        noise_values = np.random.laplace(loc=0.0, scale=beta)
+        uncorrelated_noise = np.random.laplace(loc=0.0, scale=beta)
     elif distribution.lower() in ["gaussian", "normal"]:
-        noise_values = np.random.normal(loc=0.0, scale=sigma_sec)
+        uncorrelated_noise = np.random.normal(loc=0.0, scale=sigma_sec)
     else:
         raise ValueError(f"Unsupported distribution: {distribution}")
 
-    # 4. Pointwise excess noise flag (|noise| > N * sigma_sec)
+    # 4. Apply Event-Grouped Systemic Bias (if enabled)
+    if apply_systemic_bias:
+        std_scale = total_bias / 2.0
+
+        if event_idx is None:
+            # Single event case (all picks belong to same event)
+            p_scale = np.random.normal(0.0, std_scale)
+            s_ratio = np.random.normal(0.0, std_scale) * frac_bias_s_ratio
+            shift = np.random.normal(0.0, origin_shift_std)
+
+            scale_factor = np.where(s_mask == 1, p_scale + s_ratio, p_scale)
+            systemic_bias = (t_r * scale_factor) + shift
+        else:
+            # Multi-event mixed/unsorted array case
+            event_idx = np.asarray(event_idx)
+            unique_events = np.unique(event_idx)
+
+            # Draw one unique set of parameters per unique event ID
+            p_scales = np.random.normal(0.0, std_scale, size=len(unique_events))
+            s_ratios = (
+                np.random.normal(0.0, std_scale, size=len(unique_events))
+                * frac_bias_s_ratio
+            )
+            shifts = np.random.normal(
+                0.0, origin_shift_std, size=len(unique_events)
+            )
+
+            # Map unique event parameters back to the full pick array
+            event_map = {ev: i for i, ev in enumerate(unique_events)}
+            pick_event_indices = np.array([event_map[ev] for ev in event_idx])
+
+            pick_p_scales = p_scales[pick_event_indices]
+            pick_s_ratios = s_ratios[pick_event_indices]
+            pick_shifts = shifts[pick_event_indices]
+
+            pick_scale_factors = np.where(
+                s_mask == 1, pick_p_scales + pick_s_ratios, pick_p_scales
+            )
+            systemic_bias = (t_r * pick_scale_factors) + pick_shifts
+    else:
+        systemic_bias = 0.0
+
+    total_noise = uncorrelated_noise + systemic_bias
+
+    # 5. Outlier Detection: Evaluated strictly on uncorrelated noise!
     threshold = excess_threshold_sigma * sigma_sec
-    is_excess = np.abs(noise_values) > threshold
+    is_excess = np.abs(uncorrelated_noise) > threshold
 
     if return_sigma:
-        return noise_values, is_excess, sigma_sec
-    return noise_values, is_excess
-
+        return total_noise, is_excess, sigma_sec
+    return total_noise, is_excess
 
 
 ## With correlated bias
