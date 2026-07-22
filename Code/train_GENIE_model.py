@@ -1053,21 +1053,46 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		## errors that are from a velocity model different than used for sampling, training, and application, etc.
 		## Uses a different bias for both p and s waves, but constant for all stations, for each event
 		if add_bias_scaled_travel_time_noise == True:
-			# total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
-			# scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
-			# avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
-			# avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
-			# mean_ps_ratio = avg_p_vel/avg_s_vel
-			## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
-			frac_bias_s_ratio = 0.3
-			scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
-			scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
-			scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
-			# scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
-			# scale_bias_s = 
-			scale_bias = scale_bias + 1.0
-			arrivals_theoretical = arrivals_theoretical*scale_bias
+			# # total_bias = 0.03 # up to 3% scaled (uniform across station) travel time error (now specified in train_config.yaml)
+			# # scale_bias = np.random.rand(len(src_positions),1,2)*total_bias - total_bias/2.0
+			# # avg_p_vel = (sr_distances/arrivals_theoretical[:,:,0]).mean()
+			# # avg_s_vel = (sr_distances/arrivals_theoretical[:,:,1]).mean()
+			# # mean_ps_ratio = avg_p_vel/avg_s_vel
+			# ## Note, it would be better to implement the biases in terms of velocity, rather than time, to more accurately reflect the perturbation
+			# frac_bias_s_ratio = 0.3
+			# scale_bias_p = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+			# scale_bias_s_ratio = (np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0)*frac_bias_s_ratio
+			# scale_bias = np.concatenate((scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis = 2)
+			# # scale_bias_ps_ratio = np.random.rand(len(src_positions),1,1)*total_bias - total_bias/2.0
+			# # scale_bias_s = 
+			# scale_bias = scale_bias + 1.0
+			# arrivals_theoretical = arrivals_theoretical*scale_bias
 
+			n_events = len(src_positions)
+		    # 1. Standard deviation for Gaussian velocity scale bias (~3% total range -> std = 0.015)
+		    std_scale_p = total_bias / 2.0
+		    frac_bias_s_ratio = 0.3
+		    # Sample P-wave velocity perturbation (normally distributed around 0)
+		    scale_bias_p = np.random.normal(loc=0.0, scale=std_scale_p, size=(n_events, 1, 1))
+		    # Sample S-wave ratio perturbation
+		    scale_bias_s_ratio = (
+		        np.random.normal(loc=0.0, scale=std_scale_p, size=(n_events, 1, 1))
+		        * frac_bias_s_ratio
+		    )
+		    # Concatenate P and S scale factors: shape (n_events, 1, 2)
+		    scale_bias = np.concatenate(
+		        (scale_bias_p, scale_bias_p + scale_bias_s_ratio), axis=2
+		    )
+		    # Multiplicative factor: e.g. 1.0 + 0.015 = 1.015
+		    scale_multiplier = 1.0 + scale_bias
+		    # 2. Additive origin/static baseline shift (seconds per event)
+		    origin_shift_std = 0.0  # seconds
+		    origin_shifts = np.random.normal(
+		        loc=0.0, scale=origin_shift_std, size=(n_events, 1, 1)
+		    )
+		    # 3. Apply both biases to theoretical arrivals: t_new = t * (1 + delta) + shift
+		    arrivals_theoretical = (arrivals_theoretical * scale_multiplier) + origin_shifts
+	
 	if use_real_data_sample == False:
 
 		arrival_origin_times = src_times.reshape(-1,1).repeat(n_sta, 1)
