@@ -1368,11 +1368,35 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 
 			if use_real_data_sample == False:
-				noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-				iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+				
+				# noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+				# iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+				# arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+				
+				noise_values, is_excess = generate_travel_time_noise(
+				    arrivals[iz,0],
+				    phase_input=arrivals[iz,4],  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+				    event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
+				    distribution="laplace",
+				    sigma_pick=0.08,
+				    sigma_path_max=1.20,
+				    T_c=150.0,
+				    scale_extra=1.0,
+				    s_wave_multiplier=2.2,
+				    excess_threshold_sigma=2.0,
+				    # --- Systemic Velocity Model Bias Parameters ---
+				    apply_systemic_bias=False,  # Set True if applying bias inside this function
+				    total_bias=0.03,  # ~3% velocity perturbation range
+				    frac_bias_s_ratio=0.3,
+				    origin_shift_std=0.0,  # Baseline origin shift in seconds
+				    return_sigma=False)
+				
+				iexcess_noise = np.where(is_excess == 1)[0]
 				arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
+			
 
 			else:
+				
 				noise_values = 0.0*np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
 				iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
 				arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] # + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise				
