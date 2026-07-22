@@ -760,13 +760,13 @@ import numpy as np
 
 def generate_travel_time_noise(
     t_r,
-    phase_type="P",
-    distribution="laplace",  # Options: "laplace" or "gaussian"
-    sigma_pick=0.05,
-    sigma_path_max=1.20,
-    T_c=150.0,
+    phase_type = "P",
+    distribution = "laplace",  # Options: "laplace" or "gaussian"
+    sigma_pick = 0.08, # 0.05 (or 0.1)
+    sigma_path_max = 1.20,
+    T_c = 150.0,
 	scale_extra = 1.0
-):
+): # Clean / Benchmark Data (Current Defaults):sigma_pick = 0.05, sigma_path_max = 1.2 $\rightarrow$ ($\text{Core Spread } \approx \pm 2\text{s}$)Noisy / Automated Picker Data:sigma_pick = 0.15, sigma_path_max = 2.0 $\rightarrow$ ($\text{Core Spread } \approx \pm 3.5\text{s}$)
     """Generates path-independent travel-time noise using either Laplace (heavy-
 
     tailed) or Gaussian distributions.
