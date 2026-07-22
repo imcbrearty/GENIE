@@ -1481,7 +1481,7 @@ if train_travel_time_neural_network == True:
 		Rel_p1 = []
 		Rel_s1 = []
 
-		n_ver_trv_time_model_load = 1
+		n_ver_trv_time_model_load = vel_model_ver
 		trv = load_travel_time_neural_network(path_to_file, ftrns1_diff, ftrns2_diff, n_ver_trv_time_model_load, device = device)
 
 		n_sta_check = 10
