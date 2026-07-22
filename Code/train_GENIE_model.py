@@ -1108,13 +1108,28 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	else:
 
-		# min_time = 45.0 ## Both this time
-		min_rel_error = 0.2 ## and this minimum relative error
-		min_rel_time = 1.0
+		min_sigma_multiple = 3.0
 		min_ratio_neighbors = 0.2
-		max_abs_error = 5.0
+		# max_abs_error = 5.0
 
 		trv_out_pred_base = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
+		shape1, shape2 = trv_out_pred_base.shape[0], trv_out_pred_base.shape[1]
+
+		sigma_p = generate_travel_time_noise(
+		    trv_out_pred_base[:,:,0].reshape(-1),
+		    phase_input="P",  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+		    event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
+		    distribution="laplace",
+		    return_sigma=True)[2].reshape(shape1, shape2)
+
+		sigma_s = generate_travel_time_noise(
+		    trv_out_pred_base[:,:,1].reshape(-1),
+		    phase_input="S",  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+		    event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
+		    distribution="laplace",
+		    return_sigma=True)[2].reshape(shape1, shape2)
+
+
 		# trv_out_pred_base[trv_out_pred_base > max_t] = np.nan
 		trv_out_pred = trv_out_pred_base + src_times.reshape(-1,1,1)
 		trv_time_p1 = np.concatenate((trv_out_pred[:,:,0].reshape(-1,1), np.arange(len(locs)).reshape(1,-1).repeat(len(src_positions), axis = 0).reshape(-1,1), np.arange(len(src_positions)).reshape(-1, 1).repeat(len(locs), axis = 1).reshape(-1,1)), axis = 1)
@@ -1127,21 +1142,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		tree_picks = cKDTree(P_ref[:,0:2]*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
 		ip_query1 = tree_picks.query(np.nan_to_num(trv_time_p1[:,0:2], nan = -3600.0*24.0*1.5)*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
 		ip_query2 = tree_picks.query(np.nan_to_num(trv_time_p2[:,0:2], nan = -3600.0*24.0*1.5)*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
-
-		## Should add stable relative error
-		# ifind1 = np.where((ip_query1[0] < min_time)*(np.abs(ip_query1[0]/np.maximum(1.0, trv_out_pred_base[:,:,0].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0))[0]
-		# ifind2 = np.where((ip_query2[0] < min_time)*(np.abs(ip_query2[0]/np.maximum(1.0, trv_out_pred_base[:,:,1].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0))[0]
-		# ifind1 = np.where((np.abs(ip_query1[0]/np.maximum(1.0, trv_out_pred_base[:,:,0].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0))[0]
-		# ifind2 = np.where((np.abs(ip_query2[0]/np.maximum(1.0, trv_out_pred_base[:,:,1].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0))[0]
-		ifind1 = np.where((np.abs(ip_query1[0]/np.maximum(1.0, trv_out_pred_base[:,:,0].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0)*(ip_query1[0] < max_abs_error))[0]
-		ifind2 = np.where((np.abs(ip_query2[0]/np.maximum(1.0, trv_out_pred_base[:,:,1].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0)*(ip_query2[0] < max_abs_error))[0]
-
-
-		ifind11 = np.where((ip_query1[0] < min_rel_time)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0)*(ip_query1[0] < max_abs_error))[0]
-		ifind21 = np.where((ip_query2[0] < min_rel_time)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0)*(ip_query2[0] < max_abs_error))[0]
-		ifind1 = np.unique(np.concatenate((ifind1, ifind11), axis = 0))
-		ifind2 = np.unique(np.concatenate((ifind2, ifind21), axis = 0))
-
+		ifind1 = np.where(ip_query1[0] < min_sigma_multiple*sigma_p.reshape(-1))[0]
+		ifind2 = np.where(ip_query2[0] < min_sigma_multiple*sigma_s.reshape(-1))[0]
+		
 		## Filter the retained stations based on neighbor relationships
 		## E.g., use scatter for each source, for each station, based on neighbors, and only retain those picks that > thresh proportion of neighbors
 		## Can use batching for efficiency
@@ -4609,7 +4612,39 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 
 
 
+		# # min_time = 45.0 ## Both this time
+		# min_rel_error = 0.2 ## and this minimum relative error
+		# min_rel_time = 1.0
+		# min_ratio_neighbors = 0.2
+		# max_abs_error = 5.0
 
+		# trv_out_pred_base = trv(torch.Tensor(locs).to(device), torch.Tensor(src_positions[:,0:3]).to(device)).cpu().detach().numpy()
+		# # trv_out_pred_base[trv_out_pred_base > max_t] = np.nan
+		# trv_out_pred = trv_out_pred_base + src_times.reshape(-1,1,1)
+		# trv_time_p1 = np.concatenate((trv_out_pred[:,:,0].reshape(-1,1), np.arange(len(locs)).reshape(1,-1).repeat(len(src_positions), axis = 0).reshape(-1,1), np.arange(len(src_positions)).reshape(-1, 1).repeat(len(locs), axis = 1).reshape(-1,1)), axis = 1)
+		# trv_time_p2 = np.concatenate((trv_out_pred[:,:,1].reshape(-1,1), np.arange(len(locs)).reshape(1,-1).repeat(len(src_positions), axis = 0).reshape(-1,1), np.arange(len(src_positions)).reshape(-1, 1).repeat(len(locs), axis = 1).reshape(-1,1)), axis = 1)
+
+		# # trv_time_p1 = np.concatenate((trv_out_pred[:,:,0].reshape(-1,1), np.arange(len(locs)).reshape(1,-1).repeat(len(src_positions), axis = 0).reshape(-1,1), np.arange(len(locs)).reshape(1, -1).repeat(len(src_positions), axis = 0).reshape(-1,1)), axis = 1)
+		# # trv_time_p2 = np.concatenate((trv_out_pred[:,:,1].reshape(-1,1), np.arange(len(locs)).reshape(1,-1).repeat(len(src_positions), axis = 0).reshape(-1,1), np.arange(len(locs)).reshape(1, -1).repeat(len(src_positions), axis = 0).reshape(-1,1)), axis = 1)
+
+		# ## For each simulated travel time, see if a pick exists in the pick dataset P_ref
+		# tree_picks = cKDTree(P_ref[:,0:2]*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
+		# ip_query1 = tree_picks.query(np.nan_to_num(trv_time_p1[:,0:2], nan = -3600.0*24.0*1.5)*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
+		# ip_query2 = tree_picks.query(np.nan_to_num(trv_time_p2[:,0:2], nan = -3600.0*24.0*1.5)*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
+
+		# ## Should add stable relative error
+		# # ifind1 = np.where((ip_query1[0] < min_time)*(np.abs(ip_query1[0]/np.maximum(1.0, trv_out_pred_base[:,:,0].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0))[0]
+		# # ifind2 = np.where((ip_query2[0] < min_time)*(np.abs(ip_query2[0]/np.maximum(1.0, trv_out_pred_base[:,:,1].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0))[0]
+		# # ifind1 = np.where((np.abs(ip_query1[0]/np.maximum(1.0, trv_out_pred_base[:,:,0].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0))[0]
+		# # ifind2 = np.where((np.abs(ip_query2[0]/np.maximum(1.0, trv_out_pred_base[:,:,1].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0))[0]
+		# ifind1 = np.where((np.abs(ip_query1[0]/np.maximum(1.0, trv_out_pred_base[:,:,0].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0)*(ip_query1[0] < max_abs_error))[0]
+		# ifind2 = np.where((np.abs(ip_query2[0]/np.maximum(1.0, trv_out_pred_base[:,:,1].reshape(-1))) < min_rel_error)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0)*(ip_query2[0] < max_abs_error))[0]
+
+
+		# ifind11 = np.where((ip_query1[0] < min_rel_time)*(np.isnan(trv_out_pred_base[:,:,0].reshape(-1)) == 0)*(ip_query1[0] < max_abs_error))[0]
+		# ifind21 = np.where((ip_query2[0] < min_rel_time)*(np.isnan(trv_out_pred_base[:,:,1].reshape(-1)) == 0)*(ip_query2[0] < max_abs_error))[0]
+		# ifind1 = np.unique(np.concatenate((ifind1, ifind11), axis = 0))
+		# ifind2 = np.unique(np.concatenate((ifind2, ifind21), axis = 0))
 
 
 
