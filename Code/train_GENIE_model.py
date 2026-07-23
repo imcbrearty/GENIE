@@ -1531,6 +1531,7 @@ for i in range(n_restart_step, n_epochs):
 		h = h5py.File(file_choice, 'r')
 		
 		data = [h['data'][:], h['srcs'][:], h['srcs_active'][:]]
+		n_valid_samples = sum(len(h['lp_times_%d'%j]) > 0 for j in range(n_batch))
 
 		# h.close()
 
@@ -1566,12 +1567,15 @@ for i in range(n_restart_step, n_epochs):
 				A_edges_ref_l[n] = dt_partition
 				Inpts[n] = np.copy(np.ascontiguousarray(Inpts[n][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
 				Masks[n] = np.copy(np.ascontiguousarray(Masks[n][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
-	
-	
+
+		n_valid_samples = sum(len(lp_times[j]) > 0 for j in range(n_batch))
+
+
 	loss_val = 0
 	loss_regularize_val, loss_regularize_cnt = 0, 0
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
 	mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4 = 0.0, 0.0, 0.0, 0.0
+	n_processed_samples = 0
 
 	if ((np.mod(i, 1000) == 0) or (i == (n_epochs - 1)))*(i != n_restart_step):
 		torch.save(mz.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(i, n_ver))
@@ -1579,7 +1583,13 @@ for i in range(n_restart_step, n_epochs):
 		np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
 		print('saved model %s %d'%(n_ver, i))
 		print('saved model at step %d'%i)
-	
+
+	if n_valid_samples == 0:
+		if load_training_data == True:
+			h.close()
+		print('%d skipped optimizer step because all samples had zero input picks \n'%i)
+		continue
+
 	for inc, i0 in enumerate(range(n_batch)):
 
 		if load_training_data == True:
@@ -1646,8 +1656,9 @@ for i in range(n_restart_step, n_epochs):
 
 		## Adding skip... to skip samples with zero input picks
 		if len(lp_times[i0]) == 0:
-			print('skip a sample!') ## If this skips, and yet i0 == (n_batch - 1), is it a problem?
+			print('skip a sample with zero input picks')
 			continue ## Skip this!
+		n_processed_samples += 1
 
 		## Should add increased samples in x_src_query around places of coherency
 		## and true labels
@@ -1775,7 +1786,7 @@ for i in range(n_restart_step, n_epochs):
 		out = mz(*input_tensors)
 		
 		pick_lbls = pick_labels_extract_interior_region(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta[i0][:,-2::], lp_srcs[i0], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
-		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_batch
+		loss = (weights[0]*loss_func(out[0][:,:,0], torch.Tensor(Lbls[i0]).to(device)) + weights[1]*loss_func(out[1][:,:,0], torch.Tensor(Lbls_query[i0]).to(device)) + weights[2]*loss_func(out[2][:,:,0], pick_lbls[:,:,0]) + weights[3]*loss_func(out[3][:,:,0], pick_lbls[:,:,1]))/n_valid_samples
 
 		min_val_use = 0.1
 		use_sensitivity_loss = False
@@ -1829,7 +1840,7 @@ for i in range(n_restart_step, n_epochs):
 			# elif np.random.rand() > 0.8: # Plot a fraction of false sources
 			# 	visualize_predictions(out, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
 
-		if inc != (n_batch - 1):
+		if n_processed_samples != n_valid_samples:
 			loss.backward(retain_graph = True)
 		else:
 			loss.backward(retain_graph = False)
@@ -1849,15 +1860,15 @@ for i in range(n_restart_step, n_epochs):
 
 	optimizer.step()
 	losses[i] = loss_val
-	mx_trgt_1[i] = mx_trgt_val_1/n_batch
-	mx_trgt_2[i] = mx_trgt_val_2/n_batch
-	mx_trgt_3[i] = mx_trgt_val_3/n_batch
-	mx_trgt_4[i] = mx_trgt_val_4/n_batch
+	mx_trgt_1[i] = mx_trgt_val_1/n_valid_samples
+	mx_trgt_2[i] = mx_trgt_val_2/n_valid_samples
+	mx_trgt_3[i] = mx_trgt_val_3/n_valid_samples
+	mx_trgt_4[i] = mx_trgt_val_4/n_valid_samples
 
-	mx_pred_1[i] = mx_pred_val_1/n_batch
-	mx_pred_2[i] = mx_pred_val_2/n_batch
-	mx_pred_3[i] = mx_pred_val_3/n_batch
-	mx_pred_4[i] = mx_pred_val_4/n_batch
+	mx_pred_1[i] = mx_pred_val_1/n_valid_samples
+	mx_pred_2[i] = mx_pred_val_2/n_valid_samples
+	mx_pred_3[i] = mx_pred_val_3/n_valid_samples
+	mx_pred_4[i] = mx_pred_val_4/n_valid_samples
 	loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
 	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, (10e4)*loss_regularize_val))
