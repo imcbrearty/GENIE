@@ -469,11 +469,13 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 	if verbose == True:
 		st_start = time.time()
 
-	# if len(t0) == 1:
-	# 	t0 = float(t0)
+	time_samples = np.asarray(t0, dtype = float).reshape(-1)
+	if len(time_samples) != 1:
+		raise ValueError('extract_input_from_data expects one sampling time; got %d'%len(time_samples))
+	t0_scalar = float(time_samples[0])
 
 	# ineed = np.where((P[:,0] > (t0 - 3.0*kernel_sig_t))*(P[:,0] < (t0 + max_t + 3.0*kernel_sig_t)))[0]
-	ineed = np.where((P[:,0] > (t0 - 2.0*kernel_sig_t))*(P[:,0] < (t0 + max_t + 2.0*kernel_sig_t)))[0] #
+	ineed = np.where((P[:,0] > (t0_scalar - 2.0*kernel_sig_t))*(P[:,0] < (t0_scalar + max_t + 2.0*kernel_sig_t)))[0] #
 	P_slice = np.copy(P[ineed])
 
 	## Find pick indices with stations in desired subset (note could do this after the next query instead)
@@ -498,7 +500,7 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 
 	t_offset = 3.0*kernel_sig_t
 	# int_offset = int(np.ceil(t_offset/dt))
-	abs_time_ref = np.arange(t0 - t_offset, t0 + max_t + t_offset + dt, dt)
+	abs_time_ref = np.arange(t0_scalar - t_offset, t0_scalar + max_t + t_offset + dt, dt)
 	## Note: Pick times of t0, should be mapped to indices of int_offset.
 
 	n_time_series = len(abs_time_ref) # int((3*kernel_sig_t + 3*kernel_sig_t + max_t)/dt)
@@ -591,12 +593,12 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 		## Find sampling times for all grid nodes
 		if trv_times is None:
 
-			trv_out_ind = ((trv_pairwise(torch.Tensor(locs[ind_use]).to(device)[A_src_in_sta[0][ifind]], torch.Tensor(x_grid).to(device)[A_src_in_sta[1][ifind]]).cpu().detach().numpy() + t0 - abs_time_ref[0])/dt).astype('int') ## Referenced to time since start of window
+			trv_out_ind = ((trv_pairwise(torch.Tensor(locs[ind_use]).to(device)[A_src_in_sta[0][ifind]], torch.Tensor(x_grid).to(device)[A_src_in_sta[1][ifind]]).cpu().detach().numpy() + t0_scalar - abs_time_ref[0])/dt).astype('int') ## Referenced to time since start of window
 
 
 		else:
 			## Assume trv_times is the absolute theoretical travel times from x_grid to locs
-			trv_out_ind = ((trv_times[A_src_in_sta[1][ifind], ind_use[A_src_in_sta[0][ifind]],:] + t0 - abs_time_ref[0])/dt).astype('int')
+			trv_out_ind = ((trv_times[A_src_in_sta[1][ifind], ind_use[A_src_in_sta[0][ifind]],:] + t0_scalar - abs_time_ref[0])/dt).astype('int')
 
 
 		trv_read_ind_p = (trv_out_ind[:,0] + A_src_in_sta_proj[ifind]*n_time_series).reshape(-1)
@@ -634,7 +636,7 @@ def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in
 	# if isinstance(t0, float) or isinstance(t0, int):
 	# 	t0 = [t0]
 
-	lp_times, lp_stations, lp_phases, lp_meta = extract_pick_inputs_from_data(P_slice, locs, ind_use, t0, max_t, use_batch = False, verbose = False)
+	lp_times, lp_stations, lp_phases, lp_meta = extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, use_batch = False, verbose = False)
 
 	if verbose == True:
 		print('batch gen time took %0.2f'%(time.time() - st_start))		
