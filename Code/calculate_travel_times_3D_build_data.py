@@ -370,12 +370,13 @@ argvs = sys.argv
 if len(argvs) == 1:
 	argvs.append(0)
 
-n_jobs = config['n_jobs']
-n_batch = int(np.ceil(len(locs)/n_jobs))
-ind_use = [np.arange(n_batch) + n_batch*i for i in range(n_jobs)]
-if n_jobs > 1:
-	ind_use[-1] = np.arange(ind_use[-2][-1] + 1, len(locs))
-ind_use = ind_use[int(argvs[1])]
+n_jobs = int(config['n_jobs'])
+job_index = int(argvs[1])
+if n_jobs < 1:
+	raise ValueError('n_jobs must be at least 1')
+if (job_index < 0) or (job_index >= n_jobs):
+	raise ValueError('job index must be between 0 and %d; got %d'%(n_jobs - 1, job_index))
+ind_use = np.array_split(np.arange(len(locs)), n_jobs)[job_index]
 
 # vel_model_ver = 1
 use_relative_1d_profile = False
