@@ -258,9 +258,14 @@ elif vel_model_type == 2:
 	z.close()
 
 	tree = cKDTree(ftrns1(x_vel)) ## Assigns the velocity values to the computation grid (xx) using nearest neighbors (e.g., the input 3D model can include any number of points, anywhere, and interpolation will fill in the values elsewhere)
-	ip_nearest = tree.query(xx)[1]
-	Vp = vp_vel[ip_nearest]
-	Vs = vs_vel[ip_nearest]
+	query_chunk_size = 250_000
+	Vp = np.empty((len(xx),) + vp_vel.shape[1:], dtype = vp_vel.dtype)
+	Vs = np.empty((len(xx),) + vs_vel.shape[1:], dtype = vs_vel.dtype)
+	for start in range(0, len(xx), query_chunk_size):
+		stop = min(start + query_chunk_size, len(xx))
+		ip_nearest = tree.query(xx[start:stop])[1]
+		Vp[start:stop] = vp_vel[ip_nearest]
+		Vs[start:stop] = vs_vel[ip_nearest]
 
 elif vel_model_type == 3:
 
