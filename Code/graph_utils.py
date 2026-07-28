@@ -3993,7 +3993,7 @@ def get_domain_bounds(points_lla, scale=1.05, lat_range = None, lon_range = None
 
 
 
-def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, max_time_shift_range = None, file_index = 0, date = [2000, 1, 1], n_grids = 1, initialize = None, fixed_domain = None, use_paths = False, rbest = None, mn = None, optimize_station_graphs = False, optimize_source_graphs = False, use_domain_approximate = True, use_tuner = True, name_of_project = '', verbose = True, device = 'cpu'):
+def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, max_time_shift_range = None, file_index = 0, date = [2000, 1, 1], n_grids = 1, initialize = None, fixed_domain = None, use_paths = False, rbest = None, mn = None, optimize_station_graphs = False, optimize_source_graphs = False, use_domain_approximate = True, use_tuner = True, name_of_project = '', verbose = True, device = 'cpu'):
 
     if initialize is None: # else: [lat_range, lon_range, ]
         domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -4515,7 +4515,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
 
 
-def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 3500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
+def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, n_rand_srcs = 150, quantile_times = 0.35, quantile_times_srcs = 0.5, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
     # if domain is None:
     #     domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -5974,7 +5974,7 @@ def build_sampling_grid(lat_range, lon_range, lat_range_extend, lon_range_extend
 #     }
 
 
-def estimate_kernel_widths1(domain, station_locs, z_range = (-40000, 2000), Vs = 3500.0, noise_level = 0.02, n_srcs = 250, n_test_per_src = 10000, n_neighbors_trgt = 20, use_global = False, device = 'cpu'):
+def estimate_kernel_widths1(domain, station_locs, z_range = (-40000, 2000), Vs = 6500.0, noise_level = 0.02, n_srcs = 250, n_test_per_src = 10000, n_neighbors_trgt = 20, use_global = False, device = 'cpu'):
     """
     Computes Gaussian coherency widths (W_phys, W_t) using a vectorized batch approach.
     Adaptive for any scale (Borehole to Global) with zero hard-coded temporal floors.
@@ -6430,7 +6430,7 @@ def estimate_kernel_widths1(domain, station_locs, z_range = (-40000, 2000), Vs =
 #     return {"W_phys_m": w_phys, "W_t_s": w_t, "rel_scale": rel_scale}
 
 
-def estimate_kernel_widths_backup(domain, station_locs, z_range=(-40000, 2000), Vs=3500.0, noise_level=0.02, n_srcs=250, n_test_per_src=10000, n_neighbors_trgt=20, use_global=False, device='cpu'):
+def estimate_kernel_widths_backup(domain, station_locs, z_range=(-40000, 2000), Vs=6500.0, noise_level=0.02, n_srcs=250, n_test_per_src=10000, n_neighbors_trgt=20, use_global=False, device='cpu'):
     import torch
     import numpy as np
     from scipy.spatial.distance import cdist
@@ -6511,11 +6511,11 @@ def estimate_kernel_widths_backup(domain, station_locs, z_range=(-40000, 2000), 
         cluster_apertures.append(aperture_s)
         
         if aperture_s < 300000.0:
-            Vs_adaptive = 3500.0
+            Vs_adaptive = 6000.0
         elif aperture_s < 1500000.0:
-            Vs_adaptive = 4700.0
+            Vs_adaptive = 8000.0
         else:
-            Vs_adaptive = 6500.0
+            Vs_adaptive = 8200.0
         source_velocities[s] = Vs_adaptive
         
         moveout = (s_dists[-1] - s_dists[0]) / Vs_adaptive
@@ -6582,7 +6582,247 @@ def estimate_kernel_widths_backup(domain, station_locs, z_range=(-40000, 2000), 
 
 
 
-def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), Vs=3500.0, noise_level=0.02, n_srcs=250, n_test_per_src=10000, n_neighbors_trgt=20, use_global=False, device='cpu'):
+# def estimate_kernel_widths(
+#     domain,
+#     station_locs,
+#     z_range=(-40000, 2000),
+#     vel_phase=6000.0,
+#     noise_level=0.02,
+#     n_srcs=250,
+#     n_test_per_src=10000,
+#     n_neighbors_trgt=20,
+#     use_global=False,
+#     device="cpu",
+# ):
+#     import numpy as np
+#     from scipy.spatial.distance import cdist
+#     import torch
+
+#     lat_r, lon_r = domain["lat_range"], domain["lon_range"]
+#     device = (
+#         torch.device("cuda")
+#         if torch.cuda.is_available()
+#         else torch.device("cpu")
+#     )
+#     n_neighbors_trgt = min(len(station_locs) - 1, n_neighbors_trgt)
+
+#     # --- Vectorized Travel Time Engine ---
+#     def trv(locs, srcs, V_wave):
+#         locs_ecef = torch.tensor(
+#             lla2ecef(locs.cpu().detach().numpy()),
+#             dtype=torch.float32,
+#             device=device,
+#         )
+#         srcs_ecef = torch.tensor(
+#             lla2ecef(srcs.cpu().detach().numpy()),
+#             dtype=torch.float32,
+#             device=device,
+#         )
+
+#         sample_dists = torch.cdist(locs_ecef, locs_ecef)
+#         batch_aperture = torch.max(sample_dists).item()
+
+#         if batch_aperture < 300000.0:
+#             # Local/Regional Euclidean Mode
+#             t_euclidean = torch.cdist(srcs_ecef, locs_ecef) / V_wave
+#             return t_euclidean.unsqueeze(2)
+#         else:
+#             # Global Ellipsoidal Great-Circle Mode
+#             a, b = 6378137.0, 6356752.3142
+#             locs_norm = locs_ecef / torch.norm(
+#                 locs_ecef, dim=1, keepdim=True
+#             )
+#             srcs_norm = srcs_ecef / torch.norm(
+#                 srcs_ecef, dim=1, keepdim=True
+#             )
+
+#             r_locs = (
+#                 a
+#                 * b
+#                 / torch.sqrt(
+#                     (b * locs_norm[:, 0]) ** 2
+#                     + (b * locs_norm[:, 1]) ** 2
+#                     + (a * locs_norm[:, 2]) ** 2
+#                 )
+#             )
+#             r_srcs = (
+#                 a
+#                 * b
+#                 / torch.sqrt(
+#                     (b * srcs_norm[:, 0]) ** 2
+#                     + (b * srcs_norm[:, 1]) ** 2
+#                     + (a * srcs_norm[:, 2]) ** 2
+#                 )
+#             )
+#             r_avg = 0.5 * (r_locs.unsqueeze(0) + r_srcs.unsqueeze(1))
+
+#             cos_theta = torch.clamp(
+#                 torch.mm(srcs_norm, locs_norm.T), -1.0, 1.0
+#             )
+#             theta = torch.acos(cos_theta)
+#             return ((theta * r_avg) / V_wave).unsqueeze(2)
+
+#     # 1. Sample Reference Sources
+#     if domain.get("is_wrapped", False):
+#         width = (lon_r[1] + 360) - lon_r[0]
+#         lons = np.mod(
+#             np.random.uniform(lon_r[0], lon_r[0] + width, n_srcs), 360
+#         )
+#         lons = ((lons + 180) % 360) - 180
+#     else:
+#         lons = np.random.uniform(lon_r[0], lon_r[1], n_srcs)
+
+#     lats = np.random.uniform(lat_r[0], lat_r[1], n_srcs)
+#     zs = np.random.uniform(z_range[0], z_range[1], n_srcs)
+#     src_refs_lla = np.stack([lats, lons, zs], axis=1)
+
+#     st_ecef = lla2ecef(station_locs)
+#     ref_ecef = lla2ecef(src_refs_lla)
+
+#     # 2. Adaptive Search Limits
+#     all_dists = cdist(ref_ecef, st_ecef)
+#     nearest_idx = np.zeros((n_srcs, n_neighbors_trgt), dtype=int)
+#     local_scales = np.zeros(n_srcs)
+#     time_limits = np.zeros(n_srcs)
+#     cluster_apertures = []
+#     source_velocities = np.zeros(n_srcs)
+
+#     for s in range(n_srcs):
+#         s_all_dists = all_dists[s]
+#         if use_global:
+#             dist_threshold = np.quantile(s_all_dists, 0.10)
+#             valid_indices = np.where(s_all_dists <= dist_threshold)[0]
+#             if len(valid_indices) < n_neighbors_trgt:
+#                 valid_indices = np.arange(len(s_all_dists))
+#         else:
+#             valid_indices = np.arange(len(s_all_dists))
+
+#         filtered_dists = s_all_dists[valid_indices]
+#         local_sort = np.argsort(filtered_dists)[:n_neighbors_trgt]
+#         chosen_idx = valid_indices[local_sort]
+#         nearest_idx[s] = chosen_idx
+
+#         s_dists = s_all_dists[chosen_idx]
+#         local_scales[s] = s_dists[min(4, len(s_dists) - 1)]
+
+#         cluster_stas = st_ecef[chosen_idx]
+#         aperture_s = cdist(cluster_stas, cluster_stas).max()
+#         cluster_apertures.append(aperture_s)
+
+#         # Adaptive P-wave speed matching scale
+#         if aperture_s < 100000.0:
+#             V_adaptive = 6000.0
+#         elif aperture_s < 1000000.0:
+#             V_adaptive = 8000.0
+#         elif aperture_s < 3000000.0:
+#             V_adaptive = 10000.0
+#         else:
+#             V_adaptive = 13000.0
+
+#         source_velocities[s] = V_adaptive
+
+#         moveout = (s_dists[-1] - s_dists[0]) / V_adaptive
+#         sigma_t_expected = np.mean(s_dists / V_adaptive) * noise_level
+#         time_limits[s] = max(moveout * 0.5, sigma_t_expected * 5.0)
+
+#     aperture_m = np.median(cluster_apertures)
+
+#     # 3. Generate Perturbations
+#     space_offs = (
+#         np.random.uniform(-1, 1, (n_srcs, n_test_per_src, 3))
+#         * local_scales[:, None, None]
+#     )
+#     time_offs = (
+#         np.random.uniform(-1, 1, (n_srcs, n_test_per_src))
+#         * time_limits[:, None]
+#     )
+#     test_ecef_flat = (ref_ecef[:, None, :] + space_offs).reshape(-1, 3)
+#     test_lla_flat = ecef2lla(test_ecef_flat)
+
+#     # 4. Compute Travel Times
+#     t_obs_list, t_test_list = [], []
+#     for s in range(n_srcs):
+#         s_stas = station_locs[nearest_idx[s]]
+#         V_s = source_velocities[s]
+
+#         t_r = (
+#             trv(
+#                 torch.Tensor(s_stas).to(device),
+#                 torch.Tensor(src_refs_lla[s : s + 1]).to(device),
+#                 V_wave=V_s,
+#             )
+#             .cpu()
+#             .detach()
+#             .numpy()
+#         )
+#         s1, s2 = t_r.shape[0], t_r.shape[1]
+
+#         noise_values = generate_travel_time_noise(
+#             t_r[:, :, 0], phase_input="P"
+#         )[0].reshape(s1, s2)
+
+#         t_obs_list.append(t_r[:, :, 0] + noise_values)
+
+#         t_t = (
+#             trv(
+#                 torch.Tensor(s_stas).to(device),
+#                 torch.Tensor(
+#                     test_lla_flat[
+#                         s * n_test_per_src : (s + 1) * n_test_per_src
+#                     ]
+#                 ).to(device),
+#                 V_wave=V_s,
+#             )
+#             .cpu()
+#             .detach()
+#             .numpy()
+#         )
+#         t_test_list.append(t_t[:, :, 0])
+
+#     t_obs = np.stack(t_obs_list, axis=0)
+#     t_test = np.stack(t_test_list, axis=0)
+
+#     # 5. Vectorized Chi-Square Misfit
+#     residuals = t_obs[:, :, None, :] - t_test[:, None, :, :]
+#     residuals = residuals.squeeze(1) - time_offs[:, :, None]
+#     sigma_d = np.maximum(t_test * noise_level, 1e-6)
+#     chi_error = np.sqrt(np.mean((residuals / sigma_d) ** 2, axis=2))
+
+#     # 6. Extract Widths
+#     dist_s = np.linalg.norm(space_offs, axis=2)
+#     mask = (chi_error > 0.1) & (chi_error < 5.0)
+
+#     w_phys = (
+#         np.median(dist_s[mask] / chi_error[mask])
+#         if np.any(mask)
+#         else local_scales.mean()
+#     )
+#     w_t = (
+#         np.median(np.abs(time_offs)[mask] / chi_error[mask])
+#         if np.any(mask)
+#         else time_limits.mean()
+#     )
+
+#     rel_scale = w_phys / aperture_m
+#     print(f"\n{'='*55}")
+#     print(f"BATCHED ADAPTIVE COHERENCY ESTIMATION")
+#     print(f"{'='*55}")
+#     print(f"Total Points Sampled:   {n_srcs * n_test_per_src}")
+#     print(f"Spatial Width (W_phys): {w_phys/1000:.4f} km")
+#     print(f"Temporal Width (W_t):   {w_t:.4f} s")
+#     print(f"Computed Aperture:      {aperture_m/1000:.2f} km")
+#     print(f"Relative Resolution:    {rel_scale:.4%}")
+#     print(f"Noise Level Used:       {noise_level*100:.1f}%\n")
+
+#     return {
+#         "W_phys_m": w_phys,
+#         "W_t_s": w_t,
+#         "rel_scale": rel_scale,
+#     }
+
+
+
+def estimate_kernel_widths_backup(domain, station_locs, z_range=(-40000, 2000), Vs=6500.0, noise_level=0.02, n_srcs=250, n_test_per_src=10000, n_neighbors_trgt=20, use_global=False, device='cpu'):
     import torch
     import numpy as np
     from scipy.spatial.distance import cdist
@@ -6592,7 +6832,7 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), Vs=3500
     n_neighbors_trgt = min(len(station_locs) - 1, n_neighbors_trgt)
 
     # --- FIXED: Scale-Agnostic Vectorized Travel Time Engine ---
-    def trv(locs, srcs, Vs=3500.0):
+    def trv(locs, srcs, Vs=Vs):
         locs_ecef = torch.tensor(lla2ecef(locs.cpu().detach().numpy()), dtype=torch.float32, device=device)
         srcs_ecef = torch.tensor(lla2ecef(srcs.cpu().detach().numpy()), dtype=torch.float32, device=device)
         
@@ -6663,11 +6903,11 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), Vs=3500
         cluster_apertures.append(aperture_s)
         
         if aperture_s < 300000.0:
-            Vs_adaptive = 3500.0
+            Vs_adaptive = 6000.0 # 3500.0
         elif aperture_s < 1500000.0:
-            Vs_adaptive = 4700.0
+            Vs_adaptive = 8000.0
         else:
-            Vs_adaptive = 6500.0
+            Vs_adaptive = 8200.0
         source_velocities[s] = Vs_adaptive
         
         moveout = (s_dists[-1] - s_dists[0]) / Vs_adaptive
@@ -6739,6 +6979,175 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), Vs=3500
     return {"W_phys_m": w_phys, "W_t_s": w_t, "rel_scale": w_phys / aperture_m}
 
 
+
+def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), vel_phase=6000.0, 
+                           noise_level=0.02, n_srcs=250, n_test_per_src=10000, 
+                           n_neighbors_trgt=20, use_global=False, device='cpu'):
+    import torch
+    import numpy as np
+    from scipy.spatial.distance import cdist
+
+    lat_r, lon_r = domain['lat_range'], domain['lon_range']
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    n_neighbors_trgt = min(len(station_locs) - 1, n_neighbors_trgt)
+
+    # --- Vectorized Travel Time Engine ---
+    def trv(locs, srcs, V_wave):
+        locs_ecef = torch.tensor(lla2ecef(locs.cpu().detach().numpy()), dtype=torch.float32, device=device)
+        srcs_ecef = torch.tensor(lla2ecef(srcs.cpu().detach().numpy()), dtype=torch.float32, device=device)
+        
+        sample_dists = torch.cdist(locs_ecef, locs_ecef)
+        batch_aperture = torch.max(sample_dists).item()
+
+        if batch_aperture < 300000.0:
+            # Local/Regional Mode: 3D Euclidean Space
+            t_euclidean = torch.cdist(srcs_ecef, locs_ecef) / V_wave
+            return t_euclidean.unsqueeze(2)
+        else:
+            # Global Mode: WGS84 Ellipsoidal Arc Paths
+            a, b = 6378137.0, 6356752.3142
+            locs_norm = locs_ecef / torch.norm(locs_ecef, dim=1, keepdim=True)
+            srcs_norm = srcs_ecef / torch.norm(srcs_ecef, dim=1, keepdim=True)
+            
+            r_locs = a * b / torch.sqrt((b * locs_norm[:, 0])**2 + (b * locs_norm[:, 1])**2 + (a * locs_norm[:, 2])**2)
+            r_srcs = a * b / torch.sqrt((b * srcs_norm[:, 0])**2 + (b * srcs_norm[:, 1])**2 + (a * srcs_norm[:, 2])**2)
+            r_avg = 0.5 * (r_locs.unsqueeze(0) + r_srcs.unsqueeze(1))
+            
+            cos_theta = torch.clamp(torch.mm(srcs_norm, locs_norm.T), -1.0, 1.0)
+            theta = torch.acos(cos_theta)
+            return ((theta * r_avg) / V_wave).unsqueeze(2)
+
+    # 1. Sample Reference Sources (n_srcs, 3)
+    if domain.get('is_wrapped', False):
+        width = (lon_r[1] + 360) - lon_r[0]
+        lons = np.mod(np.random.uniform(lon_r[0], lon_r[0] + width, n_srcs), 360)
+        lons = ((lons + 180) % 360) - 180
+    else:
+        lons = np.random.uniform(lon_r[0], lon_r[1], n_srcs)
+        
+    lats = np.random.uniform(lat_r[0], lat_r[1], n_srcs)
+    zs = np.random.uniform(z_range[0], z_range[1], n_srcs)
+    src_refs_lla = np.stack([lats, lons, zs], axis=1)
+
+    st_ecef = lla2ecef(station_locs)
+    ref_ecef = lla2ecef(src_refs_lla)
+
+    # 2. Calculate Adaptive Search Limits per Source
+    all_dists = cdist(ref_ecef, st_ecef)
+    nearest_idx = np.zeros((n_srcs, n_neighbors_trgt), dtype=int)
+    local_scales = np.zeros(n_srcs)
+    time_limits = np.zeros(n_srcs)
+    cluster_apertures = []
+    source_velocities = np.zeros(n_srcs)
+    
+    for s in range(n_srcs):
+        s_all_dists = all_dists[s]
+        if use_global:
+            dist_threshold = np.quantile(s_all_dists, 0.10)
+            valid_indices = np.where(s_all_dists <= dist_threshold)[0]
+            if len(valid_indices) < n_neighbors_trgt:
+                valid_indices = np.arange(len(s_all_dists))
+        else:
+            valid_indices = np.arange(len(s_all_dists))
+            
+        filtered_dists = s_all_dists[valid_indices]
+        local_sort = np.argsort(filtered_dists)[:n_neighbors_trgt]
+        chosen_idx = valid_indices[local_sort]
+        nearest_idx[s] = chosen_idx
+        
+        s_dists = s_all_dists[chosen_idx]
+        local_scales[s] = s_dists[min(4, len(s_dists)-1)]
+        
+        cluster_stas = st_ecef[chosen_idx]
+        aperture_s = cdist(cluster_stas, cluster_stas).max()
+        cluster_apertures.append(aperture_s)
+        
+        # Adaptive P-Wave Velocity Scale Engine
+        if aperture_s < 100000.0:
+            V_adaptive = 6000.0
+        elif aperture_s < 1000000.0:
+            V_adaptive = 8000.0
+        elif aperture_s < 3000000.0:
+            V_adaptive = 10000.0
+        else:
+            V_adaptive = 13000.0
+        source_velocities[s] = V_adaptive
+        
+        moveout = (s_dists[-1] - s_dists[0]) / V_adaptive
+        sigma_t_expected = np.mean(s_dists / V_adaptive) * noise_level
+        time_limits[s] = max(moveout * 0.5, sigma_t_expected * 5.0)
+
+    aperture_m = np.median(cluster_apertures)
+
+    # 3. Generate Geodetically Stable Local Perturbations
+    lat_m_per_deg = 111000.0  # Approx meters per degree latitude
+    
+    dx_m = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * local_scales[:, None]
+    dy_m = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * local_scales[:, None]
+    dz_m = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * (local_scales[:, None] * 0.2)  # Depth scale
+    time_offs = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * time_limits[:, None]
+
+    ref_lats = src_refs_lla[:, 0][:, None]
+    ref_lons = src_refs_lla[:, 1][:, None]
+    ref_zs   = src_refs_lla[:, 2][:, None]
+
+    lon_m_per_deg = lat_m_per_deg * np.cos(np.radians(ref_lats))
+
+    test_lats = ref_lats + (dy_m / lat_m_per_deg)
+    test_lons = ref_lons + (dx_m / lon_m_per_deg)
+    test_zs   = np.clip(ref_zs + dz_m, z_range[0], z_range[1])  # Constrain depth to Earth interior
+
+    test_lla_flat = np.stack([test_lats.ravel(), test_lons.ravel(), test_zs.ravel()], axis=1)
+
+    # 4. Execute Vectorized Travel Time Computations
+    t_obs_list, t_test_list = [], []
+    for s in range(n_srcs):
+        s_stas = station_locs[nearest_idx[s]]
+        V_s = source_velocities[s]
+        
+        t_r = trv(torch.Tensor(s_stas).to(device), torch.Tensor(src_refs_lla[s:s+1]).to(device), V_wave=V_s).cpu().detach().numpy()
+        s1, s2 = t_r.shape[0], t_r.shape[1]
+        
+        noise_values = generate_travel_time_noise(t_r[:,:,0], phase_input="P")[0].reshape(s1, s2)
+        t_obs_list.append(t_r[:, :, 0] + noise_values)
+        
+        t_t = trv(torch.Tensor(s_stas).to(device), torch.Tensor(test_lla_flat[s*n_test_per_src : (s+1)*n_test_per_src]).to(device), V_wave=V_s).cpu().detach().numpy()
+        t_test_list.append(t_t[:, :, 0])
+
+    t_obs = np.stack(t_obs_list, axis=0)
+    t_test = np.stack(t_test_list, axis=0) 
+
+    # 5. Vectorized Chi-Square Misfit
+    residuals = t_obs[:, :, None, :] - t_test[:, None, :, :]
+    residuals = residuals.squeeze(1) - time_offs[:, :, None]
+    sigma_d = np.maximum(t_test * noise_level, 1e-6)
+    chi_error = np.sqrt(np.mean((residuals / sigma_d)**2, axis=2)) 
+
+    # 6. Extract Widths with Robust Fallbacks
+    dist_s = np.sqrt(dx_m**2 + dy_m**2 + dz_m**2) 
+    mask = (chi_error > 0.1) & (chi_error < 5.0)
+
+    if np.any(mask):
+        w_phys = float(np.median(dist_s[mask] / chi_error[mask]))
+        w_t = float(np.median(np.abs(time_offs)[mask] / chi_error[mask]))
+    else:
+        # Fallback to mean scale if noise floor suppresses mask
+        w_phys = float(np.mean(local_scales) * 0.1)
+        w_t = float(np.mean(time_limits) * 0.1)
+
+    rel_scale = w_phys / aperture_m
+
+    print(f"\n{'='*55}")
+    print(f"BATCHED ADAPTIVE COHERENCY ESTIMATION")
+    print(f"{'='*55}")
+    print(f"Total Points Sampled:   {n_srcs * n_test_per_src:,}")
+    print(f"Spatial Width (W_phys): {w_phys/1000:.4f} km")
+    print(f"Temporal Width (W_t):   {w_t:.4f} s")
+    print(f"Computed Aperture:      {aperture_m/1000:.2f} km")
+    print(f"Relative Resolution:    {rel_scale:.4%}")
+    print(f"Noise Level Used:       {noise_level*100:.1f}%\n")
+    
+    return {"W_phys_m": w_phys, "W_t_s": w_t, "rel_scale": rel_scale}
 
 
 
@@ -6879,7 +7288,145 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), Vs=3500
 
 
 def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
-                                     k_stations=20, vel_avg=3500.0, vel_min=2500.0,
+                                     k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, W_t=3.0, vel_avg=6500.0, vel_min=4875.0,
+                                     r_min=None, r_max=None, use_global=False, num_candidates=50000, device='cpu'):
+    import torch
+    import numpy as np
+
+    device = torch.device(device)
+    station_xyz = torch.tensor(ftrns1(station_latlonz), device=device, dtype=torch.float32)
+    
+    src_true_init = np.array([np.mean(domain_lat_range), np.mean(domain_lon_range), np.mean(domain_depth_range)]).reshape(1, -1)
+    src_true_init_xyz = torch.tensor(ftrns1(src_true_init), device=device, dtype=torch.float32)
+    all_dists_init = torch.cdist(src_true_init_xyz, station_xyz).squeeze(0)
+    _, sta_idx_init = torch.topk(all_dists_init, k=k_stations, largest=False)
+    
+    active_cluster_dists = torch.cdist(station_xyz[sta_idx_init], station_xyz[sta_idx_init])
+    local_aperture = torch.max(active_cluster_dists).item()
+    
+    # # --- Adaptive Scaling Engine Restored ---
+    # if local_aperture < 300000.0:
+    #     vel_avg = 3500.0
+    #     vel_min = 2500.0
+    # elif local_aperture < 1500000.0:
+    #     vel_avg = 4700.0
+    #     vel_min = 4000.0
+    # else:
+    #     vel_avg = 6500.0
+    #     vel_min = 5000.0                                         
+
+    # --- Corrected P-Wave Adaptive Velocity Engine ---
+
+    override_vc = True
+    if override_vc == True:
+        if local_aperture < 100000.0:         # < 100 km (Local / High-frequency Regional)
+            vel_avg = 6000.0                   # Upper crustal P-wave (Pg)
+            vel_min = 5500.0
+        elif local_aperture < 1000000.0:      # 100 km to 1,000 km (Regional)
+            vel_avg = 8000.0                   # Mantle lid / Refracted P-wave (Pn)
+            vel_min = 7200.0
+        elif local_aperture < 3000000.0:      # 1,000 km to 3,000 km (Regional-to-Teleseismic)
+            vel_avg = 10000.0                  # Upper-to-lower mantle transitions
+            vel_min = 8500.0
+        else:                                 # > 3,000 km (Global Teleseismic Array)
+            vel_avg = 13000.0                  # Deep lower mantle P-waves (P/Pdiff)
+            vel_min = 10500.0
+            
+
+    d_array = 1.2 * local_aperture
+    max_radius_m = d_array / 2.0
+    max_dt = d_array / vel_min
+    
+    src_true = np.array([np.random.uniform(*domain_lat_range), np.random.uniform(*domain_lon_range), np.random.uniform(*domain_depth_range)]).reshape(1, -1)
+    src_true_xyz = torch.tensor(ftrns1(src_true), device=device, dtype=torch.float32)
+
+    trial_points, _ = regular_sobolov(num_candidates, lat_range=domain_lat_range, lon_range=domain_lon_range, depth_range=domain_depth_range, time_range=max_dt, use_time=True, use_global=use_global, scale_time=vel_avg, N_target=num_candidates, buffer_scale=0.0, r_min=r_min, r_max=r_max)
+    trial_points = torch.Tensor(trial_points).to(device)
+
+    all_dists = torch.cdist(src_true_xyz, station_xyz).squeeze(0)
+    _, sta_idx = torch.topk(all_dists, k=k_stations, largest=False)
+    active_stas_xyz = station_xyz[sta_idx]
+    
+    # Unpack trial candidates explicitly to feed the scale-agnostic layout
+    cand_xyz = torch.tensor(ftrns1(trial_points[:, :3].cpu().numpy()), device=device, dtype=torch.float32)
+    cand_dt = trial_points[:, 3]
+
+    # --- Scale-Agnostic Engine Execution ---
+    if local_aperture < 300000.0:
+        t_obs = torch.norm(active_stas_xyz - src_true_xyz, dim=1) / vel_avg
+        t_calc = torch.cdist(cand_xyz, active_stas_xyz) / vel_avg
+    else:
+        a, b = 6378137.0, 6356752.3142
+        sta_norm = active_stas_xyz / torch.norm(active_stas_xyz, dim=1, keepdim=True)
+        src_true_norm = src_true_xyz / torch.norm(src_true_xyz, dim=1, keepdim=True)
+        cand_norm = cand_xyz / torch.norm(cand_xyz, dim=1, keepdim=True)
+        
+        r_stas = a * b / torch.sqrt((b * sta_norm[:, 0])**2 + (b * sta_norm[:, 1])**2 + (a * sta_norm[:, 2])**2)
+        r_src_true = a * b / torch.sqrt((b * src_true_norm[:, 0])**2 + (b * src_true_norm[:, 1])**2 + (a * src_true_norm[:, 2])**2)
+        r_cand = a * b / torch.sqrt((b * cand_norm[:, 0])**2 + (b * cand_norm[:, 1])**2 + (a * cand_norm[:, 2])**2)
+        
+        cos_theta_true = torch.clamp(torch.mm(src_true_norm, sta_norm.T), -1.0, 1.0).squeeze(0)
+        t_obs = (torch.acos(cos_theta_true) * (0.5 * (r_stas + r_src_true))) / vel_avg
+        
+        r_avg_matrix = 0.5 * (r_cand.unsqueeze(1) + r_stas.unsqueeze(0))
+        cos_theta_cand = torch.clamp(torch.mm(cand_norm, sta_norm.T), -1.0, 1.0)
+        t_calc = (torch.acos(cos_theta_cand) * r_avg_matrix) / vel_avg
+
+    t_obs_picks = np.concatenate((t_obs.cpu().numpy().reshape(-1, 1), sta_idx.cpu().numpy().reshape(-1, 1)), axis=1)
+    
+    # Scope Parameters Safely Restored
+    W_t_scalar = 1.0
+    rel_threshold = k_stations * 0.15                                         
+    mismatch = torch.abs((t_obs.unsqueeze(0) - t_calc) - cand_dt.unsqueeze(1))
+    coherence = torch.exp(-mismatch / (W_t_scalar*W_t)).sum(dim=1)
+
+    # Box-Intersection Suppression Gate
+    d_space_true = torch.norm(cand_xyz - src_true_xyz, dim=1)
+    d_time_true = torch.abs(cand_dt - 0.0)
+    
+    is_inside_spatial_core = d_space_true <= (W_phys_m * 1.5)
+    is_inside_temporal_core = d_time_true <= (W_t * 1.5)
+    is_main_peak = is_inside_spatial_core & is_inside_temporal_core
+    valid_mask = (~is_main_peak) & (coherence > rel_threshold)
+    
+    candidate_indices = torch.where(valid_mask)[0]
+    srcs_init = torch.cat((trial_points[candidate_indices], coherence[candidate_indices].reshape(-1,1)), dim=1)
+    peaks = []
+
+    # while len(srcs_init) > int(0.02*num_candidates):
+    #     n_remove = np.minimum(len(srcs_init) - int(0.02*num_candidates), int(len(srcs_init)/3))
+    #     idel = np.sort(np.random.choice(len(srcs_init), size=n_remove, replace=False))
+    #     srcs_init = torch.Tensor(np.delete(srcs_init.cpu().detach().numpy(), idel, axis=0)).to(device)
+                                         
+    # Sort candidates by coherence score (column index 4) descending and take top N
+    if len(srcs_init) > int(0.02 * num_candidates):
+        max_keep = int(0.02 * num_candidates)
+        _, top_indices = torch.topk(srcs_init[:, 4], k=max_keep)
+        srcs_init = srcs_init[top_indices]
+
+    if len(srcs_init) > 0:
+        mp = LocalMarching(device=device)
+        srcs_maxima = mp(srcs_init.cpu().detach().numpy(), ftrns1, tc_win=W_t, sp_win=W_phys_m, scale_depth=0.2, n_steps_max=2)
+        srcs_maxima = torch.Tensor(srcs_maxima).to(device)
+
+        if len(srcs_maxima) > 0:
+            for i in range(len(srcs_maxima)):
+                p_coord = srcs_maxima[i]
+                p_xyz = torch.tensor(ftrns1(p_coord[:3].cpu().numpy().reshape(1,-1)), device=device).reshape(-1)
+                d_s_final = torch.norm(p_xyz - src_true_xyz)
+                d_t_final = torch.abs(p_coord[3] - 0.0) * vel_avg
+                
+                peaks.append({
+                    'pos': p_xyz, 'pos_src': p_coord[:3].cpu().numpy(), 'val': srcs_maxima[i,4],
+                    'dt_offset': p_coord[3].item(), 'dist_offset_m': d_s_final.item(),
+                    'dist_4d_m': torch.sqrt(d_s_final**2 + d_t_final**2).item()
+                })
+
+    return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
+
+
+def probe_network_sidelobes_geodetic_backup(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
+                                     k_stations=20, vel_avg=6500.0, vel_min=4875.0,
                                      scan_step_m=1000.0, W_phys_m=1000.0, W_t=3.0, r_min = None, r_max = None, use_global = False, num_candidates = 50000, device='cpu'): # scale_time = 3500.0
     
     device = torch.device(device)
@@ -7015,7 +7562,6 @@ def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_l
                 })
 
     return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
-
 
 # def probe_network_sidelobes_geodetic2(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
 #                                      k_stations=20, vel_avg=3500.0, vel_min=2500.0,
@@ -7407,118 +7953,118 @@ def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_l
 #     return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
 
 
-def probe_network_sidelobes_geodetic1(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
-                                     k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, W_t=3.0, vel_avg=3500.0, vel_min=2500.0,
-                                     r_min=None, r_max=None, use_global=False, num_candidates=50000, device='cpu'):
-    import torch
-    import numpy as np
+# def probe_network_sidelobes_geodetic1(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
+#                                      k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, W_t=3.0, vel_avg=6500.0, vel_min=4875.0,
+#                                      r_min=None, r_max=None, use_global=False, num_candidates=50000, device='cpu'):
+#     import torch
+#     import numpy as np
 
-    device = torch.device(device)
-    station_xyz = torch.tensor(ftrns1(station_latlonz), device=device, dtype=torch.float32)
+#     device = torch.device(device)
+#     station_xyz = torch.tensor(ftrns1(station_latlonz), device=device, dtype=torch.float32)
     
-    src_true_init = np.array([np.mean(domain_lat_range), np.mean(domain_lon_range), np.mean(domain_depth_range)]).reshape(1, -1)
-    src_true_init_xyz = torch.tensor(ftrns1(src_true_init), device=device, dtype=torch.float32)
-    all_dists_init = torch.cdist(src_true_init_xyz, station_xyz).squeeze(0)
-    _, sta_idx_init = torch.topk(all_dists_init, k=k_stations, largest=False)
+#     src_true_init = np.array([np.mean(domain_lat_range), np.mean(domain_lon_range), np.mean(domain_depth_range)]).reshape(1, -1)
+#     src_true_init_xyz = torch.tensor(ftrns1(src_true_init), device=device, dtype=torch.float32)
+#     all_dists_init = torch.cdist(src_true_init_xyz, station_xyz).squeeze(0)
+#     _, sta_idx_init = torch.topk(all_dists_init, k=k_stations, largest=False)
     
-    active_cluster_dists = torch.cdist(station_xyz[sta_idx_init], station_xyz[sta_idx_init])
-    local_aperture = torch.max(active_cluster_dists).item()
+#     active_cluster_dists = torch.cdist(station_xyz[sta_idx_init], station_xyz[sta_idx_init])
+#     local_aperture = torch.max(active_cluster_dists).item()
     
-    # --- Adaptive Scaling Engine Restored ---
-    if local_aperture < 300000.0:
-        vel_avg = 3500.0
-        vel_min = 2500.0
-    elif local_aperture < 1500000.0:
-        vel_avg = 4700.0
-        vel_min = 4000.0
-    else:
-        vel_avg = 6500.0
-        vel_min = 5000.0                                         
+#     # --- Adaptive Scaling Engine Restored ---
+#     if local_aperture < 300000.0:
+#         vel_avg = 3500.0
+#         vel_min = 2500.0
+#     elif local_aperture < 1500000.0:
+#         vel_avg = 4700.0
+#         vel_min = 4000.0
+#     else:
+#         vel_avg = 6500.0
+#         vel_min = 5000.0                                         
 
-    d_array = 1.2 * local_aperture
-    max_radius_m = d_array / 2.0
-    max_dt = d_array / vel_min
+#     d_array = 1.2 * local_aperture
+#     max_radius_m = d_array / 2.0
+#     max_dt = d_array / vel_min
     
-    src_true = np.array([np.random.uniform(*domain_lat_range), np.random.uniform(*domain_lon_range), np.random.uniform(*domain_depth_range)]).reshape(1, -1)
-    src_true_xyz = torch.tensor(ftrns1(src_true), device=device, dtype=torch.float32)
+#     src_true = np.array([np.random.uniform(*domain_lat_range), np.random.uniform(*domain_lon_range), np.random.uniform(*domain_depth_range)]).reshape(1, -1)
+#     src_true_xyz = torch.tensor(ftrns1(src_true), device=device, dtype=torch.float32)
 
-    trial_points, _ = regular_sobolov(num_candidates, lat_range=domain_lat_range, lon_range=domain_lon_range, depth_range=domain_depth_range, time_range=max_dt, use_time=True, use_global=use_global, scale_time=vel_avg, N_target=num_candidates, buffer_scale=0.0, r_min=r_min, r_max=r_max)
-    trial_points = torch.Tensor(trial_points).to(device)
+#     trial_points, _ = regular_sobolov(num_candidates, lat_range=domain_lat_range, lon_range=domain_lon_range, depth_range=domain_depth_range, time_range=max_dt, use_time=True, use_global=use_global, scale_time=vel_avg, N_target=num_candidates, buffer_scale=0.0, r_min=r_min, r_max=r_max)
+#     trial_points = torch.Tensor(trial_points).to(device)
 
-    all_dists = torch.cdist(src_true_xyz, station_xyz).squeeze(0)
-    _, sta_idx = torch.topk(all_dists, k=k_stations, largest=False)
-    active_stas_xyz = station_xyz[sta_idx]
+#     all_dists = torch.cdist(src_true_xyz, station_xyz).squeeze(0)
+#     _, sta_idx = torch.topk(all_dists, k=k_stations, largest=False)
+#     active_stas_xyz = station_xyz[sta_idx]
     
-    # Unpack trial candidates explicitly to feed the scale-agnostic layout
-    cand_xyz = torch.tensor(ftrns1(trial_points[:, :3].cpu().numpy()), device=device, dtype=torch.float32)
-    cand_dt = trial_points[:, 3]
+#     # Unpack trial candidates explicitly to feed the scale-agnostic layout
+#     cand_xyz = torch.tensor(ftrns1(trial_points[:, :3].cpu().numpy()), device=device, dtype=torch.float32)
+#     cand_dt = trial_points[:, 3]
 
-    # --- Scale-Agnostic Engine Execution ---
-    if local_aperture < 300000.0:
-        t_obs = torch.norm(active_stas_xyz - src_true_xyz, dim=1) / vel_avg
-        t_calc = torch.cdist(cand_xyz, active_stas_xyz) / vel_avg
-    else:
-        a, b = 6378137.0, 6356752.3142
-        sta_norm = active_stas_xyz / torch.norm(active_stas_xyz, dim=1, keepdim=True)
-        src_true_norm = src_true_xyz / torch.norm(src_true_xyz, dim=1, keepdim=True)
-        cand_norm = cand_xyz / torch.norm(cand_xyz, dim=1, keepdim=True)
+#     # --- Scale-Agnostic Engine Execution ---
+#     if local_aperture < 300000.0:
+#         t_obs = torch.norm(active_stas_xyz - src_true_xyz, dim=1) / vel_avg
+#         t_calc = torch.cdist(cand_xyz, active_stas_xyz) / vel_avg
+#     else:
+#         a, b = 6378137.0, 6356752.3142
+#         sta_norm = active_stas_xyz / torch.norm(active_stas_xyz, dim=1, keepdim=True)
+#         src_true_norm = src_true_xyz / torch.norm(src_true_xyz, dim=1, keepdim=True)
+#         cand_norm = cand_xyz / torch.norm(cand_xyz, dim=1, keepdim=True)
         
-        r_stas = a * b / torch.sqrt((b * sta_norm[:, 0])**2 + (b * sta_norm[:, 1])**2 + (a * sta_norm[:, 2])**2)
-        r_src_true = a * b / torch.sqrt((b * src_true_norm[:, 0])**2 + (b * src_true_norm[:, 1])**2 + (a * src_true_norm[:, 2])**2)
-        r_cand = a * b / torch.sqrt((b * cand_norm[:, 0])**2 + (b * cand_norm[:, 1])**2 + (a * cand_norm[:, 2])**2)
+#         r_stas = a * b / torch.sqrt((b * sta_norm[:, 0])**2 + (b * sta_norm[:, 1])**2 + (a * sta_norm[:, 2])**2)
+#         r_src_true = a * b / torch.sqrt((b * src_true_norm[:, 0])**2 + (b * src_true_norm[:, 1])**2 + (a * src_true_norm[:, 2])**2)
+#         r_cand = a * b / torch.sqrt((b * cand_norm[:, 0])**2 + (b * cand_norm[:, 1])**2 + (a * cand_norm[:, 2])**2)
         
-        cos_theta_true = torch.clamp(torch.mm(src_true_norm, sta_norm.T), -1.0, 1.0).squeeze(0)
-        t_obs = (torch.acos(cos_theta_true) * (0.5 * (r_stas + r_src_true))) / vel_avg
+#         cos_theta_true = torch.clamp(torch.mm(src_true_norm, sta_norm.T), -1.0, 1.0).squeeze(0)
+#         t_obs = (torch.acos(cos_theta_true) * (0.5 * (r_stas + r_src_true))) / vel_avg
         
-        r_avg_matrix = 0.5 * (r_cand.unsqueeze(1) + r_stas.unsqueeze(0))
-        cos_theta_cand = torch.clamp(torch.mm(cand_norm, sta_norm.T), -1.0, 1.0)
-        t_calc = (torch.acos(cos_theta_cand) * r_avg_matrix) / vel_avg
+#         r_avg_matrix = 0.5 * (r_cand.unsqueeze(1) + r_stas.unsqueeze(0))
+#         cos_theta_cand = torch.clamp(torch.mm(cand_norm, sta_norm.T), -1.0, 1.0)
+#         t_calc = (torch.acos(cos_theta_cand) * r_avg_matrix) / vel_avg
 
-    t_obs_picks = np.concatenate((t_obs.cpu().numpy().reshape(-1, 1), sta_idx.cpu().numpy().reshape(-1, 1)), axis=1)
+#     t_obs_picks = np.concatenate((t_obs.cpu().numpy().reshape(-1, 1), sta_idx.cpu().numpy().reshape(-1, 1)), axis=1)
     
-    # Scope Parameters Safely Restored
-    W_t_scalar = 1.0
-    rel_threshold = k_stations * 0.15                                         
-    mismatch = torch.abs((t_obs.unsqueeze(0) - t_calc) - cand_dt.unsqueeze(1))
-    coherence = torch.exp(-mismatch / (W_t_scalar*W_t)).sum(dim=1)
+#     # Scope Parameters Safely Restored
+#     W_t_scalar = 1.0
+#     rel_threshold = k_stations * 0.15                                         
+#     mismatch = torch.abs((t_obs.unsqueeze(0) - t_calc) - cand_dt.unsqueeze(1))
+#     coherence = torch.exp(-mismatch / (W_t_scalar*W_t)).sum(dim=1)
 
-    # Box-Intersection Suppression Gate
-    d_space_true = torch.norm(cand_xyz - src_true_xyz, dim=1)
-    d_time_true = torch.abs(cand_dt - 0.0)
+#     # Box-Intersection Suppression Gate
+#     d_space_true = torch.norm(cand_xyz - src_true_xyz, dim=1)
+#     d_time_true = torch.abs(cand_dt - 0.0)
     
-    is_inside_spatial_core = d_space_true <= (W_phys_m * 1.5)
-    is_inside_temporal_core = d_time_true <= (W_t * 1.5)
-    is_main_peak = is_inside_spatial_core & is_inside_temporal_core
-    valid_mask = (~is_main_peak) & (coherence > rel_threshold)
+#     is_inside_spatial_core = d_space_true <= (W_phys_m * 1.5)
+#     is_inside_temporal_core = d_time_true <= (W_t * 1.5)
+#     is_main_peak = is_inside_spatial_core & is_inside_temporal_core
+#     valid_mask = (~is_main_peak) & (coherence > rel_threshold)
     
-    candidate_indices = torch.where(valid_mask)[0]
-    srcs_init = torch.cat((trial_points[candidate_indices], coherence[candidate_indices].reshape(-1,1)), dim=1)
-    peaks = []
+#     candidate_indices = torch.where(valid_mask)[0]
+#     srcs_init = torch.cat((trial_points[candidate_indices], coherence[candidate_indices].reshape(-1,1)), dim=1)
+#     peaks = []
 
-    while len(srcs_init) > int(0.02*num_candidates):
-        n_remove = np.minimum(len(srcs_init) - int(0.02*num_candidates), int(len(srcs_init)/3))
-        idel = np.sort(np.random.choice(len(srcs_init), size=n_remove, replace=False))
-        srcs_init = torch.Tensor(np.delete(srcs_init.cpu().detach().numpy(), idel, axis=0)).to(device)
+#     while len(srcs_init) > int(0.02*num_candidates):
+#         n_remove = np.minimum(len(srcs_init) - int(0.02*num_candidates), int(len(srcs_init)/3))
+#         idel = np.sort(np.random.choice(len(srcs_init), size=n_remove, replace=False))
+#         srcs_init = torch.Tensor(np.delete(srcs_init.cpu().detach().numpy(), idel, axis=0)).to(device)
                                          
-    if len(srcs_init) > 0:
-        mp = LocalMarching(device=device)
-        srcs_maxima = mp(srcs_init.cpu().detach().numpy(), ftrns1, tc_win=W_t, sp_win=W_phys_m, scale_depth=0.2, n_steps_max=2)
-        srcs_maxima = torch.Tensor(srcs_maxima).to(device)
+#     if len(srcs_init) > 0:
+#         mp = LocalMarching(device=device)
+#         srcs_maxima = mp(srcs_init.cpu().detach().numpy(), ftrns1, tc_win=W_t, sp_win=W_phys_m, scale_depth=0.2, n_steps_max=2)
+#         srcs_maxima = torch.Tensor(srcs_maxima).to(device)
 
-        if len(srcs_maxima) > 0:
-            for i in range(len(srcs_maxima)):
-                p_coord = srcs_maxima[i]
-                p_xyz = torch.tensor(ftrns1(p_coord[:3].cpu().numpy().reshape(1,-1)), device=device).reshape(-1)
-                d_s_final = torch.norm(p_xyz - src_true_xyz)
-                d_t_final = torch.abs(p_coord[3] - 0.0) * vel_avg
+#         if len(srcs_maxima) > 0:
+#             for i in range(len(srcs_maxima)):
+#                 p_coord = srcs_maxima[i]
+#                 p_xyz = torch.tensor(ftrns1(p_coord[:3].cpu().numpy().reshape(1,-1)), device=device).reshape(-1)
+#                 d_s_final = torch.norm(p_xyz - src_true_xyz)
+#                 d_t_final = torch.abs(p_coord[3] - 0.0) * vel_avg
                 
-                peaks.append({
-                    'pos': p_xyz, 'pos_src': p_coord[:3].cpu().numpy(), 'val': 0.0,
-                    'dt_offset': p_coord[3].item(), 'dist_offset_m': d_s_final.item(),
-                    'dist_4d_m': torch.sqrt(d_s_final**2 + d_t_final**2).item()
-                })
+#                 peaks.append({
+#                     'pos': p_xyz, 'pos_src': p_coord[:3].cpu().numpy(), 'val': 0.0,
+#                     'dt_offset': p_coord[3].item(), 'dist_offset_m': d_s_final.item(),
+#                     'dist_4d_m': torch.sqrt(d_s_final**2 + d_t_final**2).item()
+#                 })
 
-    return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
+#     return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
 
 
 def strings_to_tensor(string_list):
