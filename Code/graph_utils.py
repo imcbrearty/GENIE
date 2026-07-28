@@ -294,6 +294,41 @@ def get_warped_metric_space(x_grid, depth_boost, scale_t, scale_val=10000.0,
 
     return p4d_scaled
 
+# def get_warped_metric_space1(points_lla_t, depth_boost=1.0, scale_time=10000.0):
+#     """
+#     Transforms [lat, lon, depth, time] into an isotropic 4D Cartesian metric space for FPS.
+    
+#     1. Converts (lat, lon, depth) -> WGS84 ECEF [X, Y, Z] (in meters)
+#     2. Scales the depth offset perpendicular to the ellipsoid surface by depth_boost.
+#     3. Scales time by scale_time (m/s).
+#     """
+#     # 1. Convert LLA (deg, deg, km or m) to ECEF (meters)
+#     # Ensure depth input is in meters!
+#     ecef = lla2ecef(points_lla_t[:, :3])  # Shape: [N, 3] (X, Y, Z in meters)
+    
+#     # 2. Subtract centroid to center origin (prevents float Precision loss)
+#     centroid = ecef.mean(axis=0, keepdims=True)
+#     ecef_centered = ecef - centroid
+    
+#     # 3. Apply depth boost along the surface normal vector (radial direction)
+#     if depth_boost != 1.0:
+#         # Radial vector from Earth center (or surface normal)
+#         norms = np.linalg.norm(ecef, axis=1, keepdims=True)
+#         radial_unit = ecef / norms
+        
+#         # Depth relative to domain average depth
+#         mean_depth_m = points_lla_t[:, 2].mean()
+#         depth_residuals = (points_lla_t[:, 2] - mean_depth_m).reshape(-1, 1)
+        
+#         # Expand depth differences along the normal vector
+#         ecef_centered += radial_unit * (depth_residuals * (depth_boost - 1.0))
+        
+#     # 4. Scale time if 4D
+#     if points_lla_t.shape[1] == 4:
+#         t_scaled = (points_lla_t[:, 3:] * scale_time)  # [N, 1] in meters
+#         return np.hstack([ecef_centered, t_scaled])
+    
+#     return ecef_centered
 
 def regular_sobolov(N, lat_range = None, lon_range = None, depth_range = None, time_range = None, use_time = True, use_global = None, scale_time = None, depth_boost = 1.0, N_target = None, use_station_density = False, buffer_scale = 0.0, r_min = None, r_max = None, use_spherical = False, run_checks = False):
 
@@ -504,6 +539,7 @@ def regular_sobolov(N, lat_range = None, lon_range = None, depth_range = None, t
         # Move from the surface XYZ along the Normal by h_sampled
         xyz = xyz_surface + (n_unit * h_sampled)
         x_grid = ftrns2_abs(xyz)
+        mask_points = np.ones(len(x_grid), dtype=bool)
 
 
         # if use_time == True:
@@ -531,6 +567,156 @@ def regular_sobolov(N, lat_range = None, lon_range = None, depth_range = None, t
 
         return x_grid, np.ones(len(x_grid))
 
+
+
+
+# def get_q_wgs84(lat_val):
+#     """Computes Snyder's authalic parameter q for WGS84 (Corrected Sign)."""
+#     e = 0.0818191908426215
+#     e2 = e**2
+#     phi = np.deg2rad(lat_val)
+#     s = np.sin(phi)
+#     s = np.clip(s, -0.999999, 0.999999)
+#     return (1 - e2) * ((s / (1 - e2 * s**2)) + (1 / (2 * e)) * np.log((1 + e * s) / (1 - e * s)))
+
+# def regular_sobolov(
+#     N, lat_range=None, lon_range=None, depth_range=None, time_range=None, 
+#     use_time=True, use_global=False, scale_time=None, depth_boost=1.0, 
+#     N_target=None, use_station_density=False, density_grid=None, 
+#     buffer_scale=0.0, r_min=None, r_max=None, use_spherical=False, run_checks=False
+# ):
+#     a = 6371e3 if use_spherical else 6378137.0
+#     b = 6371e3 if use_spherical else 6356752.31424
+
+#     earth_radius = a
+#     ftrns1_abs = lambda x: lla2ecef(x, a=earth_radius) if x.shape[1] == 3 else np.concatenate((lla2ecef(x, a=earth_radius), x[:,3].reshape(-1,1)), axis=1)
+#     ftrns2_abs = lambda x: ecef2lla(x, a=earth_radius) if x.shape[1] == 3 else np.concatenate((ecef2lla(x, a=earth_radius), x[:,3].reshape(-1,1)), axis=1)
+
+#     if buffer_scale > 0.0:
+#         metrics = compute_warped_expected_spacing(
+#             N, lat_range, lon_range, depth_range, time_range, 
+#             use_time, scale_time, depth_boost, use_global, r_min, r_max
+#         )
+#         Volume, V_space_metric, _, L_metric, _, _ = metrics 
+        
+#         spatial_buffer_m = L_metric * buffer_scale 
+#         (pLat_min, pLat_max), (pLon_min, pLon_max) = get_ellipsoid_paddings(
+#             lat_range[0], lat_range[1], spatial_buffer_m
+#         )
+#         max_pLon = max(pLon_min, pLon_max)    
+#         pad_depth = (L_metric * buffer_scale) / depth_boost    
+#         pad_time = (L_metric * buffer_scale) / scale_time if use_time else 0.0  
+        
+#         expanded_lat = [lat_range[0] - pLat_min, lat_range[1] + pLat_max]
+#         expanded_lon = [lon_range[0] - max_pLon, lon_range[1] + max_pLon]
+#         expanded_depth = [depth_range[0] - pad_depth, depth_range[1] + pad_depth]
+#         expanded_time = time_range + pad_time if use_time else time_range 
+
+#         Volume_expanded, _, _, _, _, _ = compute_warped_expected_spacing(
+#             N, expanded_lat, expanded_lon, expanded_depth, expanded_time, 
+#             use_time, scale_time, depth_boost, use_global, r_min, r_max
+#         )
+#         N_updated = int(np.ceil(N * (Volume_expanded / Volume)))
+
+#         m = int(np.ceil(np.log2(N_updated)))
+#         N_sobol = 2**m
+#         u = scipy.stats.qmc.Sobol(d=4 if use_time else 3, scramble=True).random_base2(m)
+
+#         if not use_global:
+#             phi = expanded_lon[0] + u[:,0] * dlon_diff(expanded_lon)
+#             theta = u_to_geodetic_lat(u[:,1], expanded_lat)
+#         else:
+#             phi = ((2 * np.pi * u[:, 0]) - np.pi) * (180.0 / np.pi)
+#             theta = u_to_geodetic_lat(u[:,1], [-90.0, 90.0])
+
+#         phi_wrapped = (phi + 180) % 360 - 180
+#         xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), np.zeros((len(phi),1))), axis=1))
+
+#         n = xyz_surface / np.array([a**2, a**2, b**2])
+#         n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+#         r_surface = np.linalg.norm(xyz_surface, axis=1, keepdims=True)
+
+#         h_top, h_bot = expanded_depth[0], expanded_depth[1]
+#         r_top, r_bot = r_surface + h_top, r_surface + h_bot
+#         h_sampled = (r_bot**3 + u[:, [2]] * (r_top**3 - r_bot**3))**(1/3.0) - r_surface
+
+#         xyz = xyz_surface + (n_unit * h_sampled)
+#         x_grid = ftrns2_abs(xyz)
+
+#         if use_time:
+#             t = -expanded_time + 2.0 * expanded_time * u[:, [3]]
+#             x_grid = np.concatenate((x_grid, t), axis=1)
+
+#         if not use_global:
+#             lons_wrapped = (x_grid[:,1] + 180) % 360 - 180
+#             mask_points = (
+#                 (x_grid[:,0] >= lat_range[0]) & (x_grid[:,0] <= lat_range[1]) &
+#                 is_in_lon_range(lons_wrapped, lon_range[0], lon_range[1]) &
+#                 (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0])
+#             )
+#             if use_time:
+#                 mask_points &= (x_grid[:,3] <= time_range) & (x_grid[:,3] >= -time_range)
+#         else:
+#             mask_points = (x_grid[:,2] <= depth_range[1]) & (x_grid[:,2] >= depth_range[0])
+#             if use_time:
+#                 mask_points &= (x_grid[:,3] <= time_range) & (x_grid[:,3] >= -time_range)
+
+#         if N_target is not None:
+#             ratio = (Volume_expanded - Volume) / Volume
+#             n_boundary_retain = int(N_target * ratio)
+#             ichoose = np.concatenate((
+#                 np.where(mask_points == 1)[0], 
+#                 np.random.choice(np.where(mask_points == 0)[0], size=n_boundary_retain, replace=False)
+#             ), axis=0)
+#             x_grid = x_grid[ichoose]
+#             mask_points = mask_points[ichoose]
+
+#         if use_station_density and density_grid is not None:
+#             mask_vals = density_grid.fast_query(x_grid[:,0:2]).reshape(-1)
+#             keep_prob = mask_vals / np.max(mask_vals) 
+#             random_vals = np.random.rand(len(x_grid))
+#             x_grid = x_grid[random_vals < keep_prob]
+#             mask_points = mask_points[random_vals < keep_prob]
+
+#         return x_grid, mask_points
+
+#     else:
+#         u = scipy.stats.qmc.Sobol(d=4 if use_time else 3, scramble=True).random(N)
+#         if not use_global:
+#             phi = lon_range[0] + u[:,0] * dlon_diff(lon_range)
+#             theta = u_to_geodetic_lat(u[:,1], lat_range)
+#         else:
+#             phi = ((2 * np.pi * u[:, 0]) - np.pi) * (180.0 / np.pi)
+#             theta = u_to_geodetic_lat(u[:,1], [-90.0, 90.0])
+
+#         phi_wrapped = (phi + 180) % 360 - 180
+#         xyz_surface = ftrns1_abs(np.concatenate((theta.reshape(-1,1), phi_wrapped.reshape(-1,1), np.zeros((len(phi),1))), axis=1))
+
+#         n = xyz_surface / np.array([a**2, a**2, b**2])
+#         n_unit = n / np.linalg.norm(n, axis=1, keepdims=True)
+#         r_surface = np.linalg.norm(xyz_surface, axis=1, keepdims=True)
+
+#         h_top, h_bot = depth_range[0], depth_range[1]
+#         r_top, r_bot = r_surface + h_top, r_surface + h_bot
+#         h_sampled = (r_bot**3 + u[:, [2]] * (r_top**3 - r_bot**3))**(1/3.0) - r_surface
+
+#         xyz = xyz_surface + (n_unit * h_sampled)
+#         x_grid = ftrns2_abs(xyz)
+
+#         if use_time:
+#             t = -time_range + 2.0 * time_range * u[:, [3]]
+#             x_grid = np.concatenate((x_grid, t), axis=1)
+
+#         mask_points = np.ones(len(x_grid), dtype=bool)
+
+#         if use_station_density and density_grid is not None:
+#             mask_vals = density_grid.fast_query(x_grid[:,0:2]).reshape(-1)
+#             keep_prob = mask_vals / np.max(mask_vals) 
+#             random_vals = np.random.rand(len(x_grid))
+#             x_grid = x_grid[random_vals < keep_prob]
+#             mask_points = mask_points[random_vals < keep_prob]
+
+#         return x_grid, mask_points
 
 
 def farthest_point_sampling(points_candidates, target_N, scale_time = None, depth_boost = 1.0, use_station_density = False, mask_candidates = None, device = device):
@@ -659,7 +845,15 @@ def get_q_wgs84(lat_val):
     q_val = get_q(lat_val)
 
     return q_val
-   
+
+def get_q_wgs84_1(lat_val):
+    e = 0.0818191908426215
+    e2 = e**2
+    phi = np.deg2rad(lat_val)
+    s = np.sin(phi)
+    # Corrected Snyder Eq. (3-12):
+    return (1 - e2) * ((s / (1 - e2 * s**2)) + (1 / (2 * e)) * np.log((1 + e * s) / (1 - e * s)))
+
 def get_simple_density_ratio(normalized_data, N, frac_edge=0.1):
     num_bins = int(1.0 / frac_edge)
     # Histogram on the [0, 1] range
