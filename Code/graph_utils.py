@@ -867,265 +867,265 @@ def fit_domain_budget_aware(W_phys_min, W_t_min, lat_range, lon_range, depth_ran
 # from skopt.utils import use_named_args
 
 
-class SamplingTuner:
+# class SamplingTuner:
 
-    def __init__(
-        self,
-        target_N,
-        lat_range,
-        lon_range,
-        depth_range,
-        time_range,
-        scale_time_effective=None,
-        use_time_shift=True,
-        use_global=False,
-        r_min=None,
-        r_max=None,
-        n_slack_frac=0.1,
-        time_slack_frac=0.1,
-        device='cpu',
-    ):
+#     def __init__(
+#         self,
+#         target_N,
+#         lat_range,
+#         lon_range,
+#         depth_range,
+#         time_range,
+#         scale_time_effective=None,
+#         use_time_shift=True,
+#         use_global=False,
+#         r_min=None,
+#         r_max=None,
+#         n_slack_frac=0.1,
+#         time_slack_frac=0.1,
+#         device='cpu',
+#     ):
 
-        self.target_N = target_N
-        self.time_range = time_range
-        self.device = device
-        self.use_global = use_global
-        self.use_time_shift = use_time_shift
-        self.scale_time_effective = (
-            scale_time_effective
-            if scale_time_effective is not None
-            else 10000.0
-        )
-        self.r_min = r_min
-        self.r_max = r_max
-        self.ranges = [
-            lat_range,
-            lon_range,
-            depth_range,
-            [-time_range, time_range],
-        ]
+#         self.target_N = target_N
+#         self.time_range = time_range
+#         self.device = device
+#         self.use_global = use_global
+#         self.use_time_shift = use_time_shift
+#         self.scale_time_effective = (
+#             scale_time_effective
+#             if scale_time_effective is not None
+#             else 10000.0
+#         )
+#         self.r_min = r_min
+#         self.r_max = r_max
+#         self.ranges = [
+#             lat_range,
+#             lon_range,
+#             depth_range,
+#             [-time_range, time_range],
+#         ]
 
-        self.n_slack_frac = n_slack_frac
-        self.time_slack_frac = time_slack_frac
+#         self.n_slack_frac = n_slack_frac
+#         self.time_slack_frac = time_slack_frac
 
-        earth_radius = 6378137.0
-        ftrns1_abs = lambda x: (
-            lla2ecef(x, a=earth_radius)
-            if x.shape[1] == 3
-            else np.concatenate(
-                (lla2ecef(x, a=earth_radius), x[:, 3].reshape(-1, 1)), axis=1
-            )
-        )
-        ftrns2_abs = lambda x: (
-            ecef2lla(x, a=earth_radius)
-            if x.shape[1] == 3
-            else np.concatenate(
-                (ecef2lla(x, a=earth_radius), x[:, 3].reshape(-1, 1)), axis=1
-            )
-        )
-        self.ftrns1_abs = ftrns1_abs
-        self.ftrns2_abs = ftrns2_abs
+#         earth_radius = 6378137.0
+#         ftrns1_abs = lambda x: (
+#             lla2ecef(x, a=earth_radius)
+#             if x.shape[1] == 3
+#             else np.concatenate(
+#                 (lla2ecef(x, a=earth_radius), x[:, 3].reshape(-1, 1)), axis=1
+#             )
+#         )
+#         ftrns2_abs = lambda x: (
+#             ecef2lla(x, a=earth_radius)
+#             if x.shape[1] == 3
+#             else np.concatenate(
+#                 (ecef2lla(x, a=earth_radius), x[:, 3].reshape(-1, 1)), axis=1
+#             )
+#         )
+#         self.ftrns1_abs = ftrns1_abs
+#         self.ftrns2_abs = ftrns2_abs
 
-        # 1. Base Search Space
-        self.space = [
-            Real(3e3, 10e3, prior='log-uniform', name='scale_t'),
-            Real(0.5, 3.0, name='depth_boost'),
-            Real(1.5, 2.5, name='buffer_scale'),
-        ]
+#         # 1. Base Search Space
+#         self.space = [
+#             Real(3e3, 10e3, prior='log-uniform', name='scale_t'),
+#             Real(0.5, 3.0, name='depth_boost'),
+#             Real(1.5, 2.5, name='buffer_scale'),
+#         ]
 
-        # 2. Dynamic Search Space (handling zero-slack safety)
-        if self.n_slack_frac > 0.0:
-            n_min = int(np.round(self.target_N * (1.0 - self.n_slack_frac)))
-            n_max = int(np.round(self.target_N * (1.0 + self.n_slack_frac)))
-            self.space.append(Integer(max(10, n_min), n_max, name='N_nodes'))
-        else:
-            self.space.append(
-                Integer(self.target_N, self.target_N + 1, name='N_nodes')
-            )
+#         # 2. Dynamic Search Space (handling zero-slack safety)
+#         if self.n_slack_frac > 0.0:
+#             n_min = int(np.round(self.target_N * (1.0 - self.n_slack_frac)))
+#             n_max = int(np.round(self.target_N * (1.0 + self.n_slack_frac)))
+#             self.space.append(Integer(max(10, n_min), n_max, name='N_nodes'))
+#         else:
+#             self.space.append(
+#                 Integer(self.target_N, self.target_N + 1, name='N_nodes')
+#             )
 
-        if self.time_slack_frac > 0.0:
-            t_min = self.time_range * (1.0 - self.time_slack_frac)
-            t_max = self.time_range * (1.0 + self.time_slack_frac)
-            self.space.append(Real(t_min, t_max, name='curr_time_range'))
-        else:
-            self.space.append(
-                Real(
-                    self.time_range,
-                    self.time_range + 1e-6,
-                    name='curr_time_range',
-                )
-            )
+#         if self.time_slack_frac > 0.0:
+#             t_min = self.time_range * (1.0 - self.time_slack_frac)
+#             t_max = self.time_range * (1.0 + self.time_slack_frac)
+#             self.space.append(Real(t_min, t_max, name='curr_time_range'))
+#         else:
+#             self.space.append(
+#                 Real(
+#                     self.time_range,
+#                     self.time_range + 1e-6,
+#                     name='curr_time_range',
+#                 )
+#             )
 
-    def optimize(self, n_calls=90, w_N_penalty=3.0, w_t_penalty=3.0):
-        """Runs Bayesian Optimization to find the optimal grid hyperparameters."""
+#     def optimize(self, n_calls=90, w_N_penalty=3.0, w_t_penalty=3.0):
+#         """Runs Bayesian Optimization to find the optimal grid hyperparameters."""
 
-        use_station_density = False
-        use_normalized_mean = True
+#         use_station_density = False
+#         use_normalized_mean = True
 
-        @use_named_args(self.space)
-        def objective(
-            scale_t, depth_boost, buffer_scale, N_nodes, curr_time_range
-        ):
+#         @use_named_args(self.space)
+#         def objective(
+#             scale_t, depth_boost, buffer_scale, N_nodes, curr_time_range
+#         ):
 
-            # Ensure integer typing for point count operations
-            N_nodes = int(np.round(N_nodes))
+#             # Ensure integer typing for point count operations
+#             N_nodes = int(np.round(N_nodes))
 
-            # 1. GENERATE CANDIDATES
-            up_sample_factor = 20 if self.use_time_shift else 10
-            if use_station_density:
-                up_sample_factor *= 5
-            number_candidate_nodes = up_sample_factor * N_nodes
+#             # 1. GENERATE CANDIDATES
+#             up_sample_factor = 20 if self.use_time_shift else 10
+#             if use_station_density:
+#                 up_sample_factor *= 5
+#             number_candidate_nodes = up_sample_factor * N_nodes
 
-            trial_points, mask_points = regular_sobolov(
-                number_candidate_nodes,
-                lat_range=self.ranges[0],
-                lon_range=self.ranges[1],
-                depth_range=self.ranges[2],
-                time_range=curr_time_range,
-                use_time=self.use_time_shift,
-                use_global=self.use_global,
-                scale_time=scale_t,
-                depth_boost=depth_boost,
-                N_target=N_nodes,
-                buffer_scale=buffer_scale,
-                r_min=self.r_min,
-                r_max=self.r_max,
-            )
+#             trial_points, mask_points = regular_sobolov(
+#                 number_candidate_nodes,
+#                 lat_range=self.ranges[0],
+#                 lon_range=self.ranges[1],
+#                 depth_range=self.ranges[2],
+#                 time_range=curr_time_range,
+#                 use_time=self.use_time_shift,
+#                 use_global=self.use_global,
+#                 scale_time=scale_t,
+#                 depth_boost=depth_boost,
+#                 N_target=N_nodes,
+#                 buffer_scale=buffer_scale,
+#                 r_min=self.r_min,
+#                 r_max=self.r_max,
+#             )
 
-            # 2. SAMPLING
-            x_grid = farthest_point_sampling(
-                trial_points,
-                N_nodes,
-                scale_time=scale_t,
-                depth_boost=depth_boost,
-                mask_candidates=mask_points,
-                device=self.device,
-            )
+#             # 2. SAMPLING
+#             x_grid = farthest_point_sampling(
+#                 trial_points,
+#                 N_nodes,
+#                 scale_time=scale_t,
+#                 depth_boost=depth_boost,
+#                 mask_candidates=mask_points,
+#                 device=self.device,
+#             )
 
-            # 3. METRIC & UNIFORMITY
-            x_proj_scaled = get_warped_metric_space(
-                x_grid, depth_boost, scale_t
-            )
-            tree = cKDTree(x_proj_scaled)
-            nn_dist = tree.query(x_proj_scaled, k=2)[0][:, 1]
-            cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)
+#             # 3. METRIC & UNIFORMITY
+#             x_proj_scaled = get_warped_metric_space(
+#                 x_grid, depth_boost, scale_t
+#             )
+#             tree = cKDTree(x_proj_scaled)
+#             nn_dist = tree.query(x_proj_scaled, k=2)[0][:, 1]
+#             cv = np.std(nn_dist) / (np.mean(nn_dist) + 1e-9)
 
-            if use_normalized_mean:
-                x_metric_4d1 = get_warped_metric_space(
-                    x_grid, depth_boost, scale_t, return_physical_units=True
-                )
-                tree_4d = cKDTree(x_metric_4d1)
-                dist_4d1, _ = tree_4d.query(x_metric_4d1, k=2)
-                nn_4d1 = dist_4d1[:, 1]
+#             if use_normalized_mean:
+#                 x_metric_4d1 = get_warped_metric_space(
+#                     x_grid, depth_boost, scale_t, return_physical_units=True
+#                 )
+#                 tree_4d = cKDTree(x_metric_4d1)
+#                 dist_4d1, _ = tree_4d.query(x_metric_4d1, k=2)
+#                 nn_4d1 = dist_4d1[:, 1]
 
-                metrics = compute_warped_expected_spacing(
-                    N_nodes,
-                    lat_range=self.ranges[0],
-                    lon_range=self.ranges[1],
-                    depth_range=self.ranges[2],
-                    time_range=curr_time_range,
-                    scale_time=scale_t,
-                    depth_boost=depth_boost,
-                    use_global=self.use_global,
-                    r_min=self.r_min,
-                    r_max=self.r_max,
-                )
+#                 metrics = compute_warped_expected_spacing(
+#                     N_nodes,
+#                     lat_range=self.ranges[0],
+#                     lon_range=self.ranges[1],
+#                     depth_range=self.ranges[2],
+#                     time_range=curr_time_range,
+#                     scale_time=scale_t,
+#                     depth_boost=depth_boost,
+#                     use_global=self.use_global,
+#                     r_min=self.r_min,
+#                     r_max=self.r_max,
+#                 )
 
-                volume_4d_warped, _, _, _, _, _ = metrics
-                expected_mean = 0.463 * (volume_4d_warped / N_nodes) ** (0.25)
-                norm_mean = np.mean(nn_4d1) / expected_mean
-                penalty_norm = max(0, 1.4 - norm_mean) ** 2
-                cv = cv + 1.0 * penalty_norm
+#                 volume_4d_warped, _, _, _, _, _ = metrics
+#                 expected_mean = 0.463 * (volume_4d_warped / N_nodes) ** (0.25)
+#                 norm_mean = np.mean(nn_4d1) / expected_mean
+#                 penalty_norm = max(0, 1.4 - norm_mean) ** 2
+#                 cv = cv + 1.0 * penalty_norm
 
-            # 4. BOUNDARY & DENSITY HEALTH
-            densities = check_boundary_densities(
-                x_grid,
-                self.ranges[0],
-                self.ranges[1],
-                self.ranges[2],
-                curr_time_range,
-                self.use_global,
-            )
-            penalty_boundary = (
-                (1.0 - densities['Depth']) ** 2
-                + (1.0 - densities['Time']) ** 2
-                + (1.0 - densities['Lat']) ** 2
-                + (1.0 - densities['Lon']) ** 2
-            ) / 4.0
+#             # 4. BOUNDARY & DENSITY HEALTH
+#             densities = check_boundary_densities(
+#                 x_grid,
+#                 self.ranges[0],
+#                 self.ranges[1],
+#                 self.ranges[2],
+#                 curr_time_range,
+#                 self.use_global,
+#             )
+#             penalty_boundary = (
+#                 (1.0 - densities['Depth']) ** 2
+#                 + (1.0 - densities['Time']) ** 2
+#                 + (1.0 - densities['Lat']) ** 2
+#                 + (1.0 - densities['Lon']) ** 2
+#             ) / 4.0
 
-            # 5. CDF ANALYSIS
-            cdf_loss = compute_cdf_analysis(
-                x_grid, self.ranges, self.ftrns1_abs, self.ftrns2_abs
-            )
+#             # 5. CDF ANALYSIS
+#             cdf_loss = compute_cdf_analysis(
+#                 x_grid, self.ranges, self.ftrns1_abs, self.ftrns2_abs
+#             )
 
-            # 6. PENALTIES
-            reg_scale_penalty = 0.1 * (
-                np.log10(scale_t / self.scale_time_effective) ** 2
-            )
-            n_slack_penalty = (
-                w_N_penalty * (((N_nodes - self.target_N) / self.target_N) ** 2)
-                if self.n_slack_frac > 0.0
-                else 0.0
-            )
-            t_slack_penalty = (
-                w_t_penalty
-                * (((curr_time_range - self.time_range) / self.time_range) ** 2)
-                if self.time_slack_frac > 0.0
-                else 0.0
-            )
+#             # 6. PENALTIES
+#             reg_scale_penalty = 0.1 * (
+#                 np.log10(scale_t / self.scale_time_effective) ** 2
+#             )
+#             n_slack_penalty = (
+#                 w_N_penalty * (((N_nodes - self.target_N) / self.target_N) ** 2)
+#                 if self.n_slack_frac > 0.0
+#                 else 0.0
+#             )
+#             t_slack_penalty = (
+#                 w_t_penalty
+#                 * (((curr_time_range - self.time_range) / self.time_range) ** 2)
+#                 if self.time_slack_frac > 0.0
+#                 else 0.0
+#             )
 
-            return (
-                cv
-                + (3.0 * cdf_loss)
-                + (0.2 * penalty_boundary)
-                + reg_scale_penalty
-                + n_slack_penalty
-                + t_slack_penalty
-            )
+#             return (
+#                 cv
+#                 + (3.0 * cdf_loss)
+#                 + (0.2 * penalty_boundary)
+#                 + reg_scale_penalty
+#                 + n_slack_penalty
+#                 + t_slack_penalty
+#             )
 
-        res = gp_minimize(
-            objective, self.space, n_calls=n_calls, verbose=True
-        )
+#         res = gp_minimize(
+#             objective, self.space, n_calls=n_calls, verbose=True
+#         )
 
-        best_scale_t, best_depth_boost, best_buffer_scale = res.x[:3]
-        best_N = int(np.round(res.x[3]))
-        best_time_range = float(res.x[4])
+#         best_scale_t, best_depth_boost, best_buffer_scale = res.x[:3]
+#         best_N = int(np.round(res.x[3]))
+#         best_time_range = float(res.x[4])
 
-        _, _, _, nominal_spacing_4d, _, _ = compute_warped_expected_spacing(
-            best_N,
-            lat_range=self.ranges[0],
-            lon_range=self.ranges[1],
-            depth_range=self.ranges[2],
-            time_range=best_time_range,
-            use_time=self.use_time_shift,
-            scale_time=best_scale_t,
-            depth_boost=best_depth_boost,
-            use_global=self.use_global,
-            r_min=self.r_min,
-            r_max=self.r_max,
-        )
+#         _, _, _, nominal_spacing_4d, _, _ = compute_warped_expected_spacing(
+#             best_N,
+#             lat_range=self.ranges[0],
+#             lon_range=self.ranges[1],
+#             depth_range=self.ranges[2],
+#             time_range=best_time_range,
+#             use_time=self.use_time_shift,
+#             scale_time=best_scale_t,
+#             depth_boost=best_depth_boost,
+#             use_global=self.use_global,
+#             r_min=self.r_min,
+#             r_max=self.r_max,
+#         )
 
-        buffer_width_phys = best_buffer_scale * nominal_spacing_4d
+#         buffer_width_phys = best_buffer_scale * nominal_spacing_4d
 
-        print('\n--- Optimization Results ---')
-        print(f'Optimal scale_t:      {best_scale_t:.3f} m/s')
-        print(f'Optimal depth_boost: {best_depth_boost:.3f}')
-        print(f'Optimal buffer_scale:{best_buffer_scale:.3f}')
-        print(f'Optimal N_nodes:      {best_N} (Target: {self.target_N})')
-        print(
-            f'Optimal time_range:  {best_time_range:.3f} s (Target:'
-            f' {self.time_range:.3f} s)'
-        )
-        print(f'Effective Padding:    {buffer_width_phys:.2f} (units)')
+#         print('\n--- Optimization Results ---')
+#         print(f'Optimal scale_t:      {best_scale_t:.3f} m/s')
+#         print(f'Optimal depth_boost: {best_depth_boost:.3f}')
+#         print(f'Optimal buffer_scale:{best_buffer_scale:.3f}')
+#         print(f'Optimal N_nodes:      {best_N} (Target: {self.target_N})')
+#         print(
+#             f'Optimal time_range:  {best_time_range:.3f} s (Target:'
+#             f' {self.time_range:.3f} s)'
+#         )
+#         print(f'Effective Padding:    {buffer_width_phys:.2f} (units)')
 
-        return {
-            'scale_t': best_scale_t,
-            'depth_boost': best_depth_boost,
-            'buffer_scale': best_buffer_scale,
-            'buffer_width_phys': buffer_width_phys,
-            'N_nodes': best_N,
-            'time_range': best_time_range,
-        }
+#         return {
+#             'scale_t': best_scale_t,
+#             'depth_boost': best_depth_boost,
+#             'buffer_scale': best_buffer_scale,
+#             'buffer_width_phys': buffer_width_phys,
+#             'N_nodes': best_N,
+#             'time_range': best_time_range,
+#         }
 
 
 # class SamplingTuner:
@@ -1314,7 +1314,7 @@ class SamplingTuner:
 #             'time_range': best_time_range
 #         }
 
-class SamplingTuner_backup:
+class SamplingTuner:
 
     def __init__(self, target_N, lat_range, lon_range, depth_range, time_range, scale_time_effective = None, use_time_shift = True, use_global = False, r_min = None, r_max = None, device = device):
 
@@ -1344,7 +1344,7 @@ class SamplingTuner_backup:
             # Real(1e3, 100e3, prior = 'log-uniform', name='scale_t'),    
             Real(3e3, 10e3, prior = 'log-uniform', name='scale_t'),      ## Can increase slightly
             Real(0.5, 3.0, name='depth_boost'),   
-            Real(1.5, 2.5, name='buffer_scale')    # prior='log-uniform',
+            Real(1.0, 2.5, name='buffer_scale')    # prior='log-uniform',
         ]
 
     def optimize(self, n_calls = 90):
