@@ -956,7 +956,7 @@ class SamplingTuner:
                 )
             )
 
-    def optimize(self, n_calls=90, w_N_penalty=1.0, w_t_penalty=1.0):
+    def optimize(self, n_calls=90, w_N_penalty=3.0, w_t_penalty=3.0):
         """Runs Bayesian Optimization to find the optimal grid hyperparameters."""
 
         use_station_density = False
