@@ -882,7 +882,8 @@ class SamplingTuner:
         # depth_boost: dimensionless vertical stretch
         # buffer_scale: multiplier for the nominal spacing
         self.space = [
-            Real(1e3, 100e3, prior = 'log-uniform', name='scale_t'),      
+            # Real(1e3, 100e3, prior = 'log-uniform', name='scale_t'),    
+            Real(3e3, 10e3, prior = 'log-uniform', name='scale_t'),      ## Can increase slightly
             Real(0.5, 3.0, name='depth_boost'),   
             Real(1.5, 2.5, name='buffer_scale')    # prior='log-uniform',
         ]
