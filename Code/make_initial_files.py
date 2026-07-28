@@ -215,20 +215,21 @@ if __name__ == '__main__':
     ## Add estimate of number of nodes / cartesian product size
     if config['vel_model_type'] == 1:
         # vp = np.array(config['velocity_model']['Vp'])
-        vs = np.array(config['velocity_model']['Vs']).reshape(-1)
+        vp = np.array(config['velocity_model']['Vp']).reshape(-1)
         depths = np.array(config['velocity_model']['Depths'])
-        ifind = np.where(depths >= np.quantile(depths, 0.8))[0]
-        Vc = np.median(vs[ifind])
+        ifind = np.where(depths >= np.quantile(depths, 0.5))[0]
+        # ifind = np.where(depths >= np.quantile(depths, 0.8))[0]
+        Vc = np.median(vp[ifind])
         # Vc = 3500.0
     elif config['vel_model_type'] == 2:   
         z = np.load(base_path + '3d_velocity_model.npz')
-        depths, vs = z['X'][:,2], z['Vs'].reshape(-1) ## lat, lon, depth (x_vel) and velocity values
-        ifind = np.where(depths >= np.quantile(depths, 0.8))[0]
-        Vc = np.median(vs[ifind])
+        depths, vp = z['X'][:,2], z['Vp'].reshape(-1) ## lat, lon, depth (x_vel) and velocity values
+        ifind = np.where(depths >= np.quantile(depths, 0.5))[0]
+        Vc = np.median(vp[ifind])
         # depths, vp, vs = z['X'][:,2], z['Vp'], z['Vs'] ## lat, lon, depth (x_vel) and velocity values
         z.close()
     
-    Vc = 3500.0 # Vc = 3500.0
+    Vc = 6500.0 # Vc = 3500.0
     scale_domain = 1.0
     deg_padding = np.nan ## Use hueristic
     n_trgt_nodes = config.get('n_trgt_nodes', int(200e3))
