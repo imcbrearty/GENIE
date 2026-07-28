@@ -882,7 +882,7 @@ def generate_travel_time_noise(
     event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
     distribution="laplace",
     sigma_pick=0.08,
-    sigma_path_max=1.20,
+    sigma_path_max=1.80, # 1.2
     T_c=150.0,
     scale_extra=1.0,
     s_wave_multiplier=2.2,
