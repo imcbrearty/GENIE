@@ -876,22 +876,38 @@ def knn_distance(
 import numpy as np
 
 
+# def generate_travel_time_noise(
+#     t_r,
+#     phase_input="P",  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+#     event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
+#     distribution="laplace",
+#     sigma_pick=0.08,
+#     sigma_path_max=1.80, # 1.2
+#     T_c=150.0,
+#     scale_extra=1.0,
+#     s_wave_multiplier=2.2,
+#     excess_threshold_sigma=2.0,
+#     # --- Systemic Velocity Model Bias Parameters ---
+#     apply_systemic_bias=False,  # Set True if applying bias inside this function
+#     total_bias=0.03,  # ~3% velocity perturbation range
+#     frac_bias_s_ratio=0.3,
+#     origin_shift_std=0.1,  # Baseline origin shift in seconds
+#     return_sigma=False,
+# ):
 def generate_travel_time_noise(
     t_r,
-    phase_input="P",  # String ("P"/"S") OR array of 0s (P) and 1s (S)
-    event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
+    phase_input="P",
+    event_idx=None,
     distribution="laplace",
     sigma_pick=0.08,
-    sigma_path_max=1.80, # 1.2
-    T_c=150.0,
+    gamma_path=0.12,  # Path noise growth coefficient (sec / sqrt(sec))
     scale_extra=1.0,
     s_wave_multiplier=2.2,
     excess_threshold_sigma=2.0,
-    # --- Systemic Velocity Model Bias Parameters ---
-    apply_systemic_bias=False,  # Set True if applying bias inside this function
-    total_bias=0.03,  # ~3% velocity perturbation range
+    apply_systemic_bias=False,
+    total_bias=0.03,
     frac_bias_s_ratio=0.3,
-    origin_shift_std=0.1,  # Baseline origin shift in seconds
+    origin_shift_std=0.1,
     return_sigma=False,
 ):
     """Generates path-dependent Laplace pick noise with optional event-grouped
@@ -909,13 +925,21 @@ def generate_travel_time_noise(
         s_mask = np.asarray(phase_input)
         multiplier = np.where(s_mask == 1, s_wave_multiplier, 1.0)
 
-    # 2. Uncorrelated Per-Ray Standard Deviation (sigma_sec)
+    # # 2. Uncorrelated Per-Ray Standard Deviation (sigma_sec)
+    # sigma_sec = (
+    #     (sigma_pick + sigma_path_max * (1.0 - np.exp(-t_r / T_c)))
+    #     * multiplier
+    #     * scale_extra
+    # )
+
+	# 2. Uncorrelated Per-Ray Standard Deviation (sigma_sec)
+    # Square-root path growth: sigma_path = gamma_path * sqrt(t_r)
     sigma_sec = (
-        (sigma_pick + sigma_path_max * (1.0 - np.exp(-t_r / T_c)))
+        (sigma_pick + gamma_path * np.sqrt(t_r))
         * multiplier
         * scale_extra
     )
-
+	
     # 3. Sample Uncorrelated Pick-Level Noise
     if distribution.lower() == "laplace":
         beta = sigma_sec / np.sqrt(2.0)
