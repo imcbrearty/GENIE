@@ -6982,7 +6982,7 @@ def estimate_kernel_widths_backup(domain, station_locs, z_range=(-40000, 2000), 
 
 def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), vel_phase=6000.0, 
                            noise_level=0.02, n_srcs=250, n_test_per_src=10000, 
-                           n_neighbors_trgt=20, use_global=False, device='cpu'):
+                           n_neighbors_trgt=20, use_global=False, Vs = None, overwrite_vs = True, device='cpu'):
     import torch
     import numpy as np
     from scipy.spatial.distance import cdist
@@ -7063,14 +7063,17 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), vel_pha
         cluster_apertures.append(aperture_s)
         
         # Adaptive P-Wave Velocity Scale Engine
-        if aperture_s < 100000.0:
-            V_adaptive = 6000.0
-        elif aperture_s < 1000000.0:
-            V_adaptive = 8000.0
-        elif aperture_s < 3000000.0:
-            V_adaptive = 10000.0
+        if overwrite_vs == True:
+            if aperture_s < 100000.0:
+                V_adaptive = 6000.0
+            elif aperture_s < 1000000.0:
+                V_adaptive = 8000.0
+            elif aperture_s < 3000000.0:
+                V_adaptive = 10000.0
+            else:
+                V_adaptive = 13000.0
         else:
-            V_adaptive = 13000.0
+            V_adaptive = Vs
         source_velocities[s] = V_adaptive
         
         moveout = (s_dists[-1] - s_dists[0]) / V_adaptive
