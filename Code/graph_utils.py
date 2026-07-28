@@ -4538,7 +4538,14 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ## Temporarily define this for simplicity
     def trv(locs, srcs, Vs = Vc):
-        return torch.Tensor(np.linalg.norm(np.expand_dims(lla2ecef(srcs.cpu().detach().numpy()), axis = 1) - np.expand_dims(lla2ecef(locs.cpu().detach().numpy()), axis = 0), axis = 2, keepdims = True)/Vs).to(srcs.device)
+
+        # Equivalent, faster, and cleaner
+        ecef_srcs = torch.tensor(lla2ecef(srcs.cpu().numpy()), device=device)
+        ecef_locs = torch.tensor(lla2ecef(locs.cpu().numpy()), device=device)
+        trv_out = torch.cdist(ecef_srcs, ecef_locs) / Vs
+        
+        # return torch.Tensor(np.linalg.norm(np.expand_dims(lla2ecef(srcs.cpu().detach().numpy()), axis = 1) - np.expand_dims(lla2ecef(locs.cpu().detach().numpy()), axis = 0), axis = 2, keepdims = True)/Vs).to(srcs.device)
+        return trv_out
 
 
     domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20, use_global = use_global, device = device)
