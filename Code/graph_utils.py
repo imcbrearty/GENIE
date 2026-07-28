@@ -5083,7 +5083,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
         m = SamplingTuner(final_N, lat_range_extend, lon_range_extend, depth_range, time_shift_range, scale_time_effective = final_scale_time, use_global = use_global, r_min = r_min, r_max = r_max)
         params = m.optimize(n_calls = n_tuner_steps)
         scale_time, depth_boost, buffer_scale = params['scale_t'], params['depth_boost'], params['buffer_scale']
-        final_N, time_shift_range  = params['N_nodes'], params['time_range']
+        # final_N, time_shift_range  = params['N_nodes'], params['time_range']
 
     else:
         depth_boost = 2.0
