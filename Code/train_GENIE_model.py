@@ -1382,8 +1382,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				    event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
 				    distribution="laplace",
 				    sigma_pick=0.08,
-				    sigma_path_max=1.20,
-				    T_c=150.0,
+					gamma_path=0.12,
 				    scale_extra=1.0,
 				    s_wave_multiplier=2.2,
 				    excess_threshold_sigma=2.0,
