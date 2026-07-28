@@ -940,22 +940,21 @@ def generate_travel_time_noise(
         else:
             # Multi-event mixed/unsorted array case
             event_idx = np.asarray(event_idx)
-            unique_events = np.unique(event_idx)
+
+			# Get unique events and map indices in a single vectorized pass
+            unique_events, pick_event_indices = np.unique(event_idx, return_inverse=True)
+            n_events = len(unique_events)
 
             # Draw one unique set of parameters per unique event ID
-            p_scales = np.random.normal(0.0, std_scale, size=len(unique_events))
+            p_scales = np.random.normal(0.0, std_scale, size=n_events)
             s_ratios = (
-                np.random.normal(0.0, std_scale, size=len(unique_events))
+                np.random.normal(0.0, std_scale, size=n_events)
                 * frac_bias_s_ratio
             )
             shifts = np.random.normal(
-                0.0, origin_shift_std, size=len(unique_events)
-            )
-
-            # Map unique event parameters back to the full pick array
-            event_map = {ev: i for i, ev in enumerate(unique_events)}
-            pick_event_indices = np.array([event_map[ev] for ev in event_idx])
-
+                0.0, origin_shift_std, size=n_events
+            )			
+			
             pick_p_scales = p_scales[pick_event_indices]
             pick_s_ratios = s_ratios[pick_event_indices]
             pick_shifts = shifts[pick_event_indices]
