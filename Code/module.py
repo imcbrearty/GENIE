@@ -301,6 +301,119 @@ class BipartiteGraphOperator(MessagePassing):
 
 		return self.activate1(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = mask.max(1, keepdims = True)[0]*self.fc1(torch.cat((inpt, A_src_in_edges.x), dim = -1)))))
 
+
+
+# class BipartiteGraphOperator(MessagePassing):
+# 	def __init__(self, ndim_in, ndim_out, ndim_edges=4, ndim_mask=4):
+# 		super(BipartiteGraphOperator, self).__init__(aggr='add')
+		
+# 		# 1. Edge MLP: Evaluates travel-time misfit + 4D geometry
+# 		self.fc1 = nn.Sequential(
+# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
+# 			nn.PReLU(),
+# 			nn.Linear(ndim_in, ndim_in),
+# 			nn.PReLU()
+# 		)
+		
+# 		# 2. Low-Rank Gating (Prevents synthetic memorization)
+# 		self.mask_gate = nn.Sequential(
+# 			nn.Linear(ndim_mask, 4),
+# 			nn.PReLU(),
+# 			nn.Linear(4, ndim_in),
+# 			nn.Sigmoid()
+# 		)
+		
+# 		# 3. LayerNorm standardizes feature distribution across channels
+# 		self.norm = nn.LayerNorm(ndim_in)
+		
+# 		# 4. Final Projection
+# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
+# 		self.activate_out = nn.PReLU()
+
+# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
+# 		# Target nodes (M) represent the factor graph space being stacked onto
+# 		N = A_src_in_edges.edge_index[0].max().item() + 1
+# 		M = A_src_in_edges.edge_index[1].max().item() + 1
+
+# 		# Step 1: Existential gate for active mask edges
+# 		absolute_gate = mask.max(1, keepdims=True)[0]
+
+# 		# Step 2: Compute non-linear geometric features & phase routing
+# 		geo_features = self.fc1(torch.cat((inpt, A_src_in_edges.x), dim=-1))
+# 		phase_routing_vectors = self.mask_gate(mask)
+
+# 		# Step 3: Gated message composition
+# 		msg = absolute_gate * (phase_routing_vectors * geo_features)
+
+# 		# Step 4: Perform raw physical stacking (Constructive Summing)
+# 		stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
+
+# 		# Step 5: Compute active degree E_i per target node (only counting active mask edges)
+# 		target_indices = A_src_in_edges.edge_index[1]
+# 		deg = torch.zeros((M, 1), device=stacked.device, dtype=stacked.dtype)
+# 		deg.index_add_(0, target_indices, absolute_gate)
+
+# 		# Step 6: Scale by 1 / sqrt(E_i) -> Keeps noise floor equal between core hubs & sparse nodes
+# 		stacked_normalized = stacked / torch.sqrt(deg.clamp(min=1.0))
+
+# 		# Step 7: Channel-wise standardization & final projection
+# 		return self.activate_out(self.fc2(self.norm(stacked_normalized)))
+
+		
+# class BipartiteGraphOperator(MessagePassing):
+# 	def __init__(self, ndim_in, ndim_out, ndim_edges=3, ndim_mask=4):
+# 		# 'add' aggregation acts as true seismic stacking/back-projection
+# 		super(BipartiteGraphOperator, self).__init__(aggr='add')
+		
+# 		# 1. Edge MLP: Evaluates travel-time misfit + node features
+# 		self.fc1 = nn.Sequential(
+# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
+# 			nn.PReLU(),
+# 			nn.Linear(ndim_in, ndim_in),
+# 			nn.PReLU()
+# 		)
+		
+# 		# 2. Compact Phase/Quality Gate (values 0.0 to 1.0)
+# 		self.mask_gate = nn.Sequential(
+# 			nn.Linear(ndim_mask, 4),
+# 			nn.PReLU(),
+# 			nn.Linear(4, ndim_in),
+# 			nn.Sigmoid()
+# 		)
+		
+# 		# 3. LayerNorm normalizes stacked features across variable station counts
+# 		self.norm = nn.LayerNorm(ndim_in)
+		
+# 		# 4. Final Output Map
+# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
+# 		self.activate_out = nn.PReLU()
+
+# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
+# 		N = A_src_in_edges.edge_index[0].max().item() + 1
+# 		M = A_src_in_edges.edge_index[1].max().item() + 1
+
+# 		# Step 1: Hard existential kill-switch for missing station-source pairs
+# 		# Guarantees dead edges contribute EXACTLY 0.0 to the sum
+# 		absolute_gate = mask.max(1, keepdims=True)[0]
+
+# 		# Step 2: Extract non-linear misfit features
+# 		geo_features = self.fc1(torch.cat((inpt, A_src_in_edges.x), dim=-1))
+
+# 		# Step 3: Phase reliability / mask gating
+# 		phase_routing_vectors = self.mask_gate(mask)
+
+# 		# Step 4: Gated message composition
+# 		# Only valid, coherent arrival signals pass through as non-zero
+# 		msg = absolute_gate * (phase_routing_vectors * geo_features)
+
+# 		# Step 5: Stack coherent arrivals over stations (preserving sparse energy!)
+# 		stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
+		
+# 		# Step 6: Post-stack normalization (stabilizes scale without zero-diluting)
+# 		normalized_stack = self.norm(stacked)
+
+# 		return self.activate_out(self.fc2(normalized_stack))
+		
 # class BipartiteGraphOperator(MessagePassing):
 # 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
 # 		super(BipartiteGraphOperator, self).__init__('add')
@@ -313,12 +426,19 @@ class BipartiteGraphOperator(MessagePassing):
 # 			nn.PReLU()
 # 		)
 		
-# 		# 2. Phase-routing gating network (2-Layer MLP + Sigmoid)
+# 		# # 2. Phase-routing gating network (2-Layer MLP + Sigmoid)
+# 		# self.mask_gate = nn.Sequential(
+# 		# 	nn.Linear(ndim_mask, ndim_in // 2),
+# 		# 	nn.PReLU(),
+# 		# 	nn.Linear(ndim_in // 2, ndim_in),
+# 		# 	nn.Sigmoid()
+# 		# )
+
 # 		self.mask_gate = nn.Sequential(
-# 			nn.Linear(ndim_mask, ndim_in // 2),
-# 			nn.PReLU(),
-# 			nn.Linear(ndim_in // 2, ndim_in),
-# 			nn.Sigmoid()
+# 		    nn.Linear(ndim_mask, 4),
+# 		    nn.PReLU(),
+# 		    nn.Linear(4, ndim_in),
+# 		    nn.Sigmoid()
 # 		)
 		
 # 		# 3. Output projection
