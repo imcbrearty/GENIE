@@ -303,6 +303,50 @@ class BipartiteGraphOperator(MessagePassing):
 
 # class BipartiteGraphOperator(MessagePassing):
 # 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
+# 		super(BipartiteGraphOperator, self).__init__('add')
+		
+# 		# 1. Expressive geometric & feature representation (2-Layer MLP)
+# 		self.fc1 = nn.Sequential(
+# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
+# 			nn.PReLU(),
+# 			nn.Linear(ndim_in, ndim_in),
+# 			nn.PReLU()
+# 		)
+		
+# 		# 2. Phase-routing gating network (2-Layer MLP + Sigmoid)
+# 		self.mask_gate = nn.Sequential(
+# 			nn.Linear(ndim_mask, ndim_in // 2),
+# 			nn.PReLU(),
+# 			nn.Linear(ndim_in // 2, ndim_in),
+# 			nn.Sigmoid()
+# 		)
+		
+# 		# 3. Output projection
+# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
+# 		self.activate_out = nn.PReLU()
+
+# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
+# 		N = A_src_in_edges.edge_index[0].max().item() + 1
+# 		M = A_src_in_edges.edge_index[1].max().item() + 1
+
+# 		# Step 1: Strict outer existential kill-switch (0 if all mask elements are 0)
+# 		absolute_gate = mask.max(1, keepdims=True)[0]
+
+# 		# Step 2: Compute deep geometric/arrival representation
+# 		geo_features = self.fc1(torch.cat((inpt, A_src_in_edges.x), dim=-1))
+
+# 		# Step 3: Compute channel-wise phase routing weights (values in [0.0, 1.0])
+# 		phase_routing_vectors = self.mask_gate(mask)
+
+# 		# Step 4: Gated message composition
+# 		msg = absolute_gate * (phase_routing_vectors * geo_features)
+
+# 		# Step 5: Bipartite aggregation & final projection
+# 		aggregated = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
+# 		return self.activate_out(self.fc2(aggregated))
+		
+# class BipartiteGraphOperator(MessagePassing):
+# 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
 # 		super(BipartiteGraphOperator, self).__init__('add') # (aggr='gcn') 
 # 		# 1. Standard projection for the geometric features
 # 		self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
