@@ -770,6 +770,83 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 
 		return mask_j*self.activate1(self.fc1(torch.cat((x_j, edge_attr), dim = -1)))	
 
+
+# class BipartiteGraphReadOutOperator(MessagePassing):
+# 	def __init__(self, ndim_in, ndim_out, ndim_edges=4):
+# 		# Aggregating from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
+# 		super(BipartiteGraphReadOutOperator, self).__init__('add')
+		
+# 		# 2-layer MLP for non-linear association evaluation
+# 		self.fc1 = nn.Sequential(
+# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
+# 			nn.PReLU(),
+# 			nn.Linear(ndim_in, ndim_in),
+# 			nn.PReLU()
+# 		)
+# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
+# 		self.activate_out = nn.PReLU()
+
+# 	def forward(self, inpt, A_Lg_in_srcs, mask, n_sta, n_temp):
+# 		N = A_Lg_in_srcs.edge_index[0].max().item() + 1 # Source Factor nodes
+# 		M = A_Lg_in_srcs.edge_index[1].max().item() + 1 # Product Graph nodes
+
+# 		# Propagate message from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
+# 		out = self.propagate(
+# 			A_Lg_in_srcs.edge_index, 
+# 			size=(N, M), 
+# 			x=inpt, 
+# 			edge_attr=A_Lg_in_srcs.x, 
+# 			mask=mask
+# 		)
+
+# 		# Mask mapped to sending source nodes (edge_index[0])
+# 		out_mask = mask[A_Lg_in_srcs.edge_index[0]]
+
+# 		return self.activate_out(self.fc2(out)), out_mask
+
+# 	def message(self, x_j, mask_j, edge_attr):
+# 		# x_j is inpt[edge_index[0]] (Source Factor representation)
+# 		# mask_j is mask[edge_index[0]] (Source prediction mask)
+# 		return mask_j * self.fc1(torch.cat((x_j, edge_attr), dim=-1))
+		
+# class BipartiteGraphReadOutOperator(MessagePassing):
+# 	def __init__(self, ndim_in, ndim_out, ndim_edges=4):
+# 		super(BipartiteGraphReadOutOperator, self).__init__('add')
+		
+# 		# 2-layer MLP to accurately evaluate source-station association geometry
+# 		self.fc1 = nn.Sequential(
+# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
+# 			nn.PReLU(),
+# 			nn.Linear(ndim_in, ndim_in),
+# 			nn.PReLU()
+# 		)
+# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
+# 		self.activate_out = nn.PReLU()
+
+# 	def forward(self, inpt, A_Lg_in_srcs, mask, n_sta, n_temp):
+# 		N = A_Lg_in_srcs.edge_index[0].max().item() + 1
+# 		M = A_Lg_in_srcs.edge_index[1].max().item() + 1
+
+# 		# Propagate message back to product graph
+# 		out = self.propagate(
+# 			A_Lg_in_srcs.edge_index, 
+# 			size=(N, M), 
+# 			x=inpt, 
+# 			edge_attr=A_Lg_in_srcs.x, 
+# 			mask=mask
+# 		)
+
+# 		# Extract mask slice for active edge outputs
+# 		out_mask = mask[A_Lg_in_srcs.edge_index[0]]
+
+# 		return self.activate_out(self.fc2(out)), out_mask
+
+# 	def message(self, x_j, mask_j, edge_attr):
+# 		# Masking out inactive edges
+# 		# x_j is source representation, edge_attr is 4D relative offset
+# 		return mask_j * self.fc1(torch.cat((x_j, edge_attr), dim=-1))
+		
+
 class DataAggregationAssociationPhase(MessagePassing): # make equivelent version with sum operations.
 	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_latent = 30, n_dim_mask = 5, use_absolute_pos = use_absolute_pos):
 		super(DataAggregationAssociationPhase, self).__init__('mean') # node dim
@@ -1892,6 +1969,7 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		else:
 			# mask_out = 1.0*(torch.round(torch.sigmoid(y[:,1].reshape(-1,1))).detach()).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
+			mask_out = torch.clamp((torch.sigmoid(y[:,1].reshape(-1,1)) - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
 			mask_out = torch.clamp((torch.sigmoid(y[:,1].reshape(-1,1)) - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
 
 
