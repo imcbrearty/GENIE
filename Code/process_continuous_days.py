@@ -349,7 +349,7 @@ else:
 	
 	## Add estimate of number of nodes / cartesian product size
 	deg_padding = np.nan ## Use hueristic
-	Vc = 3500.0 # Include this or not
+	Vc = 6500.0 # Include this or not
 	scale_domain = 1.1
 
 	## Include this or not
