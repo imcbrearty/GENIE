@@ -427,7 +427,7 @@ class SpaceTimeAttention(MessagePassing):
 		self.scale_rel = scale_rel
 		self.activate2 = nn.PReLU()
 		self.log_temp = nn.Parameter(torch.Tensor([0.5]))
-		self.fixed_degree = torch.Tensor([30.0]).to(device)
+		self.fixed_degree = torch.Tensor([120]).to(device) # 30.0
 		# self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
 		# self.proj = nn.Linear(n_latent*n_heads, out_channels) # can remove this layer possibly.
 		# self.proj = nn.Linear(n_latent*n_heads, out_channels) # can remove this layer possibly.
@@ -441,12 +441,13 @@ class SpaceTimeAttention(MessagePassing):
 		self.use_fixed_edges = False
 		# self.activate3 = nn.PReLU()
 
-	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, k = 30, fixed_type = 0): # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
+	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, k = 12, fixed_type = 0): # 12 # Note: spatial attention k is a SMALLER fraction than bandwidth on spatial graph. (10 vs. 15).
 
 		if self.use_fixed_edges == False:
 
 			edge_index = knn(torch.cat((x_context/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_query/1000.0, self.scale_time*x_query_t.reshape(-1,1)), dim = 1), k = k).flip(0)
-			edge_attr = torch.cat(((x_query[edge_index[1],0:3] - x_context[edge_index[0],0:3])/self.scale_rel, x_query_t[edge_index[1]].reshape(-1,1)/self.scale_time - x_context_t[edge_index[0]].reshape(-1,1)/self.scale_time), dim = 1) # /scale_x
+			# edge_attr = torch.cat(((x_query[edge_index[1],0:3] - x_context[edge_index[0],0:3])/self.scale_rel, x_query_t[edge_index[1]].reshape(-1,1)/self.scale_time - x_context_t[edge_index[0]].reshape(-1,1)/self.scale_time), dim = 1) # /scale_x
+			edge_attr = torch.cat(((x_query[edge_index[1],0:3] - x_context[edge_index[0],0:3]), self.scale_time*(x_query_t[edge_index[1]].reshape(-1,1) - x_context_t[edge_index[0]].reshape(-1,1))), dim = 1)/self.scale_rel # /scale_x
 			# return self.activate2(self.proj(self.propagate(edge_index, x = inpts, edge_attr = edge_attr, size = (x_context.shape[0], x_query.shape[0])).reshape(len(x_query), -1))) # mean over different heads
 			return self.activate2(self.proj(self.propagate(edge_index, x = inpts, edge_attr = edge_attr, size = (x_context.shape[0], x_query.shape[0])).mean(1))) # mean over different heads
 
@@ -474,9 +475,10 @@ class SpaceTimeAttention(MessagePassing):
 		return alpha.unsqueeze(-1)*value_embed
 
 
-	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k = 30):
+	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k = 12): # 30
 		edge_index = knn(torch.cat((x_context/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_query/1000.0, self.scale_time*x_query_t.reshape(-1,1)), dim = 1), k = k).flip(0)
-		edge_attr = torch.cat(((x_query[edge_index[1],0:3] - x_context[edge_index[0],0:3])/self.scale_rel, x_query_t[edge_index[1]].reshape(-1,1)/self.scale_time - x_context_t[edge_index[0]].reshape(-1,1)/self.scale_time), dim = 1) # /scale_x
+		# edge_attr = torch.cat(((x_query[edge_index[1],0:3] - x_context[edge_index[0],0:3])/self.scale_rel, x_query_t[edge_index[1]].reshape(-1,1)/self.scale_time - x_context_t[edge_index[0]].reshape(-1,1)/self.scale_time), dim = 1) # /scale_x
+		edge_attr = torch.cat(((x_query[edge_index[1],0:3] - x_context[edge_index[0],0:3]), self.scale_time*(x_query_t[edge_index[1]].reshape(-1,1) - x_context_t[edge_index[0]].reshape(-1,1))), dim = 1)/self.scale_rel # /scale_x
 		self.fixed_edges = edge_index
 		self.edge_features = edge_attr
 		self.use_fixed_edges = True
