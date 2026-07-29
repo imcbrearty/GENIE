@@ -263,9 +263,11 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 
 		# embed_sta_edges = self.fproj_edges_sta(pos_loc/1e6)
 
-		pos_rel_sta = torch.cat(((pos_loc[A_src_in_sta[0][A_in_sta[0]]]/1000.0 - pos_loc[A_src_in_sta[0][A_in_sta[1]]]/1000.0)/(self.scale_rel/1000.0), (pos_src_t[A_src_in_sta[1][A_in_sta[0]]] - pos_src_t[A_src_in_sta[1][A_in_sta[1]]]).reshape(-1,1)/self.scale_time), dim = 1)   # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-		pos_rel_src = torch.cat(((pos_src[A_src_in_sta[1][A_in_src[0]]]/1000.0 - pos_src[A_src_in_sta[1][A_in_src[1]]]/1000.0)/(self.scale_rel/1000.0), (pos_src_t[A_src_in_sta[1][A_in_src[0]]] - pos_src_t[A_src_in_sta[1][A_in_src[1]]]).reshape(-1,1)/self.scale_time), dim = 1)  # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-
+		# pos_rel_sta = torch.cat(((pos_loc[A_src_in_sta[0][A_in_sta[0]]]/1000.0 - pos_loc[A_src_in_sta[0][A_in_sta[1]]]/1000.0)/(self.scale_rel/1000.0), (pos_src_t[A_src_in_sta[1][A_in_sta[0]]] - pos_src_t[A_src_in_sta[1][A_in_sta[1]]]).reshape(-1,1)/self.scale_time), dim = 1)   # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		# pos_rel_src = torch.cat(((pos_src[A_src_in_sta[1][A_in_src[0]]]/1000.0 - pos_src[A_src_in_sta[1][A_in_src[1]]]/1000.0)/(self.scale_rel/1000.0), (pos_src_t[A_src_in_sta[1][A_in_src[0]]] - pos_src_t[A_src_in_sta[1][A_in_src[1]]]).reshape(-1,1)/self.scale_time), dim = 1)  # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		pos_rel_sta = torch.cat(((pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]]), 1000.0*self.scale_time*(pos_src_t[A_src_in_sta[1][A_in_sta[0]]] - pos_src_t[A_src_in_sta[1][A_in_sta[1]]]).view(-1,1)), dim = 1)/self.scale_rel   # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		pos_rel_src = torch.cat(((pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]]), 1000.0*self.scale_time*(pos_src_t[A_src_in_sta[1][A_in_src[0]]] - pos_src_t[A_src_in_sta[1][A_in_src[1]]]).view(-1,1)), dim = 1)/self.scale_rel  # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		
 		## Could add binary edge type information to indicate data type
 		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), edge_attr = pos_rel_sta)), dim = 1)) # could concatenate edge features here, and before.
 		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(tr), edge_attr = pos_rel_src)), dim = 1))
@@ -285,18 +287,19 @@ class BipartiteGraphOperator(MessagePassing):
 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4):
 		super(BipartiteGraphOperator, self).__init__('add')
 		# include a single projection map
-		self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
+		self.fc1 = nn.Sequential(nn.Linear(ndim_in + ndim_edges, ndim_in), nn.PReLU(), nn.Linear(ndim_in, ndim_in), nn.PReLU())
+		# self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
 		self.fc2 = nn.Linear(ndim_in, ndim_out) # added additional layer
 
 		self.activate1 = nn.PReLU() # added activation.
-		self.activate2 = nn.PReLU() # added activation.
+		# self.activate2 = nn.PReLU() # added activation.
 
 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
 
 		N = A_src_in_edges.edge_index[0].max().item() + 1
 		M = A_src_in_edges.edge_index[1].max().item() + 1
 
-		return self.activate2(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = mask.max(1, keepdims = True)[0]*self.activate1(self.fc1(torch.cat((inpt, A_src_in_edges.x), dim = -1))))))
+		return self.activate1(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = mask.max(1, keepdims = True)[0]*self.fc1(torch.cat((inpt, A_src_in_edges.x), dim = -1)))))
 
 # class BipartiteGraphOperator(MessagePassing):
 # 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
