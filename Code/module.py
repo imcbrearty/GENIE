@@ -1115,12 +1115,12 @@ class DataAggregationAssociationPhase(MessagePassing): # make equivelent version
 			pos_rel_src = torch.cat((pos_rel_src[:,0:3]/src_norm, torch.exp(-1.0*src_norm*F.softplus(self.w_gamma2)), pos_rel_src[:,3:4]), dim = 1)
 			
 		
-		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(self.l1_t1_1(tr))), mask, edge_attr = pos_rel_sta, edge_type = 1), dim = 1)) # Supposed to use this layer. Now, using correct layer.
-		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(self.l1_t2_1(tr))), mask, edge_attr = pos_rel_src, edge_type = 2), dim = 1))
+		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(self.l1_t1_1(tr)), edge_attr = pos_rel_sta, edge_type = 1), mask), dim = 1)) # Supposed to use this layer. Now, using correct layer.
+		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(self.l1_t2_1(tr)), edge_attr = pos_rel_src, edge_type = 2), mask), dim = 1))
 		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
 
-		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask, edge_attr = pos_rel_sta, edge_type = 1), dim = 1)) # could concatenate edge features here, and before.
-		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr))), mask, edge_attr = pos_rel_src, edge_type = 2), dim = 1))
+		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), edge_attr = pos_rel_sta, edge_type = 1), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), edge_attr = pos_rel_src, edge_type = 2), mask), dim = 1))
 		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
 
 		return tr # the new embedding.
