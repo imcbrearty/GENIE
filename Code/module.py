@@ -204,12 +204,13 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 		if use_offsets == True:
 			self.merge_edges1 = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
 			self.merge_edges2 = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
+			self.w_gamma1 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
+			self.w_gamma2 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
 			# init_gammas1 = torch.tensor([0.1, 0.5, 1.0, 2.0])
 			# init_gammas2 = torch.tensor([0.1, 0.5, 1.0, 2.0])
-        	# self.w_gamma1 = nn.Parameter(torch.tensor([0.1, 0.5, 1.0, 2.0]).reshape(1,-1))
-        	# self.w_gamma2 = nn.Parameter(torch.tensor([0.1, 0.5, 1.0, 2.0]).reshape(1,-1))
-        	self.w_gamma1 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
-        	self.w_gamma2 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
+			# self.w_gamma1 = nn.Parameter(torch.tensor([0.1, 0.5, 1.0, 2.0]).reshape(1,-1))
+			# self.w_gamma2 = nn.Parameter(torch.tensor([0.1, 0.5, 1.0, 2.0]).reshape(1,-1))
+
 		
 		else:
 			self.merge_edges1 = lambda x: x
@@ -404,8 +405,8 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 		self.scale_time = scale_time
 		self.merge_edges1 = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
 		self.merge_edges2 = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
-        self.w_gamma1 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
-        self.w_gamma2 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
+		self.w_gamma1 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
+		self.w_gamma2 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
 
 	def forward(self, tr, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src, pos_src_t):
 
@@ -1095,8 +1096,8 @@ class DataAggregationAssociationPhase(MessagePassing): # make equivelent version
 		if use_offsets == True:
 			self.merge_edges1 = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
 			self.merge_edges2 = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
-        	self.w_gamma1 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
-        	self.w_gamma2 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
+			self.w_gamma1 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
+			self.w_gamma2 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1,-1))
 		self.use_offsets = use_offsets
 		
 	
