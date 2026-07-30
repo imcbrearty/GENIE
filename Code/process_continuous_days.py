@@ -787,8 +787,9 @@ for cnt, strs in enumerate([0]):
 		if use_time_shift == False:
 			spatial_vals = torch.Tensor((ftrns1(x_grids[i][A_src_in_prod[1].cpu().detach().numpy()][:,0:3]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()]))/(30*src_x_kernel)).to(device)
 		else:
-			spatial_vals = torch.cat((torch.Tensor((ftrns1(x_grids[i][A_src_in_prod[1].cpu().detach().numpy()][:,0:3]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()]))/(30*src_x_kernel)).to(device), torch.Tensor(x_grids[i][A_src_in_prod[1].cpu().detach().numpy(),3]).reshape(-1,1).to(device)/time_shift_range), dim = 1)
-		
+			# spatial_vals = torch.cat((torch.Tensor((ftrns1(x_grids[i][A_src_in_prod[1].cpu().detach().numpy()][:,0:3]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()]))/(30*src_x_kernel)).to(device), torch.Tensor(x_grids[i][A_src_in_prod[1].cpu().detach().numpy(),3]).reshape(-1,1).to(device)/time_shift_range), dim = 1)
+			spatial_vals = torch.cat((torch.Tensor((ftrns1(x_grids[i][A_src_in_prod[1].cpu().detach().numpy()][:,0:3]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()]))/(30*src_x_kernel)).to(device), torch.Tensor(x_grids[i][A_src_in_prod[1].cpu().detach().numpy(),3]).reshape(-1,1).to(device)/(10.0*src_t_kernel)), dim = 1)
+
 		A_src_in_prod = Data(x = spatial_vals, edge_index = A_src_in_prod)
 		flipped_edge = torch.Tensor(np.ascontiguousarray(np.flip(A_src_in_prod.edge_index.cpu().detach().numpy(), axis = 0))).long().to(device)
 		A_src_in_prod_flipped = Data(x = spatial_vals, edge_index = flipped_edge).to(device)
