@@ -247,8 +247,8 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 
 	def message(self, x_j, edge_attr = None, edge_type = None):
 		if edge_attr is not None:
-	    	# Message with edge offsets
-	    	return self.merge_edges1(torch.cat((x_j, edge_attr), dim=1)) if edge_type == 1 else self.merge_edges2(torch.cat((x_j, edge_attr), dim=1))
+			# Message with edge offsets
+			return self.merge_edges1(torch.cat((x_j, edge_attr), dim=1)) if edge_type == 1 else self.merge_edges2(torch.cat((x_j, edge_attr), dim=1))
 		return x_j
 
 	# def message(self, x_j, edge_attr
