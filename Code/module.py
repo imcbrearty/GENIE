@@ -2384,7 +2384,8 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
 		self.SpatialAggregation3 = SpatialAggregation(30, 30).to(device) # 15, 30
 		self.SpaceTimeDirect = SpaceTimeDirect(30, 30).to(device) # 15, 30
-		self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 4, 15, device = device).to(device)
+		self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 8, 15, device = device).to(device)
+		# self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 4, 15, device = device).to(device)
 
 		if use_expanded == True:
 			# self.SpatialAggregation1_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
