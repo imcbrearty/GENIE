@@ -468,7 +468,7 @@ class BipartiteGraphOperator(MessagePassing):
 		
 		# 1. Edge MLP: Evaluates travel-time misfit + 4D geometry
 		self.fc1 = nn.Sequential(
-			nn.Linear(ndim_in + ndim_edges + 4, ndim_in),
+			nn.Linear(ndim_in + ndim_edges, ndim_in),
 			nn.PReLU(),
 			nn.Linear(ndim_in, ndim_in),
 			nn.PReLU()
