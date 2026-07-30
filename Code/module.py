@@ -391,6 +391,9 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 
 		return self.merge_edges(torch.cat((x_j, edge_attr), dim = 1)) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 
+	# spatial_filter = self.edge_mlp(edge_attr)  # Shape: (N_edges, n_hidden)
+	# return x_j * spatial_filter
+
 class BipartiteGraphOperator1(MessagePassing):
 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4):
 		super(BipartiteGraphOperator1, self).__init__('add')
@@ -2209,13 +2212,13 @@ class SourceStationAttention(MessagePassing):
 
 
 class GCN_Detection_Network_extended(nn.Module):
-	def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, use_embedding = use_embedding, use_src_pred = False, use_sigmoid = use_sigmoid, attach_time = attach_time, trv = None, device = 'cuda'):
+	def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, use_embedding = use_embedding, use_src_pred = False, use_sigmoid = use_sigmoid, attach_time = attach_time, use_absolute_offset = True, trv = None, device = 'cuda'):
 		super(GCN_Detection_Network_extended, self).__init__()
 		# Define modules and other relavent fixed objects (scaling coefficients.)
 		# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
 		n_dim_extra_inpt = 0 if attach_time == False else 1
 		n_dim_extra_feat = 0 if use_embedding == False else 20
-
+		if use_absolute_offset == True: n_dim_extra_inpt = n_dim_extra_inpt + 4 # concatenate the spatial offsets between source nodes and recievers into input feature
 		
 		embed_vector_dim = 10 ## Note can add normalization to output
 		self.embed_vector = nn.Sequential(nn.Linear(6, 30), nn.PReLU(), nn.Linear(30, embed_vector_dim))
@@ -2280,6 +2283,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.use_direct_output = True
 		self.use_sigmoid = use_sigmoid
 		self.use_src_pred = use_src_pred
+		self.use_absolute_offset = use_absolute_offset
 		# self.use_src_pred = self.Arrivals.src_pred
 		# self.scale_output = torch.Tensor([1.0/10.0]).to(device)
 		# self.use_sigmoid = use_sigmoid
@@ -2298,13 +2302,16 @@ class GCN_Detection_Network_extended(nn.Module):
 		if self.use_absolute_pos == True:
 			Slice = torch.cat((Slice, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
+		if self.use_absolute_offset == True:
+			Slice = torch.cat((Slice, A_src_in_edges.x[:,0:3], torch.norm(A_src_in_edges.x[:,0:3], dim = 1, keepdim = True)), dim = 1)
+		
 		if self.attach_time == True:
-			Slice = torch.cat((Slice, x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1)
+			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
 
 		Slice = torch.cat((Slice, embed_context), dim = 1)
 
 		if self.use_embedding == True:
-			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
+			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
 			inpt_embedding = torch.cat((inpt_embedding, embed_context), dim = 1)
 
 			embedding = self.DataAggregationEmbedding(inpt_embedding, A_in_sta, A_in_src[0], A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
@@ -2531,12 +2538,16 @@ class GCN_Detection_Network_extended(nn.Module):
 		
 		if self.use_absolute_pos == True:
 			Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
+
+		if self.use_absolute_offset == True:
+			Slice = torch.cat((Slice, A_src_in_edges.x[:,0:3], torch.norm(A_src_in_edges.x[:,0:3], dim = 1, keepdim = True)), dim = 1)
+		
 		if self.attach_time == True:
-			Slice = torch.cat((Slice, x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1)
+			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
 		
 		Slice = torch.cat((Slice, embed_context), dim = 1)
 		if self.use_embedding == True:
-			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
+			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
 			inpt_embedding = torch.cat((inpt_embedding, embed_context), dim = 1)
 
 			embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
@@ -2638,13 +2649,16 @@ class GCN_Detection_Network_extended(nn.Module):
 		if self.use_absolute_pos == True:
 			Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
+		if self.use_absolute_offset == True:
+			Slice = torch.cat((Slice, A_src_in_edges.x[:,0:3], torch.norm(A_src_in_edges.x[:,0:3], dim = 1, keepdim = True)), dim = 1)
+		
 		if self.attach_time == True:
-			Slice = torch.cat((Slice, x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1)
+			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
 
 		Slice = torch.cat((Slice, embed_context), dim = 1)
 
 		if self.use_embedding == True:
-			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/self.scale_time), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
+			inpt_embedding = torch.cat((torch.ones(len(Slice),1).to(Slice.device),  1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
 			inpt_embedding = torch.cat((inpt_embedding, embed_context), dim = 1)
 
 			embedding = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
