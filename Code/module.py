@@ -283,9 +283,9 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 
 		return self.merge_edges(torch.cat((x_j, edge_attr), dim = 1)) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 
-class BipartiteGraphOperator(MessagePassing):
+class BipartiteGraphOperator1(MessagePassing):
 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4):
-		super(BipartiteGraphOperator, self).__init__('add')
+		super(BipartiteGraphOperator1, self).__init__('add')
 		# include a single projection map
 		self.fc1 = nn.Sequential(nn.Linear(ndim_in + ndim_edges, ndim_in), nn.PReLU(), nn.Linear(ndim_in, ndim_in), nn.PReLU())
 		# self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
@@ -303,61 +303,61 @@ class BipartiteGraphOperator(MessagePassing):
 
 
 
-# class BipartiteGraphOperator(MessagePassing):
-# 	def __init__(self, ndim_in, ndim_out, ndim_edges=4, ndim_mask=4):
-# 		super(BipartiteGraphOperator, self).__init__(aggr='add')
+class BipartiteGraphOperator(MessagePassing):
+	def __init__(self, ndim_in, ndim_out, ndim_edges=4, ndim_mask=4):
+		super(BipartiteGraphOperator, self).__init__(aggr='add')
 		
-# 		# 1. Edge MLP: Evaluates travel-time misfit + 4D geometry
-# 		self.fc1 = nn.Sequential(
-# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
-# 			nn.PReLU(),
-# 			nn.Linear(ndim_in, ndim_in),
-# 			nn.PReLU()
-# 		)
+		# 1. Edge MLP: Evaluates travel-time misfit + 4D geometry
+		self.fc1 = nn.Sequential(
+			nn.Linear(ndim_in + ndim_edges, ndim_in),
+			nn.PReLU(),
+			nn.Linear(ndim_in, ndim_in),
+			nn.PReLU()
+		)
 		
-# 		# 2. Low-Rank Gating (Prevents synthetic memorization)
-# 		self.mask_gate = nn.Sequential(
-# 			nn.Linear(ndim_mask, 4),
-# 			nn.PReLU(),
-# 			nn.Linear(4, ndim_in),
-# 			nn.Sigmoid()
-# 		)
+		# 2. Low-Rank Gating (Prevents synthetic memorization)
+		self.mask_gate = nn.Sequential(
+			nn.Linear(ndim_mask, 4),
+			nn.PReLU(),
+			nn.Linear(4, ndim_in),
+			nn.Sigmoid()
+		)
 		
-# 		# 3. LayerNorm standardizes feature distribution across channels
-# 		self.norm = nn.LayerNorm(ndim_in)
+		# 3. LayerNorm standardizes feature distribution across channels
+		self.norm = nn.LayerNorm(ndim_in)
 		
-# 		# 4. Final Projection
-# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
-# 		self.activate_out = nn.PReLU()
+		# 4. Final Projection
+		self.fc2 = nn.Linear(ndim_in, ndim_out)
+		self.activate_out = nn.PReLU()
 
-# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
-# 		# Target nodes (M) represent the factor graph space being stacked onto
-# 		N = A_src_in_edges.edge_index[0].max().item() + 1
-# 		M = A_src_in_edges.edge_index[1].max().item() + 1
+	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
+		# Target nodes (M) represent the factor graph space being stacked onto
+		N = A_src_in_edges.edge_index[0].max().item() + 1
+		M = A_src_in_edges.edge_index[1].max().item() + 1
 
-# 		# Step 1: Existential gate for active mask edges
-# 		absolute_gate = mask.max(1, keepdims=True)[0]
+		# Step 1: Existential gate for active mask edges
+		absolute_gate = mask.max(1, keepdims=True)[0]
 
-# 		# Step 2: Compute non-linear geometric features & phase routing
-# 		geo_features = self.fc1(torch.cat((inpt, A_src_in_edges.x), dim=-1))
-# 		phase_routing_vectors = self.mask_gate(mask)
+		# Step 2: Compute non-linear geometric features & phase routing
+		geo_features = self.fc1(torch.cat((inpt, A_src_in_edges.x), dim=-1))
+		phase_routing_vectors = self.mask_gate(mask)
 
-# 		# Step 3: Gated message composition
-# 		msg = absolute_gate * (phase_routing_vectors * geo_features)
+		# Step 3: Gated message composition
+		msg = absolute_gate * (phase_routing_vectors * geo_features)
 
-# 		# Step 4: Perform raw physical stacking (Constructive Summing)
-# 		stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
+		# Step 4: Perform raw physical stacking (Constructive Summing)
+		stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
 
-# 		# Step 5: Compute active degree E_i per target node (only counting active mask edges)
-# 		target_indices = A_src_in_edges.edge_index[1]
-# 		deg = torch.zeros((M, 1), device=stacked.device, dtype=stacked.dtype)
-# 		deg.index_add_(0, target_indices, absolute_gate)
+		# Step 5: Compute active degree E_i per target node (only counting active mask edges)
+		target_indices = A_src_in_edges.edge_index[1]
+		deg = torch.zeros((M, 1), device=stacked.device, dtype=stacked.dtype)
+		deg.index_add_(0, target_indices, absolute_gate)
 
-# 		# Step 6: Scale by 1 / sqrt(E_i) -> Keeps noise floor equal between core hubs & sparse nodes
-# 		stacked_normalized = stacked / torch.sqrt(deg.clamp(min=1.0))
+		# Step 6: Scale by 1 / sqrt(E_i) -> Keeps noise floor equal between core hubs & sparse nodes
+		stacked_normalized = stacked / torch.sqrt(deg.clamp(min=1.0))
 
-# 		# Step 7: Channel-wise standardization & final projection
-# 		return self.activate_out(self.fc2(self.norm(stacked_normalized)))
+		# Step 7: Channel-wise standardization & final projection
+		return self.activate_out(self.fc2(self.norm(stacked_normalized)))
 
 		
 # class BipartiteGraphOperator(MessagePassing):
@@ -749,9 +749,9 @@ class SpaceTimeAttentionQuery(MessagePassing):
 		self.use_fixed_edges = True
 
 
-class BipartiteGraphReadOutOperator(MessagePassing):
+class BipartiteGraphReadOutOperator1(MessagePassing):
 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4):
-		super(BipartiteGraphReadOutOperator, self).__init__('add')
+		super(BipartiteGraphReadOutOperator1, self).__init__('add')
 		# include a single projection map
 		self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
 		self.fc2 = nn.Linear(ndim_in, ndim_out) # added additional layer
@@ -771,43 +771,43 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		return mask_j*self.activate1(self.fc1(torch.cat((x_j, edge_attr), dim = -1)))	
 
 
-# class BipartiteGraphReadOutOperator(MessagePassing):
-# 	def __init__(self, ndim_in, ndim_out, ndim_edges=4):
-# 		# Aggregating from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
-# 		super(BipartiteGraphReadOutOperator, self).__init__('add')
+class BipartiteGraphReadOutOperator(MessagePassing):
+	def __init__(self, ndim_in, ndim_out, ndim_edges=4):
+		# Aggregating from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
+		super(BipartiteGraphReadOutOperator, self).__init__('add')
 		
-# 		# 2-layer MLP for non-linear association evaluation
-# 		self.fc1 = nn.Sequential(
-# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
-# 			nn.PReLU(),
-# 			nn.Linear(ndim_in, ndim_in),
-# 			nn.PReLU()
-# 		)
-# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
-# 		self.activate_out = nn.PReLU()
+		# 2-layer MLP for non-linear association evaluation
+		self.fc1 = nn.Sequential(
+			nn.Linear(ndim_in + ndim_edges, ndim_in),
+			nn.PReLU(),
+			nn.Linear(ndim_in, ndim_in),
+			nn.PReLU()
+		)
+		self.fc2 = nn.Linear(ndim_in, ndim_out)
+		self.activate_out = nn.PReLU()
 
-# 	def forward(self, inpt, A_Lg_in_srcs, mask, n_sta, n_temp):
-# 		N = A_Lg_in_srcs.edge_index[0].max().item() + 1 # Source Factor nodes
-# 		M = A_Lg_in_srcs.edge_index[1].max().item() + 1 # Product Graph nodes
+	def forward(self, inpt, A_Lg_in_srcs, mask, n_sta, n_temp):
+		N = A_Lg_in_srcs.edge_index[0].max().item() + 1 # Source Factor nodes
+		M = A_Lg_in_srcs.edge_index[1].max().item() + 1 # Product Graph nodes
 
-# 		# Propagate message from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
-# 		out = self.propagate(
-# 			A_Lg_in_srcs.edge_index, 
-# 			size=(N, M), 
-# 			x=inpt, 
-# 			edge_attr=A_Lg_in_srcs.x, 
-# 			mask=mask
-# 		)
+		# Propagate message from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
+		out = self.propagate(
+			A_Lg_in_srcs.edge_index, 
+			size=(N, M), 
+			x=inpt, 
+			edge_attr=A_Lg_in_srcs.x, 
+			mask=mask
+		)
 
-# 		# Mask mapped to sending source nodes (edge_index[0])
-# 		out_mask = mask[A_Lg_in_srcs.edge_index[0]]
+		# Mask mapped to sending source nodes (edge_index[0])
+		out_mask = mask[A_Lg_in_srcs.edge_index[0]]
 
-# 		return self.activate_out(self.fc2(out)), out_mask
+		return self.activate_out(self.fc2(out)), out_mask
 
-# 	def message(self, x_j, mask_j, edge_attr):
-# 		# x_j is inpt[edge_index[0]] (Source Factor representation)
-# 		# mask_j is mask[edge_index[0]] (Source prediction mask)
-# 		return mask_j * self.fc1(torch.cat((x_j, edge_attr), dim=-1))
+	def message(self, x_j, mask_j, edge_attr):
+		# x_j is inpt[edge_index[0]] (Source Factor representation)
+		# mask_j is mask[edge_index[0]] (Source prediction mask)
+		return mask_j * self.fc1(torch.cat((x_j, edge_attr), dim=-1))
 		
 # class BipartiteGraphReadOutOperator(MessagePassing):
 # 	def __init__(self, ndim_in, ndim_out, ndim_edges=4):
