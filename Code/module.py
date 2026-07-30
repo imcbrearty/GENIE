@@ -191,7 +191,10 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 
 		# self.alpha_expand1 = nn.Parameter(torch.tensor([0.1], device = device)) # device = device
 		# self.alpha_expand2 = nn.Parameter(torch.tensor([0.1], device = device)) # device = device
-
+		self.gate1 = nn.Linear(4*n_hidden, 2*n_hidden)
+		self.gate2 = nn.Linear(4*n_hidden, 2*n_hidden)
+		nn.init.constant_(self.gate1.bias, -2.0) ## Initialize gate output to close to zero
+		nn.init.constant_(self.gate2.bias, -2.0)
 
 
 	def forward(self, tr, mask, A_in_sta, A_in_src):
@@ -201,20 +204,24 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 
 		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr)), mask), dim = 1)) # could concatenate edge features here, and before.
 		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate12(tr)), mask), dim = 1))
-		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
+		tr_local = self.activate1(torch.cat((tr1, tr2), dim = 1))
 
 		tr1 = self.l1_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11c(self.l1_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
 		tr2 = self.l1_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate12c(self.l1_t2_1c(tr))), mask), dim = 1))
-		tr = self.activate1c(torch.cat((tr1, tr2), dim = 1))
+		tr_expanded = self.activate1c(torch.cat((tr1, tr2), dim = 1))
+		gate = torch.sigmoid(self.gate1(torch.cat((tr_local, tr_expanded), dim = 1)))
+		tr = tr_local + gate * tr_expanded
+		
 		# tr = tr_local + self.alpha_expand1*tr_expanded
-
 		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
 		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate22(self.l2_t2_1(tr))), mask), dim = 1))
-		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
+		tr_local = self.activate2(torch.cat((tr1, tr2), dim = 1))
 
 		tr1 = self.l2_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21c(self.l2_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
 		tr2 = self.l2_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate22c(self.l2_t2_1c(tr))), mask), dim = 1))
-		tr = self.activate2c(torch.cat((tr1, tr2), dim = 1))
+		tr_expanded = self.activate2c(torch.cat((tr1, tr2), dim = 1))
+		gate = torch.sigmoid(self.gate2(torch.cat((tr_local, tr_expanded), dim = 1)))
+		tr = tr_local + gate * tr_expanded
 		# tr = tr_local + self.alpha_expand2*tr_expanded
 
 		tr1 = self.l3_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate31(self.l3_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
@@ -222,6 +229,105 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 		tr = self.activate3(torch.cat((tr1, tr2), dim = 1))
 
 		return tr # the new embedding.
+		
+		
+# class DataAggregationExpanded(MessagePassing): # make equivelent version with sum operations.
+# 	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, use_absolute_pos = use_absolute_pos, device = device):
+# 		super(DataAggregationExpanded, self).__init__('mean') # node dim
+
+# 		if use_absolute_pos == True:
+# 			in_channels = in_channels + 3*2
+		
+# 		## Use two layers of SageConv.
+# 		self.in_channels = in_channels
+# 		self.out_channels = out_channels
+# 		self.n_hidden = n_hidden
+
+# 		self.activate = nn.PReLU() # can extend to each channel
+# 		self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
+
+# 		# self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
+# 		self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+
+# 		# self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
+# 		self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+# 		self.activate11 = nn.PReLU() # can extend to each channel
+# 		self.activate12 = nn.PReLU() # can extend to each channel
+# 		self.activate1 = nn.PReLU() # can extend to each channel
+
+# 		self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+
+# 		self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+# 		self.activate21 = nn.PReLU() # can extend to each channel
+# 		self.activate22 = nn.PReLU() # can extend to each channel
+# 		self.activate2 = nn.PReLU() # can extend to each channel
+
+# 		## Add third layer
+# 		self.l3_t1_1 = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l3_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+
+# 		self.l3_t2_1 = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l3_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+# 		self.activate31 = nn.PReLU() # can extend to each channel
+# 		self.activate32 = nn.PReLU() # can extend to each channel
+# 		self.activate3 = nn.PReLU() # can extend to each channel
+
+# 		## Expanded layers
+
+# 		self.l1_t1_1c = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l1_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+# 		# self.l1_t1_2c = nn.Linear(2*n_hidden, n_hidden)
+
+# 		self.l1_t2_1c = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l1_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+# 		self.activate11c = nn.PReLU() # can extend to each channel
+# 		self.activate12c = nn.PReLU() # can extend to each channel
+# 		self.activate1c = nn.PReLU() # can extend to each channel
+
+# 		self.l2_t1_1c = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l2_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+
+# 		self.l2_t2_1c = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l2_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+# 		self.activate21c = nn.PReLU() # can extend to each channel
+# 		self.activate22c = nn.PReLU() # can extend to each channel
+# 		self.activate2c = nn.PReLU() # can extend to each channel
+
+# 		# self.alpha_expand1 = nn.Parameter(torch.tensor([0.1], device = device)) # device = device
+# 		# self.alpha_expand2 = nn.Parameter(torch.tensor([0.1], device = device)) # device = device
+
+
+
+# 	def forward(self, tr, mask, A_in_sta, A_in_src):
+
+# 		tr = torch.cat((tr, mask), dim = -1)
+# 		tr = self.activate(self.init_trns(tr))
+
+# 		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr)), mask), dim = 1)) # could concatenate edge features here, and before.
+# 		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate12(tr)), mask), dim = 1))
+# 		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
+
+# 		tr1 = self.l1_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11c(self.l1_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+# 		tr2 = self.l1_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate12c(self.l1_t2_1c(tr))), mask), dim = 1))
+# 		tr = self.activate1c(torch.cat((tr1, tr2), dim = 1))
+# 		# tr = tr_local + self.alpha_expand1*tr_expanded
+
+# 		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+# 		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate22(self.l2_t2_1(tr))), mask), dim = 1))
+# 		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
+
+# 		tr1 = self.l2_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21c(self.l2_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+# 		tr2 = self.l2_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate22c(self.l2_t2_1c(tr))), mask), dim = 1))
+# 		tr = self.activate2c(torch.cat((tr1, tr2), dim = 1))
+# 		# tr = tr_local + self.alpha_expand2*tr_expanded
+
+# 		tr1 = self.l3_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate31(self.l3_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+# 		tr2 = self.l3_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate32(self.l3_t2_1(tr))), mask), dim = 1))
+# 		tr = self.activate3(torch.cat((tr1, tr2), dim = 1))
+
+# 		return tr # the new embedding.
 
 class DataAggregationEmbedding(MessagePassing): # make equivelent version with sum operations.
 	def __init__(self, in_channels, out_channels, n_hidden = 30, scale_rel = scale_rel, scale_time = scale_time, ndim_proj = 4):
