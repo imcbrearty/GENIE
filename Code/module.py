@@ -417,12 +417,12 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 
 		# pos_rel_sta = torch.cat(((pos_loc[A_src_in_sta[0][A_in_sta[0]]]/1000.0 - pos_loc[A_src_in_sta[0][A_in_sta[1]]]/1000.0)/(self.scale_rel/1000.0), (pos_src_t[A_src_in_sta[1][A_in_sta[0]]] - pos_src_t[A_src_in_sta[1][A_in_sta[1]]]).reshape(-1,1)/self.scale_time), dim = 1)   # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
 		# pos_rel_src = torch.cat(((pos_src[A_src_in_sta[1][A_in_src[0]]]/1000.0 - pos_src[A_src_in_sta[1][A_in_src[1]]]/1000.0)/(self.scale_rel/1000.0), (pos_src_t[A_src_in_sta[1][A_in_src[0]]] - pos_src_t[A_src_in_sta[1][A_in_src[1]]]).reshape(-1,1)/self.scale_time), dim = 1)  # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-		pos_rel_sta = torch.cat(((pos_loc[A_src_in_sta[0][A_in_sta[1]]] - pos_loc[A_src_in_sta[0][A_in_sta[0]]]), 1000.0*self.scale_time*(pos_src_t[A_src_in_sta[1][A_in_sta[1]]] - pos_src_t[A_src_in_sta[1][A_in_sta[0]]]).view(-1,1)), dim = 1)/self.scale_rel   # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-		pos_rel_src = torch.cat(((pos_src[A_src_in_sta[1][A_in_src[1]]] - pos_src[A_src_in_sta[1][A_in_src[0]]]), 1000.0*self.scale_time*(pos_src_t[A_src_in_sta[1][A_in_src[1]]] - pos_src_t[A_src_in_sta[1][A_in_src[0]]]).view(-1,1)), dim = 1)/self.scale_rel  # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-		sta_norm = torch.sqrt(torch.sum(pos_rel_sta[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-		src_norm = torch.sqrt(torch.sum(pos_rel_src[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-		pos_rel_sta = torch.cat((pos_rel_sta[:,0:3]/sta_norm, torch.exp(-1.0*sta_norm*F.softplus(self.w_gamma1)), pos_rel_sta[:,3:4]), dim = 1)
-		pos_rel_src = torch.cat((pos_rel_src[:,0:3]/src_norm, torch.exp(-1.0*src_norm*F.softplus(self.w_gamma2)), pos_rel_src[:,3:4]), dim = 1)
+		pos_rel_sta_ref = torch.cat(((pos_loc[A_src_in_sta[0][A_in_sta[1]]] - pos_loc[A_src_in_sta[0][A_in_sta[0]]]), 1000.0*self.scale_time*(pos_src_t[A_src_in_sta[1][A_in_sta[1]]] - pos_src_t[A_src_in_sta[1][A_in_sta[0]]]).view(-1,1)), dim = 1)/self.scale_rel   # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		pos_rel_src_ref = torch.cat(((pos_src[A_src_in_sta[1][A_in_src[1]]] - pos_src[A_src_in_sta[1][A_in_src[0]]]), 1000.0*self.scale_time*(pos_src_t[A_src_in_sta[1][A_in_src[1]]] - pos_src_t[A_src_in_sta[1][A_in_src[0]]]).view(-1,1)), dim = 1)/self.scale_rel  # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		sta_norm = torch.sqrt(torch.sum(pos_rel_sta_ref[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
+		src_norm = torch.sqrt(torch.sum(pos_rel_src_ref[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
+		pos_rel_sta = torch.cat((pos_rel_sta_ref[:,0:3]/sta_norm, torch.exp(-1.0*sta_norm*F.softplus(self.w_gamma1)), pos_rel_sta_ref[:,3:4]), dim = 1)
+		pos_rel_src = torch.cat((pos_rel_src_ref[:,0:3]/src_norm, torch.exp(-1.0*src_norm*F.softplus(self.w_gamma2)), pos_rel_src_ref[:,3:4]), dim = 1)
 
 		## Could add binary edge type information to indicate data type
 		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), edge_attr = pos_rel_sta, edge_type = 1)), dim = 1)) # could concatenate edge features here, and before.
@@ -433,7 +433,7 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), edge_attr = pos_rel_src, edge_type = 2)), dim = 1))
 		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
 
-		return tr, pos_rel_sta, pos_rel_src  # the new embedding.
+		return tr, pos_rel_sta_ref, pos_rel_src_ref  # the new embedding.
 
 	def message(self, x_j, edge_attr, edge_type = None):
 
