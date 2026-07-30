@@ -463,7 +463,7 @@ class BipartiteGraphOperator1(MessagePassing):
 
 
 class BipartiteGraphOperator(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, ndim_edges=8, ndim_mask=4):
+	def __init__(self, ndim_in, ndim_out, ndim_edges=12, ndim_mask=4):
 		super(BipartiteGraphOperator, self).__init__(aggr='add')
 		
 		# 1. Edge MLP: Evaluates travel-time misfit + 4D geometry
