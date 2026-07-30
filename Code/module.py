@@ -403,8 +403,8 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 		# pos_rel_src = torch.cat(((pos_src[A_src_in_sta[1][A_in_src[0]]]/1000.0 - pos_src[A_src_in_sta[1][A_in_src[1]]]/1000.0)/(self.scale_rel/1000.0), (pos_src_t[A_src_in_sta[1][A_in_src[0]]] - pos_src_t[A_src_in_sta[1][A_in_src[1]]]).reshape(-1,1)/self.scale_time), dim = 1)  # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
 		pos_rel_sta = torch.cat(((pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]]), 1000.0*self.scale_time*(pos_src_t[A_src_in_sta[1][A_in_sta[0]]] - pos_src_t[A_src_in_sta[1][A_in_sta[1]]]).view(-1,1)), dim = 1)/self.scale_rel   # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
 		pos_rel_src = torch.cat(((pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]]), 1000.0*self.scale_time*(pos_src_t[A_src_in_sta[1][A_in_src[0]]] - pos_src_t[A_src_in_sta[1][A_in_src[1]]]).view(-1,1)), dim = 1)/self.scale_rel  # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-		pos_rel_sta = torch.cat((pos_rel_sta, torch.sum(pos_rel_sta[:,0:3]**2, dim = 1, keepdim = True)), dim = 1)
-		pos_rel_src = torch.cat((pos_rel_src, torch.sum(pos_rel_src[:,0:3]**2, dim = 1, keepdim = True)), dim = 1)
+		pos_rel_sta = torch.cat((pos_rel_sta, torch.sqrt(torch.sum(pos_rel_sta[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)), dim = 1)
+		pos_rel_src = torch.cat((pos_rel_src, torch.sqrt(torch.sum(pos_rel_src[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)), dim = 1)
 
 		## Could add binary edge type information to indicate data type
 		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), edge_attr = pos_rel_sta, edge_type = 1)), dim = 1)) # could concatenate edge features here, and before.
