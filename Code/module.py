@@ -77,7 +77,7 @@ device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cp
 
 
 class DataAggregation(MessagePassing): # make equivelent version with sum operations.
-	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, use_absolute_pos = use_absolute_pos):
+	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, use_absolute_pos = use_absolute_pos, use_offsets = False):
 		super(DataAggregation, self).__init__('mean') # node dim
 
 		if use_absolute_pos == True:
@@ -108,6 +108,7 @@ class DataAggregation(MessagePassing): # make equivelent version with sum operat
 		self.activate21 = nn.PReLU() # can extend to each channel
 		self.activate22 = nn.PReLU() # can extend to each channel
 		self.activate2 = nn.PReLU() # can extend to each channel
+		self.use_offsets = use_offsets
 
 	def forward(self, tr, mask, A_in_sta, A_in_src):
 
@@ -410,7 +411,7 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), edge_attr = pos_rel_src, edge_type = 2)), dim = 1))
 		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
 
-		return tr # the new embedding.
+		return tr, pos_rel_sta, pos_rel_src  # the new embedding.
 
 	def message(self, x_j, edge_attr, edge_type = None):
 
@@ -685,7 +686,7 @@ class BipartiteGraphOperator(MessagePassing):
 
 
 class SpatialAggregation(MessagePassing):
-	def __init__(self, in_channels, out_channels, scale_rel = scale_rel, scale_time = scale_time, n_dim = 4, n_global = 5, n_hidden = 30):
+	def __init__(self, in_channels, out_channels, scale_rel = scale_rel, scale_time = scale_time, n_dim = 4, n_global = 5, n_hidden = 30, zero_offsets = False):
 		super(SpatialAggregation, self).__init__('mean') # node dim
 		## Use two layers of SageConv. Explictly or implicitly?
 		self.fc1 = nn.Linear(in_channels + n_dim + n_global, n_hidden)
@@ -695,10 +696,11 @@ class SpatialAggregation(MessagePassing):
 		self.activate2 = nn.PReLU()
 		self.activate3 = nn.PReLU()
 		self.scale_rel = scale_rel
+		self.zero_offsets = zero_offsets
 
 	def forward(self, tr, A_src, pos):
 
-		return self.activate2(self.fc2(torch.cat((tr, self.propagate(A_src, x = tr, pos = pos/self.scale_rel)), dim = -1)))
+		return self.activate2(self.fc2(torch.cat((tr, self.propagate(A_src, x = tr, pos = (self.zero_offsets == False)*pos/self.scale_rel)), dim = -1)))
 
 	def message(self, x_j, pos_i, pos_j):
 		
@@ -2263,7 +2265,7 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		if use_expanded == True:
 			# self.SpatialAggregation1_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
-			self.SpatialAggregation2_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
+			self.SpatialAggregation2_expanded = SpatialAggregation(30, 30, zero_offsets = True).to(device) # 15, 30
 			self.gate_expanded = nn.Linear(2*30, 30)
 			nn.init.constant_(self.gate_expanded.bias, -2.0)
 			
@@ -2342,7 +2344,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
 			inpt_embedding = torch.cat((inpt_embedding, embed_context), dim = 1)
 
-			embedding = self.DataAggregationEmbedding(inpt_embedding, A_in_sta, A_in_src[0], A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
+			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, A_in_sta, A_in_src[0], A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
 			Slice = torch.cat((Slice, embedding), dim = 1)
 			
 
@@ -2354,7 +2356,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			x_query_cart = Variable(x_query_cart, requires_grad = True)
 			t_query = Variable(t_query, requires_grad = True)
 
-		x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 		x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
 		x = self.SpatialAggregation1(x, A_src if self.use_expanded == False else A_src[0], x_temp_cuda) # x_temp_cuda_cart
 		# if self.use_expanded == True:
