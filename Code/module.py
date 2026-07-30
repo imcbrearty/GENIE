@@ -126,7 +126,7 @@ class DataAggregation(MessagePassing): # make equivelent version with sum operat
 
 
 class DataAggregationExpanded(MessagePassing): # make equivelent version with sum operations.
-	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, use_absolute_pos = use_absolute_pos, device = device):
+	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, use_absolute_pos = use_absolute_pos, use_offsets = True, ndim_proj = 5, device = device):
 		super(DataAggregationExpanded, self).__init__('mean') # node dim
 
 		if use_absolute_pos == True:
@@ -196,40 +196,64 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 		nn.init.constant_(self.gate1.bias, -2.0) ## Initialize gate output to close to zero
 		nn.init.constant_(self.gate2.bias, -2.0)
 
-
-	def forward(self, tr, mask, A_in_sta, A_in_src):
+		if use_offsets == True:
+			self.merge_edges1 = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
+			self.merge_edges2 = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
+		else:
+			self.merge_edges1 = lambda x: x
+			self.merge_edges2 = lambda x: x
+		self.use_offsets = use_offsets
+	
+	def forward(self, tr, mask, A_in_sta, A_in_src, pos_rel_sta = None, pos_rel_src = None): # A_src_in_sta, pos_loc, pos_src, pos_src_t
 
 		tr = torch.cat((tr, mask), dim = -1)
 		tr = self.activate(self.init_trns(tr))
 
-		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr)), mask), dim = 1)) # could concatenate edge features here, and before.
-		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate12(tr)), mask), dim = 1))
+		# if self.use_offsets == True:
+		# 	pos_rel_sta = torch.cat(((pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]]), 1000.0*self.scale_time*(pos_src_t[A_src_in_sta[1][A_in_sta[0]]] - pos_src_t[A_src_in_sta[1][A_in_sta[1]]]).view(-1,1)), dim = 1)/self.scale_rel   # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		# 	pos_rel_src = torch.cat(((pos_src[A_src_in_sta[1][A_in_src[0][0]]] - pos_src[A_src_in_sta[1][A_in_src[0][1]]]), 1000.0*self.scale_time*(pos_src_t[A_src_in_sta[1][A_in_src[0][0]]] - pos_src_t[A_src_in_sta[1][A_in_src[0][1]]]).view(-1,1)), dim = 1)/self.scale_rel  # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		# 	pos_rel_sta = torch.cat((pos_rel_sta, torch.sum(pos_rel_sta[:,0:3]**2, dim = 1, keepdim = True)), dim = 1)
+		# 	pos_rel_src = torch.cat((pos_rel_src, torch.sum(pos_rel_src[:,0:3]**2, dim = 1, keepdim = True)), dim = 1)
+		
+		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr)) if self.use_offsets == False else self.propagate(A_in_sta, x = self.activate11(tr), edge_attr = pos_rel_sta, edge_type = 1), mask), dim = 1))  # could concatenate edge features here, and before.
+		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate12(tr)) if self.use_offsets == False else self.propagate(A_in_src[0], x = self.activate12(tr), edge_attr = pos_rel_src, edge_type = 2), mask), dim = 1))
 		tr_local = self.activate1(torch.cat((tr1, tr2), dim = 1))
 
-		tr1 = self.l1_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11c(self.l1_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr1 = self.l1_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11c(self.l1_t1_1c(tr))) if self.use_offsets == False else self.propagate(A_in_sta, x = self.activate11c(self.l1_t1_1c(tr)), edge_attr = pos_rel_sta, edge_type = 1), mask), dim = 1)) # could concatenate edge features here, and before.
+		# tr2 = self.l1_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate12c(self.l1_t2_1c(tr))) if self.use_offsets == False else self.propagate(A_in_src[1], x = self.activate12c(self.l1_t2_1c(tr)), edge_attr = pos_rel_src), mask), dim = 1))
 		tr2 = self.l1_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate12c(self.l1_t2_1c(tr))), mask), dim = 1))
 		tr_expanded = self.activate1c(torch.cat((tr1, tr2), dim = 1))
 		gate = torch.sigmoid(self.gate1(torch.cat((tr_local, tr_expanded), dim = 1)))
 		tr = tr_local + gate * tr_expanded
 		
 		# tr = tr_local + self.alpha_expand1*tr_expanded
-		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
-		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate22(self.l2_t2_1(tr))), mask), dim = 1))
+		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))) if self.use_offsets == False else self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), edge_attr = pos_rel_sta, edge_type = 1), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate22(self.l2_t2_1(tr))) if self.use_offsets == False else self.propagate(A_in_src[0], x = self.activate22(self.l2_t2_1(tr)), edge_attr = pos_rel_src, edge_type = 2), mask), dim = 1))
 		tr_local = self.activate2(torch.cat((tr1, tr2), dim = 1))
 
-		tr1 = self.l2_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21c(self.l2_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr1 = self.l2_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21c(self.l2_t1_1c(tr))) if self.use_offsets == False else self.propagate(A_in_sta, x = self.activate21c(self.l2_t1_1c(tr)), edge_attr = pos_rel_sta, edge_type = 1), mask), dim = 1)) # could concatenate edge features here, and before.
 		tr2 = self.l2_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate22c(self.l2_t2_1c(tr))), mask), dim = 1))
 		tr_expanded = self.activate2c(torch.cat((tr1, tr2), dim = 1))
 		gate = torch.sigmoid(self.gate2(torch.cat((tr_local, tr_expanded), dim = 1)))
 		tr = tr_local + gate * tr_expanded
 		# tr = tr_local + self.alpha_expand2*tr_expanded
 
-		tr1 = self.l3_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate31(self.l3_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
-		tr2 = self.l3_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate32(self.l3_t2_1(tr))), mask), dim = 1))
+		tr1 = self.l3_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate31(self.l3_t1_1(tr))) if self.use_offsets == False else self.propagate(A_in_sta, x = self.activate31(self.l3_t1_1(tr)), edge_attr = pos_rel_sta, edge_type = 1), mask), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l3_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate32(self.l3_t2_1(tr))) if self.use_offsets == False else self.propagate(A_in_src[0], x = self.activate32(self.l3_t2_1(tr)), edge_attr = pos_rel_src, edge_type = 2), mask), dim = 1))
 		tr = self.activate3(torch.cat((tr1, tr2), dim = 1))
 
 		return tr # the new embedding.
-		
+
+	def message(self, x_j, edge_attr = None, edge_type = None):
+		if edge_attr is not None:
+	    	# Message with edge offsets
+	    	return self.merge_edges1(torch.cat((x_j, edge_attr), dim=1)) if edge_type == 1 else self.merge_edges2(torch.cat((x_j, edge_attr), dim=1))
+		return x_j
+
+	# def message(self, x_j, edge_attr
+
+
+
 		
 # class DataAggregationExpanded(MessagePassing): # make equivelent version with sum operations.
 # 	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, use_absolute_pos = use_absolute_pos, device = device):
@@ -360,7 +384,8 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 
 		self.scale_rel = scale_rel
 		self.scale_time = scale_time
-		self.merge_edges = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
+		self.merge_edges1 = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
+		self.merge_edges2 = nn.Sequential(nn.Linear(n_hidden + ndim_proj, n_hidden), nn.PReLU())
 
 	def forward(self, tr, A_in_sta, A_in_src, A_src_in_sta, pos_loc, pos_src, pos_src_t):
 
@@ -377,19 +402,19 @@ class DataAggregationEmbedding(MessagePassing): # make equivelent version with s
 		pos_rel_src = torch.cat((pos_rel_src, torch.sum(pos_rel_src[:,0:3]**2, dim = 1, keepdim = True)), dim = 1)
 
 		## Could add binary edge type information to indicate data type
-		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), edge_attr = pos_rel_sta)), dim = 1)) # could concatenate edge features here, and before.
-		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(tr), edge_attr = pos_rel_src)), dim = 1))
+		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr), edge_attr = pos_rel_sta, edge_type = 1)), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate12(tr), edge_attr = pos_rel_src, edge_type = 2)), dim = 1))
 		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
 
-		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), edge_attr = pos_rel_sta)), dim = 1)) # could concatenate edge features here, and before.
-		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), edge_attr = pos_rel_src)), dim = 1))
+		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr)), edge_attr = pos_rel_sta, edge_type = 1)), dim = 1)) # could concatenate edge features here, and before.
+		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src, x = self.activate22(self.l2_t2_1(tr)), edge_attr = pos_rel_src, edge_type = 2)), dim = 1))
 		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
 
 		return tr # the new embedding.
 
-	def message(self, x_j, edge_attr):
+	def message(self, x_j, edge_attr, edge_type = None):
 
-		return self.merge_edges(torch.cat((x_j, edge_attr), dim = 1)) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+		return self.merge_edges1(torch.cat((x_j, edge_attr), dim = 1)) if edge_type == 1 else self.merge_edges2(torch.cat((x_j, edge_attr), dim = 1)) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 
 	# spatial_filter = self.edge_mlp(edge_attr)  # Shape: (N_edges, n_hidden)
 	# return x_j * spatial_filter
