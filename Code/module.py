@@ -2236,11 +2236,14 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.SpaceTimeDirect = SpaceTimeDirect(30, 30).to(device) # 15, 30
 		self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 4, 15, device = device).to(device)
 
-		# if use_expanded == True:
-		# 	self.SpatialAggregation1_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
-		# 	self.SpatialAggregation2_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
-		# 	self.alpha_expand1 = nn.Parameter(torch.tensor([0.1], device = device))
-		# 	self.alpha_expand2 = nn.Parameter(torch.tensor([0.1], device = device))
+		if use_expanded == True:
+			# self.SpatialAggregation1_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
+			self.SpatialAggregation2_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
+			self.gate_expanded = nn.Linear(2*30, 30)
+			nn.init.constant_(self.gate_expanded.bias, -2.0)
+			
+			# self.alpha_expand1 = nn.Parameter(torch.tensor([0.1], device = device))
+			# self.alpha_expand2 = nn.Parameter(torch.tensor([0.1], device = device))
 
 		if use_sigmoid == False:
 			self.proj_soln1 = nn.Sequential(nn.Linear(30, 30), nn.PReLU(), nn.Linear(30, 1))
@@ -2332,8 +2335,11 @@ class GCN_Detection_Network_extended(nn.Module):
 		# if self.use_expanded == True:
 		# 	x = x + self.alpha_expand1*self.SpatialAggregation1_expanded(x, A_src[1], x_temp_cuda) # x_temp_cuda_cart
 		x = self.SpatialAggregation2(x, A_src if self.use_expanded == False else A_src[0], x_temp_cuda)
-		# if self.use_expanded == True:
-		# 	x = x + self.alpha_expand2*self.SpatialAggregation2_expanded(x, A_src[1], x_temp_cuda) # x_temp_cuda_cart
+		if self.use_expanded == True:
+			x_expand = self.SpatialAggregation2_expanded(x, A_src[1], x_temp_cuda) # x_temp_cuda_cart
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x, x_expand), dim = 1)))
+			x = x + gate*x_expand
+			
 		x_spatial = self.SpatialAggregation3(x, A_src if self.use_expanded == False else A_src[0], x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
 		if self.use_direct_output == True:
@@ -2423,11 +2429,11 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.SpatialAggregation3.scale_rel = scale_rel
 		self.SpatialAggregation3.scale_time = scale_time
 
-		# if self.use_expanded == True:
-		# 	self.SpatialAggregation1_expanded.scale_rel = 10.0*scale_rel
-		# 	self.SpatialAggregation1_expanded.scale_time = 10.0*scale_time
-		# 	self.SpatialAggregation2_expanded.scale_rel = 10.0*scale_rel
-		# 	self.SpatialAggregation2_expanded.scale_time = 10.0*scale_time
+		if self.use_expanded == True:
+			# self.SpatialAggregation1_expanded.scale_rel = 10.0*scale_rel
+			# self.SpatialAggregation1_expanded.scale_time = 10.0*scale_time
+			self.SpatialAggregation2_expanded.scale_rel = 10.0*scale_rel
+			self.SpatialAggregation2_expanded.scale_time = 10.0*scale_time
 
 		self.SpaceTimeAttention.scale_rel = scale_rel
 		self.SpaceTimeAttention.scale_time = scale_time
@@ -2567,6 +2573,11 @@ class GCN_Detection_Network_extended(nn.Module):
 		# 	x = x + self.alpha_expand2*self.SpatialAggregation2_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
 		# x = self.SpatialAggregation2(x, A_src, x_temp_cuda)
 		# x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
+		if self.use_expanded == True:
+			x_expand = self.SpatialAggregation2_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x, x_expand), dim = 1)))
+			x = x + gate*x_expand
+		
 		x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
 
@@ -2674,6 +2685,11 @@ class GCN_Detection_Network_extended(nn.Module):
 		# if self.use_expanded == True:
 		# 	x = x + self.alpha_expand1*self.SpatialAggregation1_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
 		# x = self.SpatialAggregation2(x, A_src, x_temp_cuda)
+		if self.use_expanded == True:
+			x_expand = self.SpatialAggregation2_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x, x_expand), dim = 1)))
+			x = x + gate*x_expand
+		
 		x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
 		# if self.use_expanded == True:
 		# 	x = x + self.alpha_expand2*self.SpatialAggregation2_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
