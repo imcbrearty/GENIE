@@ -171,11 +171,13 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 
 		## Expanded layers
 
-		self.l1_t1_1c = nn.Linear(2*n_hidden, n_hidden)
+		# self.l1_t1_1c = nn.Linear(2*n_hidden, n_hidden)
+		self.l1_t1_1c = nn.Linear(n_hidden, n_hidden)
 		self.l1_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 		# self.l1_t1_2c = nn.Linear(2*n_hidden, n_hidden)
 
-		self.l1_t2_1c = nn.Linear(2*n_hidden, n_hidden)
+		# self.l1_t2_1c = nn.Linear(2*n_hidden, n_hidden)
+		self.l1_t2_1c = nn.Linear(n_hidden, n_hidden)
 		self.l1_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
 		self.activate11c = nn.PReLU() # can extend to each channel
 		self.activate12c = nn.PReLU() # can extend to each channel
