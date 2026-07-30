@@ -1965,8 +1965,11 @@ class GCN_Detection_Network_extended(nn.Module):
 		mask_p_thresh = 0.1
 		if self.use_sigmoid == False:
 			# mask_out = 1.0*(y.detach() > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
-			mask_out = torch.clamp((y - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
-
+			# mask_out = torch.clamp((y - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
+			# Sigmoid scales unbounded logits into (0, 1) smoothly without hard zero-gradient cutoffs
+			y_prob = torch.sigmoid((y - mask_p_thresh) / slope_width)
+			mask_out = y_prob
+		
 		else:
 			# mask_out = 1.0*(torch.round(torch.sigmoid(y[:,1].reshape(-1,1))).detach()).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			mask_out = torch.clamp((torch.sigmoid(y[:,1].reshape(-1,1)) - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
@@ -2185,8 +2188,11 @@ class GCN_Detection_Network_extended(nn.Module):
 		mask_p_thresh = 0.1
 		if self.use_sigmoid == False:
 			# mask_out = 1.0*(y.detach() > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
-			mask_out = torch.clamp((y - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
-
+			# mask_out = torch.clamp((y - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
+			# Sigmoid scales unbounded logits into (0, 1) smoothly without hard zero-gradient cutoffs
+			y_prob = torch.sigmoid((y - mask_p_thresh) / slope_width)
+			mask_out = y_prob		
+		
 		else:
 			# mask_out = 1.0*(torch.round(torch.sigmoid(y[:,1].reshape(-1,1))).detach()).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
 			mask_out = torch.clamp((torch.sigmoid(y[:,1].reshape(-1,1)) - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
