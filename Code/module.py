@@ -463,12 +463,12 @@ class BipartiteGraphOperator1(MessagePassing):
 
 
 class BipartiteGraphOperator(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, ndim_edges=12, ndim_mask=4):
+	def __init__(self, ndim_in, ndim_out, ndim_edges=8, ndim_mask=4):
 		super(BipartiteGraphOperator, self).__init__(aggr='add')
 		
 		# 1. Edge MLP: Evaluates travel-time misfit + 4D geometry
 		self.fc1 = nn.Sequential(
-			nn.Linear(ndim_in + ndim_edges, ndim_in),
+			nn.Linear(ndim_in + ndim_edges + 4, ndim_in),
 			nn.PReLU(),
 			nn.Linear(ndim_in, ndim_in),
 			nn.PReLU()
@@ -2380,7 +2380,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			self.DataAggregation = DataAggregationExpanded(4 + n_dim_extra_inpt + n_dim_extra_feat + embed_vector_dim, 15, device = device).to(device) # output size is latent size for (half of) bipartite code # , 15				
 
 		## Maybe add expander convolution on SpatialAggregation
-		self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 4).to(device) # 30, 15
+		self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 8).to(device) # 30, 15
 		self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
 		self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
 		self.SpatialAggregation3 = SpatialAggregation(30, 30).to(device) # 15, 30
