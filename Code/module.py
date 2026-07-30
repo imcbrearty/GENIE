@@ -979,7 +979,7 @@ class BipartiteGraphReadOutOperator1(MessagePassing):
 
 
 class BipartiteGraphReadOutOperator(MessagePassing):
-	def __init__(self, ndim_in, ndim_out, ndim_edges=4):
+	def __init__(self, ndim_in, ndim_out, ndim_edges=8):
 		# Aggregating from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
 		super(BipartiteGraphReadOutOperator, self).__init__('add')
 		
