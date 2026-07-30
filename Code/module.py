@@ -732,7 +732,7 @@ class SpatialAggregation(MessagePassing):
 
 		pos_rel = (pos[A_src[1]] - pos[A_src[0]])/self.scale_rel # (self.zero_offsets == False)*
 		pos_norm = torch.sqrt(torch.sum(pos_rel[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-		pos_rel = torch.cat((pos_rel/pos_norm, torch.exp(-1.0*pos_norm*F.softplus(self.w_gamma)), pos_rel[:,3:4]), dim = 1)
+		pos_rel = torch.cat((pos_rel[:,0:3]/pos_norm, torch.exp(-1.0*pos_norm*F.softplus(self.w_gamma)), pos_rel[:,3:4]), dim = 1)
 		global_feat = self.activate3(self.fglobal(tr)).mean(0, keepdim = True).expand(A_src.shape[1], -1)
 		
 		return self.activate2(self.fc2(torch.cat((tr, self.propagate(A_src, x = tr, edge_attr = (self.zero_offsets == False)*pos_rel, global_feat = global_feat)), dim = -1)))
