@@ -3099,7 +3099,8 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 		## Consider changing spatial_vals to proportional to labels
 		## Updating spatial vals to use scaled Cartesian coordinates
 		# spatial_vals = torch.cat((torch.Tensor((X_fixed[A_src_in_prod_l[1].cpu().detach().numpy()][:,0:3] - Locs[A_src_in_sta_l[0][A_src_in_prod_l[0]].cpu().detach().numpy()])/scale_x_extend).to(device), torch.Tensor(X_fixed[A_src_in_prod_l[1].cpu().detach().numpy()][:,[3]]).to(device)/time_shift_range), dim = 1)
-		spatial_vals = torch.cat((torch.Tensor((ftrns1(X_fixed[A_src_in_prod_l[1].cpu().detach().numpy()][:,0:3]) - ftrns1(Locs[A_src_in_sta_l[0][A_src_in_prod_l[0]].cpu().detach().numpy()]))/(30*src_x_kernel)).to(device), torch.Tensor(X_fixed[A_src_in_prod_l[1].cpu().detach().numpy()][:,[3]]).to(device)/time_shift_range), dim = 1)
+		# spatial_vals = torch.cat((torch.Tensor((ftrns1(X_fixed[A_src_in_prod_l[1].cpu().detach().numpy()][:,0:3]) - ftrns1(Locs[A_src_in_sta_l[0][A_src_in_prod_l[0]].cpu().detach().numpy()]))/(30*src_x_kernel)).to(device), torch.Tensor(X_fixed[A_src_in_prod_l[1].cpu().detach().numpy()][:,[3]]).to(device)/time_shift_range), dim = 1)
+		spatial_vals = torch.cat((torch.Tensor((ftrns1(X_fixed[A_src_in_prod_l[1].cpu().detach().numpy()][:,0:3]) - ftrns1(Locs[A_src_in_sta_l[0][A_src_in_prod_l[0]].cpu().detach().numpy()]))/(30*src_x_kernel)).to(device), torch.Tensor(X_fixed[A_src_in_prod_l[1].cpu().detach().numpy()][:,[3]]).to(device)/(10.0*src_t_kernel)), dim = 1)
 
 	else:
 
@@ -3112,7 +3113,8 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 		## Consider changing spatial_vals to proportional to labels
 		## Updating spatial vals to use scaled Cartesian coordinates
 		# spatial_vals = torch.cat((torch.Tensor(((np.repeat(np.expand_dims(X_fixed[:,0:3], axis = 1), Locs.shape[0], axis = 1) - np.repeat(np.expand_dims(Locs, axis = 0), X_fixed.shape[0], axis = 0)).reshape(-1,3))/scale_x_extend).to(device), torch.Tensor(X_fixed[:,[3]]).to(device)/time_shift_range), dim = 1)
-		spatial_vals = torch.cat((torch.Tensor(((np.repeat(np.expand_dims(ftrns1(X_fixed[:,0:3]), axis = 1), Locs.shape[0], axis = 1) - np.repeat(np.expand_dims(ftrns1(Locs), axis = 0), X_fixed.shape[0], axis = 0)).reshape(-1,3))/(30*src_x_kernel)).to(device), torch.Tensor(X_fixed[:,[3]]).to(device)/time_shift_range), dim = 1)
+		# spatial_vals = torch.cat((torch.Tensor(((np.repeat(np.expand_dims(ftrns1(X_fixed[:,0:3]), axis = 1), Locs.shape[0], axis = 1) - np.repeat(np.expand_dims(ftrns1(Locs), axis = 0), X_fixed.shape[0], axis = 0)).reshape(-1,3))/(30*src_x_kernel)).to(device), torch.Tensor(X_fixed[:,[3]]).to(device)/time_shift_range), dim = 1)
+		spatial_vals = torch.cat((torch.Tensor(((np.repeat(np.expand_dims(ftrns1(X_fixed[:,0:3]), axis = 1), Locs.shape[0], axis = 1) - np.repeat(np.expand_dims(ftrns1(Locs), axis = 0), X_fixed.shape[0], axis = 0)).reshape(-1,3))/(30*src_x_kernel)).to(device), torch.Tensor(X_fixed[:,[3]]).to(device)/(10.0*src_t_kernel)), dim = 1)
 
 
 
