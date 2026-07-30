@@ -704,7 +704,29 @@ class SpatialAggregation(MessagePassing):
 
 	def message(self, x_j, pos_i, pos_j):
 		
-		return self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j, self.activate3(self.fglobal(x_j)).mean(0, keepdims = True).repeat(x_j.shape[0], 1)), dim = -1))) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+		return self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j, self.activate3(self.fglobal(x_j)).mean(0, keepdim = True).expand(x_j.shape[0], -1)), dim = -1))) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+
+# class SpatialAggregation(MessagePassing):
+# 	def __init__(self, in_channels, out_channels, scale_rel = scale_rel, scale_time = scale_time, n_dim = 4, n_global = 5, n_hidden = 30, zero_offsets = False):
+# 		super(SpatialAggregation, self).__init__('mean') # node dim
+# 		## Use two layers of SageConv. Explictly or implicitly?
+# 		self.fc1 = nn.Linear(in_channels + n_dim + n_global, n_hidden)
+# 		self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
+# 		self.fglobal = nn.Linear(in_channels, n_global)
+# 		self.activate1 = nn.PReLU()
+# 		self.activate2 = nn.PReLU()
+# 		self.activate3 = nn.PReLU()
+# 		self.scale_rel = scale_rel
+# 		self.zero_offsets = zero_offsets
+
+# 	def forward(self, tr, A_src, pos):
+
+# 		return self.activate2(self.fc2(torch.cat((tr, self.propagate(A_src, x = tr, pos = (self.zero_offsets == False)*pos/self.scale_rel)), dim = -1)))
+
+# 	def message(self, x_j, pos_i, pos_j):
+		
+# 		return self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j, self.activate3(self.fglobal(x_j)).mean(0, keepdims = True).repeat(x_j.shape[0], 1)), dim = -1))) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+
 
 class SpaceTimeDirect(nn.Module):
 	def __init__(self, inpt_dim, out_channels):
