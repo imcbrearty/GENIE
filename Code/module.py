@@ -1125,7 +1125,8 @@ class ArrivalEmbedding(MessagePassing):
 
 		## Distances between reference nodes and query (including time offsets)
 		offset_ref_src = (x_query_cart[query_vals[iwhere_query,1]] - x_context_cart[A_src_in_sta[1,nodes_of_product[iwhere_query]]])/(1.0*self.scale_rel)
-		offset_ref_src_t = (x_query_t[query_vals[iwhere_query,1]].reshape(-1,1) - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]].reshape(-1,1))/(1.0*self.scale_time)
+		# offset_ref_src_t = (x_query_t[query_vals[iwhere_query,1]].reshape(-1,1) - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]].reshape(-1,1))/(1.0*self.scale_time)
+		offset_ref_src_t = 1000.0*self.scale_time*(x_query_t[query_vals[iwhere_query,1]].reshape(-1,1) - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]].reshape(-1,1))/(1.0*self.scale_rel)
 
 		offset_src_sta_norm = torch.norm(offset_src_sta, dim = 1, keepdim = True)
 		offset_ref_sta_norm = torch.norm(offset_ref_sta, dim = 1, keepdim = True)
