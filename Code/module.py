@@ -971,7 +971,7 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 	def message(self, x_j, mask_j, edge_attr):
 		# x_j is inpt[edge_index[0]] (Source Factor representation)
 		# mask_j is mask[edge_index[0]] (Source prediction mask)
-		return mask_j * self.fc1(torch.cat((x_j, edge_attr), dim=-1))
+		return (mask_j + 0.01) * self.fc1(torch.cat((x_j, edge_attr), dim=-1))
 		
 # class BipartiteGraphReadOutOperator(MessagePassing):
 # 	def __init__(self, ndim_in, ndim_out, ndim_edges=4):
