@@ -2284,7 +2284,7 @@ class GaussianDiceLossL1(nn.Module):
     # 2. Leaky ReLU:
     #    - Exact identity for x >= 0 (zero distortion across [0, 1])
     #    - Non-zero gradient (slope=0.01) for x < 0 to prevent stuck weights
-    pred_pos = F.leaky_relu(pred, negative_slope=self.negative_slope)
+    pred_pos = torch.clamp(F.leaky_relu(pred, negative_slope=self.negative_slope), max = 2.0)
 
     # 3. Determine reduction dimensions (reduce spatial/temporal dims, keeping batch & channel)
     #    Assumes shape: (B, C, N_queries) or (B, N_queries) or similar
@@ -2413,13 +2413,13 @@ def gaussian_heatmap_loss(
 
   # Preserve autograd graph link
   loss = 0.0 * pred.sum()
-  eps = 1e-6
+  eps = 1e-4
 
   # ==================== POSITIVES ====================
   if pos.any():
     # Leaky ReLU + offset keeps value strictly > 0 for log()
     # WITHOUT using torch.clamp (which destroys leaky_relu gradients)
-    pred_pos_safe = F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4
+    pred_pos_safe = torch.clamp(F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4, 2.0)
 
     log_pred = torch.log(pred_pos_safe)
     log_tgt = torch.log(target[pos] + eps)
@@ -2553,7 +2553,7 @@ def gaussian_heatmap_loss_with_cap(
     cap_threshold: float = 0.7,
     cap_huber_weight: float = 10.0,
     charb_downweight: float = 0.3,
-    eps: float = 1e-6,
+    eps: float = 1e-4,
 ) -> torch.Tensor:
   # 1. Empty slice guard linked to graph
   if pred.numel() == 0 or target.numel() == 0:
@@ -2570,7 +2570,7 @@ def gaussian_heatmap_loss_with_cap(
   if pos.any():
     # Leaky ReLU + 1e-4 shift keeps values strictly > 0 for log()
     # WITHOUT using torch.clamp (preserving gradient flow when pred < 0)
-    pred_pos_safe = F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4
+    pred_pos_safe = torch.clamp(F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4, max = 2.0)
 
     log_pred = torch.log(pred_pos_safe)
     log_tgt = torch.log(target[pos] + eps)
