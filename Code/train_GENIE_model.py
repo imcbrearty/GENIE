@@ -2338,6 +2338,28 @@ class GaussianDiceLoss(nn.Module):
 		return dice # .mean()
 
 
+# class GaussianDiceLoss(nn.Module):
+
+#   def __init__(self, smooth: float = 1e-5, bg_weight: float = 1.0):
+#     super().__init__()
+#     self.smooth = smooth
+#     self.bg_weight = bg_weight
+
+#   def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+#     pred = pred.float()
+#     target = target.float()
+
+#     # Quadratic sum over spatial coordinates
+#     intersection = (pred * target).sum() / pred.shape[1]
+#     pred_sum = (pred**2).sum() / pred.shape[1]
+#     target_sum = (target**2).sum() / pred.shape[1]
+
+#     dice = 1.0 - (
+#         (2.0 * intersection + self.smooth)
+#         / (pred_sum + self.bg_weight * target_sum + self.smooth)
+#     )
+
+#     return dice
 
 
 use_updated_heatmap_loss = True
