@@ -2424,6 +2424,38 @@ class SoftFocalLoss(nn.Module):
 		return loss
 		
 
+
+class GaussianDiceLossL1(nn.Module):
+    def __init__(self, smooth=1e-5, bg_weight=1.0):
+        super().__init__()
+        self.smooth = smooth
+        self.bg_weight = bg_weight
+
+    def forward(self, pred, target):
+        # 1. Handle empty masks safely
+        if pred.numel() == 0 or target.numel() == 0:
+            return torch.tensor(0.0, device=pred.device, dtype=pred.dtype, requires_grad=True)
+
+        pred = pred.float()
+        target = target.float()
+
+        # 2. Ensure predictions are non-negative for continuous overlap
+        pred = torch.relu(pred)
+
+        # 3. Handle shape dimensions safely
+        num_channels = pred.shape[1] if pred.ndim > 1 else 1
+
+        # 4. L1 Overlap Formulation (Linear sums, no squaring)
+        intersection = (pred * target).sum() / num_channels
+        pred_sum = pred.sum() / num_channels         # <-- Linear sum
+        target_sum = target.sum() / num_channels     # <-- Linear sum
+
+        dice = 1.0 - ((2.0 * intersection + self.smooth) /
+                      (pred_sum + self.bg_weight * target_sum + self.smooth))
+
+        return dice
+
+
 ## Replacing row wise sum with mean
 class GaussianDiceLoss(nn.Module):
 
