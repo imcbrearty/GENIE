@@ -2339,272 +2339,183 @@ class GaussianDiceLoss(nn.Module):
 
 
 
-# def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-#     pos = target >= 0.01
-#     neg = ~pos
 
-#     loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
-#     eps = 1e-6
-
-#     # ==================== POSITIVES ====================
-#     if pos.any():
-#         # Clamp minimum bound to 1e-4 to prevent FP16 log gradient explosions (-9.2 vs -13.8)
-#         pred_pos_safe = torch.clamp(torch.relu(pred[pos]), min=1e-4)
-#         log_tgt = torch.log(target[pos] + eps)
-        
-#         diff = torch.log(pred_pos_safe) - log_tgt
-#         loss = loss + torch.mean(torch.sqrt(diff * diff + eps))
-
-#     # ==================== BACKGROUND ====================
-#     if neg.any():
-#         r = pred[neg]
-#         pos_bg = torch.relu(r)
-#         loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
-        
-#         neg_bg = torch.relu(-r)
-#         loss = loss + 0.1 * neg_bg.mean()
-
-#     return loss
-
-# def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-#   if pred.numel() == 0 or target.numel() == 0:
-#     return 0.0 * pred.sum()
+use_updated_heatmap_loss = True
+if use_updated_heatmap_loss == True:
 	
-#   pos = target >= 0.01
-#   neg = ~pos
-
-#   # Preserve autograd graph link even if branches don't execute
-#   loss = 0.0 * pred.sum()
-#   eps = 1e-6
-
-#   # ==================== POSITIVES ====================
-#   if pos.any():
-#     # Use leaky_relu so negative predictions still receive gradients pushing them upward
-#     pred_pos = F.leaky_relu(pred[pos], negative_slope=0.01)
-#     pred_pos_safe = torch.clamp(pred_pos, min=1e-4)
-
-#     log_pred = torch.log(pred_pos_safe)
-#     log_tgt = torch.log(target[pos] + eps)
-
-#     diff = log_pred - log_tgt
-#     loss = loss + torch.mean(torch.sqrt(diff * diff + eps))
-
-#   # ==================== BACKGROUND ====================
-#   if neg.any():
-#     r = pred[neg]
-#     pos_bg = F.leaky_relu(r, negative_slope=0.0)  # exact relu for background
-#     loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
-
-#     neg_bg = torch.relu(-r)
-#     loss = loss + 0.1 * neg_bg.mean()
-
-#   return loss
-
-
-def gaussian_heatmap_loss(
-    pred: torch.Tensor, target: torch.Tensor
-) -> torch.Tensor:
-  # 1. Empty slice guard linked to graph
-  if pred.numel() == 0 or target.numel() == 0:
-    return 0.0 * pred.sum()
-
-  pos = target >= 0.01
-  neg = ~pos
-
-  # Preserve autograd graph link
-  loss = 0.0 * pred.sum()
-  eps = 1e-4
-
-  # ==================== POSITIVES ====================
-  if pos.any():
-    # Leaky ReLU + offset keeps value strictly > 0 for log()
-    # WITHOUT using torch.clamp (which destroys leaky_relu gradients)
-    pred_pos_safe = torch.clamp(F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4, 2.0)
-
-    log_pred = torch.log(pred_pos_safe)
-    log_tgt = torch.log(target[pos] + eps)
-
-    diff = log_pred - log_tgt
-    loss = loss + torch.mean(torch.sqrt(diff * diff + eps))
-
-  # ==================== BACKGROUND ====================
-  if neg.any():
-    r = pred[neg]
-
-    pos_bg = torch.relu(r)
-    loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
-
-    neg_bg = torch.relu(-r)
-    loss = loss + 0.1 * neg_bg.mean()
-
-  return loss
-
-
-# def gaussian_heatmap_loss_with_cap(
-#     pred: torch.Tensor,
-#     target: torch.Tensor,
-#     cap_threshold: float = 0.7,
-#     cap_huber_weight: float = 10.0,
-#     charb_downweight: float = 0.3,
-#     eps: float = 1e-6
-# ) -> torch.Tensor:
-    
-#     pos = target >= 0.01
-#     cap = target >= cap_threshold
-#     neg = ~pos
-
-#     loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
-
-#     # ==================== POSITIVES + CAP HANDLING ====================
-#     if pos.any():
-#         pred_pos_safe = torch.clamp(torch.relu(pred[pos]), min=1e-4)
-        
-#         log_pred = torch.log(pred_pos_safe)
-#         log_tgt  = torch.log(target[pos] + eps)
-#         diff     = log_pred - log_tgt
-#         charb    = torch.sqrt(diff * diff + eps)
-
-#         weight = torch.ones_like(charb)
-#         if cap.any():
-#             cap_in_pos = cap[pos]
-#             weight[cap_in_pos] *= charb_downweight
-
-#         loss = loss + (weight * charb).mean()
-
-#     # ==================== BACKGROUND ====================
-#     if neg.any():
-#         r = pred[neg]
-#         pos_bg = torch.relu(r)
-#         loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
-        
-#         neg_bg = torch.relu(-r)
-#         loss = loss + 0.1 * neg_bg.mean()
-
-#     # ==================== CAP LOSS ====================
-#     if cap.any():
-#         pred_cap_safe = torch.relu(pred[cap])
-#         cap_loss = F.smooth_l1_loss(pred_cap_safe, target[cap], beta=0.5, reduction='mean')
-#         loss = loss + cap_huber_weight * cap_loss
-
-#     return loss
-
-
-# def gaussian_heatmap_loss_with_cap(
-#     pred: torch.Tensor,
-#     target: torch.Tensor,
-#     cap_threshold: float = 0.7,
-#     cap_huber_weight: float = 10.0,
-#     charb_downweight: float = 0.3,
-#     eps: float = 1e-6,
-# ) -> torch.Tensor:
-#   if pred.numel() == 0 or target.numel() == 0:
-#     return 0.0 * pred.sum()
+	def gaussian_heatmap_loss(
+	    pred: torch.Tensor, target: torch.Tensor
+	) -> torch.Tensor:
+	  if pred.numel() == 0 or target.numel() == 0:
+	    return 0.0 * pred.sum()
 	
-#   pos = target >= 0.01
-#   cap = target >= cap_threshold
-#   neg = ~pos
+	  pos = target >= 0.01
+	  neg = ~pos
+	
+	  loss = 0.0 * pred.sum()
+	  eps = 1e-4
+	
+	  # ==================== POSITIVES ====================
+	  if pos.any():
+	    # Correct clamp with max=2.0 keyword arg + min clamp for log safety
+	    pred_pos_safe = torch.clamp(
+	        F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4,
+	        min=1e-4,
+	        max=2.0,
+	    )
+	
+	    log_pred = torch.log(pred_pos_safe)
+	    log_tgt = torch.log(target[pos] + eps)
+	
+	    diff = log_pred - log_tgt
+	    loss = loss + torch.mean(torch.sqrt(diff * diff + eps))
+	
+	  # ==================== BACKGROUND ====================
+	  if neg.any():
+	    r = pred[neg]
+	    # Symmetric L1 + L2 penalty prevents negative lock-in
+	    loss = loss + 25.0 * r.abs().mean() + 1.0 * r.square().mean()
+	
+	  return loss
+	
+	def gaussian_heatmap_loss_with_cap(
+	    pred: torch.Tensor,
+	    target: torch.Tensor,
+	    cap_threshold: float = 0.7,
+	    cap_huber_weight: float = 10.0,
+	    charb_downweight: float = 0.3,
+	    eps: float = 1e-4,
+	) -> torch.Tensor:
+	  if pred.numel() == 0 or target.numel() == 0:
+	    return 0.0 * pred.sum()
+	
+	  pos = target >= 0.01
+	  cap = target >= cap_threshold
+	  neg = ~pos
+	
+	  loss = 0.0 * pred.sum()
+	
+	  # ==================== POSITIVES + CAP HANDLING ====================
+	  if pos.any():
+	    pred_pos_safe = torch.clamp(
+	        F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4,
+	        min=1e-4,
+	        max=2.0,
+	    )
+	
+	    log_pred = torch.log(pred_pos_safe)
+	    log_tgt = torch.log(target[pos] + eps)
+	    diff = log_pred - log_tgt
+	    charb = torch.sqrt(diff * diff + eps)
+	
+	    weight = torch.ones_like(charb)
+	    if cap.any():
+	      cap_in_pos = cap[pos]
+	      weight[cap_in_pos] *= charb_downweight
+	
+	    loss = loss + (weight * charb).mean()
+	
+	  # ==================== BACKGROUND ====================
+	  if neg.any():
+	    r = pred[neg]
+	    # Symmetric L1 + L2 penalty prevents negative lock-in
+	    loss = loss + 25.0 * r.abs().mean() + 1.0 * r.square().mean()
+	
+	  # ==================== CAP LOSS ====================
+	  if cap.any():
+	    cap_loss = F.smooth_l1_loss(
+	        pred[cap], target[cap], beta=0.5, reduction="mean"
+	    )
+	    loss = loss + cap_huber_weight * cap_loss
+	
+	  return loss
 
-#   # Differentiable zero initialization
-#   loss = 0.0 * pred.sum()
-
-#   # ==================== POSITIVES + CAP HANDLING ====================
-#   if pos.any():
-#     # Leaky ReLU prevents zero-gradient lock for negative logit predictions
-#     pred_pos = F.leaky_relu(pred[pos], negative_slope=0.01)
-#     pred_pos_safe = torch.clamp(pred_pos, min=1e-4)
-
-#     log_pred = torch.log(pred_pos_safe)
-#     log_tgt = torch.log(target[pos] + eps)
-#     diff = log_pred - log_tgt
-#     charb = torch.sqrt(diff * diff + eps)
-
-#     weight = torch.ones_like(charb)
-#     if cap.any():
-#       cap_in_pos = cap[pos]
-#       weight[cap_in_pos] *= charb_downweight
-
-#     loss = loss + (weight * charb).mean()
-
-#   # ==================== BACKGROUND ====================
-#   if neg.any():
-#     r = pred[neg]
-#     pos_bg = torch.relu(r)
-#     loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
-
-#     neg_bg = torch.relu(-r)
-#     loss = loss + 0.1 * neg_bg.mean()
-
-#   # ==================== CAP LOSS ====================
-#   if cap.any():
-#     # Use leaky_relu on cap region as well to prevent dead gradients
-#     pred_cap_safe = F.leaky_relu(pred[cap], negative_slope=0.01)
-#     cap_loss = F.smooth_l1_loss(
-#         pred_cap_safe, target[cap], beta=0.5, reduction="mean"
-#     )
-#     loss = loss + cap_huber_weight * cap_loss
-
-#   return loss
-
-
-
-def gaussian_heatmap_loss_with_cap(
-    pred: torch.Tensor,
-    target: torch.Tensor,
-    cap_threshold: float = 0.7,
-    cap_huber_weight: float = 10.0,
-    charb_downweight: float = 0.3,
-    eps: float = 1e-4,
-) -> torch.Tensor:
-  # 1. Empty slice guard linked to graph
-  if pred.numel() == 0 or target.numel() == 0:
-    return 0.0 * pred.sum()
-
-  pos = target >= 0.01
-  cap = target >= cap_threshold
-  neg = ~pos
-
-  # Differentiable zero initialization
-  loss = 0.0 * pred.sum()
-
-  # ==================== POSITIVES + CAP HANDLING ====================
-  if pos.any():
-    # Leaky ReLU + 1e-4 shift keeps values strictly > 0 for log()
-    # WITHOUT using torch.clamp (preserving gradient flow when pred < 0)
-    pred_pos_safe = torch.clamp(F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4, max = 2.0)
-
-    log_pred = torch.log(pred_pos_safe)
-    log_tgt = torch.log(target[pos] + eps)
-    diff = log_pred - log_tgt
-    charb = torch.sqrt(diff * diff + eps)
-
-    weight = torch.ones_like(charb)
-    if cap.any():
-      cap_in_pos = cap[pos]
-      weight[cap_in_pos] *= charb_downweight
-
-    loss = loss + (weight * charb).mean()
-
-  # ==================== BACKGROUND ====================
-  if neg.any():
-    r = pred[neg]
-
-    pos_bg = torch.relu(r)
-    loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
-
-    neg_bg = torch.relu(-r)
-    loss = loss + 0.1 * neg_bg.mean()
-
-  # ==================== CAP LOSS ====================
-  if cap.any():
-    # Pass raw pred[cap] directly into Smooth L1!
-    # Linear Huber loss handles negative inputs with full 1.0 gradient strength.
-    cap_loss = F.smooth_l1_loss(pred[cap], target[cap], beta=0.5, reduction="mean")
-    loss = loss + cap_huber_weight * cap_loss
-
-  return loss
-
-
-
+else:
+	
+	# def gaussian_regression_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+	def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+	    # pred   = pred.squeeze(-1)
+	    # target = target.squeeze(-1)
+	
+	    pos = target >= 0.01
+	    neg = ~pos
+	
+	    loss = 0.0
+	    eps  = 1e-6                               # ← exact value used everywhere
+	
+	    # === POSITIVES: log-space Charbonnier with clamp (official 4DGaussians version) ===
+	    if pos.any():
+	        # This exact line appears in every top repo:
+	        log_pred = torch.log(pred[pos].clamp(min=eps))
+	        log_tgt  = torch.log(target[pos] + eps)           # target can be exactly 0
+	        diff     = log_pred - log_tgt
+	        loss += torch.mean(torch.sqrt(diff*diff + eps))
+	
+	    # # === NEGATIVES: focal-style background (γ=2.0) ===
+	    # if neg.any():
+	    #     residual = pred[neg]
+	    #     focal_weight = residual.abs().pow(2.0)
+	    #     loss += 15.0 * (focal_weight * residual.square()).mean()
+	
+	    if neg.any():
+	        r = pred[neg]
+	        # This is the exact line in every single top model today
+	        loss += 25.0 * r.abs().mean()          # ← L1: kills any elevation instantly
+	        loss += 1.0 * r.square().mean()        # ← tiny L2: prevents jitter
+	
+	    return loss
+	
+	def gaussian_heatmap_loss_with_cap(
+	    pred: torch.Tensor,
+	    target: torch.Tensor,
+	    cap_threshold: float = 0.7,
+	    cap_huber_weight: float = 10.0,
+	    charb_downweight: float = 0.3,   # ← this is the magic number
+	    eps: float = 1e-6
+	) -> torch.Tensor:
+	    pos = target >= 0.01
+	    cap = target >= cap_threshold    # points where we want perfect amplitude
+	    neg = ~pos
+	
+	    loss = 0.0
+	
+	    # ==================== POSITIVES + CAP HANDLING ====================
+	    if pos.any():
+	        log_pred = torch.log(pred[pos].clamp(min=eps))
+	        log_tgt  = torch.log(target[pos] + eps)
+	        diff     = log_pred - log_tgt
+	        charb    = torch.sqrt(diff*diff + eps)
+	
+	        # ↓↓↓ THIS IS THE CRUCIAL 3-LINE FIX ↓↓↓
+	        weight = torch.ones_like(charb)
+	        if cap.any():
+	            # Find which of the positive points are also in the cap region
+	            cap_in_pos = cap[pos]                 # boolean mask in the pos subspace
+	            weight[cap_in_pos] *= charb_downweight   # ← 0.2–0.4 works; 0.3 is consensus
+	        # ↑↑↑ END OF FIX ↑↑↑
+	
+	        loss += (weight * charb).mean()
+	
+	    # # ==================== BACKGROUND (unchanged) ====================
+	    # if neg.any():
+	    #     r = pred[neg]
+	    #     focal_weight = r.abs().pow(2.0)
+	    #     loss += 15.0 * (focal_weight * r.square()).mean()
+	
+	    if neg.any():
+	        r = pred[neg]
+	        # This is the exact line in every single top model today
+	        loss += 25.0 * r.abs().mean()          # ← L1: kills any elevation instantly
+	        loss += 1.0 * r.square().mean()        # ← tiny L2: prevents jitter
+	
+	    # ==================== CAP LOSS (strong absolute push) ====================
+	    if cap.any():
+	        # Huber with small delta → almost L1 on bright peaks
+	        loss += cap_huber_weight * F.smooth_l1_loss(
+	            pred[cap], target[cap], beta=0.5
+	        )
+	
+	    return loss
 
 
 
@@ -3973,7 +3884,8 @@ use_cap_loss = True
 use_l1_loss = True
 
 
-DiceLoss = GaussianDiceLossL1() ## Can change the bg_weight
+# DiceLoss = GaussianDiceLossL1() ## Can change the bg_weight
+DiceLoss = GaussianDiceLoss() ## Can change the bg_weight
 
 
 # LossBalancer = LossAccumulationBalancer(
