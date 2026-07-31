@@ -2224,64 +2224,201 @@ def compute_source_labels(x_query, x_query_t, src_x, src_t, src_spatial_kernel, 
 # 		return x_query_sample[ind_overwrite_focused_queries], x_query_sample_t[ind_overwrite_focused_queries]
 
 
+# class GaussianDiceLossL1(nn.Module):
+#     def __init__(self, smooth=1e-5, bg_weight=1.0):
+#         super().__init__()
+#         self.smooth = smooth
+#         self.bg_weight = bg_weight
+
+#     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+#         if pred.numel() == 0 or target.numel() == 0:
+#             return torch.tensor(0.0, device=pred.device, dtype=pred.dtype, requires_grad=True)
+
+#         pred = torch.relu(pred.float())
+#         target = target.float()
+
+#         # Compute overlap across spatial dimensions (keep channels separate if 2D/3D batch)
+#         if pred.ndim > 2:
+#             spatial_dims = tuple(range(2, pred.ndim))
+#             intersection = (pred * target).sum(dim=spatial_dims)
+#             pred_sum = pred.sum(dim=spatial_dims)
+#             target_sum = target.sum(dim=spatial_dims)
+            
+#             dice = 1.0 - ((2.0 * intersection + self.smooth) /
+#                           (pred_sum + self.bg_weight * target_sum + self.smooth))
+#             return dice.mean()
+#         else:
+#             intersection = (pred * target).sum()
+#             pred_sum = pred.sum()
+#             target_sum = target.sum()
+            
+#             return 1.0 - ((2.0 * intersection + self.smooth) /
+#                           (pred_sum + self.bg_weight * target_sum + self.smooth))
+
+
 class GaussianDiceLossL1(nn.Module):
-    def __init__(self, smooth=1e-5, bg_weight=1.0):
-        super().__init__()
-        self.smooth = smooth
-        self.bg_weight = bg_weight
 
-    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        if pred.numel() == 0 or target.numel() == 0:
-            return torch.tensor(0.0, device=pred.device, dtype=pred.dtype, requires_grad=True)
+  def __init__(self, smooth: float = 1e-5, negative_slope: float = 0.01):
+    """L1 Soft Dice Loss for continuous Gaussian shape regression.
 
-        pred = torch.relu(pred.float())
-        target = target.float()
+    Args:
+        smooth: Small constant to prevent division by zero.
+        negative_slope: Small slope for negative predictions (Leaky ReLU)
+          to ensure non-zero gradient flow without distorting positive
+          values.
+    """
+    super().__init__()
+    self.smooth = smooth
+    self.negative_slope = negative_slope
 
-        # Compute overlap across spatial dimensions (keep channels separate if 2D/3D batch)
-        if pred.ndim > 2:
-            spatial_dims = tuple(range(2, pred.ndim))
-            intersection = (pred * target).sum(dim=spatial_dims)
-            pred_sum = pred.sum(dim=spatial_dims)
-            target_sum = target.sum(dim=spatial_dims)
-            
-            dice = 1.0 - ((2.0 * intersection + self.smooth) /
-                          (pred_sum + self.bg_weight * target_sum + self.smooth))
-            return dice.mean()
-        else:
-            intersection = (pred * target).sum()
-            pred_sum = pred.sum()
-            target_sum = target.sum()
-            
-            return 1.0 - ((2.0 * intersection + self.smooth) /
-                          (pred_sum + self.bg_weight * target_sum + self.smooth))
+  def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    # 1. Empty mask guard
+    if pred.numel() == 0 or target.numel() == 0:
+      return torch.tensor(
+          0.0, device=pred.device, dtype=pred.dtype, requires_grad=True
+      )
 
+    pred = pred.float()
+    target = target.float()
+
+    # 2. Leaky ReLU:
+    #    - Exact identity for x >= 0 (zero distortion across [0, 1])
+    #    - Non-zero gradient (slope=0.01) for x < 0 to prevent stuck weights
+    pred_pos = F.leaky_relu(pred, negative_slope=self.negative_slope)
+
+    # 3. Determine reduction dimensions (reduce spatial/temporal dims, keeping batch & channel)
+    #    Assumes shape: (B, C, N_queries) or (B, N_queries) or similar
+    if pred_pos.ndim > 2:
+      reduce_dims = tuple(range(2, pred_pos.ndim))
+    elif pred_pos.ndim == 2:
+      reduce_dims = (1,)
+    else:
+      reduce_dims = (0,)
+
+    # 4. Per-channel / per-sample L1 overlap and sums
+    intersection = (pred_pos * target).sum(dim=reduce_dims)
+    pred_sum = pred_pos.sum(dim=reduce_dims)
+    target_sum = target.sum(dim=reduce_dims)
+
+    # 5. Continuous Soft Dice
+    dice = 1.0 - (
+        (2.0 * intersection + self.smooth)
+        / (pred_sum + target_sum + self.smooth)
+    )
+
+    # 6. Average across batch and channels independently
+    return dice.mean()
+
+
+# def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+#     pos = target >= 0.01
+#     neg = ~pos
+
+#     loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+#     eps = 1e-6
+
+#     # ==================== POSITIVES ====================
+#     if pos.any():
+#         # Clamp minimum bound to 1e-4 to prevent FP16 log gradient explosions (-9.2 vs -13.8)
+#         pred_pos_safe = torch.clamp(torch.relu(pred[pos]), min=1e-4)
+#         log_tgt = torch.log(target[pos] + eps)
+        
+#         diff = torch.log(pred_pos_safe) - log_tgt
+#         loss = loss + torch.mean(torch.sqrt(diff * diff + eps))
+
+#     # ==================== BACKGROUND ====================
+#     if neg.any():
+#         r = pred[neg]
+#         pos_bg = torch.relu(r)
+#         loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
+        
+#         neg_bg = torch.relu(-r)
+#         loss = loss + 0.1 * neg_bg.mean()
+
+#     return loss
 
 def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    pos = target >= 0.01
-    neg = ~pos
+  if pred.numel() == 0 or target.numel() == 0:
+    return 0.0 * pred.sum()
+	
+  pos = target >= 0.01
+  neg = ~pos
 
-    loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
-    eps = 1e-6
+  # Preserve autograd graph link even if branches don't execute
+  loss = 0.0 * pred.sum()
+  eps = 1e-6
 
-    # ==================== POSITIVES ====================
-    if pos.any():
-        # Clamp minimum bound to 1e-4 to prevent FP16 log gradient explosions (-9.2 vs -13.8)
-        pred_pos_safe = torch.clamp(torch.relu(pred[pos]), min=1e-4)
-        log_tgt = torch.log(target[pos] + eps)
+  # ==================== POSITIVES ====================
+  if pos.any():
+    # Use leaky_relu so negative predictions still receive gradients pushing them upward
+    pred_pos = F.leaky_relu(pred[pos], negative_slope=0.01)
+    pred_pos_safe = torch.clamp(pred_pos, min=1e-4)
+
+    log_pred = torch.log(pred_pos_safe)
+    log_tgt = torch.log(target[pos] + eps)
+
+    diff = log_pred - log_tgt
+    loss = loss + torch.mean(torch.sqrt(diff * diff + eps))
+
+  # ==================== BACKGROUND ====================
+  if neg.any():
+    r = pred[neg]
+    pos_bg = F.leaky_relu(r, negative_slope=0.0)  # exact relu for background
+    loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
+
+    neg_bg = torch.relu(-r)
+    loss = loss + 0.1 * neg_bg.mean()
+
+  return loss
+
+
+# def gaussian_heatmap_loss_with_cap(
+#     pred: torch.Tensor,
+#     target: torch.Tensor,
+#     cap_threshold: float = 0.7,
+#     cap_huber_weight: float = 10.0,
+#     charb_downweight: float = 0.3,
+#     eps: float = 1e-6
+# ) -> torch.Tensor:
+    
+#     pos = target >= 0.01
+#     cap = target >= cap_threshold
+#     neg = ~pos
+
+#     loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+
+#     # ==================== POSITIVES + CAP HANDLING ====================
+#     if pos.any():
+#         pred_pos_safe = torch.clamp(torch.relu(pred[pos]), min=1e-4)
         
-        diff = torch.log(pred_pos_safe) - log_tgt
-        loss = loss + torch.mean(torch.sqrt(diff * diff + eps))
+#         log_pred = torch.log(pred_pos_safe)
+#         log_tgt  = torch.log(target[pos] + eps)
+#         diff     = log_pred - log_tgt
+#         charb    = torch.sqrt(diff * diff + eps)
 
-    # ==================== BACKGROUND ====================
-    if neg.any():
-        r = pred[neg]
-        pos_bg = torch.relu(r)
-        loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
+#         weight = torch.ones_like(charb)
+#         if cap.any():
+#             cap_in_pos = cap[pos]
+#             weight[cap_in_pos] *= charb_downweight
+
+#         loss = loss + (weight * charb).mean()
+
+#     # ==================== BACKGROUND ====================
+#     if neg.any():
+#         r = pred[neg]
+#         pos_bg = torch.relu(r)
+#         loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
         
-        neg_bg = torch.relu(-r)
-        loss = loss + 0.1 * neg_bg.mean()
+#         neg_bg = torch.relu(-r)
+#         loss = loss + 0.1 * neg_bg.mean()
 
-    return loss
+#     # ==================== CAP LOSS ====================
+#     if cap.any():
+#         pred_cap_safe = torch.relu(pred[cap])
+#         cap_loss = F.smooth_l1_loss(pred_cap_safe, target[cap], beta=0.5, reduction='mean')
+#         loss = loss + cap_huber_weight * cap_loss
+
+#     return loss
 
 
 def gaussian_heatmap_loss_with_cap(
@@ -2290,48 +2427,55 @@ def gaussian_heatmap_loss_with_cap(
     cap_threshold: float = 0.7,
     cap_huber_weight: float = 10.0,
     charb_downweight: float = 0.3,
-    eps: float = 1e-6
+    eps: float = 1e-6,
 ) -> torch.Tensor:
-    
-    pos = target >= 0.01
-    cap = target >= cap_threshold
-    neg = ~pos
+  if pred.numel() == 0 or target.numel() == 0:
+    return 0.0 * pred.sum()
+	
+  pos = target >= 0.01
+  cap = target >= cap_threshold
+  neg = ~pos
 
-    loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+  # Differentiable zero initialization
+  loss = 0.0 * pred.sum()
 
-    # ==================== POSITIVES + CAP HANDLING ====================
-    if pos.any():
-        pred_pos_safe = torch.clamp(torch.relu(pred[pos]), min=1e-4)
-        
-        log_pred = torch.log(pred_pos_safe)
-        log_tgt  = torch.log(target[pos] + eps)
-        diff     = log_pred - log_tgt
-        charb    = torch.sqrt(diff * diff + eps)
+  # ==================== POSITIVES + CAP HANDLING ====================
+  if pos.any():
+    # Leaky ReLU prevents zero-gradient lock for negative logit predictions
+    pred_pos = F.leaky_relu(pred[pos], negative_slope=0.01)
+    pred_pos_safe = torch.clamp(pred_pos, min=1e-4)
 
-        weight = torch.ones_like(charb)
-        if cap.any():
-            cap_in_pos = cap[pos]
-            weight[cap_in_pos] *= charb_downweight
+    log_pred = torch.log(pred_pos_safe)
+    log_tgt = torch.log(target[pos] + eps)
+    diff = log_pred - log_tgt
+    charb = torch.sqrt(diff * diff + eps)
 
-        loss = loss + (weight * charb).mean()
-
-    # ==================== BACKGROUND ====================
-    if neg.any():
-        r = pred[neg]
-        pos_bg = torch.relu(r)
-        loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
-        
-        neg_bg = torch.relu(-r)
-        loss = loss + 0.1 * neg_bg.mean()
-
-    # ==================== CAP LOSS ====================
+    weight = torch.ones_like(charb)
     if cap.any():
-        pred_cap_safe = torch.relu(pred[cap])
-        cap_loss = F.smooth_l1_loss(pred_cap_safe, target[cap], beta=0.5, reduction='mean')
-        loss = loss + cap_huber_weight * cap_loss
+      cap_in_pos = cap[pos]
+      weight[cap_in_pos] *= charb_downweight
 
-    return loss
+    loss = loss + (weight * charb).mean()
 
+  # ==================== BACKGROUND ====================
+  if neg.any():
+    r = pred[neg]
+    pos_bg = torch.relu(r)
+    loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
+
+    neg_bg = torch.relu(-r)
+    loss = loss + 0.1 * neg_bg.mean()
+
+  # ==================== CAP LOSS ====================
+  if cap.any():
+    # Use leaky_relu on cap region as well to prevent dead gradients
+    pred_cap_safe = F.leaky_relu(pred[cap], negative_slope=0.01)
+    cap_loss = F.smooth_l1_loss(
+        pred_cap_safe, target[cap], beta=0.5, reduction="mean"
+    )
+    loss = loss + cap_huber_weight * cap_loss
+
+  return loss
 
 def consistency_loss(pred1: torch.Tensor, pred2: torch.Tensor) -> torch.Tensor:
     return F.l1_loss(pred1, pred2)
