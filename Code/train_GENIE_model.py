@@ -1980,9 +1980,10 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		# 	x_query[:n_src, :3] = current_sources[:, :3]
 		# 	x_query_t[:n_src] = current_sources[:, 3]
 
-
+	
 		# 1. Extract target sources array for the current step/batch item
 		current_sources = lp_srcs[-1] if len(lp_srcs[-1]) > 0 else np.empty((0, 4))
+		n_frac_focused_queries = 0.2
 
 		# 2. Generate queries using WGS84 spatial perturbations
 		x_query, x_query_t = sample_random_queries(
