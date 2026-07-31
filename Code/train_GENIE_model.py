@@ -3657,7 +3657,7 @@ use_cap_loss = True
 use_l1_loss = True
 
 
-DiceLoss = GaussianDiceLossL1(bg_weight = 1.0) ## Can change the bg_weight
+DiceLoss = GaussianDiceLossL1() ## Can change the bg_weight
 
 
 LossBalancer = LossAccumulationBalancer(
