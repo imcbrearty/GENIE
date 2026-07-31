@@ -652,6 +652,140 @@ def sample_correlated_travel_time_noise(cholesky_matrix_trv, mean_vec, bias_fact
 
 		return simulated_times, scaled_mean_vec, scale_val, log_likelihood_obs, log_likelihood_sim
 
+## Random sampling while accounting for boundaries and using tanget plane
+
+
+def WGS84_radii_of_curvature(lat_rad, a=6378137.0, f=1.0 / 298.257223563):
+    """Computes Meridional (M) and Prime Vertical (N) radii of curvature on WGS84."""
+    e2 = 2 * f - f**2
+    sin_lat = np.sin(lat_rad)
+    denom = np.sqrt(1.0 - e2 * sin_lat**2)
+    
+    M = a * (1.0 - e2) / (denom**3)
+    N = a / denom
+    return M, N
+
+def reflect_bounds(val, low, high):
+    """Reflects array values seamlessly back into [low, high] bounds."""
+    span = high - low
+    if span <= 0:
+        return np.full_like(val, low)
+    v = val - low
+    v = np.abs(v % (2 * span))
+    v = np.where(v > span, 2 * span - v, v)
+    return v + low
+
+def generate_full_query_dataset_wgs84(
+    lp_srcs,
+    n_src_query,
+    n_frac_focused=0.2,
+    src_x_kernel_m=5000.0,
+    src_depth_kernel_m=5000.0,
+    src_t_kernel=1.0,
+    lat_range=(-90.0, 90.0),
+    lon_range=(-180.0, 180.0),
+    depth_range=(-700000.0, 0.0),
+    time_shift_range=10.0,
+    is_global_lon=True
+):
+    """
+    Generates n_src_query spatial-temporal queries:
+    1. Generates n_src_query background samples uniformly distributed by area and depth.
+    2. Overwrites n_frac_focused * n_src_query of those with focused WGS84-perturbed points.
+    
+    Returns:
+    --------
+    x_src_query : np.ndarray of shape (n_src_query, 3) -> [lat, lon, depth_m]
+    tq_sample   : np.ndarray of shape (n_src_query,)   -> time offset
+    """
+    half_t_window = time_shift_range / 2.0
+
+    # -------------------------------------------------------------------------
+    # PART 1: Generate full set of Background Uniform Area/Volume Queries
+    # -------------------------------------------------------------------------
+    # Latitude sampling using sin() transformation for exact equal-area spherical/ellipsoidal spread
+    sin_min = np.sin(np.radians(lat_range[0]))
+    sin_max = np.sin(np.radians(lat_range[1]))
+    u_lat = np.random.uniform(sin_min, sin_max, size=n_src_query)
+    bg_lats = np.degrees(np.arcsin(u_lat))
+
+    # Longitude uniform sampling
+    bg_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_src_query)
+
+    # Uniform depth sampling
+    bg_depths = np.random.uniform(depth_range[0], depth_range[1], size=n_src_query)
+
+    # Uniform time sampling across shift window
+    bg_times = np.random.uniform(-half_t_window, half_t_window, size=n_src_query)
+
+    x_src_query = np.column_stack((bg_lats, bg_lons, bg_depths))
+    tq_sample = bg_times
+
+    # -------------------------------------------------------------------------
+    # PART 2: Overwrite a fraction with Focused Target Queries (WGS84)
+    # -------------------------------------------------------------------------
+    n_focused = int(n_frac_focused * n_src_query)
+
+    if n_focused > 0 and len(lp_srcs) > 0:
+        # Pick random query slots to overwrite
+        ind_overwrite = np.sort(np.random.choice(n_src_query, size=n_focused, replace=False))
+        # Pick target sources to sample around
+        ind_sources = np.random.choice(len(lp_srcs), size=n_focused)
+
+        base_lat_deg = lp_srcs[ind_sources, 0]
+        base_lon_deg = lp_srcs[ind_sources, 1]
+        base_depth = lp_srcs[ind_sources, 2]
+        base_t = lp_srcs[ind_sources, 3]
+
+        base_lat_rad = np.radians(base_lat_deg)
+        base_lon_rad = np.radians(base_lon_deg)
+
+        # Local ENU 2D spatial perturbation
+        dE = np.random.normal(0, src_x_kernel_m, size=n_focused)
+        dN = np.random.normal(0, src_x_kernel_m, size=n_focused)
+
+        # WGS84 Radii of Curvature
+        M, N = WGS84_radii_of_curvature(base_lat_rad)
+        R_lat = M + base_depth
+        R_lon = N + base_depth
+
+        # Ellipsoidal differential displacements
+        d_lat_rad = dN / R_lat
+        new_lat_rad = base_lat_rad + d_lat_rad
+
+        d_lon_rad = dE / (R_lon * np.cos(new_lat_rad))
+        new_lon_rad = base_lon_rad + d_lon_rad
+
+        new_lat = np.degrees(new_lat_rad)
+        new_lon = np.degrees(new_lon_rad)
+
+        # Boundary Handling (Longitudes)
+        if is_global_lon:
+            new_lon = (new_lon + 180.0) % 360.0 - 180.0
+        else:
+            new_lon = reflect_bounds(new_lon, lon_range[0], lon_range[1])
+
+        # Latitude reflection
+        new_lat = reflect_bounds(new_lat, lat_range[0], lat_range[1])
+
+        # Depth perturbation and reflection
+        dz = np.random.normal(0, src_depth_kernel_m, size=n_focused)
+        raw_depth = base_depth + dz
+        new_depth = reflect_bounds(raw_depth, depth_range[0], depth_range[1])
+
+        # Time perturbation and reflection
+        dt = 2.0 * np.random.randn(n_focused) * src_t_kernel
+        raw_t = base_t + dt
+        new_t = reflect_bounds(raw_t, -half_t_window, half_t_window)
+
+        # Overwrite selected indices
+        x_src_query[ind_overwrite] = np.column_stack((new_lat, new_lon, new_depth))
+        tq_sample[ind_overwrite] = new_t
+
+    return x_src_query, tq_sample
+
+
+
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, use_time_shift = use_time_shift, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, Ac = Ac, return_only_data = False):
 
 	if verbose == True:
