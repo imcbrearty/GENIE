@@ -3977,7 +3977,7 @@ for batch_idx, inputs in enumerate(loader):
 	mx_pred_2[i] = mx_pred_val_2/n_batch
 	mx_pred_3[i] = mx_pred_val_3/n_batch
 	mx_pred_4[i] = mx_pred_val_4/n_batch
-	loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
+	# loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
 	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_negative_val, loss_consistency_val))
 
