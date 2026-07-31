@@ -1344,53 +1344,36 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		# min_misfit_allowed = 1.0 # min misfit time for establishing excess noise (now set in train_config.yaml)
 		iz = np.where(arrivals[:,4] >= 0)[0]
 
+		if use_real_data_sample == False:
+			
+			noise_values, is_excess = generate_travel_time_noise(
+				arrivals[iz,0],
+				phase_input=arrivals[iz,4],  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+				event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
+				distribution="laplace",
+				sigma_pick=0.08,
+				gamma_path=0.12,
+				scale_extra=1.0,
+				s_wave_multiplier=2.2,
+				excess_threshold_sigma=2.0,
+				# --- Systemic Velocity Model Bias Parameters ---
+				apply_systemic_bias=False,  # Set True if applying bias inside this function
+				total_bias=0.03,  # ~3% velocity perturbation range
+				frac_bias_s_ratio=0.3,
+				origin_shift_std=0.0,  # Baseline origin shift in seconds
+				return_sigma=False)
+			
+			iexcess_noise = np.where(is_excess == 1)[0]
+			arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
 
-		if use_correlated_travel_time_noise == True:
-		
-			iexcess_noise = np.where(arrivals[iz,3] > 0)[0]
-			# noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-			# iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
-			arrivals[iz,0] = arrivals[iz,0] + src_times[arrivals[iz,2].astype('int')] # + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
-			arrivals[iz,3] = src_times[arrivals[iz,2].astype('int')] ## Write real picks fourth column back to origin times, for consistency with previous approach
 		
 		else:
-
-
-			if use_real_data_sample == False:
-				
-				# noise_values = np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-				# iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
-				# arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
-				
-				noise_values, is_excess = generate_travel_time_noise(
-				    arrivals[iz,0],
-				    phase_input=arrivals[iz,4],  # String ("P"/"S") OR array of 0s (P) and 1s (S)
-				    event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
-				    distribution="laplace",
-				    sigma_pick=0.08,
-					gamma_path=0.12,
-				    scale_extra=1.0,
-				    s_wave_multiplier=2.2,
-				    excess_threshold_sigma=2.0,
-				    # --- Systemic Velocity Model Bias Parameters ---
-				    apply_systemic_bias=False,  # Set True if applying bias inside this function
-				    total_bias=0.03,  # ~3% velocity perturbation range
-				    frac_bias_s_ratio=0.3,
-				    origin_shift_std=0.0,  # Baseline origin shift in seconds
-				    return_sigma=False)
-				
-				iexcess_noise = np.where(is_excess == 1)[0]
-				arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise
 			
+			noise_values = 0.0*np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
+			iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
+			arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] # + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise				
+			assert(len(iexcess_noise) == 0)
 
-			else:
-				
-				noise_values = 0.0*np.random.laplace(scale = 1, size = len(iz))*sig_t*arrivals[iz,0]
-				iexcess_noise = np.where(np.abs(noise_values) > np.maximum(min_misfit_allowed, thresh_noise_max*sig_t*arrivals[iz,0]))[0]
-				arrivals[iz,0] = arrivals[iz,0] + arrivals[iz,3] # + noise_values ## Setting arrival times equal to moveout time plus origin time plus noise				
-				assert(len(iexcess_noise) == 0)
-
-				# pdb.set_trace()
 
 
 		if len(iexcess_noise) > 0: ## Set these arrivals to "false arrivals", since noise is so high
