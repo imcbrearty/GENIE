@@ -2366,22 +2366,60 @@ class GaussianDiceLoss(nn.Module):
 
 #     return loss
 
-def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+# def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+#   if pred.numel() == 0 or target.numel() == 0:
+#     return 0.0 * pred.sum()
+	
+#   pos = target >= 0.01
+#   neg = ~pos
+
+#   # Preserve autograd graph link even if branches don't execute
+#   loss = 0.0 * pred.sum()
+#   eps = 1e-6
+
+#   # ==================== POSITIVES ====================
+#   if pos.any():
+#     # Use leaky_relu so negative predictions still receive gradients pushing them upward
+#     pred_pos = F.leaky_relu(pred[pos], negative_slope=0.01)
+#     pred_pos_safe = torch.clamp(pred_pos, min=1e-4)
+
+#     log_pred = torch.log(pred_pos_safe)
+#     log_tgt = torch.log(target[pos] + eps)
+
+#     diff = log_pred - log_tgt
+#     loss = loss + torch.mean(torch.sqrt(diff * diff + eps))
+
+#   # ==================== BACKGROUND ====================
+#   if neg.any():
+#     r = pred[neg]
+#     pos_bg = F.leaky_relu(r, negative_slope=0.0)  # exact relu for background
+#     loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
+
+#     neg_bg = torch.relu(-r)
+#     loss = loss + 0.1 * neg_bg.mean()
+
+#   return loss
+
+
+def gaussian_heatmap_loss(
+    pred: torch.Tensor, target: torch.Tensor
+) -> torch.Tensor:
+  # 1. Empty slice guard linked to graph
   if pred.numel() == 0 or target.numel() == 0:
     return 0.0 * pred.sum()
-	
+
   pos = target >= 0.01
   neg = ~pos
 
-  # Preserve autograd graph link even if branches don't execute
+  # Preserve autograd graph link
   loss = 0.0 * pred.sum()
   eps = 1e-6
 
   # ==================== POSITIVES ====================
   if pos.any():
-    # Use leaky_relu so negative predictions still receive gradients pushing them upward
-    pred_pos = F.leaky_relu(pred[pos], negative_slope=0.01)
-    pred_pos_safe = torch.clamp(pred_pos, min=1e-4)
+    # Leaky ReLU + offset keeps value strictly > 0 for log()
+    # WITHOUT using torch.clamp (which destroys leaky_relu gradients)
+    pred_pos_safe = F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4
 
     log_pred = torch.log(pred_pos_safe)
     log_tgt = torch.log(target[pos] + eps)
@@ -2392,7 +2430,8 @@ def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Ten
   # ==================== BACKGROUND ====================
   if neg.any():
     r = pred[neg]
-    pos_bg = F.leaky_relu(r, negative_slope=0.0)  # exact relu for background
+
+    pos_bg = torch.relu(r)
     loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
 
     neg_bg = torch.relu(-r)
@@ -2450,6 +2489,64 @@ def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Ten
 #     return loss
 
 
+# def gaussian_heatmap_loss_with_cap(
+#     pred: torch.Tensor,
+#     target: torch.Tensor,
+#     cap_threshold: float = 0.7,
+#     cap_huber_weight: float = 10.0,
+#     charb_downweight: float = 0.3,
+#     eps: float = 1e-6,
+# ) -> torch.Tensor:
+#   if pred.numel() == 0 or target.numel() == 0:
+#     return 0.0 * pred.sum()
+	
+#   pos = target >= 0.01
+#   cap = target >= cap_threshold
+#   neg = ~pos
+
+#   # Differentiable zero initialization
+#   loss = 0.0 * pred.sum()
+
+#   # ==================== POSITIVES + CAP HANDLING ====================
+#   if pos.any():
+#     # Leaky ReLU prevents zero-gradient lock for negative logit predictions
+#     pred_pos = F.leaky_relu(pred[pos], negative_slope=0.01)
+#     pred_pos_safe = torch.clamp(pred_pos, min=1e-4)
+
+#     log_pred = torch.log(pred_pos_safe)
+#     log_tgt = torch.log(target[pos] + eps)
+#     diff = log_pred - log_tgt
+#     charb = torch.sqrt(diff * diff + eps)
+
+#     weight = torch.ones_like(charb)
+#     if cap.any():
+#       cap_in_pos = cap[pos]
+#       weight[cap_in_pos] *= charb_downweight
+
+#     loss = loss + (weight * charb).mean()
+
+#   # ==================== BACKGROUND ====================
+#   if neg.any():
+#     r = pred[neg]
+#     pos_bg = torch.relu(r)
+#     loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
+
+#     neg_bg = torch.relu(-r)
+#     loss = loss + 0.1 * neg_bg.mean()
+
+#   # ==================== CAP LOSS ====================
+#   if cap.any():
+#     # Use leaky_relu on cap region as well to prevent dead gradients
+#     pred_cap_safe = F.leaky_relu(pred[cap], negative_slope=0.01)
+#     cap_loss = F.smooth_l1_loss(
+#         pred_cap_safe, target[cap], beta=0.5, reduction="mean"
+#     )
+#     loss = loss + cap_huber_weight * cap_loss
+
+#   return loss
+
+
+
 def gaussian_heatmap_loss_with_cap(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -2458,9 +2555,10 @@ def gaussian_heatmap_loss_with_cap(
     charb_downweight: float = 0.3,
     eps: float = 1e-6,
 ) -> torch.Tensor:
+  # 1. Empty slice guard linked to graph
   if pred.numel() == 0 or target.numel() == 0:
     return 0.0 * pred.sum()
-	
+
   pos = target >= 0.01
   cap = target >= cap_threshold
   neg = ~pos
@@ -2470,9 +2568,9 @@ def gaussian_heatmap_loss_with_cap(
 
   # ==================== POSITIVES + CAP HANDLING ====================
   if pos.any():
-    # Leaky ReLU prevents zero-gradient lock for negative logit predictions
-    pred_pos = F.leaky_relu(pred[pos], negative_slope=0.01)
-    pred_pos_safe = torch.clamp(pred_pos, min=1e-4)
+    # Leaky ReLU + 1e-4 shift keeps values strictly > 0 for log()
+    # WITHOUT using torch.clamp (preserving gradient flow when pred < 0)
+    pred_pos_safe = F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4
 
     log_pred = torch.log(pred_pos_safe)
     log_tgt = torch.log(target[pos] + eps)
@@ -2489,6 +2587,7 @@ def gaussian_heatmap_loss_with_cap(
   # ==================== BACKGROUND ====================
   if neg.any():
     r = pred[neg]
+
     pos_bg = torch.relu(r)
     loss = loss + 25.0 * pos_bg.mean() + 1.0 * pos_bg.square().mean()
 
@@ -2497,14 +2596,17 @@ def gaussian_heatmap_loss_with_cap(
 
   # ==================== CAP LOSS ====================
   if cap.any():
-    # Use leaky_relu on cap region as well to prevent dead gradients
-    pred_cap_safe = F.leaky_relu(pred[cap], negative_slope=0.01)
-    cap_loss = F.smooth_l1_loss(
-        pred_cap_safe, target[cap], beta=0.5, reduction="mean"
-    )
+    # Pass raw pred[cap] directly into Smooth L1!
+    # Linear Huber loss handles negative inputs with full 1.0 gradient strength.
+    cap_loss = F.smooth_l1_loss(pred[cap], target[cap], beta=0.5, reduction="mean")
     loss = loss + cap_huber_weight * cap_loss
 
   return loss
+
+
+
+
+
 
 def consistency_loss(pred1: torch.Tensor, pred2: torch.Tensor) -> torch.Tensor:
     return F.l1_loss(pred1, pred2)
