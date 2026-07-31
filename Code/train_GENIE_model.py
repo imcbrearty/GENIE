@@ -2310,6 +2310,35 @@ class GaussianDiceLossL1(nn.Module):
     return dice.mean()
 
 
+## Replacing row wise sum with mean
+class GaussianDiceLoss(nn.Module):
+
+	# Start with bg_weight = 1.0
+	# If too many false positives → increase bg_weight to 1.5–3.0
+	# If missing weak Gaussians → decrease bg_weight to 0.5–0.8
+
+	def __init__(self, smooth=1e-5, bg_weight=1.0):
+		super().__init__()
+		self.smooth = smooth
+		self.bg_weight = bg_weight   # usually 1.0, sometimes 0.5–2.0
+
+	def forward(self, pred, target):
+		# No sigmoid! pred is raw linear output
+		pred = pred.float()
+		target = target.float()
+
+
+		intersection = (pred * target).sum()/pred.shape[1]  # sum over spatial + channel if multi-channel
+		pred_sum = (pred ** 2).sum()/pred.shape[1]
+		target_sum = (target ** 2).sum()/pred.shape[1]
+
+		dice = 1 - ((2.0 * intersection + self.smooth) /
+                    (pred_sum + self.bg_weight * target_sum + self.smooth))
+
+		return dice # .mean()
+
+
+
 # def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 #     pos = target >= 0.01
 #     neg = ~pos
@@ -2481,158 +2510,343 @@ def consistency_loss(pred1: torch.Tensor, pred2: torch.Tensor) -> torch.Tensor:
     return F.l1_loss(pred1, pred2)
 
 
-class LossAccumulationBalancer(nn.Module):
-    def __init__(
-        self,
-        anchor: str = 'loss_dice2',
-        group_targets: dict = None,
-        alpha: float = 0.98,
-        primary_ext: str = 'loss_dice',
-        device: str = 'cuda'
-    ):
-        super().__init__()
-        self.anchor = anchor
-        self.alpha = alpha
-        self.primary_ext = primary_ext
-        self.device = device
+# class LossAccumulationBalancer(nn.Module):
+#     def __init__(
+#         self,
+#         anchor: str = 'loss_dice2',
+#         group_targets: dict = None,
+#         alpha: float = 0.98,
+#         primary_ext: str = 'loss_dice',
+#         device: str = 'cuda'
+#     ):
+#         super().__init__()
+#         self.anchor = anchor
+#         self.alpha = alpha
+#         self.primary_ext = primary_ext
+#         self.device = device
 
-        if group_targets is None:
-            group_targets = {'primary': 1.0, 'aux': 0.02}
-        self.group_targets = group_targets
+#         if group_targets is None:
+#             group_targets = {'primary': 1.0, 'aux': 0.02}
+#         self.group_targets = group_targets
 
-        # Persistent state
-        self.primary_ema = {}
-        self.aux_ema = defaultdict(dict)
-        self._anchor_ema_current = None
+#         # Persistent state
+#         self.primary_ema = {}
+#         self.aux_ema = defaultdict(dict)
+#         self._anchor_ema_current = None
 
-        # Accumulation buffers
-        self._accum_prim = {}
-        self._accum_aux = defaultdict(dict)
-        self._participation = {}
-        self._participation_aux = defaultdict(dict)
+#         # Accumulation buffers
+#         self._accum_prim = {}
+#         self._accum_aux = defaultdict(dict)
+#         self._participation = {}
+#         self._participation_aux = defaultdict(dict)
 
-        self._step_count = 0
-        self.accum_steps = None
+#         self._step_count = 0
+#         self.accum_steps = None
 
-    def _get_group(self, name: str) -> str:
-        if name.startswith(self.primary_ext):
-            return 'primary'
-        for group in sorted(self.group_targets.keys(), key=len, reverse=True):
-            if group != 'primary' and name.startswith(group):
-                return group
-        return 'aux'
+#     def _get_group(self, name: str) -> str:
+#         if name.startswith(self.primary_ext):
+#             return 'primary'
+#         for group in sorted(self.group_targets.keys(), key=len, reverse=True):
+#             if group != 'primary' and name.startswith(group):
+#                 return group
+#         return 'aux'
 
-    def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
-        if accum_steps is not None:
-            self.accum_steps = accum_steps
+#     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
+#         if accum_steps is not None:
+#             self.accum_steps = accum_steps
 
-        total_loss = 0.0
+#         total_loss = 0.0
 
-        # 1. Accumulate values + participation counters
-        for name, loss in losses_dict.items():
-            val = loss.detach().mean().item()
-            group = self._get_group(name)
+#         # 1. Accumulate values + participation counters
+#         for name, loss in losses_dict.items():
+#             val = loss.detach().mean().item()
+#             group = self._get_group(name)
 
-            if group == 'primary':
-                self._participation[name] = self._participation.get(name, 0) + 1
-                self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
-            else:
-                self._participation_aux[group][name] = self._participation_aux[group].get(name, 0) + 1
-                self._accum_aux[group][name] = self._accum_aux[group].get(name, 0.0) + val
+#             if group == 'primary':
+#                 self._participation[name] = self._participation.get(name, 0) + 1
+#                 self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
+#             else:
+#                 self._participation_aux[group][name] = self._participation_aux[group].get(name, 0) + 1
+#                 self._accum_aux[group][name] = self._accum_aux[group].get(name, 0.0) + val
 
-        self._step_count += 1
+#         self._step_count += 1
 
-        # 2. Final microbatch step → update EMAs
-        if is_last_accum_step or (self.accum_steps and self._step_count >= self.accum_steps):
-            anchor_ema_new = None
+#         # 2. Final microbatch step → update EMAs
+#         if is_last_accum_step or (self.accum_steps and self._step_count >= self.accum_steps):
+#             anchor_ema_new = None
             
-            # Update Primary EMAs
-            for name, accum_val in self._accum_prim.items():
-                n = self._participation.get(name, 1)
-                batch_val = accum_val / n
-                if name not in self.primary_ema:
-                    self.primary_ema[name] = batch_val
-                else:
-                    self.primary_ema[name] = self.alpha * self.primary_ema[name] + (1 - self.alpha) * batch_val
-                if name == self.anchor:
-                    anchor_ema_new = self.primary_ema[name]
+#             # Update Primary EMAs
+#             for name, accum_val in self._accum_prim.items():
+#                 n = self._participation.get(name, 1)
+#                 batch_val = accum_val / n
+#                 if name not in self.primary_ema:
+#                     self.primary_ema[name] = batch_val
+#                 else:
+#                     self.primary_ema[name] = self.alpha * self.primary_ema[name] + (1 - self.alpha) * batch_val
+#                 if name == self.anchor:
+#                     anchor_ema_new = self.primary_ema[name]
 
-            # Update Aux EMAs
-            for group, accum_dict in self._accum_aux.items():
-                for name, accum_val in accum_dict.items():
-                    n = self._participation_aux[group].get(name, 1)
-                    batch_val = accum_val / n
-                    ema_dict = self.aux_ema[group]
-                    if name not in ema_dict:
-                        ema_dict[name] = batch_val
-                    else:
-                        ema_dict[name] = self.alpha * ema_dict[name] + (1 - self.alpha) * batch_val
+#             # Update Aux EMAs
+#             for group, accum_dict in self._accum_aux.items():
+#                 for name, accum_val in accum_dict.items():
+#                     n = self._participation_aux[group].get(name, 1)
+#                     batch_val = accum_val / n
+#                     ema_dict = self.aux_ema[group]
+#                     if name not in ema_dict:
+#                         ema_dict[name] = batch_val
+#                     else:
+#                         ema_dict[name] = self.alpha * ema_dict[name] + (1 - self.alpha) * batch_val
 
-            if anchor_ema_new is not None:
-                self._anchor_ema_current = anchor_ema_new
-            elif self._anchor_ema_current is None and self.primary_ema:
-                self._anchor_ema_current = max(self.primary_ema.values())
+#             if anchor_ema_new is not None:
+#                 self._anchor_ema_current = anchor_ema_new
+#             elif self._anchor_ema_current is None and self.primary_ema:
+#                 self._anchor_ema_current = max(self.primary_ema.values())
 
-            # Clear state cleanly
-            self._accum_prim.clear()
-            self._accum_aux = defaultdict(dict)
-            self._participation.clear()
-            self._participation_aux = defaultdict(dict)
-            self._step_count = 0
+#             # Clear state cleanly
+#             self._accum_prim.clear()
+#             self._accum_aux = defaultdict(dict)
+#             self._participation.clear()
+#             self._participation_aux = defaultdict(dict)
+#             self._step_count = 0
 
-        # 3. Compute scaled total loss
-        anchor_val = self._anchor_ema_current if self._anchor_ema_current is not None else 0.5
+#         # 3. Compute scaled total loss
+#         anchor_val = self._anchor_ema_current if self._anchor_ema_current is not None else 0.5
 
-        for name, loss in losses_dict.items():
-            group = self._get_group(name)
-            val = loss.detach().mean().item()
+#         for name, loss in losses_dict.items():
+#             group = self._get_group(name)
+#             val = loss.detach().mean().item()
 
-            if group == 'primary':
-                # Safe dynamic initialization if loss appears mid-run
-                ema = self.primary_ema.setdefault(name, val if val > 0 else 1.0)
-                scale = anchor_val / (ema + 1e-8)
-            else:
-                ema = self.aux_ema[group].setdefault(name, val if val > 0 else 1.0)
-                n_losses = max(len(self.aux_ema[group]), 1)
-                target = self.group_targets.get(group, 0.02)
-                scale = target * anchor_val / (n_losses * (ema + 1e-8))
+#             if group == 'primary':
+#                 # Safe dynamic initialization if loss appears mid-run
+#                 ema = self.primary_ema.setdefault(name, val if val > 0 else 1.0)
+#                 scale = anchor_val / (ema + 1e-8)
+#             else:
+#                 ema = self.aux_ema[group].setdefault(name, val if val > 0 else 1.0)
+#                 n_losses = max(len(self.aux_ema[group]), 1)
+#                 target = self.group_targets.get(group, 0.02)
+#                 scale = target * anchor_val / (n_losses * (ema + 1e-8))
 
-            scale = torch.clamp(
-                torch.tensor(scale, device=self.device), 
-                min=0.01 if group != 'primary' else 0.1,
-                max=100.0 if group != 'primary' else 300.0
-            )
-            total_loss = total_loss + scale * loss
+#             scale = torch.clamp(
+#                 torch.tensor(scale, device=self.device), 
+#                 min=0.01 if group != 'primary' else 0.1,
+#                 max=100.0 if group != 'primary' else 300.0
+#             )
+#             total_loss = total_loss + scale * loss
 
-        return total_loss
+#         return total_loss
 
-    # Checkpoint Serialization
-    def state_dict(self) -> dict:
-        return {
-            'anchor': self.anchor,
-            'group_targets': self.group_targets,
-            'alpha': self.alpha,
-            'primary_ext': self.primary_ext,
-            'accum_steps': self.accum_steps,
-            'primary_ema': self.primary_ema,
-            'aux_ema': {k: dict(v) for k, v in self.aux_ema.items()},
-            '_anchor_ema_current': self._anchor_ema_current,
-        }
+#     # Checkpoint Serialization
+#     def state_dict(self) -> dict:
+#         return {
+#             'anchor': self.anchor,
+#             'group_targets': self.group_targets,
+#             'alpha': self.alpha,
+#             'primary_ext': self.primary_ext,
+#             'accum_steps': self.accum_steps,
+#             'primary_ema': self.primary_ema,
+#             'aux_ema': {k: dict(v) for k, v in self.aux_ema.items()},
+#             '_anchor_ema_current': self._anchor_ema_current,
+#         }
 
-    def load_state_dict(self, state_dict: dict) -> None:
-        self.anchor = state_dict.get('anchor', self.anchor)
-        self.group_targets = state_dict.get('group_targets', self.group_targets)
-        self.alpha = state_dict.get('alpha', self.alpha)
-        self.primary_ext = state_dict.get('primary_ext', self.primary_ext)
-        self.accum_steps = state_dict.get('accum_steps', self.accum_steps)
-        self.primary_ema = state_dict.get('primary_ema', {})
+#     def load_state_dict(self, state_dict: dict) -> None:
+#         self.anchor = state_dict.get('anchor', self.anchor)
+#         self.group_targets = state_dict.get('group_targets', self.group_targets)
+#         self.alpha = state_dict.get('alpha', self.alpha)
+#         self.primary_ext = state_dict.get('primary_ext', self.primary_ext)
+#         self.accum_steps = state_dict.get('accum_steps', self.accum_steps)
+#         self.primary_ema = state_dict.get('primary_ema', {})
         
-        aux_ema_raw = state_dict.get('aux_ema', {})
-        self.aux_ema = defaultdict(dict)
-        for k, v in aux_ema_raw.items():
-            self.aux_ema[k] = dict(v)
+#         aux_ema_raw = state_dict.get('aux_ema', {})
+#         self.aux_ema = defaultdict(dict)
+#         for k, v in aux_ema_raw.items():
+#             self.aux_ema[k] = dict(v)
             
-        self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
+#         self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
+
+
+# from collections import defaultdict
+# import torch
+# import torch.nn as nn
+
+
+class LossAccumulationBalancer(nn.Module):
+
+  def __init__(
+      self,
+      anchor: str = 'loss_dice2',
+      group_targets: dict = None,
+      alpha: float = 0.98,
+      primary_ext: str = 'loss_dice',
+      device: str = 'cuda',
+  ):
+    super().__init__()
+    self.anchor = anchor
+    self.alpha = alpha
+    self.primary_ext = primary_ext
+    self.device = device
+
+    if group_targets is None:
+      group_targets = {'primary': 1.0, 'loss_regression': 0.5, 'aux': 0.02}
+    self.group_targets = group_targets
+
+    # Persistent state
+    self.primary_ema = {}
+    self.aux_ema = defaultdict(dict)
+    self._anchor_ema_current = None
+
+    # Accumulation buffers
+    self._accum_prim = {}
+    self._accum_aux = defaultdict(dict)
+    self._participation = {}
+    self._participation_aux = defaultdict(dict)
+
+    self._step_count = 0
+    self.accum_steps = None
+
+  def _get_group(self, name: str) -> str:
+    if name.startswith(self.primary_ext):
+      return 'primary'
+
+    # Check for prefix match against all configured group targets
+    for group in sorted(self.group_targets.keys(), key=len, reverse=True):
+      if group != 'primary' and (
+          name.startswith(group) or group in name
+      ):  # Robust match
+        return group
+    return 'aux'
+
+  def __call__(
+      self,
+      losses_dict: dict,
+      accum_steps: int = None,
+      is_last_accum_step: bool = False,
+  ):
+    if accum_steps is not None:
+      self.accum_steps = accum_steps
+
+    total_loss = 0.0
+
+    # 1. Accumulate values + participation counters
+    for name, loss in losses_dict.items():
+      val = loss.detach().mean().item()
+      group = self._get_group(name)
+
+      if group == 'primary':
+        self._participation[name] = self._participation.get(name, 0) + 1
+        self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
+      else:
+        self._participation_aux[group][name] = (
+            self._participation_aux[group].get(name, 0) + 1
+        )
+        self._accum_aux[group][name] = (
+            self._accum_aux[group].get(name, 0.0) + val
+        )
+
+    self._step_count += 1
+
+    # 2. Final microbatch step -> update EMAs
+    if is_last_accum_step or (
+        self.accum_steps and self._step_count >= self.accum_steps
+    ):
+      anchor_ema_new = None
+
+      # Update Primary EMAs
+      for name, accum_val in self._accum_prim.items():
+        n = self._participation.get(name, 1)
+        batch_val = accum_val / n
+        if name not in self.primary_ema:
+          self.primary_ema[name] = batch_val
+        else:
+          self.primary_ema[name] = (
+              self.alpha * self.primary_ema[name] + (1 - self.alpha) * batch_val
+          )
+        if name == self.anchor:
+          anchor_ema_new = self.primary_ema[name]
+
+      # Update Aux EMAs
+      for group, accum_dict in self._accum_aux.items():
+        for name, accum_val in accum_dict.items():
+          n = self._participation_aux[group].get(name, 1)
+          batch_val = accum_val / n
+          ema_dict = self.aux_ema[group]
+          if name not in ema_dict:
+            ema_dict[name] = batch_val
+          else:
+            ema_dict[name] = (
+                self.alpha * ema_dict[name] + (1 - self.alpha) * batch_val
+            )
+
+      if anchor_ema_new is not None:
+        self._anchor_ema_current = anchor_ema_new
+      elif self._anchor_ema_current is None and self.primary_ema:
+        self._anchor_ema_current = max(self.primary_ema.values())
+
+      # Clear state cleanly
+      self._accum_prim.clear()
+      self._accum_aux = defaultdict(dict)
+      self._participation.clear()
+      self._participation_aux = defaultdict(dict)
+      self._step_count = 0
+
+    # 3. Compute scaled total loss
+    anchor_val = (
+        self._anchor_ema_current
+        if self._anchor_ema_current is not None
+        else 0.5
+    )
+
+    for name, loss in losses_dict.items():
+      group = self._get_group(name)
+      val = loss.detach().mean().item()
+
+      if group == 'primary':
+        ema = self.primary_ema.setdefault(name, val if val > 0 else 1.0)
+        scale = anchor_val / (ema + 1e-8)
+        min_clamp, max_clamp = 0.1, 10.0
+      else:
+        ema = self.aux_ema[group].setdefault(name, val if val > 0 else 1.0)
+        target = self.group_targets.get(group, 0.02)
+        # REMOVED division by n_losses here!
+        scale = (target * anchor_val) / (ema + 1e-8)
+        min_clamp, max_clamp = 0.01, 10.0
+
+      # Apply controlled safety clamps
+      scale = torch.clamp(
+          torch.tensor(scale, device=self.device),
+          min=min_clamp,
+          max=max_clamp,
+      )
+      total_loss = total_loss + scale * loss
+
+    return total_loss
+
+  # Checkpoint Serialization
+  def state_dict(self) -> dict:
+    return {
+        'anchor': self.anchor,
+        'group_targets': self.group_targets,
+        'alpha': self.alpha,
+        'primary_ext': self.primary_ext,
+        'accum_steps': self.accum_steps,
+        'primary_ema': self.primary_ema,
+        'aux_ema': {k: dict(v) for k, v in self.aux_ema.items()},
+        '_anchor_ema_current': self._anchor_ema_current,
+    }
+
+  def load_state_dict(self, state_dict: dict) -> None:
+    self.anchor = state_dict.get('anchor', self.anchor)
+    self.group_targets = state_dict.get('group_targets', self.group_targets)
+    self.alpha = state_dict.get('alpha', self.alpha)
+    self.primary_ext = state_dict.get('primary_ext', self.primary_ext)
+    self.accum_steps = state_dict.get('accum_steps', self.accum_steps)
+    self.primary_ema = state_dict.get('primary_ema', {})
+
+    aux_ema_raw = state_dict.get('aux_ema', {})
+    self.aux_ema = defaultdict(dict)
+    for k, v in aux_ema_raw.items():
+      self.aux_ema[k] = dict(v)
+
+    self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
 
 
 class UncertaintyBalancer(nn.Module):
@@ -3660,14 +3874,29 @@ use_l1_loss = True
 DiceLoss = GaussianDiceLossL1() ## Can change the bg_weight
 
 
+# LossBalancer = LossAccumulationBalancer(
+#     anchor='loss_dice2',
+#     group_targets={
+#         'primary':    1.0,       # everything starting with loss_dice
+#         'loss_regression': 0.02,      # smooth l1 loss
+#         'loss_consistency': 0.005,    # tiny regularizer
+#         'loss_negative':     0.02,      # loss_negative, loss_cap1, etc.
+#         'aux': 0.02, ## Base loss
+#         # add more whenever you want
+#     },
+#     primary_ext='loss_dice',
+#     alpha=0.98,
+#     device = device
+# )
+
 LossBalancer = LossAccumulationBalancer(
     anchor='loss_dice2',
     group_targets={
         'primary':    1.0,       # everything starting with loss_dice
-        'loss_regression': 0.02,      # smooth l1 loss
-        'loss_consistency': 0.005,    # tiny regularizer
-        'loss_negative':     0.02,      # loss_negative, loss_cap1, etc.
-        'aux': 0.02, ## Base loss
+        'loss_regression': 0.5,      # smooth l1 loss
+        'loss_consistency': 0.05,    # tiny regularizer
+        'loss_negative':     0.15,      # loss_negative, loss_cap1, etc.
+        'aux': 0.1, ## Base loss
         # add more whenever you want
     },
     primary_ext='loss_dice',
@@ -4051,26 +4280,26 @@ for batch_idx, inputs in enumerate(loader):
 			X_query_save = [X_query[i0].cpu().detach().numpy()]
 
 		# ==================== 5. CONSTRUCT LOSS DICT & BALANCE ====================
-		pre_scale_weights1 = [2.0, 2.0]
+		# pre_scale_weights1 = [2.0, 2.0]
+		pre_scale_weights1 = [0.5, 2.0]
 		pre_scale_weights2 = [5.0, 50.0]
 
 		loss_dict = {
-			'loss_dice1': 0.2 * loss_base1,
+			'loss_base1': loss_base1,
 			'loss_dice2': loss_dice2,
-			'loss_dice3_P': 0.5 * loss_dice3,
-			'loss_dice4_S': 0.5 * loss_dice4,
-			'loss_regression1': loss_reg_base * pre_scale_weights1[0],
-			'loss_regression2': loss_reg_query * pre_scale_weights1[0],
-			'loss_regression3_P': loss_reg_assoc_P * pre_scale_weights1[1],
-			'loss_regression4_S': loss_reg_assoc_S * pre_scale_weights1[1],
+			'loss_dice3_P': loss_dice3,
+			'loss_dice4_S': loss_dice4,
+			'loss_base1_reg': loss_reg_base,
+			'loss_regression2': loss_reg_query,
+			'loss_regression3_P': loss_reg_assoc_P,
+			'loss_regression4_S': loss_reg_assoc_S,
 		}
 
 		if computed_negative_loss:
-			loss_dict['aux_negative'] = ramp_aux * pre_scale_weights2[0] * raw_loss_negative
+			loss_dict['aux_negative'] = ramp_aux * raw_loss_negative
 
 		if loss_consistency_flag:
-			loss_dict['aux_consistency'] = ramp_aux * pre_scale_weights2[1] * raw_loss_consistency
-
+			loss_dict['aux_consistency'] = ramp_aux * raw_loss_consistency
 
 
 
