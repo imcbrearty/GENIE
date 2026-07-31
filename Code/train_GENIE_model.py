@@ -3929,9 +3929,9 @@ LossBalancer = LossAccumulationBalancer(
     anchor='loss_dice2',
     group_targets={
         'primary':    1.0,       # everything starting with loss_dice
-        'loss_regression': 0.5,      # smooth l1 loss
+        'loss_regression': 0.35,      # smooth l1 loss
         'loss_consistency': 0.05,    # tiny regularizer
-        'loss_negative':     0.15,      # loss_negative, loss_cap1, etc.
+        'loss_negative':     0.05,      # loss_negative, loss_cap1, etc.
         'aux': 0.1, ## Base loss
         # add more whenever you want
     },
