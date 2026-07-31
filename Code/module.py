@@ -2731,7 +2731,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
 
 
-		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
 		x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda) # x_temp_cuda_cart
 		# if self.use_expanded == True:
@@ -2855,7 +2855,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
 
 
-		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
 		x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda) # x_temp_cuda_cart
 		# x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
