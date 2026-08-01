@@ -2206,7 +2206,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		x_local = self.SpatialAggregation2(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda)
 		if self.use_expanded == True:
 			x_expand = self.SpatialAggregation2_expanded(x, embed_context, A_src[1], x_temp_cuda) # x_temp_cuda_cart
-			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(n_line_nodes, -1)), dim = 1)))
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
 			x = x_local
@@ -2387,8 +2387,8 @@ class GCN_Detection_Network_extended(nn.Module):
 		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
 		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda)
 		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
-			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(n_line_nodes, -1)), dim = 1)))
+			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
 			x = x_local
@@ -2476,12 +2476,12 @@ class GCN_Detection_Network_extended(nn.Module):
 		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
 		if self.use_expanded == True:
 			x_expand = self.SpatialAggregation2_expanded(x, embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
-			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(n_line_nodes, -1)), dim = 1)))
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
 			x = x_local
 			
-		x_spatial = self.SpatialAggregation3(x, embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		x_spatial = self.SpatialAggregation3(x, self.embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 
 		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
 		x = self.proj_soln2(x)
