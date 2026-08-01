@@ -636,6 +636,11 @@ def sample_random_queries(
   """Generates spatial-temporal queries via uniform equal-area sampling and target perturbations."""
   half_t_window = time_shift_range / 2.0
 
+  # If no true catalog sources exist, shift true-focused allocation to random-focused
+  if len(lp_srcs) == 0 and n_frac_focused > 0:
+    n_frac_random_focused += n_frac_focused
+    n_frac_focused = 0.0
+	
   # 1. Background Equal-Area Sampling (Full Set)
   sin_min = np.sin(np.radians(lat_range[0]))
   sin_max = np.sin(np.radians(lat_range[1]))
