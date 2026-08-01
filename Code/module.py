@@ -2200,7 +2200,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			Slice = torch.cat((Slice, embedding), dim = 1)
 
 		
-		x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, embed_context) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 		x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, n_sta, n_temp)
 		x = self.SpatialAggregation1(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda) # x_temp_cuda_cart
 		x_local = self.SpatialAggregation2(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda)
@@ -2382,7 +2382,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			Slice = torch.cat((Slice, embedding), dim = 1)
 
 		
-		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, n_sta, n_temp)
 		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
 		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda)
@@ -2470,7 +2470,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			Slice = torch.cat((Slice, embedding), dim = 1)
 
 
-		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, n_sta, n_temp)
 		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
 		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
