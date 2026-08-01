@@ -558,7 +558,7 @@ class SpatialAggregation1(MessagePassing):
 
 
 class SpatialAggregation(MessagePassing):
-	def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=1.0, scale_time=1.0, n_global=5, n_hidden=30):
+	def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=1.0, scale_time=1.0, n_global=5, n_hidden=30, zero_offsets = False):
 		super(SpatialAggregation, self).__init__(aggr='mean')
 
 		# 1. Predict dynamic gamma rates from context scale embedding
@@ -567,7 +567,7 @@ class SpatialAggregation(MessagePassing):
 		
 		# 2. Linear layer accepts node features + scale embedding + edge features + global vector
 		edge_dim = 8
-		self.fc1 = nn.Linear(in_channels + edge_dim + n_global, n_hidden)
+		self.fc1 = nn.Linear(in_channels + edge_dim*(zero_offsets == False) + n_global, n_hidden)
 		self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
 		self.fglobal = nn.Linear(in_channels, n_global)
 		self.scale_rel = scale_rel
@@ -576,19 +576,24 @@ class SpatialAggregation(MessagePassing):
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
 		self.activate3 = nn.PReLU()
+		self.zero_offsets = zero_offsets
 
 	def forward(self, tr, embed_context, A_src, pos):
 		# Concatenate node features with context scale embedding
 		# node_and_scale = torch.cat((tr, embed_context), dim=-1)
+		if self.zero_offsets == False:
+			pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
+			pos_norm = torch.sqrt(torch.sum(pos_rel[:, 0:3] ** 2, dim=1, keepdim=True) + 1e-8)
+			
+			gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
+			gammas = torch.exp(self.log_gamma_base + gamma_offset)
+			spatial_decay = torch.exp(-1.0 * pos_norm * gammas)
 
-		pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
-		pos_norm = torch.sqrt(torch.sum(pos_rel[:, 0:3] ** 2, dim=1, keepdim=True) + 1e-8)
+			edge_attr = torch.cat((pos_rel[:, 0:3] / pos_norm, spatial_decay, pos_rel[:, 3:4]), dim=1)
+			
+		else:
+			edge_attr = torch.zeros((A_src.shape[1], 0), dtype = tr.dtype, device = tr.device)
 		
-		gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
-		gammas = torch.exp(self.log_gamma_base + gamma_offset)
-		spatial_decay = torch.exp(-1.0 * pos_norm * gammas)
-		
-		edge_attr = torch.cat((pos_rel[:, 0:3] / pos_norm, spatial_decay, pos_rel[:, 3:4]), dim=1)
 		global_feat = self.activate3(self.fglobal(tr)).mean(dim=0, keepdim=True)
 
 		aggr_out = self.propagate(A_src, x=tr, edge_attr=edge_attr, global_feat=global_feat)
