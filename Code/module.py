@@ -458,9 +458,9 @@ class BipartiteGraphOperator(MessagePassing):
             nn.Sigmoid(),
         )
 
-    	# 3. Dynamic Bandwidth Predictor driven by domain context embedding
-    	# Outputs 4 dynamic bandwidth offsets
-    	self.f_gamma = nn.Linear(embed_dim, 4)
+        # 3. Dynamic Bandwidth Predictor driven by domain context embedding
+        # Outputs 4 dynamic bandwidth offsets
+        self.f_gamma = nn.Linear(embed_dim, 4)
 
         # Learnable baseline log-gammas (initialized near ~[0.05, 0.3, 0.8, 2.0])
         self.log_gamma_base = nn.Parameter(torch.tensor([-3.0, -1.2, -0.2, 0.7]).reshape(1, -1))
