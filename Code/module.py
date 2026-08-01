@@ -2378,7 +2378,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  Slice[:, ndim_slice::]), dim = 1) if ((self.attach_time == True) or (self.use_absolute_offset == True)) else torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device) # .to(Slice.device)
 			inpt_embedding = torch.cat((inpt_embedding, self.embed_context.expand(n_line_nodes, -1)), dim = 1)
 
-			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, embed_context) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, embed_context)
+			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, self.embed_context) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, self.embed_context)
 			Slice = torch.cat((Slice, embedding), dim = 1)
 
 		
@@ -2466,7 +2466,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  Slice[:, ndim_slice::]), dim = 1) if ((self.attach_time == True) or (self.use_absolute_offset == True)) else torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device) # .to(Slice.device)
 			inpt_embedding = torch.cat((inpt_embedding, self.embed_context.expand(n_line_nodes, -1)), dim = 1)
 
-			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, embed_context) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, embed_context)
+			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, self.embed_context) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, self.embed_context)
 			Slice = torch.cat((Slice, embedding), dim = 1)
 
 
