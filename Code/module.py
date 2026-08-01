@@ -211,7 +211,6 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 			# self.w_gamma1 = nn.Parameter(torch.tensor([0.1, 0.5, 1.0, 2.0]).reshape(1,-1))
 			# self.w_gamma2 = nn.Parameter(torch.tensor([0.1, 0.5, 1.0, 2.0]).reshape(1,-1))
 
-		
 		else:
 			self.merge_edges1 = lambda x: x
 			self.merge_edges2 = lambda x: x
@@ -269,108 +268,6 @@ class DataAggregationExpanded(MessagePassing): # make equivelent version with su
 			return self.merge_edges1(torch.cat((x_j, edge_attr), dim=1)) if edge_type == 1 else self.merge_edges2(torch.cat((x_j, edge_attr), dim=1))
 		return x_j
 
-	# def message(self, x_j, edge_attr
-
-
-
-		
-# class DataAggregationExpanded(MessagePassing): # make equivelent version with sum operations.
-# 	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, use_absolute_pos = use_absolute_pos, device = device):
-# 		super(DataAggregationExpanded, self).__init__('mean') # node dim
-
-# 		if use_absolute_pos == True:
-# 			in_channels = in_channels + 3*2
-		
-# 		## Use two layers of SageConv.
-# 		self.in_channels = in_channels
-# 		self.out_channels = out_channels
-# 		self.n_hidden = n_hidden
-
-# 		self.activate = nn.PReLU() # can extend to each channel
-# 		self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
-
-# 		# self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
-# 		self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
-
-# 		# self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
-# 		self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
-# 		self.activate11 = nn.PReLU() # can extend to each channel
-# 		self.activate12 = nn.PReLU() # can extend to each channel
-# 		self.activate1 = nn.PReLU() # can extend to each channel
-
-# 		self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
-# 		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
-
-# 		self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
-# 		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
-# 		self.activate21 = nn.PReLU() # can extend to each channel
-# 		self.activate22 = nn.PReLU() # can extend to each channel
-# 		self.activate2 = nn.PReLU() # can extend to each channel
-
-# 		## Add third layer
-# 		self.l3_t1_1 = nn.Linear(2*n_hidden, n_hidden)
-# 		self.l3_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
-
-# 		self.l3_t2_1 = nn.Linear(2*n_hidden, n_hidden)
-# 		self.l3_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
-# 		self.activate31 = nn.PReLU() # can extend to each channel
-# 		self.activate32 = nn.PReLU() # can extend to each channel
-# 		self.activate3 = nn.PReLU() # can extend to each channel
-
-# 		## Expanded layers
-
-# 		self.l1_t1_1c = nn.Linear(2*n_hidden, n_hidden)
-# 		self.l1_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
-# 		# self.l1_t1_2c = nn.Linear(2*n_hidden, n_hidden)
-
-# 		self.l1_t2_1c = nn.Linear(2*n_hidden, n_hidden)
-# 		self.l1_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
-# 		self.activate11c = nn.PReLU() # can extend to each channel
-# 		self.activate12c = nn.PReLU() # can extend to each channel
-# 		self.activate1c = nn.PReLU() # can extend to each channel
-
-# 		self.l2_t1_1c = nn.Linear(2*n_hidden, n_hidden)
-# 		self.l2_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
-
-# 		self.l2_t2_1c = nn.Linear(2*n_hidden, n_hidden)
-# 		self.l2_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
-# 		self.activate21c = nn.PReLU() # can extend to each channel
-# 		self.activate22c = nn.PReLU() # can extend to each channel
-# 		self.activate2c = nn.PReLU() # can extend to each channel
-
-# 		# self.alpha_expand1 = nn.Parameter(torch.tensor([0.1], device = device)) # device = device
-# 		# self.alpha_expand2 = nn.Parameter(torch.tensor([0.1], device = device)) # device = device
-
-
-
-# 	def forward(self, tr, mask, A_in_sta, A_in_src):
-
-# 		tr = torch.cat((tr, mask), dim = -1)
-# 		tr = self.activate(self.init_trns(tr))
-
-# 		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr)), mask), dim = 1)) # could concatenate edge features here, and before.
-# 		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate12(tr)), mask), dim = 1))
-# 		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
-
-# 		tr1 = self.l1_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11c(self.l1_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
-# 		tr2 = self.l1_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate12c(self.l1_t2_1c(tr))), mask), dim = 1))
-# 		tr = self.activate1c(torch.cat((tr1, tr2), dim = 1))
-# 		# tr = tr_local + self.alpha_expand1*tr_expanded
-
-# 		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
-# 		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate22(self.l2_t2_1(tr))), mask), dim = 1))
-# 		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
-
-# 		tr1 = self.l2_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21c(self.l2_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
-# 		tr2 = self.l2_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate22c(self.l2_t2_1c(tr))), mask), dim = 1))
-# 		tr = self.activate2c(torch.cat((tr1, tr2), dim = 1))
-# 		# tr = tr_local + self.alpha_expand2*tr_expanded
-
-# 		tr1 = self.l3_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate31(self.l3_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
-# 		tr2 = self.l3_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate32(self.l3_t2_1(tr))), mask), dim = 1))
-# 		tr = self.activate3(torch.cat((tr1, tr2), dim = 1))
-
-# 		return tr # the new embedding.
 
 class DataAggregationEmbedding(MessagePassing): # make equivelent version with sum operations.
 	def __init__(self, in_channels, out_channels, n_hidden = 30, scale_rel = scale_rel, scale_time = scale_time, ndim_proj = 8):
@@ -526,197 +423,9 @@ class BipartiteGraphOperator(MessagePassing):
 		return self.activate_out(self.fc2(self.norm(stacked_normalized)))
 
 		
-# class BipartiteGraphOperator(MessagePassing):
-# 	def __init__(self, ndim_in, ndim_out, ndim_edges=3, ndim_mask=4):
-# 		# 'add' aggregation acts as true seismic stacking/back-projection
-# 		super(BipartiteGraphOperator, self).__init__(aggr='add')
-		
-# 		# 1. Edge MLP: Evaluates travel-time misfit + node features
-# 		self.fc1 = nn.Sequential(
-# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
-# 			nn.PReLU(),
-# 			nn.Linear(ndim_in, ndim_in),
-# 			nn.PReLU()
-# 		)
-		
-# 		# 2. Compact Phase/Quality Gate (values 0.0 to 1.0)
-# 		self.mask_gate = nn.Sequential(
-# 			nn.Linear(ndim_mask, 4),
-# 			nn.PReLU(),
-# 			nn.Linear(4, ndim_in),
-# 			nn.Sigmoid()
-# 		)
-		
-# 		# 3. LayerNorm normalizes stacked features across variable station counts
-# 		self.norm = nn.LayerNorm(ndim_in)
-		
-# 		# 4. Final Output Map
-# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
-# 		self.activate_out = nn.PReLU()
-
-# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
-# 		N = A_src_in_edges.edge_index[0].max().item() + 1
-# 		M = A_src_in_edges.edge_index[1].max().item() + 1
-
-# 		# Step 1: Hard existential kill-switch for missing station-source pairs
-# 		# Guarantees dead edges contribute EXACTLY 0.0 to the sum
-# 		absolute_gate = mask.max(1, keepdims=True)[0]
-
-# 		# Step 2: Extract non-linear misfit features
-# 		geo_features = self.fc1(torch.cat((inpt, A_src_in_edges.x), dim=-1))
-
-# 		# Step 3: Phase reliability / mask gating
-# 		phase_routing_vectors = self.mask_gate(mask)
-
-# 		# Step 4: Gated message composition
-# 		# Only valid, coherent arrival signals pass through as non-zero
-# 		msg = absolute_gate * (phase_routing_vectors * geo_features)
-
-# 		# Step 5: Stack coherent arrivals over stations (preserving sparse energy!)
-# 		stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
-		
-# 		# Step 6: Post-stack normalization (stabilizes scale without zero-diluting)
-# 		normalized_stack = self.norm(stacked)
-
-# 		return self.activate_out(self.fc2(normalized_stack))
-		
-# class BipartiteGraphOperator(MessagePassing):
-# 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
-# 		super(BipartiteGraphOperator, self).__init__('add')
-		
-# 		# 1. Expressive geometric & feature representation (2-Layer MLP)
-# 		self.fc1 = nn.Sequential(
-# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
-# 			nn.PReLU(),
-# 			nn.Linear(ndim_in, ndim_in),
-# 			nn.PReLU()
-# 		)
-		
-# 		# # 2. Phase-routing gating network (2-Layer MLP + Sigmoid)
-# 		# self.mask_gate = nn.Sequential(
-# 		# 	nn.Linear(ndim_mask, ndim_in // 2),
-# 		# 	nn.PReLU(),
-# 		# 	nn.Linear(ndim_in // 2, ndim_in),
-# 		# 	nn.Sigmoid()
-# 		# )
-
-# 		self.mask_gate = nn.Sequential(
-# 		    nn.Linear(ndim_mask, 4),
-# 		    nn.PReLU(),
-# 		    nn.Linear(4, ndim_in),
-# 		    nn.Sigmoid()
-# 		)
-		
-# 		# 3. Output projection
-# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
-# 		self.activate_out = nn.PReLU()
-
-# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
-# 		N = A_src_in_edges.edge_index[0].max().item() + 1
-# 		M = A_src_in_edges.edge_index[1].max().item() + 1
-
-# 		# Step 1: Strict outer existential kill-switch (0 if all mask elements are 0)
-# 		absolute_gate = mask.max(1, keepdims=True)[0]
-
-# 		# Step 2: Compute deep geometric/arrival representation
-# 		geo_features = self.fc1(torch.cat((inpt, A_src_in_edges.x), dim=-1))
-
-# 		# Step 3: Compute channel-wise phase routing weights (values in [0.0, 1.0])
-# 		phase_routing_vectors = self.mask_gate(mask)
-
-# 		# Step 4: Gated message composition
-# 		msg = absolute_gate * (phase_routing_vectors * geo_features)
-
-# 		# Step 5: Bipartite aggregation & final projection
-# 		aggregated = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
-# 		return self.activate_out(self.fc2(aggregated))
-		
-# class BipartiteGraphOperator(MessagePassing):
-# 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
-# 		super(BipartiteGraphOperator, self).__init__('add') # (aggr='gcn') 
-# 		# 1. Standard projection for the geometric features
-# 		self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
-# 		self.fc2 = nn.Linear(ndim_in, ndim_out) 
-# 		# 2. A tiny 2-layer router that transforms the 4-channel mask into 
-# 		# a 0.0 to 1.0 gating multiplier for EVERY hidden channel in ndim_in
-# 		self.mask_gate = nn.Sequential(
-# 			nn.Linear(ndim_mask, ndim_in),
-# 			nn.Sigmoid()
-# 		)
-# 		self.activate1 = nn.PReLU() 
-# 		self.activate2 = nn.PReLU() 
-
-# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
-
-# 		N = A_src_in_edges.edge_index[0].max().item() + 1
-# 		M = A_src_in_edges.edge_index[1].max().item() + 1
-# 		# Step 1: Strict outer existential kill-switch
-# 		absolute_gate = mask.max(1, keepdims = True)[0]
-
-# 		# Step 2: Compute your standard local geometric/arrival representation
-# 		geo_features = self.activate1(self.fc1(torch.cat((inpt, A_src_in_edges.x), dim = -1)))
-
-# 		# Step 3: Compute semantic routing gates (returns a 0.0-1.0 vector of size ndim_in)
-# 		phase_routing_vectors = self.mask_gate(mask)
-
-# 		# Step 4: Multiply them element-wise! (Hard zero for dead pairs, soft zero for wrong phases)
-# 		msg = absolute_gate * (phase_routing_vectors * geo_features)
-
-# 		return self.activate2(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = msg)))
-
-
-# class BipartiteGraphOperator(MessagePassing):
-# 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
-# 		super(BipartiteGraphOperator, self).__init__('add')
-		
-# 		# 1. Project raw features and edge coordinates into a unified latent geometric space
-# 		self.geo_projector = nn.Sequential(
-# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
-# 			nn.PReLU(),
-# 			nn.Linear(ndim_in, ndim_in)
-# 		)
-
-# 		# 2. Map the 4-channel phase mask to the exact same hidden feature dimension
-# 		self.mask_router = nn.Sequential(
-# 			nn.Linear(ndim_mask, ndim_in),
-# 			nn.Sigmoid() # Forces values between 0.0 and 1.0 to act as continuous gating switches
-# 		)
-
-# 		# 3. Final mixing and output layers
-# 		self.fc1 = nn.Linear(ndim_in, ndim_in)
-# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
-
-# 		self.activate1 = nn.PReLU()
-# 		self.activate2 = nn.PReLU()
-
-# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
-
-# 		N = A_src_in_edges.edge_index[0].max().item() + 1
-# 		M = A_src_in_edges.edge_index[1].max().item() + 1
-
-# 		# Step A: Existential hard kill-switch (Absolute protection against non-observations)
-# 		existential_gate = mask.max(1, keepdims = True)[0]
-
-# 		# Step B: Compute pure geometric/arrival features
-# 		geo_feat = torch.cat((inpt, A_src_in_edges.x), dim = -1)
-# 		latent_geo = self.geo_projector(geo_feat)
-
-# 		# Step C: Compute the continuous multi-channel semantic mask routing weights
-# 		phase_gates = self.mask_router(mask)
-
-# 		# Step D: Apply semantic phase gating AND the existential hard shutoff
-# 		# Element-wise multiplication forces specific latent channels to zero if their phase fails
-# 		gated_messages = existential_gate * (phase_gates * latent_geo)
-
-# 		# Step E: Mix the perfectly isolated phase representations and propagate
-# 		msg = self.activate1(self.fc1(gated_messages))
-		
-# 		return self.activate2(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = msg)))
-
-
-class SpatialAggregation(MessagePassing):
+class SpatialAggregation1(MessagePassing):
 	def __init__(self, in_channels, out_channels, scale_rel = scale_rel, scale_time = scale_time, n_dim = 8, n_global = 5, n_hidden = 30, zero_offsets = False):
-		super(SpatialAggregation, self).__init__('mean') # node dim
+		super(SpatialAggregation1, self).__init__('mean') # node dim
 		## Use two layers of SageConv. Explictly or implicitly?
 		self.fc1 = nn.Linear(in_channels + n_dim + n_global, n_hidden)
 		self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
@@ -742,26 +451,52 @@ class SpatialAggregation(MessagePassing):
 		# return self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j, self.activate3(self.fglobal(x_j)).mean(0, keepdim = True).expand(x_j.shape[0], -1)), dim = -1))) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 		return self.activate1(self.fc1(torch.cat((x_j, edge_attr, global_feat), dim = -1))) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 
-# class SpatialAggregation(MessagePassing):
-# 	def __init__(self, in_channels, out_channels, scale_rel = scale_rel, scale_time = scale_time, n_dim = 4, n_global = 5, n_hidden = 30, zero_offsets = False):
-# 		super(SpatialAggregation, self).__init__('mean') # node dim
-# 		## Use two layers of SageConv. Explictly or implicitly?
-# 		self.fc1 = nn.Linear(in_channels + n_dim + n_global, n_hidden)
-# 		self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
-# 		self.fglobal = nn.Linear(in_channels, n_global)
-# 		self.activate1 = nn.PReLU()
-# 		self.activate2 = nn.PReLU()
-# 		self.activate3 = nn.PReLU()
-# 		self.scale_rel = scale_rel
-# 		self.zero_offsets = zero_offsets
 
-# 	def forward(self, tr, A_src, pos):
+class SpatialAggregation(MessagePassing):
+    def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=1.0, scale_time=1.0, n_global=5, n_hidden=30):
+        super(SpatialAggregation, self).__init__(aggr='mean')
+        
+    	# 1. Predict dynamic gamma rates from context scale embedding
+    	# self.f_gamma = nn.Linear(in_channels + embed_dim, 4)
+		self.f_gamma = nn.Linear(in_channels + embed_dim, 4)
+		# Baseline gammas for 4 spatial decay channels (e.g., 0.1, 0.5, 1.0, 2.0)
+		self.log_gamma_base = nn.Parameter(torch.log(torch.tensor([0.1, 0.5, 1.0, 2.0]).reshape(1,-1)))
+        # 2. Linear layer accepts node features + scale embedding + edge features + global vector
+        edge_dim = 8
+        self.fc1 = nn.Linear(in_channels + embed_dim + edge_dim + n_global, n_hidden)
+        self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
+        self.fglobal = nn.Linear(in_channels + embed_dim, n_global)
 
-# 		return self.activate2(self.fc2(torch.cat((tr, self.propagate(A_src, x = tr, pos = (self.zero_offsets == False)*pos/self.scale_rel)), dim = -1)))
+        self.activate1 = nn.PReLU()
+        self.activate2 = nn.PReLU()
+        self.activate3 = nn.PReLU()
 
-# 	def message(self, x_j, pos_i, pos_j):
+    def forward(self, tr, embed_context, A_src, pos):
+        # Concatenate node features with context scale embedding
+        node_and_scale = torch.cat((tr, embed_context), dim=-1)
+
+        pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
+        pos_norm = torch.sqrt(torch.sum(pos_rel[:, 0:3] ** 2, dim=1, keepdim=True) + 1e-8)
+        
+        # # Predict dynamic gammas in log-domain (just like SpaceTimeAttention)
+        # log_gammas = torch.clamp(self.f_gamma(node_and_scale[A_src[0]]), min=-10.0, max=10.0)
+        # gammas = torch.exp(log_gammas)  # Shape: [E, 4]
+        
+        # # Dynamic exponential spatial decay
+        # spatial_decay = torch.exp(-1.0 * pos_norm * gammas)
 		
-# 		return self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j, self.activate3(self.fglobal(x_j)).mean(0, keepdims = True).repeat(x_j.shape[0], 1)), dim = -1))) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
+		gamma_offset = 1.6 * torch.tanh(self.f_gamma(node_and_scale[A_src[0]]))
+		gammas = torch.exp(self.log_gamma_base + gamma_offset)
+		
+		spatial_decay = torch.exp(-1.0 * pos_norm * gammas)
+
+		
+        edge_attr = torch.cat((pos_rel[:, 0:3] / pos_norm, spatial_decay, pos_rel[:, 3:4]), dim=1)
+        global_feat = self.activate3(self.fglobal(node_and_scale)).mean(dim=0, keepdim=True)
+
+        aggr_out = self.propagate(A_src, x=node_and_scale, edge_attr=edge_attr, global_feat=global_feat)
+        out = torch.cat((tr, aggr_out), dim=-1)
+        return self.activate2(self.fc2(out))
 
 
 class SpaceTimeDirect(nn.Module):
@@ -775,9 +510,9 @@ class SpaceTimeDirect(nn.Module):
 
 		return self.activate(self.f_direct(inpts))
 
-class SpaceTimeAttention(MessagePassing):
+class SpaceTimeAttention1(MessagePassing):
 	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, n_hidden = 30, n_heads = 5, scale_rel = scale_rel, scale_time = scale_time, device = device):
-		super(SpaceTimeAttention, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
+		super(SpaceTimeAttention1, self).__init__(node_dim = 0, aggr = 'add') #  "Max" aggregation.
 		# notice node_dim = 0.
 		# self.param_vector = nn.Parameter(nn.init.xavier_uniform_(torch.Tensor(1, n_heads, n_latent)))
 		self.f_queries = nn.Linear(n_dim, n_heads*n_latent) # add second layer transformation.
@@ -855,6 +590,143 @@ class SpaceTimeAttention(MessagePassing):
 		self.fixed_edges = edge_index
 		self.edge_features = edge_attr
 		self.use_fixed_edges = True
+
+
+class SpaceTimeAttention(MessagePassing):
+    """Multi-Resolution Continuous Space-Time Interpolator.
+    Directly conditioned on physical domain scale embeddings for exact multi-scale Gaussian rendering.
+    """
+
+    def __init__(
+        self,
+        inpt_dim,
+        out_channels,
+        n_dim,
+        n_latent,
+        embed_dim=10,
+        n_hidden=30,
+        n_heads=5,
+        scale_rel=1.0,
+        scale_time=1.0,
+        device="cuda",
+    ):
+        super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
+        self.n_heads = n_heads
+        self.n_latent = n_latent
+        self.out_channels = out_channels
+        self.scale_rel = scale_rel
+        self.scale_time = scale_time
+
+        # 1. Feature Value Transformation (fuses context features and scale embedding)
+        self.f_values = nn.Sequential(
+            nn.Linear(inpt_dim + embed_dim, n_heads * n_latent),
+            nn.PReLU(),
+        )
+
+        # 2. Dynamic Bandwidth Predictor (predicts spatial & temporal gammas per head from scale embed)
+        # self.f_gamma = nn.Linear(inpt_dim + embed_dim, n_heads * 2)
+		
+		# Predict a raw offset logits for (spatial_gamma, temporal_gamma) per head
+		self.f_gamma = nn.Linear(inpt_dim + embed_dim, n_heads * 2)
+		
+		# Learnable baseline gammas initialized to log(1.0) = 0.0
+		self.log_gamma_base = nn.Parameter(torch.zeros(1, n_heads, 2))
+		
+        # 3. Context Feature Score Modulation & Super-Resolution Gain Gate
+        self.f_feature_score = nn.Linear(inpt_dim + embed_dim, n_heads)
+        self.f_gain = nn.Sequential(
+            nn.Linear(inpt_dim + embed_dim, n_heads * n_latent),
+            nn.Sigmoid(),
+        )
+
+        # 4. Final Readout Projection
+        self.proj = nn.Linear(n_heads * n_latent, out_channels)
+        self.activate2 = nn.PReLU()
+
+        # Graph storage
+        self.fixed_edges = None
+        self.edge_features = None
+        self.use_fixed_edges = False
+
+    def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=12):
+        edge_index = knn(
+            torch.cat((x_context / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
+            torch.cat((x_query / 1000.0, self.scale_time * x_query_t.reshape(-1, 1)), dim=1),
+            k=k,
+        ).flip(0)
+
+        # Relative spatial and temporal distance squared
+        r_spatial_sq = torch.sum(
+            ((x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel) ** 2,
+            dim=1,
+            keepdim=True,
+        )
+        r_time_sq = (
+            (1000.0 * self.scale_time * (x_query_t[edge_index[1]].reshape(-1, 1) - x_context_t[edge_index[0]].reshape(-1, 1)))
+            / self.scale_rel
+        ) ** 2
+
+        edge_attr = torch.cat((r_spatial_sq, r_time_sq), dim=1)
+        return edge_index, edge_attr
+
+    def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, embed_context, k=12, fixed_type=0):
+        if not self.use_fixed_edges:
+            edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+        else:
+            edge_index, edge_attr = self.fixed_edges, self.edge_features
+
+        # Pass node features, edge attributes, and scale embeddings to propagate
+        interpolated = self.propagate(
+            edge_index,
+            x=inpts,
+            embed=embed_context,
+            edge_attr=edge_attr,
+            size=(x_context.shape[0], x_query.shape[0]),
+        )
+
+        flattened = interpolated.view(x_query.shape[0], -1)
+        out = self.proj(flattened)
+        return self.activate2(out)
+
+    def message(self, x_j, embed_j, index, edge_attr):
+        # Combine node features with scale embedding
+        node_and_scale = torch.cat((x_j, embed_j), dim=-1)
+
+        # 1. Transform context features into Values & Scale-Conditioned Gains
+        value_embed = self.f_values(node_and_scale).view(-1, self.n_heads, self.n_latent)
+        gain = 0.5 + 2.0 * self.f_gain(node_and_scale).view(-1, self.n_heads, self.n_latent)
+        value_embed = value_embed * gain
+
+        # 2. Dynamic Gaussian Bandwidth (Exponential map matches log-scale embeddings)
+        # log_gammas = self.f_gamma(node_and_scale).view(-1, self.n_heads, 2)
+        # log_gammas = torch.clamp(log_gammas, min=-10.0, max=10.0)
+        # gammas = torch.exp(log_gammas)
+		
+		# Predict bounded log-offsets in range [-1.6, 1.6]
+		# exp(-1.6) ≈ 0.2x base gamma, exp(+1.6) ≈ 5.0x base gamma
+		gamma_offset = 1.6 * torch.tanh(self.f_gamma(node_and_scale).view(-1, self.n_heads, 2))
+		
+		# Dynamic gammas remain smoothly bounded and well-behaved
+		gammas = torch.exp(self.log_gamma_base + gamma_offset)
+
+        g_sp, g_tm = gammas[:, :, 0:1], gammas[:, :, 1:2]
+        r_sp_sq, r_tm_sq = edge_attr[:, 0:1].unsqueeze(1), edge_attr[:, 1:2].unsqueeze(1)
+
+        distance_logits = -1.0 * (g_sp * r_sp_sq + g_tm * r_tm_sq).squeeze(-1)
+
+        # 3. Context Feature Score Modulation & Softmax Attention
+        logits = distance_logits + self.f_feature_score(node_and_scale)
+        alpha = softmax(logits, index)
+
+        return alpha.unsqueeze(-1) * value_embed
+
+    def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=12):
+        edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+        self.fixed_edges = edge_index
+        self.edge_features = edge_attr
+        self.use_fixed_edges = True
+
+
 
 class SpaceTimeAttentionQuery(MessagePassing):
 	def __init__(self, inpt_dim, out_channels, n_dim, n_latent, n_hidden = 30, n_heads = 5, kernel_sig_t = kernel_sig_t, locs_use = None, trv = None, ftrns2 = None, scale_rel = scale_rel, scale_time = scale_time):
@@ -1542,6 +1414,1206 @@ class ArrivalEmbedding(MessagePassing):
 		return arv_embed, mask_misfit_time ## Make sure this is correct reshape (not transposed)
 
 
+class SourceStationAttention(MessagePassing):
+
+	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_dim_out_src = 1, n_heads = 5, n_hidden = 30, eps = eps, use_src_pred = False, use_dual_attention = True, use_phase_types = use_phase_types, device = device):
+		super(SourceStationAttention, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
+
+		self.f_pick_query = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+		self.f_pick_context = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+		self.f_pick_values = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+
+		if use_dual_attention == True:
+			self.f_source_query = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.f_source_context = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.merge_attn = nn.Sequential(nn.Linear(2*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_latent))
+			# self.alpha_source = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
+			# self.alpha_src = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
+			self.alpha_src = nn.Parameter(torch.Tensor([0.5])) ## Initilizes as 0.5
+
+			self.self_dummy_src = nn.Parameter(torch.zeros(1, n_heads))
+			self.dummy_keys_src = nn.Parameter(torch.zeros(1, n_heads, n_latent)) # .to(device)
+			self.dummy_queries_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+			self.dummy_values_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+
+
+		# self.f_values_1 = nn.Linear(ndim_arv_in + 5, n_hidden) # add second layer transformation.
+		# self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
+		# self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
+		self.proj_1 = nn.Linear(n_latent*n_heads, n_hidden) # can remove this layer possibly.
+		self.proj_2 = nn.Linear(n_hidden, ndim_out) # can remove this layer possibly.
+		if use_src_pred == True:
+			self.proj_src_1 = nn.Linear(n_latent*n_heads, n_hidden) # can remove this layer possibly.
+			self.proj_src_2 = nn.Linear(n_hidden, n_hidden) # can remove this layer possibly.
+			self.proj_src_3 = nn.Linear(n_hidden, n_dim_out_src)
+			self.proj_attn = nn.Linear(n_hidden, 1)
+			self.activate_src = nn.PReLU()			
+			self.activate_src1 = nn.PReLU()			
+			self.use_src_pred = True
+			self.n_dim_out_src = n_dim_out_src
+			self.log_tau = nn.Parameter(torch.tensor([np.log(0.1)], dtype = torch.float32, device = device))
+			
+		else:
+			self.use_src_pred = False
+
+		# self.embed_trns = nn.Sequential(nn.Linear(ndim_src_in, ndim_src_in), nn.PReLU())
+		self.scale = np.sqrt(n_latent)
+		self.n_heads = n_heads
+		self.n_latent = n_latent
+		self.eps = eps
+		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
+
+		self.self_bias = nn.Parameter(torch.zeros(1, n_heads)) # .to(device) # zeros
+		self.self_dummy = nn.Parameter(torch.zeros(1, n_heads)) # .to(device) # zeros
+		self.dummy_keys = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+		self.dummy_values = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+
+		n_dim_phase = 5
+		self.embed_phase = nn.Embedding(2 + 1, n_dim_phase)
+
+		# self.alpha = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
+		# self.alpha = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5 # self.log_temp = nn.Parameter(torch.Tensor([0.5])).to(device)
+		self.alpha = nn.Parameter(torch.Tensor([0.5])) ## Initilizes as 0.5 # self.log_temp = nn.Parameter(torch.Tensor([0.5])).to(device)
+
+		self.use_dual_attention = use_dual_attention
+		
+		self.ndim_feat = ndim_arv_in + ndim_extra
+		self.use_phase_types = use_phase_types
+		self.ndim_arv_in = ndim_arv_in
+		self.n_phases = ndim_out
+
+		self.use_src_context = False
+		if self.use_src_context == True:
+			self.embed_src = nn.Sequential(nn.Linear(ndim_src_in, n_hidden), nn.PReLU())
+			self.gate_src = nn.Sequential(nn.Linear(ndim_src_in + n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, 1))
+			self.downscale = torch.Tensor([0.1]).to(device)
+
+		self.activate4 = nn.PReLU()
+		# self.activate5 = nn.PReLU()
+		self.device = device
+
+
+	def forward(self, stime, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label): # reference k nearest spatial points
+
+		# src isn't used. Only trv_src is needed.
+		n_src, n_sta, n_arv = len(stime), trv_src.shape[1], len(tpick) # + 1 ## Note: adding 1 to size of arrivals!
+		if self.use_phase_types == False:
+			phase_label = phase_label*0.0
+
+		# edges = remove_self_loops(radius(ipick.reshape(-1,1).float(), ipick.reshape(-1,1).float(), max_num_neighbors = len(ipick), r = 0.5))[0]
+		edges = add_self_loops(remove_self_loops(radius(ipick.reshape(-1,1).float(), ipick.reshape(-1,1).float(), max_num_neighbors = len(ipick), r = 0.2))[0])[0].flip(0).contiguous()
+		n_edge = edges.shape[1]
+
+		## Now must duplicate edges, for each unique source. (different accumulation points)
+		edges = (edges.repeat(1, n_src) + torch.cat(((torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device), (torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device)), dim = 0)).long().contiguous()
+		src_index = torch.arange(n_src).repeat_interleave(n_edge).contiguous().long().to(self.device)
+		self_link = (edges[0] == edges[1]).reshape(-1,1).detach() # Each accumulation index (an entry from src cross arrivals). The number of arrivals is edge_index.max() exactly (since tensor is composed of number arrivals + 1)
+
+		use_sparse = True
+		if use_sparse == True:
+
+			## Note: let's add one more level of sparsity : only include pick pairs within a radius? Because e.g., some high pick rate stations
+			## will have many useless picks to attent too.. (however this is problematic to base it on time offsets, as either phase type)
+			## might be viable (.e.g, comparing between P and S can be useful). So could in theory use "time adjacenecy" allowing swaps of phase type
+			## to create these neighborhoods. This might help prevent explosions in memory during this layer for high pick rates or noisy stations.
+			ikeep = torch.where((mask_arv[src_index, torch.remainder(edges[0], n_arv).long()] > 0) + (edges[0] == edges[1]))[0]
+			edges = edges[:,ikeep].contiguous()
+			# edges = torch.cat((edges[0][ikeep].reshape(1,-1), edges[1][ikeep].reshape(1,-1)), dim = 0).contiguous()
+			src_index = src_index[ikeep]
+			self_link = self_link[ikeep]	
+
+		if len(src_index) == 0:
+			if self.use_src_pred == True:
+				return torch.zeros(n_src, n_arv, self.n_phases).to(self.device), torch.zeros(n_src, self.n_dim_out_src).to(self.device)
+			else:
+				return torch.zeros(n_src, n_arv, self.n_phases).to(self.device)
+
+		edge_dummy = torch.cat(((n_arv*n_src)*torch.ones(1,n_arv*n_src), torch.arange(n_arv*n_src).reshape(1,-1)), dim = 0).long().to(self.device)
+
+		## Create n_src dummy "arrivals" to link to each source.
+		if self.use_dual_attention == True: ## Is this arrival reshape correct?
+			## Should add phase embedding
+			arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1 + n_src, self.ndim_arv_in, device = self.device)), dim = 0)
+			phase_inpt = torch.cat((torch.tile(phase_label, (n_src, 1)), 2.0*torch.ones(1 + n_src,1).to(self.device)), dim = 0)
+			# phase_inpt = torch.cat((phase_label.expand(n_src, -1), -1.0*torch.ones(1 + n_src,1).to(self.device)), dim = 0)
+			## The dummy source indices should be the "correct" ones for those specific source-arrival pairs
+			# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
+			src_index = torch.cat((src_index, torch.arange(n_src).repeat_interleave(n_arv, dim = 0).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
+			# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
+			self_link = torch.cat((self_link, torch.zeros(n_arv*n_src + n_src,1).to(device)), dim = 0).float()
+			edge_dummy_src = torch.cat(( (torch.arange(n_src).reshape(1,-1) + n_src*n_arv + 1), torch.arange(n_src).reshape(1,-1) ), dim = 0).long().to(device) ## Reciever nodes can be arbitrarily listed here (the features aren't used at torch.arange(n_src).reshape(1,-1))
+			edges = torch.cat((edges, edge_dummy, edge_dummy_src), dim = 1).contiguous()
+
+			N = n_arv*n_src + 1 + n_src # still correct?
+			M = n_arv*n_src
+
+		else:
+
+			arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1, self.ndim_arv_in, device = self.device)), dim = 0)
+			phase_inpt = torch.cat((torch.tile(phase_label, (n_src, 1)), torch.Tensor([2.0]).reshape(1,1).to(self.device)), dim = 0)
+			# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src).to(device)), dim = 0).long().contiguous() ## The dummy "source index"
+			src_index = torch.cat((src_index, torch.arange(n_src).repeat_interleave(n_arv, dim = 0).to(device)), dim = 0).long().contiguous() ## The dummy "source index"
+			self_link = torch.cat((self_link, torch.zeros(n_arv*n_src,1).to(device)), dim = 0).float()
+			edges = torch.cat((edges, edge_dummy), dim = 1).contiguous()
+
+			N = n_arv*n_src + 1 # still correct?
+			M = n_arv*n_src
+
+		
+		# src_embed_trns = self.embed_trns(src_embed)
+		src_ind_repeat = torch.arange(n_src).repeat_interleave(n_arv).contiguous().long().to(self.device)
+		# out = self.proj_2(self.embed_src(src_embed[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+
+		if self.use_src_pred == True:
+			# out_embed = self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads) # M is output. Taking mean over heads
+			# out_src = self.proj_src_3(self.activate_src1(self.proj_src_2(self.activate_src(self.proj_src_1(out_embed))).view(n_src, n_arv, -1).sum(1)))
+			# out = self.proj_2(self.activate4(self.proj_1(out_embed)))
+			# return out.view(n_src, n_arv, -1), out_src ## Make sure this is correct reshape (not transposed)
+
+			out_embed = self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads) # M is output. Taking mean over heads
+			# out_src = self.proj_src_3(self.activate_src1(self.proj_src_2(self.activate_src(self.proj_src_1(out_embed))).view(n_src, n_arv, -1).sum(1)))
+			tau_base = torch.exp(self.log_tau) 
+			tau_deg = tau_base * (n_arv ** 0.5)
+			out_src = self.activate_src(self.proj_src_1(out_embed)).view(n_src, n_arv, -1)
+			# alpha_score = torch.softmax(self.proj_attn(out_src) / tau, dim = 1)
+			alpha_score = torch.softmax(self.proj_attn(out_src) / tau_deg, dim = 1)
+			out_src = self.proj_src_3(self.activate_src1(self.proj_src_2((alpha_score*out_src).sum(1))))
+			out = self.proj_2(self.activate4(self.proj_1(out_embed)))
+			return out.view(n_src, n_arv, -1), out_src ## Make sure this is correct reshape (not transposed)
+		
+		else:
+
+			out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+			## Could do concatenation and summation of the source embedding
+			# out = self.proj_2(torch.cat((src_embed, self.embed_src(src_embed) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))))) # M is output. Taking mean over heads
+
+		return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
+
+
+	def message(self, x_j, x_i, edge_index, index, tsrc_p, tsrc_s, sindex, stindex, stime, atime, self_link, num_queries, phase_j, phase_i): # Can use phase_j, or directly call edge_index, like done for atime, stindex, etc.
+
+		
+		## Does this converge on standard behavior if not using dual_attention
+		ifake_edge_src = (edge_index[0] > num_queries)
+		inot_fake_src = ~ifake_edge_src ## Can only compute the travel time misfits for these (to avoid source overload)
+
+		ifake_edge = (edge_index[0] == num_queries)*(inot_fake_src == 1) ## Null node
+		inot_fake = ~ifake_edge
+
+		real_edge = (~ifake_edge)*(inot_fake_src == 1) ## Real edges for pick queries are not fake edges of both types
+
+		rel_t_p = (atime[edge_index[0][real_edge]] - (tsrc_p[sindex[real_edge], stindex[edge_index[0][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+		rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p).detach()), dim = 1) # phase[edge_index[0]]
+		rel_t_s = (atime[edge_index[0][real_edge]] - (tsrc_s[sindex[real_edge], stindex[edge_index[0][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+		rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s).detach()), dim = 1) # phase[edge_index[0]]
+		rel_t = torch.cat((rel_t_p, rel_t_s, self.embed_phase(phase_j[real_edge].long().reshape(-1))), dim = 1) ## only indexed for not fake source
+
+		rel_t_p1 = (atime[edge_index[1][inot_fake_src]] - (tsrc_p[sindex[inot_fake_src], stindex[edge_index[1][inot_fake_src]]] + stime[sindex[inot_fake_src]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+		rel_t_p1 = torch.cat((torch.exp(-0.5*(rel_t_p1**2)/self.t_kernel_sq), torch.sign(rel_t_p1).detach()), dim = 1) # phase[edge_index[0]]
+		rel_t_s1 = (atime[edge_index[1][inot_fake_src]] - (tsrc_s[sindex[inot_fake_src], stindex[edge_index[1][inot_fake_src]]] + stime[sindex[inot_fake_src]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+		rel_t_s1 = torch.cat((torch.exp(-0.5*(rel_t_s1**2)/self.t_kernel_sq), torch.sign(rel_t_s1).detach()), dim = 1) # phase[edge_index[0]]
+		rel_t1 = torch.cat((rel_t_p1, rel_t_s1, self.embed_phase(phase_i[inot_fake_src].long().reshape(-1))), dim = 1)
+
+		## Queries using reciever nodes (i) because each reciever is trying to decide which of neighboring picks is "relevant", and it also uses source embedding because this is dependant on the source
+		## Contexts (actually keys) and values use the sender nodes as these are the ones the queries are attending over ## Note: I did used to include the source origin time..
+		# queries_real_and_null = self.f_pick_query(torch.cat((x_i[inot_fake_src], rel_t1, sembed[sindex[inot_fake_src]], self_link[inot_fake_src]), dim = 1)).view(-1, self.n_heads, self.n_latent)
+
+		queries_real_and_null = self.f_pick_query(torch.cat((x_i[inot_fake_src], rel_t1), dim = 1)).view(-1, self.n_heads, self.n_latent)
+
+		contexts_real = self.f_pick_context(torch.cat((x_j[real_edge], rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information		
+		values_real = self.f_pick_values(torch.cat((x_j[real_edge], rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+
+
+		queries = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+		contexts = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+		values = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+
+		queries[inot_fake_src,:,:] = queries_real_and_null
+		contexts[real_edge,:,:] = contexts_real
+		values[real_edge,:,:] = values_real
+
+		n_fake = int(ifake_edge.sum())
+		# contexts[ifake_edge,:,:] = self.dummy_keys.repeat(n_fake, 1, 1)
+		# values[ifake_edge,:,:] = self.dummy_values.repeat(n_fake, 1, 1)
+
+		contexts[ifake_edge,:,:] = self.dummy_keys # .repeat(n_fake, 1, 1)
+		values[ifake_edge,:,:] = self.dummy_values # .repeat(n_fake, 1, 1)
+		## Compute attention
+		scores = (queries*contexts).sum(-1)/self.scale
+		
+		## Clip degrees
+		deg = torch.clamp(degree(edge_index[1][inot_fake_src], num_nodes = len(atime)).detach(), min = 1)
+		temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min = 0.25, max = 2.0))[edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
+		temp[deg[edge_index[1]] <= 2] = 1.0 ## Stabalize temperature for low degree cases
+		## Add bias terms
+		scores[self_link[:,0] == 1] = scores[self_link[:,0] == 1] + self.self_bias
+		scores[ifake_edge] = scores[ifake_edge] + self.self_dummy
+
+		scores = scores / temp.sqrt()
+
+		## Add dual attention aggregation
+		# alpha = softmax(scores, index, num_nodes = ) # 
+		alpha = softmax(scores, index) # 
+
+		if self.use_dual_attention == False:
+
+			return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
+
+		else:
+
+			## Note: as two seperate steps can implement with aggregation of the obtained features from previous step
+			# attn_picks = alpha.unsqueeze(-1)*values
+
+			attn_picks = alpha.unsqueeze(-1)*values
+
+			rel_t_p2 = (atime[edge_index[1][real_edge]] - (tsrc_p[sindex[real_edge], stindex[edge_index[1][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+			rel_t_p2 = torch.cat((torch.exp(-0.5*(rel_t_p2**2)/self.t_kernel_sq), torch.sign(rel_t_p2).detach()), dim = 1) # phase[edge_index[0]]
+			rel_t_s2 = (atime[edge_index[1][real_edge]] - (tsrc_s[sindex[real_edge], stindex[edge_index[1][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
+			rel_t_s2 = torch.cat((torch.exp(-0.5*(rel_t_s2**2)/self.t_kernel_sq), torch.sign(rel_t_s2).detach()), dim = 1) # phase[edge_index[0]]
+			rel_t2 = torch.cat((rel_t_p2, rel_t_s2, self.embed_phase(phase_i[real_edge].long().reshape(-1))), dim = 1)
+
+
+			attn_slice = attn_picks.view(-1, self.n_heads*self.n_latent)[real_edge]
+
+			
+			queries_src_real = self.f_source_query(torch.cat((x_i[real_edge], attn_slice, rel_t2), dim = 1)).view(-1, self.n_heads, self.n_latent)
+			contexts_src_real = self.f_source_context(torch.cat((x_j[real_edge], attn_slice, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+			values_src_real = self.f_source_values(torch.cat((x_j[real_edge], attn_slice, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+			# values_src = self.f_source_values(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+
+			queries_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+			contexts_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+			values_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+
+
+			queries_src[real_edge,:,:] = queries_src_real
+			contexts_src[real_edge,:,:] = contexts_src_real
+			values_src[real_edge,:,:] = values_src_real
+
+			n_fake_src = int(ifake_edge_src.sum())
+			queries_src[ifake_edge_src,:,:] = self.dummy_queries_src # .repeat(n_fake_src, 1, 1)
+			contexts_src[ifake_edge_src,:,:] = self.dummy_keys_src # .repeat(n_fake_src, 1, 1)
+			values_src[ifake_edge_src,:,:] = self.dummy_values_src # .repeat(n_fake_src, 1, 1)
+
+
+			scores_src = (queries_src*contexts_src).sum(-1)/self.scale
+			deg = torch.clamp(degree(sindex, num_nodes = len(stime)).detach(), min = 1)
+
+			# temp_src = torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1).pow(torch.clamp(torch.sigmoid(self.alpha_src), min = 0.25))[edge_index[1]].reshape(-1,1)
+			temp_src = torch.log1p(deg).pow(torch.clamp(self.alpha_src, min = 0.25, max = 2.0))[sindex].reshape(-1,1) # [edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
+			temp_src[deg[sindex] <= 2.0] = 1.0
+
+			# scores_src[self_link[:,0] == 1] = scores_src[self_link[:,0] == 1] + self.self_bias
+			scores_src[ifake_edge_src] = scores_src[ifake_edge_src] + self.self_dummy_src
+
+			scores_src = scores_src / temp_src.sqrt()
+			alpha_src = softmax(scores_src, sindex)
+			attn_src = alpha_src.unsqueeze(-1)*values_src
+
+			## Now merge with the messages of the previous attention layer and aggregate
+			merge_attn = self.merge_attn(torch.cat((attn_picks, attn_src), dim = 2))
+
+			return merge_attn
+			
+
+
+class GCN_Detection_Network_extended(nn.Module):
+	def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, use_embedding = use_embedding, use_src_pred = False, use_sigmoid = use_sigmoid, attach_time = attach_time, use_absolute_offset = True, trv = None, device = 'cuda'):
+		super(GCN_Detection_Network_extended, self).__init__()
+		# Define modules and other relavent fixed objects (scaling coefficients.)
+		# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
+		n_dim_extra_inpt = 0 if attach_time == False else 1
+		n_dim_extra_feat = 0 if use_embedding == False else 20
+		if use_absolute_offset == True: n_dim_extra_inpt = n_dim_extra_inpt + 7 # concatenate the spatial offsets between source nodes and recievers into input feature
+		
+		embed_vector_dim = 10 ## Note can add normalization to output
+		self.embed_vector = nn.Sequential(nn.Linear(6, 30), nn.PReLU(), nn.Linear(30, embed_vector_dim))
+
+		if use_expanded == False:
+			self.DataAggregation = DataAggregation(4 + n_dim_extra_inpt + n_dim_extra_feat + embed_vector_dim, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
+		else:
+			self.DataAggregation = DataAggregationExpanded(4 + n_dim_extra_inpt + n_dim_extra_feat + embed_vector_dim, 15, device = device).to(device) # output size is latent size for (half of) bipartite code # , 15				
+
+		## Maybe add expander convolution on SpatialAggregation
+		self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 8).to(device) # 30, 15
+		self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
+		self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
+		self.SpatialAggregation3 = SpatialAggregation(30, 30).to(device) # 15, 30
+		self.SpaceTimeDirect = SpaceTimeDirect(30, 30).to(device) # 15, 30
+		self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 8, 15, device = device).to(device)
+		# self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 4, 15, device = device).to(device)
+
+		if use_expanded == True:
+			# self.SpatialAggregation1_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
+			self.SpatialAggregation2_expanded = SpatialAggregation(30, 30, zero_offsets = True).to(device) # 15, 30
+			self.gate_expanded = nn.Linear(2*30 + embed_vector_dim, 30)
+			nn.init.constant_(self.gate_expanded.bias, -2.0)
+
+		self.proj_soln1 = nn.Sequential(nn.Linear(30, 30), nn.PReLU(), nn.Linear(30, 1))
+		self.proj_soln2 = nn.Sequential(nn.Linear(30, 30), nn.PReLU(), nn.Linear(30, 1))
+
+		self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
+
+		## For now, don't use expanded on the downstream DataAggregationAssociationPhase (may be slightly unnecessary)
+		# if use_expanded == False:
+		self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
+
+		## Make association module layers (note, previous arrival embeddings used to be smaller)
+		self.ArrivalEmbedding = ArrivalEmbedding(30, 30, trv = trv, device = device, ftrns2 = ftrns2) ## [note: merging the embeddings for P and S into one (oveloaded) layer rather than keeping as seperate layers?]
+		self.Arrivals = SourceStationAttention(30, 30, 2, 15, n_heads = 3, use_src_pred = use_src_pred, device = device).to(device)
+		if use_src_pred == True:
+			self.alpha = nn.Parameter(torch.tensor([0.1], device = device))
+
+		if use_embedding == True:
+			self.DataAggregationEmbedding = DataAggregationEmbedding(1 + n_dim_extra_inpt + embed_vector_dim, int(n_dim_extra_feat/2))
+
+		self.use_absolute_pos = use_absolute_pos
+		self.scale_rel = scale_rel
+		self.scale_time = scale_time
+		self.use_expanded = use_expanded
+		self.use_gradient_loss = use_gradient_loss
+		self.activate_gradient_loss = False
+		self.attach_time = attach_time
+		self.use_embedding = use_embedding
+		self.use_direct_output = True
+		self.use_sigmoid = use_sigmoid
+		self.use_src_pred = use_src_pred
+		self.use_absolute_offset = use_absolute_offset
+		self.w_gamma = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
+		# self.use_src_pred = self.Arrivals.src_pred
+		# self.scale_output = torch.Tensor([1.0/10.0]).to(device)
+		# self.use_sigmoid = use_sigmoid
+		self.device = device
+
+		self.ftrns1 = ftrns1
+		self.ftrns2 = ftrns2
+
+	def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q, save_state = False):
+
+		n_line_nodes = Slice.shape[0]
+		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
+		assert(x_temp_cuda_cart.shape[1] == 3)
+		
+		embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
+		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+		
+		if self.use_absolute_offset == True:
+			norm_pos = torch.sqrt(torch.sum(A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
+			rel_pos = torch.cat((A_src_in_edges.x[:,0:3]/norm_pos, torch.exp(-1.0*norm_pos*F.softplus(self.w_gamma))), dim = 1)
+			Slice = torch.cat((Slice, rel_pos), dim = 1)
+
+		if self.attach_time == True:
+			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
+
+		Slice = torch.cat((Slice, embed_context.expand(n_line_nodes, -1)), dim = 1)
+		pos_rel_sta, pos_rel_src = None, None
+		
+		if self.use_embedding == True:
+			# inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
+			ndim_slice = -1 if (self.attach_time == True)*(self.use_absolute_offset == False) else -8
+			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  Slice[:, ndim_slice::]), dim = 1) if ((self.attach_time == True) or (self.use_absolute_offset == True)) else torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device) # .to(Slice.device)
+			inpt_embedding = torch.cat((inpt_embedding, embed_context.expand(n_line_nodes, -1)), dim = 1)
+
+			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, A_in_sta, A_in_src[0], A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
+			Slice = torch.cat((Slice, embedding), dim = 1)
+
+		
+		x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
+		x = self.SpatialAggregation1(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda)
+		if self.use_expanded == True:
+			x_expand = self.SpatialAggregation2_expanded(x, embed_context, A_src[1], x_temp_cuda) # x_temp_cuda_cart
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(n_line_nodes, -1)), dim = 1)))
+			x = x_local + gate*x_expand
+		else:
+			x = x_local
+		x_spatial = self.SpatialAggregation3(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		
+		if self.use_direct_output == True:
+			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
+		else:
+			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, embed_context) # contains data on spatial and temporal solution at fixed nodes
+
+		y = self.proj_soln1(y_latent)
+		
+		if save_state == True:
+			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
+			
+		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+
+		x_src = []
+		x = self.proj_soln2(x)
+		
+		slope_width = 0.1
+		mask_p_thresh = 0.1
+		mask_out = torch.relu(y - mask_p_thresh)
+		
+		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
+		
+		## Maybe re-concatenate the initial Cartesian product input misfit features back into s here
+		if self.use_expanded == False:
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, A_in_sta, A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
+
+		else: ## This assumes that DataAggregationAssociationPhase does not use expanded version
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, A_in_sta, A_in_src[0], pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
+
+		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, trv_out = trv_out_q)
+
+		if self.use_src_pred == True:
+			arv, src = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
+			return y, x, arv_p, arv_s, src
+
+		else:
+			
+			arv = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)			
+			return y, x, arv_p, arv_s
+
+	def set_scale_coefficients(self, scale_rel, scale_time, kernel_sig_t, eps, src_x_kernel, src_t_kernel, time_shift_range):
+
+		self.scale_rel = scale_rel
+		self.scale_time = scale_time
+
+		if self.use_embedding == True:
+			self.DataAggregationEmbedding.scale_rel = scale_rel
+			self.DataAggregationEmbedding.scale_time = scale_time
+
+		self.SpatialAggregation1.scale_rel = scale_rel
+		self.SpatialAggregation1.scale_time = scale_time
+		self.SpatialAggregation2.scale_rel = scale_rel
+		self.SpatialAggregation2.scale_time = scale_time
+		self.SpatialAggregation3.scale_rel = scale_rel
+		self.SpatialAggregation3.scale_time = scale_time
+
+		if self.use_expanded == True:
+			# self.SpatialAggregation1_expanded.scale_rel = 10.0*scale_rel
+			# self.SpatialAggregation1_expanded.scale_time = 10.0*scale_time
+			self.SpatialAggregation2_expanded.scale_rel = 10.0*scale_rel
+			self.SpatialAggregation2_expanded.scale_time = 10.0*scale_time
+
+		self.SpaceTimeAttention.scale_rel = scale_rel
+		self.SpaceTimeAttention.scale_time = scale_time
+		
+		self.ArrivalEmbedding.scale_rel = scale_rel
+		self.ArrivalEmbedding.scale_time = scale_time
+		self.ArrivalEmbedding.kernel_sig_t = kernel_sig_t
+
+		# self.SpaceTimeAttentionQuery.scale_rel = scale_rel
+		# self.SpaceTimeAttentionQuery.scale_time = scale_time
+		# self.SpaceTimeAttentionQuery.kernel_sig_t = kernel_sig_t
+		
+		self.Arrivals.eps = eps
+		self.embedding_vector = torch.tensor([np.log(scale_rel)/5.0, np.log(scale_time), np.log(kernel_sig_t), np.log(src_x_kernel)/3.0, np.log(src_t_kernel), np.log(time_shift_range)/2.0], device = self.device).reshape(1,-1).float()
+		self.embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # embed_context = self.embed_vector(self.embedding_vector).expand(Slice.shape[0], -1)
+		
+	def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, pos_loc, pos_src):
+
+		# pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		# pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
+		# dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
+		# dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
+		# pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
+		# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
+		
+		self.A_in_sta = A_in_sta
+		self.A_in_src = A_in_src
+		self.A_src_in_edges = A_src_in_edges
+		self.A_Lg_in_src = A_Lg_in_src
+		self.A_src_in_sta = A_src_in_sta
+
+		if self.use_expanded == False:
+			self.A_src = A_src # [0] # if self.use_expanded == True else A_src
+		else:
+			self.A_src = A_src[0]
+			self.Ac = A_src[1]
+
+		self.A_edges_p = A_edges_p
+		self.A_edges_s = A_edges_s
+		self.dt_partition = dt_partition
+		self.tlatent = tlatent
+		# self.pos_rel_sta = pos_rel_sta
+		# self.pos_rel_src = pos_rel_src
+
+	def set_internal_state(self, x_spatial, x_temp_cuda_cart, x_temp_cuda_t): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
+		## Use this to set state for rapid queries of attention layer
+		self.x_spatial = x_spatial
+		self.x_temp_cuda_cart = x_temp_cuda_cart
+		self.x_temp_cuda_t = x_temp_cuda_t
+
+	def set_internal_state_queries(self, s, x_spatial, x_temp_cuda_cart, x_temp_cuda_t, locs_use_cart, tlatent): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
+		## Use this to set state for rapid queries of attention layer
+		
+		self.s = s
+		self.x_spatial = x_spatial
+		self.x_temp_cuda_cart = x_temp_cuda_cart
+		self.x_temp_cuda_t = x_temp_cuda_t
+		self.locs_use_cart = locs_use_cart
+		self.tlatent = tlatent
+
+	def forward_queries(self, x_query_cart, t_query, train = False): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
+
+		## Use this to obtain query predictions. Note, can modify to also return the spatial embeddings (prior to proj_soln)
+		return self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t, self.embed_context))
+
+	def forward_src_queries(self, x_query_src_cart, tq_sample, tpick, ipick, phase_label, trv_out_q): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
+
+		arv_embed, mask_arv = self.ArrivalEmbedding(self.s, self.x_temp_cuda_cart, self.x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, self.locs_use_cart, self.tlatent, trv_out = trv_out_q)
+		if self.use_src_pred == True:
+			arv, src = self.Arrivals(tq_sample, trv_out_q, self.locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
+			return arv_p, arv_s, src
+
+		else:
+			arv = self.Arrivals(tq_sample, trv_out_q, self.locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
+			return arv_p, arv_s
+
+
+	def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
+
+		# embed_context = self.embed_vector(self.embedding_vector).expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
+		
+		n_line_nodes = Slice.shape[0]
+		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
+		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+		
+		
+		if self.use_absolute_offset == True:
+			norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
+			rel_pos = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, torch.exp(-1.0*norm_pos*F.softplus(self.w_gamma))), dim = 1)
+			Slice = torch.cat((Slice, rel_pos), dim = 1)
+		
+		if self.attach_time == True:
+			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
+		
+		Slice = torch.cat((Slice, self.embed_context.expand(n_line_nodes, -1)), dim = 1)
+		pos_rel_sta, pos_rel_src = None, None
+		
+		if self.use_embedding == True:
+			ndim_slice = -1 if (self.attach_time == True)*(self.use_absolute_offset == False) else -8
+			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  Slice[:, ndim_slice::]), dim = 1) if ((self.attach_time == True) or (self.use_absolute_offset == True)) else torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device) # .to(Slice.device)
+			inpt_embedding = torch.cat((inpt_embedding, self.embed_context.expand(n_line_nodes, -1)), dim = 1)
+
+			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
+			Slice = torch.cat((Slice, embedding), dim = 1)
+
+		
+		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
+		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda)
+		if self.use_expanded == True:
+			x_expand = self.SpatialAggregation2_expanded(x, embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(n_line_nodes, -1)), dim = 1)))
+			x = x_local + gate*x_expand
+		else:
+			x = x_local
+		x_spatial = self.SpatialAggregation3(x, embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		
+
+		# use_direct_output = False
+		if self.use_direct_output == True:
+			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
+
+		else:
+			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, self.embed_context) # contains data on spatial and temporal solution at fixed nodes
+
+		y = self.proj_soln1(y_latent)
+		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+		
+		x_src = []
+		x = self.proj_soln2(x)
+
+		slope_width = 0.1
+		mask_p_thresh = 0.1
+		mask_out = torch.relu(y - mask_p_thresh)
+		
+
+		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
+
+		if self.use_expanded == False:
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
+
+		else: ## This assumes that DataAggregationAssociationPhase does not use expanded version
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src[0], pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
+
+		## Arrival embedding
+		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, self.tlatent, trv_out = trv_out_q)
+		
+		## x_query_src_cart
+		if self.use_src_pred == True:
+			arv, src = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
+
+		else:
+			arv = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
+
+		
+		if self.use_src_pred == True:
+			return y, x, arv_p, arv_s, src
+
+		else:
+			return y, x, arv_p, arv_s
+
+		
+	## Maye need to add new module that maps to the association - source locations
+	def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, t_query, n_reshape = 1):
+	
+		# embed_context = self.embed_vector(self.embedding_vector).expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
+
+		n_line_nodes = Slice.shape[0]
+		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
+		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+		
+		if self.use_absolute_offset == True:
+			norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
+			rel_pos = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, torch.exp(-1.0*norm_pos*F.softplus(self.w_gamma))), dim = 1)
+			Slice = torch.cat((Slice, rel_pos), dim = 1)
+
+		if self.attach_time == True:
+			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
+
+		Slice = torch.cat((Slice, self.embed_context.expand(n_line_nodes, -1)), dim = 1)
+		pos_rel_sta, pos_rel_src = None, None
+		
+		if self.use_embedding == True:
+			ndim_slice = -1 if (self.attach_time == True)*(self.use_absolute_offset == False) else -8
+			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  Slice[:, ndim_slice::]), dim = 1) if ((self.attach_time == True) or (self.use_absolute_offset == True)) else torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device) # .to(Slice.device)
+			inpt_embedding = torch.cat((inpt_embedding, self.embed_context.expand(n_line_nodes, -1)), dim = 1)
+
+			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
+			Slice = torch.cat((Slice, embedding), dim = 1)
+
+
+		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
+		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
+		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		if self.use_expanded == True:
+			x_expand = self.SpatialAggregation2_expanded(x, embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(n_line_nodes, -1)), dim = 1)))
+			x = x_local + gate*x_expand
+		else:
+			x = x_local
+			
+		x_spatial = self.SpatialAggregation3(x, embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+
+		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+		x = self.proj_soln2(x)
+
+		if n_reshape > 1: ## Use this to map (n_reshape) repeated spatial queries (x_temp_cuda_cart) at different origin times, to predictions for fixed coordinates and across time
+			x = x.reshape(-1,n_reshape,1)
+
+		return [], x
+
+
+#### EXTRA
+
+
+class VModel(nn.Module):
+
+	def __init__(self, n_phases = 2, n_hidden = 50, n_embed = 10, device = 'cuda'): # v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, 
+		super(VModel, self).__init__()
+
+		## Relative offset prediction [2]
+		self.fc1_1 = nn.Linear(3 + n_embed, n_hidden)
+		self.fc1_2 = nn.Linear(n_hidden, n_hidden)
+		self.fc1_3 = nn.Linear(n_hidden, n_hidden)
+		self.fc1_4 = nn.ModuleList()
+		for j in range(n_phases):
+			self.fc1_4.append(nn.Linear(n_hidden, 1))
+			# self.fc1_41 = nn.Linear(n_hidden, 1)
+			# self.fc1_42 = nn.Linear(n_hidden, 1)
+		self.activate1_1 = lambda x: torch.sin(x)
+		self.activate1_2 = lambda x: torch.sin(x)
+		self.activate1_3 = lambda x: torch.sin(x)
+		self.activate = nn.Softplus()
+		self.mask = torch.zeros((1, 3)).to(device) # + n_embed)).to(device)
+		self.mask[0,2] = 1.0
+		self.n_phases = n_phases
+
+	def fc1_block(self, x):
+
+		# x = x*torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(x.device)
+		x1 = self.activate1_1(self.fc1_1(x))
+		x = self.activate1_2(self.fc1_2(x1)) + x1
+		x1 = self.activate1_3(self.fc1_3(x)) + x
+		# out = [self.activate(self.fc1_4[j](x1)) for j in range(self.n_phases)]
+
+		return [self.activate(self.fc1_4[j](x1)) for j in range(self.n_phases)]
+
+	def forward(self, src, embed):
+
+		out = self.fc1_block(torch.cat((src, embed), dim = 1))
+		lout = [out[0]]
+		for j in range(1, self.n_phases):
+			lout.append(out[0]*out[j])
+		# out[:,1] = out[:,0]*out[:,1] ## Vs is a fraction of Vp
+
+		return torch.cat(lout, dim = 1)
+
+
+class TravelTimesPN1(nn.Module):
+
+        def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, corrs = None, locs_corr = None, device = 'cuda'):
+                super(TravelTimesPN1, self).__init__()
+
+                ## Relative offset prediction [2]
+                self.fc1_1 = nn.Linear(4 + n_phases + n_embed, n_hidden)
+                self.fc1_2 = nn.Linear(n_hidden, n_hidden)
+                self.fc1_3 = nn.Linear(n_hidden, n_hidden)
+                # self.fc1_4 = nn.Linear(n_hidden, n_phases)
+                self.activate1_1 = lambda x: torch.sin(x)
+                self.activate1_2 = lambda x: torch.sin(x)
+                self.activate1_3 = lambda x: torch.sin(x)
+
+                ## Absolute position prediction [3]
+                self.fc2_1 = nn.Linear(7 + n_phases + n_embed, n_hidden)
+                self.fc2_2 = nn.Linear(n_hidden, n_hidden)
+                self.fc2_3 = nn.Linear(n_hidden, n_hidden)
+                # self.fc2_4 = nn.Linear(n_hidden, n_phases)
+                self.activate2_1 = lambda x: torch.sin(x)
+                self.activate2_2 = lambda x: torch.sin(x)
+                self.activate2_3 = lambda x: torch.sin(x)
+
+                self.merge = nn.Sequential(nn.Linear(2*n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_phases))
+
+                ## Embed source [3]
+                # self.fc3_1 = nn.Linear(3 + 2 + 1, n_hidden)
+                self.fc3_1 = nn.Linear(4, n_hidden)
+                self.fc3_2 = nn.Linear(n_hidden, n_hidden)
+                self.fc3_3 = nn.Linear(n_hidden, n_hidden)
+                self.fc3_4 = nn.Linear(n_hidden, n_embed)
+                self.activate3_1 = lambda x: torch.sin(x)
+                self.activate3_2 = lambda x: torch.sin(x)
+                self.activate3_3 = lambda x: torch.sin(x)
+
+                ## Projection functions
+                self.ftrns1 = ftrns1
+                self.ftrns2 = ftrns2
+                # self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
+                # self.tscale = torch.Tensor([trav_val]).to(device)
+                self.v_mean = torch.Tensor(v_mean).to(device)
+                self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
+                self.device = device
+                self.norm_pos = norm_pos
+                self.inorm_pos = inorm_pos
+                self.inorm_time = inorm_time
+                self.norm_vel = norm_vel
+                self.conversion_factor = conversion_factor
+                self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
+                self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
+                self.scale_angles = torch.Tensor([180.0, 180.0]).reshape(1,-1).to(device) ## Make these adaptive
+                self.scale_depths = torch.Tensor([300e3]).reshape(1,-1).to(device)
+                if locs_corr is not None:
+                        self.tree_corr = cKDTree(ftrns1(torch.Tensor(locs_corr).to(device)).cpu().detach().numpy())
+                        self.corrs = torch.Tensor(corrs).to(device)
+                        self.use_corr = True
+                else:
+                        self.use_corr = False
+
+                if n_srcs > 0:
+                        self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))) # .to(device)
+                        self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))) # .to(device)
+
+                # self.Tp_average
+
+        def fc1_block(self, x):
+
+                x1 = self.activate1_1(self.fc1_1(x))
+                x = self.activate1_2(self.fc1_2(x1)) + x1
+                x1 = self.activate1_3(self.fc1_3(x)) + x
+
+                return x1 # self.fc1_4(x1)
+
+        def fc2_block(self, x):
+
+                x1 = self.activate2_1(self.fc2_1(x))
+                x = self.activate2_2(self.fc2_2(x1)) + x1
+                x1 = self.activate2_3(self.fc2_3(x)) + x
+
+                return x1 # self.fc2_4(x1)
+
+        def fc3_block(self, x):
+
+                x1 = self.activate3_1(self.fc3_1(x))
+                x = self.activate3_2(self.fc3_2(x1)) + x1
+                x1 = self.activate3_3(self.fc3_3(x)) + x
+
+                return self.fc3_4(x1)
+
+        def embed_src(self, src):
+
+                return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), self.norm_pos(src[:,2].reshape(-1,1))), dim = 1))
+
+        # def embed_src(self, src):
+
+        #       return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), src[:,0:2]/self.scale_angles, src[:,[2]]/self.scale_depths), dim = 1))
+
+        def src_proj(self, src):
+
+                return self.norm_pos(self.ftrns1(src))
+
+        def forward(self, sta, src, method = 'pairs', train = False):
+
+                # embed_src = self.fc3_block(self.norm_pos(self.ftrns1(src)))
+                # embed_src = self.embed_src(src*self.mask)
+                embed_src = self.embed_src(src)
+
+                if method == 'direct':
+
+                        sta_proj = self.norm_pos(self.ftrns1(sta))
+                        src_proj = self.norm_pos(self.ftrns1(src))
+
+                        if train == True:
+                                src_proj = Variable(src_proj, requires_grad = True)
+
+                        base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)
+
+                        pred1 = self.fc1_block( torch.cat((sta_proj - src_proj, self.norm_pos(src[:,2].reshape(-1,1)), base_val, embed_src), dim = 1) )
+                        pred2 = self.fc2_block( torch.cat((sta_proj, src_proj, self.norm_pos(src[:,2]).reshape(-1,1), base_val, embed_src), dim = 1) )
+                        pred = self.merge(torch.cat((pred1, pred2), dim = 1))
+
+                        if train == True:
+                                return base_val, pred, src_proj, embed_src
+
+                        else:
+                                if self.use_corr == True:
+                                        imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
+                                        return torch.relu(self.inorm_time(base_val + pred) + self.corrs[imatch,:])
+
+                                else:
+                                        return torch.relu(self.inorm_time(base_val + pred))
+
+
+                elif method == 'pairs':
+
+                        ## First, create all pairs of srcs and recievers
+                        src_repeat = self.norm_pos(self.ftrns1(src)).repeat_interleave(len(sta), dim = 0) # /self.scale
+                        sta_repeat = self.norm_pos(self.ftrns1(sta)).repeat(len(src), 1) # /self.scale
+                        src_embed_repeat = embed_src.repeat_interleave(len(sta), dim = 0)
+
+                        if train == True:
+                                src_repeat = Variable(src_repeat, requires_grad = True)
+
+                        base_val = self.conversion_factor*(torch.norm(sta_repeat - src_repeat, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)) # .reshape(len(src), len(sta), -1)
+
+                        pred1 = self.fc1_block(torch.cat((sta_repeat - src_repeat, self.norm_pos(src[:,2].reshape(-1,1)).repeat_interleave(len(sta), dim = 0), base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
+                        pred2 = self.fc2_block(torch.cat((sta_repeat, src_repeat, self.norm_pos(src[:,2].reshape(-1,1)).repeat_interleave(len(sta), dim = 0), base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
+                        pred = self.merge(torch.cat((pred1, pred2), dim = 1)).reshape(len(src), len(sta), -1)
+
+                        if train == True:
+                                return base_val.reshape(len(src), len(sta), -1), pred, src_repeat.reshape(len(src), len(sta), -1), src_embed_repeat.reshape(len(src), len(sta), -1)
+
+                        else:
+
+                                if self.use_corr == True:
+                                        imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
+                                        return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred) + self.corrs[imatch,:].unsqueeze(0))
+
+                                return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
+                                # return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
+
+
+
+class TravelTimesPN(nn.Module):
+
+	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, corrs = None, locs_corr = None, device = 'cuda'):
+		super(TravelTimesPN, self).__init__()
+
+		## Relative offset prediction [2]
+		self.fc1_1 = nn.Linear(3 + n_phases + n_embed, n_hidden)
+		self.fc1_2 = nn.Linear(n_hidden, n_hidden)
+		self.fc1_3 = nn.Linear(n_hidden, n_hidden)
+		# self.fc1_4 = nn.Linear(n_hidden, n_phases)
+		self.activate1_1 = lambda x: torch.sin(x)
+		self.activate1_2 = lambda x: torch.sin(x)
+		self.activate1_3 = lambda x: torch.sin(x)
+
+		## Absolute position prediction [3]
+		self.fc2_1 = nn.Linear(6 + n_phases + n_embed, n_hidden)
+		self.fc2_2 = nn.Linear(n_hidden, n_hidden)
+		self.fc2_3 = nn.Linear(n_hidden, n_hidden)
+		# self.fc2_4 = nn.Linear(n_hidden, n_phases)
+		self.activate2_1 = lambda x: torch.sin(x)
+		self.activate2_2 = lambda x: torch.sin(x)
+		self.activate2_3 = lambda x: torch.sin(x)
+
+		self.merge = nn.Sequential(nn.Linear(2*n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_phases))
+
+		## Embed source [3]
+		# self.fc3_1 = nn.Linear(3 + 2 + 1, n_hidden)
+		self.fc3_1 = nn.Linear(3, n_hidden)
+		self.fc3_2 = nn.Linear(n_hidden, n_hidden)
+		self.fc3_3 = nn.Linear(n_hidden, n_hidden)
+		self.fc3_4 = nn.Linear(n_hidden, n_embed)
+		self.activate3_1 = lambda x: torch.sin(x)
+		self.activate3_2 = lambda x: torch.sin(x)
+		self.activate3_3 = lambda x: torch.sin(x)
+
+		## Projection functions
+		self.ftrns1 = ftrns1
+		self.ftrns2 = ftrns2
+		# self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
+		# self.tscale = torch.Tensor([trav_val]).to(device)
+		self.v_mean = torch.Tensor(v_mean).to(device)
+		self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
+		self.device = device
+		self.norm_pos = norm_pos
+		self.inorm_pos = inorm_pos
+		self.inorm_time = inorm_time
+		self.norm_vel = norm_vel
+		self.conversion_factor = conversion_factor
+		self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
+		self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
+		self.scale_angles = torch.Tensor([180.0, 180.0]).reshape(1,-1).to(device) ## Make these adaptive
+		self.scale_depths = torch.Tensor([300e3]).reshape(1,-1).to(device)
+		if locs_corr is not None:
+			self.tree_corr = cKDTree(ftrns1(torch.Tensor(locs_corr).to(device)).cpu().detach().numpy())
+			self.corrs = torch.Tensor(corrs).to(device)
+			self.use_corr = True
+		else:
+			self.use_corr = False
+		
+		if n_srcs > 0:
+			self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))) # .to(device)
+			self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))) # .to(device)
+
+		# self.Tp_average
+
+	def fc1_block(self, x):
+
+		x1 = self.activate1_1(self.fc1_1(x))
+		x = self.activate1_2(self.fc1_2(x1)) + x1
+		x1 = self.activate1_3(self.fc1_3(x)) + x
+
+		return x1 # self.fc1_4(x1)
+
+	def fc2_block(self, x):
+
+		x1 = self.activate2_1(self.fc2_1(x))
+		x = self.activate2_2(self.fc2_2(x1)) + x1
+		x1 = self.activate2_3(self.fc2_3(x)) + x
+
+		return x1 # self.fc2_4(x1)
+
+	def fc3_block(self, x):
+
+		x1 = self.activate3_1(self.fc3_1(x))
+		x = self.activate3_2(self.fc3_2(x1)) + x1
+		x1 = self.activate3_3(self.fc3_3(x)) + x
+
+		return self.fc3_4(x1)
+
+	def embed_src(self, src):
+
+		return self.fc3_block(self.norm_pos(self.ftrns1(src)))
+
+	# def embed_src(self, src):
+
+	# 	return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), src[:,0:2]/self.scale_angles, src[:,[2]]/self.scale_depths), dim = 1))
+
+	def src_proj(self, src):
+
+		return self.norm_pos(self.ftrns1(src))
+
+	def forward(self, sta, src, method = 'pairs', train = False):
+
+		# embed_src = self.fc3_block(self.norm_pos(self.ftrns1(src)))
+		# embed_src = self.embed_src(src*self.mask)
+		embed_src = self.embed_src(src)
+
+		if method == 'direct':
+
+			sta_proj = self.norm_pos(self.ftrns1(sta))
+			src_proj = self.norm_pos(self.ftrns1(src))
+
+			if train == True:
+				src_proj = Variable(src_proj, requires_grad = True)
+
+			base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)
+
+			pred1 = self.fc1_block( torch.cat((sta_proj - src_proj, base_val, embed_src), dim = 1) )
+			pred2 = self.fc2_block( torch.cat((sta_proj, src_proj, base_val, embed_src), dim = 1) )
+			pred = self.merge(torch.cat((pred1, pred2), dim = 1))
+
+			if train == True:
+				return base_val, pred, src_proj, embed_src
+
+			else:
+				if self.use_corr == True:
+					imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
+					return torch.relu(self.inorm_time(base_val + pred) + self.corrs[imatch,:])
+
+				else:
+					return torch.relu(self.inorm_time(base_val + pred))
+
+		
+		elif method == 'pairs':
+
+			## First, create all pairs of srcs and recievers
+			src_repeat = self.norm_pos(self.ftrns1(src)).repeat_interleave(len(sta), dim = 0) # /self.scale
+			sta_repeat = self.norm_pos(self.ftrns1(sta)).repeat(len(src), 1) # /self.scale
+			src_embed_repeat = embed_src.repeat_interleave(len(sta), dim = 0)
+
+			if train == True:
+				src_repeat = Variable(src_repeat, requires_grad = True)
+
+			base_val = self.conversion_factor*(torch.norm(sta_repeat - src_repeat, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)) # .reshape(len(src), len(sta), -1)
+
+			pred1 = self.fc1_block(torch.cat((sta_repeat - src_repeat, base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
+			pred2 = self.fc2_block(torch.cat((sta_repeat, src_repeat, base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
+			pred = self.merge(torch.cat((pred1, pred2), dim = 1)).reshape(len(src), len(sta), -1)
+
+			if train == True:
+				return base_val.reshape(len(src), len(sta), -1), pred, src_repeat.reshape(len(src), len(sta), -1), src_embed_repeat.reshape(len(src), len(sta), -1)
+
+			else:
+
+				if self.use_corr == True:
+					imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
+					return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred) + self.corrs[imatch,:].unsqueeze(0))		
+
+				return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
+				# return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
+
+
+## Magnitude class
+class Magnitude(nn.Module):
+	def __init__(self, locs, grid, ftrns1_diff, ftrns2_diff, k = 1, device = 'cuda'):
+		# super(Magnitude, self).__init__(aggr = 'max') # node dim
+		super(Magnitude, self).__init__() # node dim
+		## Predict magnitudes with trainable coefficients,
+		## and spatial-reciver biases (with knn interp k)
+		# In elliptical coordinates
+		self.locs = locs
+		self.grid = grid
+		self.grid_cart = ftrns1_diff(grid)
+		self.ftrns1 = ftrns1_diff
+		self.ftrns2 = ftrns2_diff
+		self.k = k
+		self.device = device
+
+		## Setup like regular log_amp = C1 * Mag + C2 * log_dist_depths_0 + C3 * log_dist_depths + Bias (for each phase type)
+		self.mag_coef = nn.Parameter(torch.ones(2))
+		self.epicenter_spatial_coef = nn.Parameter(torch.ones(2))
+		self.depth_spatial_coef = nn.Parameter(torch.zeros(2))
+		self.bias = nn.Parameter(torch.zeros(grid.shape[0], locs.shape[0], 2))
+		self.activate = nn.Softplus()
+		self.grid_save = nn.Parameter(grid, requires_grad = False)
+		self.zvec = torch.Tensor([1.0,1.0,0.0]).reshape(1,-1).to(device)
+		# self.bias = nn.Parameter(torch.zeros(locs.shape[0], grid.shape[0], 2), requires_grad = True).to(device)
+	
+	## Need to double check these routines
+	def log_amplitudes(self, ind, src, mag, phase):
+		## Input src: n_srcs x 3;
+		## ind: indices into absolute locs array (can repeat, for phase types)
+		## log_amp (base 10), for each ind
+		## phase type for each ind 
+
+		# Compute pairwise distances;
+		fudge = 1.0 # add before log10, to avoid log10(0)
+		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1(src*self.zvec).unsqueeze(1) - self.ftrns1(self.locs[ind]*self.zvec).unsqueeze(0), dim = 2) + fudge)
+		pw_log_dist_depths = torch.log10(abs(src[:,2].view(-1,1) - self.locs[ind,2].view(1,-1)) + fudge)
+		inds = knn(self.grid_cart/1000.0, self.ftrns1(src)/1000.0, k = self.k)[1].reshape(-1,self.k) ## for each of the second one, find indices in the first
+		bias = self.bias[inds][:,:,ind,phase].mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
+		log_amp = mag*torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device)) - self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
+		# log_amp = mag*torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device)) + self.epicenter_spatial_coef[phase]*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
+		## Can directly use torch_scatter to coalesce the data
+		
+		return log_amp
+
+	def train(self, ind, src, mag, phase):
+		## Input src: n_srcs x 3;
+		## ind: indices into absolute locs array (can repeat, for phase types)
+		## log_amp (base 10), for each ind
+		## phase type for each ind 
+
+		# Compute pairwise distances;
+		fudge = 1.0 # add before log10, to avoid log10(0)
+		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1(src*self.zvec) - self.ftrns1(self.locs[ind]*self.zvec), dim = 1) + fudge)
+		pw_log_dist_depths = torch.log10(abs(src[:,2].view(-1) - self.locs[ind,2].view(-1)) + fudge)
+		sta_ind = ind.repeat_interleave(self.k)
+		inds = knn(self.grid_cart/1000.0, self.ftrns1(src)/1000.0, k = self.k) # [1] # .reshape(-1,self.k) ## for each of the second one, find indices in the first
+
+		bias = self.bias[inds[1], sta_ind, :] # .mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
+		bias = scatter(bias, inds[0], dim = 0, reduce = 'mean')[torch.arange(len(src)).long().to(self.device),phase]
+		log_amp = mag*torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device)) - self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
+
+		return log_amp
+	
+	## Note, closer between amplitudes and forward
+	def forward(self, ind, src, log_amp, phase):
+		## Input src: n_srcs x 3;
+		## ind: indices into absolute locs array (can repeat, for phase types)
+		## log_amp (base 10), for each ind
+		## phase type for each ind
+
+		# Compute pairwise distances;
+		fudge = 1.0 # add before log10, to avoid log10(0)
+		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1(src*self.zvec).unsqueeze(1) - self.ftrns1(self.locs[ind]*self.zvec).unsqueeze(0), dim = 2) + fudge)
+		pw_log_dist_depths = torch.log10(abs(src[:,2].view(-1,1) - self.locs[ind,2].view(1,-1)) + fudge)
+		inds = knn(self.grid_cart/1000.0, self.ftrns1(src)/1000.0, k = self.k)[1].reshape(-1,self.k) ## for each of the second one, find indices in the first
+		bias = self.bias[inds][:,:,ind,phase].mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
+		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
+
+		return mag
+
+		## Can directly use torch_scatter to coalesce the data
+		# bias = self.bias[inds][:,:,ind,phase].mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
+		# log_amp = mag*torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device)) + self.epicenter_spatial_coef[phase]*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
+
+
+		## Can directly use torch_scatter to coalesce the data?
+		# mag = (log_amp - self.epicenter_spatial_coef[phase]*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device))
+
+
+		# self.f_arrival_query_1 = nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden) # add edge data (observed arrival - theoretical arrival)
+		# self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
+		# self.f_src_context_1 = nn.Linear(ndim_arv_in + 5, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
+		# self.f_src_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # only use single tranform layer for source embdding (which already has sufficient information)
+
+		# self.f_pick_query = nn.Sequential(nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+		
+		# + 1
+
+
+		# self.activate1 = nn.PReLU()
+		# self.activate2 = nn.PReLU()
+		# self.activate3 = nn.PReLU()
+
+		## Append dummy edge
+		# edges = torch.cat((edges, edge_dummy), dim = 1)
+		# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src,1)), dim = 0) ## The dummy "source index"
+		# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src,1)).to(device), dim = 0) ## The dummy "source index"
+		# self_link = torch.cat((self_link, torch.zeros(n_arv*n_src,1)).to(device), dim = 0)
+		## Could use search sorted to insert into edge list (sorted)
+		## Append dummy edges (new sending nodes from index n_arv*n_src (e.g., > all real picks) to all real nodes)
+
+
+
+		## Use gate to merge the two branches
+		# gate = torch.sigmoid(self.gate_linear(src_embed_trns[src_ind_repeat]))
+		# out = self.proj_2(
+		#     gate * self.embed_src(src_embed_trns[src_ind_repeat]) +
+		#     (1 - gate) * self.activate4(self.proj_1(...))
+		# )
+
+
+		# if self.use_src_context == True:
+
+		# 	aggregate = self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))
+		# 	# gate = torch.sigmoid(self.gate_src(torch.cat((src_embed_trns[src_ind_repeat], aggregate), dim = 1)))
+		# 	gate = torch.sigmoid(self.gate_src(torch.cat((F.layer_norm(src_embed_trns[src_ind_repeat], src_embed_trns[src_ind_repeat].shape[-1:]), F.layer_norm(aggregate, aggregate.shape[-1:])), dim = 1)))
+		# 	out = self.proj_2(self.downscale*gate*self.embed_src(src_embed_trns[src_ind_repeat]) + aggregate)
+		# 	# out = self.proj_2(self.embed_src(src_embed_trns[src_ind_repeat]) + ) # M is output. Taking mean over heads
+
+		# else:
+
 
 # class ArrivalEmbedding(MessagePassing):
 # 	def __init__(self, ndim_arv_in, ndim_out, n_hidden = 20, n_dim_embed = 30, n_phase_embed = 5, ndim_out_src = 1, scale_rel = scale_rel, k_spc_edges = k_spc_edges, kernel_sig_t = kernel_sig_t, use_phase_types = use_phase_types, scale_time = scale_time, min_thresh = 0.01, trv = None, ftrns2 = None, device = 'cuda'):
@@ -2057,1334 +3129,618 @@ class ArrivalEmbedding(MessagePassing):
 # 		return arv_embed, src_embed, mask_misfit_time ## Make sure this is correct reshape (not transposed)
 
 
-
-class SourceStationAttention(MessagePassing):
-
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_dim_out_src = 1, n_heads = 5, n_hidden = 30, eps = eps, use_src_pred = False, use_dual_attention = True, use_phase_types = use_phase_types, device = device):
-		super(SourceStationAttention, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
-
-		self.f_pick_query = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-		self.f_pick_context = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-		self.f_pick_values = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-
-		if use_dual_attention == True:
-			self.f_source_query = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.f_source_context = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.merge_attn = nn.Sequential(nn.Linear(2*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_latent))
-			# self.alpha_source = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
-			# self.alpha_src = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5
-			self.alpha_src = nn.Parameter(torch.Tensor([0.5])) ## Initilizes as 0.5
-
-			self.self_dummy_src = nn.Parameter(torch.zeros(1, n_heads))
-			self.dummy_keys_src = nn.Parameter(torch.zeros(1, n_heads, n_latent)) # .to(device)
-			self.dummy_queries_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
-			self.dummy_values_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+	# def message(self, x_j, edge_attr
 
 
-		# self.f_values_1 = nn.Linear(ndim_arv_in + 5, n_hidden) # add second layer transformation.
-		# self.f_values_2 = nn.Linear(n_hidden, n_heads*n_latent) # add second layer transformation.
-		# self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
-		self.proj_1 = nn.Linear(n_latent*n_heads, n_hidden) # can remove this layer possibly.
-		self.proj_2 = nn.Linear(n_hidden, ndim_out) # can remove this layer possibly.
-		if use_src_pred == True:
-			self.proj_src_1 = nn.Linear(n_latent*n_heads, n_hidden) # can remove this layer possibly.
-			self.proj_src_2 = nn.Linear(n_hidden, n_hidden) # can remove this layer possibly.
-			self.proj_src_3 = nn.Linear(n_hidden, n_dim_out_src)
-			self.proj_attn = nn.Linear(n_hidden, 1)
-			self.activate_src = nn.PReLU()			
-			self.activate_src1 = nn.PReLU()			
-			self.use_src_pred = True
-			self.n_dim_out_src = n_dim_out_src
-			self.log_tau = nn.Parameter(torch.tensor([np.log(0.1)], dtype = torch.float32, device = device))
-			
-		else:
-			self.use_src_pred = False
-
-		# self.embed_trns = nn.Sequential(nn.Linear(ndim_src_in, ndim_src_in), nn.PReLU())
-		self.scale = np.sqrt(n_latent)
-		self.n_heads = n_heads
-		self.n_latent = n_latent
-		self.eps = eps
-		self.t_kernel_sq = torch.Tensor([eps]).to(device)**2
-
-		self.self_bias = nn.Parameter(torch.zeros(1, n_heads)) # .to(device) # zeros
-		self.self_dummy = nn.Parameter(torch.zeros(1, n_heads)) # .to(device) # zeros
-		self.dummy_keys = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
-		self.dummy_values = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
-
-		n_dim_phase = 5
-		self.embed_phase = nn.Embedding(2 + 1, n_dim_phase)
-
-		# self.alpha = nn.Parameter(torch.Tensor([np.log(0.5 / (1 - 0.5))]).to(device)) ## Initilizes as 0.5
-		# self.alpha = nn.Parameter(torch.Tensor([0.5]).to(device)) ## Initilizes as 0.5 # self.log_temp = nn.Parameter(torch.Tensor([0.5])).to(device)
-		self.alpha = nn.Parameter(torch.Tensor([0.5])) ## Initilizes as 0.5 # self.log_temp = nn.Parameter(torch.Tensor([0.5])).to(device)
-
-		self.use_dual_attention = use_dual_attention
-		
-		self.ndim_feat = ndim_arv_in + ndim_extra
-		self.use_phase_types = use_phase_types
-		self.ndim_arv_in = ndim_arv_in
-		self.n_phases = ndim_out
-
-		self.use_src_context = False
-		if self.use_src_context == True:
-			self.embed_src = nn.Sequential(nn.Linear(ndim_src_in, n_hidden), nn.PReLU())
-			self.gate_src = nn.Sequential(nn.Linear(ndim_src_in + n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, 1))
-			self.downscale = torch.Tensor([0.1]).to(device)
-
-		self.activate4 = nn.PReLU()
-		# self.activate5 = nn.PReLU()
-		self.device = device
-
-
-	def forward(self, stime, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label): # reference k nearest spatial points
-
-		# src isn't used. Only trv_src is needed.
-		n_src, n_sta, n_arv = len(stime), trv_src.shape[1], len(tpick) # + 1 ## Note: adding 1 to size of arrivals!
-		if self.use_phase_types == False:
-			phase_label = phase_label*0.0
-
-		# edges = remove_self_loops(radius(ipick.reshape(-1,1).float(), ipick.reshape(-1,1).float(), max_num_neighbors = len(ipick), r = 0.5))[0]
-		edges = add_self_loops(remove_self_loops(radius(ipick.reshape(-1,1).float(), ipick.reshape(-1,1).float(), max_num_neighbors = len(ipick), r = 0.2))[0])[0].flip(0).contiguous()
-		n_edge = edges.shape[1]
-
-		## Now must duplicate edges, for each unique source. (different accumulation points)
-		edges = (edges.repeat(1, n_src) + torch.cat(((torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device), (torch.arange(n_src)*n_arv).repeat_interleave(n_edge).view(1,-1).to(self.device)), dim = 0)).long().contiguous()
-		src_index = torch.arange(n_src).repeat_interleave(n_edge).contiguous().long().to(self.device)
-		self_link = (edges[0] == edges[1]).reshape(-1,1).detach() # Each accumulation index (an entry from src cross arrivals). The number of arrivals is edge_index.max() exactly (since tensor is composed of number arrivals + 1)
-
-		use_sparse = True
-		if use_sparse == True:
-
-			## Note: let's add one more level of sparsity : only include pick pairs within a radius? Because e.g., some high pick rate stations
-			## will have many useless picks to attent too.. (however this is problematic to base it on time offsets, as either phase type)
-			## might be viable (.e.g, comparing between P and S can be useful). So could in theory use "time adjacenecy" allowing swaps of phase type
-			## to create these neighborhoods. This might help prevent explosions in memory during this layer for high pick rates or noisy stations.
-			ikeep = torch.where((mask_arv[src_index, torch.remainder(edges[0], n_arv).long()] > 0) + (edges[0] == edges[1]))[0]
-			edges = edges[:,ikeep].contiguous()
-			# edges = torch.cat((edges[0][ikeep].reshape(1,-1), edges[1][ikeep].reshape(1,-1)), dim = 0).contiguous()
-			src_index = src_index[ikeep]
-			self_link = self_link[ikeep]	
-
-		if len(src_index) == 0:
-			if self.use_src_pred == True:
-				return torch.zeros(n_src, n_arv, self.n_phases).to(self.device), torch.zeros(n_src, self.n_dim_out_src).to(self.device)
-			else:
-				return torch.zeros(n_src, n_arv, self.n_phases).to(self.device)
-
-		edge_dummy = torch.cat(((n_arv*n_src)*torch.ones(1,n_arv*n_src), torch.arange(n_arv*n_src).reshape(1,-1)), dim = 0).long().to(self.device)
-
-		## Create n_src dummy "arrivals" to link to each source.
-		if self.use_dual_attention == True: ## Is this arrival reshape correct?
-			## Should add phase embedding
-			arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1 + n_src, self.ndim_arv_in, device = self.device)), dim = 0)
-			phase_inpt = torch.cat((torch.tile(phase_label, (n_src, 1)), 2.0*torch.ones(1 + n_src,1).to(self.device)), dim = 0)
-			# phase_inpt = torch.cat((phase_label.expand(n_src, -1), -1.0*torch.ones(1 + n_src,1).to(self.device)), dim = 0)
-			## The dummy source indices should be the "correct" ones for those specific source-arrival pairs
-			# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
-			src_index = torch.cat((src_index, torch.arange(n_src).repeat_interleave(n_arv, dim = 0).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
-			# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
-			self_link = torch.cat((self_link, torch.zeros(n_arv*n_src + n_src,1).to(device)), dim = 0).float()
-			edge_dummy_src = torch.cat(( (torch.arange(n_src).reshape(1,-1) + n_src*n_arv + 1), torch.arange(n_src).reshape(1,-1) ), dim = 0).long().to(device) ## Reciever nodes can be arbitrarily listed here (the features aren't used at torch.arange(n_src).reshape(1,-1))
-			edges = torch.cat((edges, edge_dummy, edge_dummy_src), dim = 1).contiguous()
-
-			N = n_arv*n_src + 1 + n_src # still correct?
-			M = n_arv*n_src
-
-		else:
-
-			arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1, self.ndim_arv_in, device = self.device)), dim = 0)
-			phase_inpt = torch.cat((torch.tile(phase_label, (n_src, 1)), torch.Tensor([2.0]).reshape(1,1).to(self.device)), dim = 0)
-			# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src).to(device)), dim = 0).long().contiguous() ## The dummy "source index"
-			src_index = torch.cat((src_index, torch.arange(n_src).repeat_interleave(n_arv, dim = 0).to(device)), dim = 0).long().contiguous() ## The dummy "source index"
-			self_link = torch.cat((self_link, torch.zeros(n_arv*n_src,1).to(device)), dim = 0).float()
-			edges = torch.cat((edges, edge_dummy), dim = 1).contiguous()
-
-			N = n_arv*n_src + 1 # still correct?
-			M = n_arv*n_src
 
 		
-		# src_embed_trns = self.embed_trns(src_embed)
-		src_ind_repeat = torch.arange(n_src).repeat_interleave(n_arv).contiguous().long().to(self.device)
-		# out = self.proj_2(self.embed_src(src_embed[src_ind_repeat]) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+# class DataAggregationExpanded(MessagePassing): # make equivelent version with sum operations.
+# 	def __init__(self, in_channels, out_channels, n_hidden = 30, n_dim_mask = 4, use_absolute_pos = use_absolute_pos, device = device):
+# 		super(DataAggregationExpanded, self).__init__('mean') # node dim
 
-		if self.use_src_pred == True:
-			# out_embed = self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads) # M is output. Taking mean over heads
-			# out_src = self.proj_src_3(self.activate_src1(self.proj_src_2(self.activate_src(self.proj_src_1(out_embed))).view(n_src, n_arv, -1).sum(1)))
-			# out = self.proj_2(self.activate4(self.proj_1(out_embed)))
-			# return out.view(n_src, n_arv, -1), out_src ## Make sure this is correct reshape (not transposed)
-
-			out_embed = self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads) # M is output. Taking mean over heads
-			# out_src = self.proj_src_3(self.activate_src1(self.proj_src_2(self.activate_src(self.proj_src_1(out_embed))).view(n_src, n_arv, -1).sum(1)))
-			tau_base = torch.exp(self.log_tau) 
-			tau_deg = tau_base * (n_arv ** 0.5)
-			out_src = self.activate_src(self.proj_src_1(out_embed)).view(n_src, n_arv, -1)
-			# alpha_score = torch.softmax(self.proj_attn(out_src) / tau, dim = 1)
-			alpha_score = torch.softmax(self.proj_attn(out_src) / tau_deg, dim = 1)
-			out_src = self.proj_src_3(self.activate_src1(self.proj_src_2((alpha_score*out_src).sum(1))))
-			out = self.proj_2(self.activate4(self.proj_1(out_embed)))
-			return out.view(n_src, n_arv, -1), out_src ## Make sure this is correct reshape (not transposed)
+# 		if use_absolute_pos == True:
+# 			in_channels = in_channels + 3*2
 		
-		else:
+# 		## Use two layers of SageConv.
+# 		self.in_channels = in_channels
+# 		self.out_channels = out_channels
+# 		self.n_hidden = n_hidden
 
-			out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
-			## Could do concatenation and summation of the source embedding
-			# out = self.proj_2(torch.cat((src_embed, self.embed_src(src_embed) + self.activate4(self.proj_1(self.propagate(edges, x = arrival.reshape(n_arv*n_src,-1), sembed = src_embed, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = phase_label.repeat(n_src, 1), self_link = self_link, size = (N, M)).view(-1, self.n_latent*self.n_heads)))))) # M is output. Taking mean over heads
+# 		self.activate = nn.PReLU() # can extend to each channel
+# 		self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
 
-		return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
+# 		# self.l1_t1_1 = nn.Linear(n_hidden, n_hidden)
+# 		self.l1_t1_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+
+# 		# self.l1_t2_1 = nn.Linear(in_channels, n_hidden)
+# 		self.l1_t2_2 = nn.Linear(2*n_hidden + n_dim_mask, n_hidden)
+# 		self.activate11 = nn.PReLU() # can extend to each channel
+# 		self.activate12 = nn.PReLU() # can extend to each channel
+# 		self.activate1 = nn.PReLU() # can extend to each channel
+
+# 		self.l2_t1_1 = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l2_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+
+# 		self.l2_t2_1 = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l2_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+# 		self.activate21 = nn.PReLU() # can extend to each channel
+# 		self.activate22 = nn.PReLU() # can extend to each channel
+# 		self.activate2 = nn.PReLU() # can extend to each channel
+
+# 		## Add third layer
+# 		self.l3_t1_1 = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l3_t1_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+
+# 		self.l3_t2_1 = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l3_t2_2 = nn.Linear(3*n_hidden + n_dim_mask, out_channels)
+# 		self.activate31 = nn.PReLU() # can extend to each channel
+# 		self.activate32 = nn.PReLU() # can extend to each channel
+# 		self.activate3 = nn.PReLU() # can extend to each channel
+
+# 		## Expanded layers
+
+# 		self.l1_t1_1c = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l1_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+# 		# self.l1_t1_2c = nn.Linear(2*n_hidden, n_hidden)
+
+# 		self.l1_t2_1c = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l1_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+# 		self.activate11c = nn.PReLU() # can extend to each channel
+# 		self.activate12c = nn.PReLU() # can extend to each channel
+# 		self.activate1c = nn.PReLU() # can extend to each channel
+
+# 		self.l2_t1_1c = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l2_t1_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+
+# 		self.l2_t2_1c = nn.Linear(2*n_hidden, n_hidden)
+# 		self.l2_t2_2c = nn.Linear(3*n_hidden + n_dim_mask, n_hidden)
+# 		self.activate21c = nn.PReLU() # can extend to each channel
+# 		self.activate22c = nn.PReLU() # can extend to each channel
+# 		self.activate2c = nn.PReLU() # can extend to each channel
+
+# 		# self.alpha_expand1 = nn.Parameter(torch.tensor([0.1], device = device)) # device = device
+# 		# self.alpha_expand2 = nn.Parameter(torch.tensor([0.1], device = device)) # device = device
 
 
-	def message(self, x_j, x_i, edge_index, index, tsrc_p, tsrc_s, sindex, stindex, stime, atime, self_link, num_queries, phase_j, phase_i): # Can use phase_j, or directly call edge_index, like done for atime, stindex, etc.
 
+# 	def forward(self, tr, mask, A_in_sta, A_in_src):
+
+# 		tr = torch.cat((tr, mask), dim = -1)
+# 		tr = self.activate(self.init_trns(tr))
+
+# 		tr1 = self.l1_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11(tr)), mask), dim = 1)) # could concatenate edge features here, and before.
+# 		tr2 = self.l1_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate12(tr)), mask), dim = 1))
+# 		tr = self.activate1(torch.cat((tr1, tr2), dim = 1))
+
+# 		tr1 = self.l1_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate11c(self.l1_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+# 		tr2 = self.l1_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate12c(self.l1_t2_1c(tr))), mask), dim = 1))
+# 		tr = self.activate1c(torch.cat((tr1, tr2), dim = 1))
+# 		# tr = tr_local + self.alpha_expand1*tr_expanded
+
+# 		tr1 = self.l2_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21(self.l2_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+# 		tr2 = self.l2_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate22(self.l2_t2_1(tr))), mask), dim = 1))
+# 		tr = self.activate2(torch.cat((tr1, tr2), dim = 1))
+
+# 		tr1 = self.l2_t1_2c(torch.cat((tr, self.propagate(A_in_sta, x = self.activate21c(self.l2_t1_1c(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+# 		tr2 = self.l2_t2_2c(torch.cat((tr, self.propagate(A_in_src[1], x = self.activate22c(self.l2_t2_1c(tr))), mask), dim = 1))
+# 		tr = self.activate2c(torch.cat((tr1, tr2), dim = 1))
+# 		# tr = tr_local + self.alpha_expand2*tr_expanded
+
+# 		tr1 = self.l3_t1_2(torch.cat((tr, self.propagate(A_in_sta, x = self.activate31(self.l3_t1_1(tr))), mask), dim = 1)) # could concatenate edge features here, and before.
+# 		tr2 = self.l3_t2_2(torch.cat((tr, self.propagate(A_in_src[0], x = self.activate32(self.l3_t2_1(tr))), mask), dim = 1))
+# 		tr = self.activate3(torch.cat((tr1, tr2), dim = 1))
+
+# 		return tr # the new embedding.
+
+
+# class BipartiteGraphOperator(MessagePassing):
+# 	def __init__(self, ndim_in, ndim_out, ndim_edges=3, ndim_mask=4):
+# 		# 'add' aggregation acts as true seismic stacking/back-projection
+# 		super(BipartiteGraphOperator, self).__init__(aggr='add')
 		
-		## Does this converge on standard behavior if not using dual_attention
-		ifake_edge_src = (edge_index[0] > num_queries)
-		inot_fake_src = ~ifake_edge_src ## Can only compute the travel time misfits for these (to avoid source overload)
-
-		ifake_edge = (edge_index[0] == num_queries)*(inot_fake_src == 1) ## Null node
-		inot_fake = ~ifake_edge
-
-		real_edge = (~ifake_edge)*(inot_fake_src == 1) ## Real edges for pick queries are not fake edges of both types
-
-		rel_t_p = (atime[edge_index[0][real_edge]] - (tsrc_p[sindex[real_edge], stindex[edge_index[0][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/self.t_kernel_sq), torch.sign(rel_t_p).detach()), dim = 1) # phase[edge_index[0]]
-		rel_t_s = (atime[edge_index[0][real_edge]] - (tsrc_s[sindex[real_edge], stindex[edge_index[0][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/self.t_kernel_sq), torch.sign(rel_t_s).detach()), dim = 1) # phase[edge_index[0]]
-		rel_t = torch.cat((rel_t_p, rel_t_s, self.embed_phase(phase_j[real_edge].long().reshape(-1))), dim = 1) ## only indexed for not fake source
-
-		rel_t_p1 = (atime[edge_index[1][inot_fake_src]] - (tsrc_p[sindex[inot_fake_src], stindex[edge_index[1][inot_fake_src]]] + stime[sindex[inot_fake_src]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_p1 = torch.cat((torch.exp(-0.5*(rel_t_p1**2)/self.t_kernel_sq), torch.sign(rel_t_p1).detach()), dim = 1) # phase[edge_index[0]]
-		rel_t_s1 = (atime[edge_index[1][inot_fake_src]] - (tsrc_s[sindex[inot_fake_src], stindex[edge_index[1][inot_fake_src]]] + stime[sindex[inot_fake_src]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_s1 = torch.cat((torch.exp(-0.5*(rel_t_s1**2)/self.t_kernel_sq), torch.sign(rel_t_s1).detach()), dim = 1) # phase[edge_index[0]]
-		rel_t1 = torch.cat((rel_t_p1, rel_t_s1, self.embed_phase(phase_i[inot_fake_src].long().reshape(-1))), dim = 1)
-
-		## Queries using reciever nodes (i) because each reciever is trying to decide which of neighboring picks is "relevant", and it also uses source embedding because this is dependant on the source
-		## Contexts (actually keys) and values use the sender nodes as these are the ones the queries are attending over ## Note: I did used to include the source origin time..
-		# queries_real_and_null = self.f_pick_query(torch.cat((x_i[inot_fake_src], rel_t1, sembed[sindex[inot_fake_src]], self_link[inot_fake_src]), dim = 1)).view(-1, self.n_heads, self.n_latent)
-
-		queries_real_and_null = self.f_pick_query(torch.cat((x_i[inot_fake_src], rel_t1), dim = 1)).view(-1, self.n_heads, self.n_latent)
-
-		contexts_real = self.f_pick_context(torch.cat((x_j[real_edge], rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information		
-		values_real = self.f_pick_values(torch.cat((x_j[real_edge], rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
-
-
-		queries = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
-		contexts = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
-		values = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
-
-		queries[inot_fake_src,:,:] = queries_real_and_null
-		contexts[real_edge,:,:] = contexts_real
-		values[real_edge,:,:] = values_real
-
-		n_fake = int(ifake_edge.sum())
-		# contexts[ifake_edge,:,:] = self.dummy_keys.repeat(n_fake, 1, 1)
-		# values[ifake_edge,:,:] = self.dummy_values.repeat(n_fake, 1, 1)
-
-		contexts[ifake_edge,:,:] = self.dummy_keys # .repeat(n_fake, 1, 1)
-		values[ifake_edge,:,:] = self.dummy_values # .repeat(n_fake, 1, 1)
-		## Compute attention
-		scores = (queries*contexts).sum(-1)/self.scale
+# 		# 1. Edge MLP: Evaluates travel-time misfit + node features
+# 		self.fc1 = nn.Sequential(
+# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
+# 			nn.PReLU(),
+# 			nn.Linear(ndim_in, ndim_in),
+# 			nn.PReLU()
+# 		)
 		
-		## Clip degrees
-		deg = torch.clamp(degree(edge_index[1][inot_fake_src], num_nodes = len(atime)).detach(), min = 1)
-		temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min = 0.25, max = 2.0))[edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
-		temp[deg[edge_index[1]] <= 2] = 1.0 ## Stabalize temperature for low degree cases
-		## Add bias terms
-		scores[self_link[:,0] == 1] = scores[self_link[:,0] == 1] + self.self_bias
-		scores[ifake_edge] = scores[ifake_edge] + self.self_dummy
-
-		scores = scores / temp.sqrt()
-
-		## Add dual attention aggregation
-		# alpha = softmax(scores, index, num_nodes = ) # 
-		alpha = softmax(scores, index) # 
-
-		if self.use_dual_attention == False:
-
-			return alpha.unsqueeze(-1)*values # self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j), dim = -1)))
-
-		else:
-
-			## Note: as two seperate steps can implement with aggregation of the obtained features from previous step
-			# attn_picks = alpha.unsqueeze(-1)*values
-
-			attn_picks = alpha.unsqueeze(-1)*values
-
-			rel_t_p2 = (atime[edge_index[1][real_edge]] - (tsrc_p[sindex[real_edge], stindex[edge_index[1][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-			rel_t_p2 = torch.cat((torch.exp(-0.5*(rel_t_p2**2)/self.t_kernel_sq), torch.sign(rel_t_p2).detach()), dim = 1) # phase[edge_index[0]]
-			rel_t_s2 = (atime[edge_index[1][real_edge]] - (tsrc_s[sindex[real_edge], stindex[edge_index[1][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-			rel_t_s2 = torch.cat((torch.exp(-0.5*(rel_t_s2**2)/self.t_kernel_sq), torch.sign(rel_t_s2).detach()), dim = 1) # phase[edge_index[0]]
-			rel_t2 = torch.cat((rel_t_p2, rel_t_s2, self.embed_phase(phase_i[real_edge].long().reshape(-1))), dim = 1)
-
-
-			attn_slice = attn_picks.view(-1, self.n_heads*self.n_latent)[real_edge]
-
-			
-			queries_src_real = self.f_source_query(torch.cat((x_i[real_edge], attn_slice, rel_t2), dim = 1)).view(-1, self.n_heads, self.n_latent)
-			contexts_src_real = self.f_source_context(torch.cat((x_j[real_edge], attn_slice, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
-			values_src_real = self.f_source_values(torch.cat((x_j[real_edge], attn_slice, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
-			# values_src = self.f_source_values(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
-
-			queries_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
-			contexts_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
-			values_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
-
-
-			queries_src[real_edge,:,:] = queries_src_real
-			contexts_src[real_edge,:,:] = contexts_src_real
-			values_src[real_edge,:,:] = values_src_real
-
-			n_fake_src = int(ifake_edge_src.sum())
-			queries_src[ifake_edge_src,:,:] = self.dummy_queries_src # .repeat(n_fake_src, 1, 1)
-			contexts_src[ifake_edge_src,:,:] = self.dummy_keys_src # .repeat(n_fake_src, 1, 1)
-			values_src[ifake_edge_src,:,:] = self.dummy_values_src # .repeat(n_fake_src, 1, 1)
-
-
-			scores_src = (queries_src*contexts_src).sum(-1)/self.scale
-			deg = torch.clamp(degree(sindex, num_nodes = len(stime)).detach(), min = 1)
-
-			# temp_src = torch.clamp(degree(sindex, num_nodes = len(sembed)).detach(), min = 1).pow(torch.clamp(torch.sigmoid(self.alpha_src), min = 0.25))[edge_index[1]].reshape(-1,1)
-			temp_src = torch.log1p(deg).pow(torch.clamp(self.alpha_src, min = 0.25, max = 2.0))[sindex].reshape(-1,1) # [edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
-			temp_src[deg[sindex] <= 2.0] = 1.0
-
-			# scores_src[self_link[:,0] == 1] = scores_src[self_link[:,0] == 1] + self.self_bias
-			scores_src[ifake_edge_src] = scores_src[ifake_edge_src] + self.self_dummy_src
-
-			scores_src = scores_src / temp_src.sqrt()
-			alpha_src = softmax(scores_src, sindex)
-			attn_src = alpha_src.unsqueeze(-1)*values_src
-
-			## Now merge with the messages of the previous attention layer and aggregate
-			merge_attn = self.merge_attn(torch.cat((attn_picks, attn_src), dim = 2))
-
-			return merge_attn
-			
-
-
-class GCN_Detection_Network_extended(nn.Module):
-	def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, use_embedding = use_embedding, use_src_pred = False, use_sigmoid = use_sigmoid, attach_time = attach_time, use_absolute_offset = True, trv = None, device = 'cuda'):
-		super(GCN_Detection_Network_extended, self).__init__()
-		# Define modules and other relavent fixed objects (scaling coefficients.)
-		# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
-		n_dim_extra_inpt = 0 if attach_time == False else 1
-		n_dim_extra_feat = 0 if use_embedding == False else 20
-		if use_absolute_offset == True: n_dim_extra_inpt = n_dim_extra_inpt + 7 # concatenate the spatial offsets between source nodes and recievers into input feature
+# 		# 2. Compact Phase/Quality Gate (values 0.0 to 1.0)
+# 		self.mask_gate = nn.Sequential(
+# 			nn.Linear(ndim_mask, 4),
+# 			nn.PReLU(),
+# 			nn.Linear(4, ndim_in),
+# 			nn.Sigmoid()
+# 		)
 		
-		embed_vector_dim = 10 ## Note can add normalization to output
-		self.embed_vector = nn.Sequential(nn.Linear(6, 30), nn.PReLU(), nn.Linear(30, embed_vector_dim))
-
-		if use_expanded == False:
-			self.DataAggregation = DataAggregation(4 + n_dim_extra_inpt + n_dim_extra_feat + embed_vector_dim, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
-		else:
-			self.DataAggregation = DataAggregationExpanded(4 + n_dim_extra_inpt + n_dim_extra_feat + embed_vector_dim, 15, device = device).to(device) # output size is latent size for (half of) bipartite code # , 15				
-
-		## Maybe add expander convolution on SpatialAggregation
-		self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 8).to(device) # 30, 15
-		self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
-		self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
-		self.SpatialAggregation3 = SpatialAggregation(30, 30).to(device) # 15, 30
-		self.SpaceTimeDirect = SpaceTimeDirect(30, 30).to(device) # 15, 30
-		self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 8, 15, device = device).to(device)
-		# self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 4, 15, device = device).to(device)
-
-		if use_expanded == True:
-			# self.SpatialAggregation1_expanded = SpatialAggregation(30, 30).to(device) # 15, 30
-			self.SpatialAggregation2_expanded = SpatialAggregation(30, 30, zero_offsets = True).to(device) # 15, 30
-			self.gate_expanded = nn.Linear(2*30, 30)
-			nn.init.constant_(self.gate_expanded.bias, -2.0)
-			
-			# self.alpha_expand1 = nn.Parameter(torch.tensor([0.1], device = device))
-			# self.alpha_expand2 = nn.Parameter(torch.tensor([0.1], device = device))
-
-		if use_sigmoid == False:
-			self.proj_soln1 = nn.Sequential(nn.Linear(30, 30), nn.PReLU(), nn.Linear(30, 1))
-			self.proj_soln2 = nn.Sequential(nn.Linear(30, 30), nn.PReLU(), nn.Linear(30, 1))
-		else:
-			self.proj_soln1 = nn.Sequential(nn.Linear(30, 30), nn.PReLU(), nn.Linear(30, 2))
-			self.proj_soln2 = nn.Sequential(nn.Linear(30, 30), nn.PReLU(), nn.Linear(30, 2))
-
-		self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
-
-		## For now, don't use expanded on the downstream DataAggregationAssociationPhase (may be slightly unnecessary)
-		# if use_expanded == False:
-		# 	self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
-		# else:
-		# 	self.DataAggregationAssociationPhase = DataAggregationAssociationPhaseExpanded(15, 15, device = device).to(device) # need to add concatenation
-
-		## For now, don't use expanded on the downstream DataAggregationAssociationPhase (may be slightly unnecessary)
-		# if use_expanded == False:
-		self.DataAggregationAssociationPhase = DataAggregationAssociationPhase(15, 15).to(device) # need to add concatenation
-		# else:
-		# self.DataAggregationAssociationPhase = DataAggregationAssociationPhaseExpanded(15, 15, device = device).to(device) # need to add concatenation
-
-		## Make association module layers (note, previous arrival embeddings used to be smaller)
-		self.ArrivalEmbedding = ArrivalEmbedding(30, 30, trv = trv, device = device, ftrns2 = ftrns2) ## [note: merging the embeddings for P and S into one (oveloaded) layer rather than keeping as seperate layers?]
-		self.Arrivals = SourceStationAttention(30, 30, 2, 15, n_heads = 3, use_src_pred = use_src_pred, device = device).to(device)
-		if use_src_pred == True:
-			self.alpha = nn.Parameter(torch.tensor([0.1], device = device))
-
-		if use_embedding == True:
-			self.DataAggregationEmbedding = DataAggregationEmbedding(1 + n_dim_extra_inpt + embed_vector_dim, int(n_dim_extra_feat/2))
-
-		self.use_absolute_pos = use_absolute_pos
-		self.scale_rel = scale_rel
-		self.scale_time = scale_time
-		self.use_expanded = use_expanded
-		self.use_gradient_loss = use_gradient_loss
-		self.activate_gradient_loss = False
-		self.attach_time = attach_time
-		self.use_embedding = use_embedding
-		self.use_direct_output = True
-		self.use_sigmoid = use_sigmoid
-		self.use_src_pred = use_src_pred
-		self.use_absolute_offset = use_absolute_offset
-		self.w_gamma = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-		# self.use_src_pred = self.Arrivals.src_pred
-		# self.scale_output = torch.Tensor([1.0/10.0]).to(device)
-		# self.use_sigmoid = use_sigmoid
-		self.device = device
-
-		self.ftrns1 = ftrns1
-		self.ftrns2 = ftrns2
-
-	def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q, save_state = False):
-
-		n_line_nodes = Slice.shape[0]
-		# mask_p_thresh = 0.025
-		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
-
-		embed_context = self.embed_vector(self.embedding_vector).expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
-		if self.use_absolute_pos == True:
-			Slice = torch.cat((Slice, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
-
-		if self.use_absolute_offset == True:
-
-			norm_pos = torch.sqrt(torch.sum(A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-			rel_pos = torch.cat((A_src_in_edges.x[:,0:3]/norm_pos, torch.exp(-1.0*norm_pos*F.softplus(self.w_gamma))), dim = 1)
-			
-			# Slice = torch.cat((Slice, A_src_in_edges.x[:,0:3], torch.sqrt(torch.sum(A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)), dim = 1)
-			Slice = torch.cat((Slice, rel_pos), dim = 1)
-
-		if self.attach_time == True:
-			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
-
-		Slice = torch.cat((Slice, embed_context), dim = 1)
-		pos_rel_sta, pos_rel_src = None, None
+# 		# 3. LayerNorm normalizes stacked features across variable station counts
+# 		self.norm = nn.LayerNorm(ndim_in)
 		
-		if self.use_embedding == True:
-			# inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
-			ndim_slice = -1 if (self.attach_time == True)*(self.use_absolute_offset == False) else -8
-			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  Slice[:, ndim_slice::]), dim = 1) if ((self.attach_time == True) or (self.use_absolute_offset == True)) else torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device) # .to(Slice.device)
-			inpt_embedding = torch.cat((inpt_embedding, embed_context), dim = 1)
+# 		# 4. Final Output Map
+# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
+# 		self.activate_out = nn.PReLU()
 
-			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, A_in_sta, A_in_src[0], A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, A_in_sta, A_in_src, A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
-			Slice = torch.cat((Slice, embedding), dim = 1)
-			
+# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
+# 		N = A_src_in_edges.edge_index[0].max().item() + 1
+# 		M = A_src_in_edges.edge_index[1].max().item() + 1
 
-		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+# 		# Step 1: Hard existential kill-switch for missing station-source pairs
+# 		# Guarantees dead edges contribute EXACTLY 0.0 to the sum
+# 		absolute_gate = mask.max(1, keepdims=True)[0]
 
+# 		# Step 2: Extract non-linear misfit features
+# 		geo_features = self.fc1(torch.cat((inpt, A_src_in_edges.x), dim=-1))
+
+# 		# Step 3: Phase reliability / mask gating
+# 		phase_routing_vectors = self.mask_gate(mask)
+
+# 		# Step 4: Gated message composition
+# 		# Only valid, coherent arrival signals pass through as non-zero
+# 		msg = absolute_gate * (phase_routing_vectors * geo_features)
+
+# 		# Step 5: Stack coherent arrivals over stations (preserving sparse energy!)
+# 		stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
 		
-		if (self.use_gradient_loss == True)*(self.activate_gradient_loss == True):
-			x_temp_cuda = Variable(x_temp_cuda, requires_grad = True)
-			x_query_cart = Variable(x_query_cart, requires_grad = True)
-			t_query = Variable(t_query, requires_grad = True)
+# 		# Step 6: Post-stack normalization (stabilizes scale without zero-diluting)
+# 		normalized_stack = self.norm(stacked)
 
-		x_latent = self.DataAggregation(Slice, Mask, A_in_sta, A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, A_in_sta, A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-		x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, n_sta, n_temp)
-		x = self.SpatialAggregation1(x, A_src if self.use_expanded == False else A_src[0], x_temp_cuda) # x_temp_cuda_cart
-		# if self.use_expanded == True:
-		# 	x = x + self.alpha_expand1*self.SpatialAggregation1_expanded(x, A_src[1], x_temp_cuda) # x_temp_cuda_cart
-		x = self.SpatialAggregation2(x, A_src if self.use_expanded == False else A_src[0], x_temp_cuda)
-		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, A_src[1], x_temp_cuda) # x_temp_cuda_cart
-			gate = torch.sigmoid(self.gate_expanded(torch.cat((x, x_expand), dim = 1)))
-			x = x + gate*x_expand
-			
-		x_spatial = self.SpatialAggregation3(x, A_src if self.use_expanded == False else A_src[0], x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+# 		return self.activate_out(self.fc2(normalized_stack))
 		
-		if self.use_direct_output == True:
-			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
-		else:
-			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t) # contains data on spatial and temporal solution at fixed nodes
-
-		y = self.proj_soln1(y_latent)
+# class BipartiteGraphOperator(MessagePassing):
+# 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
+# 		super(BipartiteGraphOperator, self).__init__('add')
 		
-		if save_state == True:
-			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
-			
-		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
-
-		x_src = []
-		x = self.proj_soln2(x)
-
-		grad_grid_src, grad_grid_t, grad_query_src, grad_query_t = [], [], [], []
-		if (self.use_gradient_loss == True)*(self.activate_gradient_loss == True):
-			torch_one_vec = torch.ones(len(x_temp_cuda_cart),1).to(x_temp_cuda_cart.device)
-			grad_grid = torch.autograd.grad(inputs = x_temp_cuda, outputs = y, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
-			grad_grid_src, grad_grid_t = grad_grid[:,0:3], (1000.0*self.scale_time)*grad_grid[:,3]
-			torch_one_vec = torch.ones(len(x_query_cart),1).to(x_query_cart.device)
-			grad_query_src = torch.autograd.grad(inputs = x_query_cart, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
-			grad_query_t = torch.autograd.grad(inputs = t_query, outputs = x, grad_outputs = torch_one_vec, retain_graph = True, create_graph = True)[0]
-
-
-		slope_width = 0.1
-		mask_p_thresh = 0.1
-		if self.use_sigmoid == False:
-			# mask_out = 1.0*(y.detach() > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
-			# mask_out = torch.clamp((y - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
-			# Sigmoid scales unbounded logits into (0, 1) smoothly without hard zero-gradient cutoffs
-			# y_prob = torch.sigmoid((y - mask_p_thresh) / slope_width)
-			# mask_out = y_prob
-			mask_out = torch.relu(y - mask_p_thresh)
+# 		# 1. Expressive geometric & feature representation (2-Layer MLP)
+# 		self.fc1 = nn.Sequential(
+# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
+# 			nn.PReLU(),
+# 			nn.Linear(ndim_in, ndim_in),
+# 			nn.PReLU()
+# 		)
 		
-		else:
-			# mask_out = 1.0*(torch.round(torch.sigmoid(y[:,1].reshape(-1,1))).detach()).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
-			mask_out = torch.clamp((torch.sigmoid(y[:,1].reshape(-1,1)) - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
-			mask_out = torch.clamp((torch.sigmoid(y[:,1].reshape(-1,1)) - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
+# 		# # 2. Phase-routing gating network (2-Layer MLP + Sigmoid)
+# 		# self.mask_gate = nn.Sequential(
+# 		# 	nn.Linear(ndim_mask, ndim_in // 2),
+# 		# 	nn.PReLU(),
+# 		# 	nn.Linear(ndim_in // 2, ndim_in),
+# 		# 	nn.Sigmoid()
+# 		# )
 
-
-		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
-		if self.use_absolute_pos == True:
-			s = torch.cat((s, locs_use_cart[A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
-
-		## Maybe re-concatenate the initial Cartesian product input misfit features back into s here
-		if self.use_expanded == False:
-			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, A_in_sta, A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
-
-		else: ## This assumes that DataAggregationAssociationPhase does not use expanded version
-			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, A_in_sta, A_in_src[0], pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
-
-		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, trv_out = trv_out_q)
-
-		if self.use_src_pred == True:
-			arv, src = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
-			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
-			if self.use_gradient_loss == False:
-				return y, x, arv_p, arv_s, src
-			else:
-				return [y, x, arv_p, arv_s], [grad_grid_src, grad_grid_t, grad_query_src, grad_query_t], src
-
-		else:
-			arv = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
-			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)			
-			if self.use_gradient_loss == False:
-				return y, x, arv_p, arv_s
-			else:
-				return [y, x, arv_p, arv_s], [grad_grid_src, grad_grid_t, grad_query_src, grad_query_t]
-
-
-	def set_scale_coefficients(self, scale_rel, scale_time, kernel_sig_t, eps, src_x_kernel, src_t_kernel, time_shift_range):
-
-		self.scale_rel = scale_rel
-		self.scale_time = scale_time
-
-		if self.use_embedding == True:
-			self.DataAggregationEmbedding.scale_rel = scale_rel
-			self.DataAggregationEmbedding.scale_time = scale_time
-
-		self.SpatialAggregation1.scale_rel = scale_rel
-		self.SpatialAggregation1.scale_time = scale_time
-		self.SpatialAggregation2.scale_rel = scale_rel
-		self.SpatialAggregation2.scale_time = scale_time
-		self.SpatialAggregation3.scale_rel = scale_rel
-		self.SpatialAggregation3.scale_time = scale_time
-
-		if self.use_expanded == True:
-			# self.SpatialAggregation1_expanded.scale_rel = 10.0*scale_rel
-			# self.SpatialAggregation1_expanded.scale_time = 10.0*scale_time
-			self.SpatialAggregation2_expanded.scale_rel = 10.0*scale_rel
-			self.SpatialAggregation2_expanded.scale_time = 10.0*scale_time
-
-		self.SpaceTimeAttention.scale_rel = scale_rel
-		self.SpaceTimeAttention.scale_time = scale_time
+# 		self.mask_gate = nn.Sequential(
+# 		    nn.Linear(ndim_mask, 4),
+# 		    nn.PReLU(),
+# 		    nn.Linear(4, ndim_in),
+# 		    nn.Sigmoid()
+# 		)
 		
-		self.ArrivalEmbedding.scale_rel = scale_rel
-		self.ArrivalEmbedding.scale_time = scale_time
-		self.ArrivalEmbedding.kernel_sig_t = kernel_sig_t
+# 		# 3. Output projection
+# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
+# 		self.activate_out = nn.PReLU()
 
-		# self.SpaceTimeAttentionQuery.scale_rel = scale_rel
-		# self.SpaceTimeAttentionQuery.scale_time = scale_time
-		# self.SpaceTimeAttentionQuery.kernel_sig_t = kernel_sig_t
+# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
+# 		N = A_src_in_edges.edge_index[0].max().item() + 1
+# 		M = A_src_in_edges.edge_index[1].max().item() + 1
+
+# 		# Step 1: Strict outer existential kill-switch (0 if all mask elements are 0)
+# 		absolute_gate = mask.max(1, keepdims=True)[0]
+
+# 		# Step 2: Compute deep geometric/arrival representation
+# 		geo_features = self.fc1(torch.cat((inpt, A_src_in_edges.x), dim=-1))
+
+# 		# Step 3: Compute channel-wise phase routing weights (values in [0.0, 1.0])
+# 		phase_routing_vectors = self.mask_gate(mask)
+
+# 		# Step 4: Gated message composition
+# 		msg = absolute_gate * (phase_routing_vectors * geo_features)
+
+# 		# Step 5: Bipartite aggregation & final projection
+# 		aggregated = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
+# 		return self.activate_out(self.fc2(aggregated))
 		
-		self.Arrivals.eps = eps
-		self.embedding_vector = torch.tensor([np.log(scale_rel)/5.0, np.log(scale_time), np.log(kernel_sig_t), np.log(src_x_kernel)/3.0, np.log(src_t_kernel), np.log(time_shift_range)/2.0], device = self.device).reshape(1,-1).float()
+# class BipartiteGraphOperator(MessagePassing):
+# 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
+# 		super(BipartiteGraphOperator, self).__init__('add') # (aggr='gcn') 
+# 		# 1. Standard projection for the geometric features
+# 		self.fc1 = nn.Linear(ndim_in + ndim_edges, ndim_in)
+# 		self.fc2 = nn.Linear(ndim_in, ndim_out) 
+# 		# 2. A tiny 2-layer router that transforms the 4-channel mask into 
+# 		# a 0.0 to 1.0 gating multiplier for EVERY hidden channel in ndim_in
+# 		self.mask_gate = nn.Sequential(
+# 			nn.Linear(ndim_mask, ndim_in),
+# 			nn.Sigmoid()
+# 		)
+# 		self.activate1 = nn.PReLU() 
+# 		self.activate2 = nn.PReLU() 
 
-	def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, pos_loc, pos_src):
+# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
 
-		# pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-		# pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-		# dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
-		# dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
-		# pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
-		# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
+# 		N = A_src_in_edges.edge_index[0].max().item() + 1
+# 		M = A_src_in_edges.edge_index[1].max().item() + 1
+# 		# Step 1: Strict outer existential kill-switch
+# 		absolute_gate = mask.max(1, keepdims = True)[0]
+
+# 		# Step 2: Compute your standard local geometric/arrival representation
+# 		geo_features = self.activate1(self.fc1(torch.cat((inpt, A_src_in_edges.x), dim = -1)))
+
+# 		# Step 3: Compute semantic routing gates (returns a 0.0-1.0 vector of size ndim_in)
+# 		phase_routing_vectors = self.mask_gate(mask)
+
+# 		# Step 4: Multiply them element-wise! (Hard zero for dead pairs, soft zero for wrong phases)
+# 		msg = absolute_gate * (phase_routing_vectors * geo_features)
+
+# 		return self.activate2(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = msg)))
+
+
+# class BipartiteGraphOperator(MessagePassing):
+# 	def __init__(self, ndim_in, ndim_out, ndim_edges = 4, ndim_mask = 4):
+# 		super(BipartiteGraphOperator, self).__init__('add')
 		
-		self.A_in_sta = A_in_sta
-		self.A_in_src = A_in_src
-		self.A_src_in_edges = A_src_in_edges
-		self.A_Lg_in_src = A_Lg_in_src
-		self.A_src_in_sta = A_src_in_sta
+# 		# 1. Project raw features and edge coordinates into a unified latent geometric space
+# 		self.geo_projector = nn.Sequential(
+# 			nn.Linear(ndim_in + ndim_edges, ndim_in),
+# 			nn.PReLU(),
+# 			nn.Linear(ndim_in, ndim_in)
+# 		)
 
-		if self.use_expanded == False:
-			self.A_src = A_src # [0] # if self.use_expanded == True else A_src
-		else:
-			self.A_src = A_src[0]
-			self.Ac = A_src[1]
+# 		# 2. Map the 4-channel phase mask to the exact same hidden feature dimension
+# 		self.mask_router = nn.Sequential(
+# 			nn.Linear(ndim_mask, ndim_in),
+# 			nn.Sigmoid() # Forces values between 0.0 and 1.0 to act as continuous gating switches
+# 		)
 
-		self.A_edges_p = A_edges_p
-		self.A_edges_s = A_edges_s
-		self.dt_partition = dt_partition
-		self.tlatent = tlatent
-		# self.pos_rel_sta = pos_rel_sta
-		# self.pos_rel_src = pos_rel_src
+# 		# 3. Final mixing and output layers
+# 		self.fc1 = nn.Linear(ndim_in, ndim_in)
+# 		self.fc2 = nn.Linear(ndim_in, ndim_out)
 
-	def set_internal_state(self, x_spatial, x_temp_cuda_cart, x_temp_cuda_t): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
-		## Use this to set state for rapid queries of attention layer
-		self.x_spatial = x_spatial
-		self.x_temp_cuda_cart = x_temp_cuda_cart
-		self.x_temp_cuda_t = x_temp_cuda_t
+# 		self.activate1 = nn.PReLU()
+# 		self.activate2 = nn.PReLU()
 
-	def set_internal_state_queries(self, s, x_spatial, x_temp_cuda_cart, x_temp_cuda_t, locs_use_cart, tlatent): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
-		## Use this to set state for rapid queries of attention layer
+# 	def forward(self, inpt, A_src_in_edges, mask, n_sta, n_temp):
 
-		self.s = s
-		self.x_spatial = x_spatial
-		self.x_temp_cuda_cart = x_temp_cuda_cart
-		self.x_temp_cuda_t = x_temp_cuda_t
-		self.locs_use_cart = locs_use_cart
-		self.tlatent = tlatent
+# 		N = A_src_in_edges.edge_index[0].max().item() + 1
+# 		M = A_src_in_edges.edge_index[1].max().item() + 1
 
-		# arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, trv_out = trv_out_q)
+# 		# Step A: Existential hard kill-switch (Absolute protection against non-observations)
+# 		existential_gate = mask.max(1, keepdims = True)[0]
 
-		# if self.use_src_pred == True:
-		# 	arv, src = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+# 		# Step B: Compute pure geometric/arrival features
+# 		geo_feat = torch.cat((inpt, A_src_in_edges.x), dim = -1)
+# 		latent_geo = self.geo_projector(geo_feat)
 
-	def forward_queries(self, x_query_cart, t_query, train = False): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
+# 		# Step C: Compute the continuous multi-channel semantic mask routing weights
+# 		phase_gates = self.mask_router(mask)
 
-		## Use this to obtain query predictions. Note, can modify to also return the spatial embeddings (prior to proj_soln)
-		if train == True:
+# 		# Step D: Apply semantic phase gating AND the existential hard shutoff
+# 		# Element-wise multiplication forces specific latent channels to zero if their phase fails
+# 		gated_messages = existential_gate * (phase_gates * latent_geo)
 
-			if self.use_sigmoid == False:
-				return self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t))
-
-			else:
-				out = self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t))
-				return out # (torch.round(torch.sigmoid(out[:,1]))*out[:,0]).reshape(-1,1)
-
-		else:
-			
-			if self.use_sigmoid == False:
-				return self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t))
-				
-			else:
-				
-				out = self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t))
-				return (torch.round(torch.sigmoid(out[:,1]))*out[:,0]).reshape(-1,1)
-
-	def forward_src_queries(self, x_query_src_cart, tq_sample, tpick, ipick, phase_label, trv_out_q): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
-
-		arv_embed, mask_arv = self.ArrivalEmbedding(self.s, self.x_temp_cuda_cart, self.x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, self.locs_use_cart, self.tlatent, trv_out = trv_out_q)
-		if self.use_src_pred == True:
-			arv, src = self.Arrivals(tq_sample, trv_out_q, self.locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
-			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
-			return arv_p, arv_s, src
-
-		else:
-			arv = self.Arrivals(tq_sample, trv_out_q, self.locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
-			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
-			return arv_p, arv_s
-
-
-	def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
-
-		embed_context = self.embed_vector(self.embedding_vector).expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
+# 		# Step E: Mix the perfectly isolated phase representations and propagate
+# 		msg = self.activate1(self.fc1(gated_messages))
 		
-		n_line_nodes = Slice.shape[0]
-		# mask_p_thresh = 0.025
-		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
+# 		return self.activate2(self.fc2(self.propagate(A_src_in_edges.edge_index, size = (N, M), x = msg)))
+
+
+# class SpatialAggregation(MessagePassing):
+# 	def __init__(self, in_channels, out_channels, scale_rel = scale_rel, scale_time = scale_time, n_dim = 4, n_global = 5, n_hidden = 30, zero_offsets = False):
+# 		super(SpatialAggregation, self).__init__('mean') # node dim
+# 		## Use two layers of SageConv. Explictly or implicitly?
+# 		self.fc1 = nn.Linear(in_channels + n_dim + n_global, n_hidden)
+# 		self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
+# 		self.fglobal = nn.Linear(in_channels, n_global)
+# 		self.activate1 = nn.PReLU()
+# 		self.activate2 = nn.PReLU()
+# 		self.activate3 = nn.PReLU()
+# 		self.scale_rel = scale_rel
+# 		self.zero_offsets = zero_offsets
+
+# 	def forward(self, tr, A_src, pos):
+
+# 		return self.activate2(self.fc2(torch.cat((tr, self.propagate(A_src, x = tr, pos = (self.zero_offsets == False)*pos/self.scale_rel)), dim = -1)))
+
+# 	def message(self, x_j, pos_i, pos_j):
 		
-		if self.use_absolute_pos == True:
-			Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
-
-		if self.use_absolute_offset == True:
-			# Slice = torch.cat((Slice, A_src_in_edges.x[:,0:3], torch.sqrt(torch.sum(A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)), dim = 1)
-
-			norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-			rel_pos = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, torch.exp(-1.0*norm_pos*F.softplus(self.w_gamma))), dim = 1)
-			Slice = torch.cat((Slice, rel_pos), dim = 1)
-		
-		if self.attach_time == True:
-			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
-		
-		Slice = torch.cat((Slice, embed_context), dim = 1)
-		pos_rel_sta, pos_rel_src = None, None
-		
-		if self.use_embedding == True:
-			# inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
-			ndim_slice = -1 if (self.attach_time == True)*(self.use_absolute_offset == False) else -8
-			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  Slice[:, ndim_slice::]), dim = 1) if ((self.attach_time == True) or (self.use_absolute_offset == True)) else torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device) # .to(Slice.device)
-			inpt_embedding = torch.cat((inpt_embedding, embed_context), dim = 1)
-
-			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
-			Slice = torch.cat((Slice, embedding), dim = 1)
-
-		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+# 		return self.activate1(self.fc1(torch.cat((x_j, pos_i - pos_j, self.activate3(self.fglobal(x_j)).mean(0, keepdims = True).repeat(x_j.shape[0], 1)), dim = -1))) # instead of one global signal, map to several, based on a corsened neighborhood. This allows easier time to predict multiple sources simultaneously.
 
 
-		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
-		x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda) # x_temp_cuda_cart
-		# if self.use_expanded == True:
-		# 	x = x + self.alpha_expand1*self.SpatialAggregation1_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
-		x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
-		# x = self.SpatialAggregation2(x, A_src, x_temp_cuda)
-		# if self.use_expanded == True:
-		# 	x = x + self.alpha_expand2*self.SpatialAggregation2_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
-		# x = self.SpatialAggregation2(x, A_src, x_temp_cuda)
-		# x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
-		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
-			gate = torch.sigmoid(self.gate_expanded(torch.cat((x, x_expand), dim = 1)))
-			x = x + gate*x_expand
-		
-		x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
-		
-
-		# use_direct_output = False
-		if self.use_direct_output == True:
-			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
-
-		else:
-			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t) # contains data on spatial and temporal solution at fixed nodes
-
-		y = self.proj_soln1(y_latent)
-		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
-		
-		x_src = []
-		x = self.proj_soln2(x)
-
-		## Note below: why detach x_latent?
-		# if self.use_sigmoid == False:
-		# 	mask_out = 1.0*(y.detach() > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
-		# else:
-		# 	mask_out = 1.0*(torch.round(torch.sigmoid(y[:,1].reshape(-1,1))).detach()).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
-
-		slope_width = 0.1
-		mask_p_thresh = 0.1
-		if self.use_sigmoid == False:
-			# mask_out = 1.0*(y.detach() > mask_p_thresh).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
-			# mask_out = torch.clamp((y - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
-			# Sigmoid scales unbounded logits into (0, 1) smoothly without hard zero-gradient cutoffs
-			# y_prob = torch.sigmoid((y - mask_p_thresh) / slope_width)
-			# mask_out = y_prob	
-			mask_out = torch.relu(y - mask_p_thresh)
-		
-		else:
-			# mask_out = 1.0*(torch.round(torch.sigmoid(y[:,1].reshape(-1,1))).detach()).detach() # note: detaching the mask. This is source prediction mask. Maybe, this is't necessary?
-			mask_out = torch.clamp((torch.sigmoid(y[:,1].reshape(-1,1)) - (mask_p_thresh - slope_width/2)) / slope_width, min=0.0, max=1.0)
+# import numpy as np
+# import torch
+# import torch.nn as nn
+# import torch.nn.functional as F
+# from torch_geometric.nn import MessagePassing, knn
+# from torch_geometric.utils import softmax
 
 
-		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
-		if self.use_absolute_pos == True:
-			s = torch.cat((s, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
+# class SpaceTimeAttention(MessagePassing):
+#     """Multi-Resolution Continuous Space-Time Interpolator.
+#     Directly conditioned on physical domain scale embeddings for exact multi-scale Gaussian rendering.
+#     """
 
-		if self.use_expanded == False:
-			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
+#     def __init__(
+#         self,
+#         inpt_dim,
+#         out_channels,
+#         n_dim,
+#         n_latent,
+#         embed_dim=32,  # Dimension of self.embed_vector(self.embedding_vector)
+#         n_hidden=30,
+#         n_heads=5,
+#         scale_rel=1.0,
+#         scale_time=1.0,
+#         device="cuda",
+#     ):
+#         super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
 
-		else: ## This assumes that DataAggregationAssociationPhase does not use expanded version
-			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src[0], pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
+#         self.n_heads = n_heads
+#         self.n_latent = n_latent
+#         self.out_channels = out_channels
+#         self.scale_rel = scale_rel
+#         self.scale_time = scale_time
 
-		## Arrival embedding
-		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, self.tlatent, trv_out = trv_out_q)
-		
-		## x_query_src_cart
-		if self.use_src_pred == True:
-			arv, src = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
-			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
+#         # 1. Feature Value Transformation (fuses context features and scale embedding)
+#         self.f_values = nn.Sequential(
+#             nn.Linear(inpt_dim + embed_dim, n_heads * n_latent),
+#             nn.PReLU(),
+#         )
 
-		else:
-			arv = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
-			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
+#         # 2. Dynamic Bandwidth Predictor (predicts spatial & temporal gammas per head from scale embed)
+#         self.f_gamma = nn.Linear(inpt_dim + embed_dim, n_heads * 2)
+
+#         # 3. Context Feature Score Modulation
+#         self.f_feature_score = nn.Linear(inpt_dim + embed_dim, n_heads)
+
+#         # 4. Super-Resolution Gain Gate (conditioned on scale embed)
+#         self.f_gain = nn.Sequential(
+#             nn.Linear(inpt_dim + embed_dim, n_heads * n_latent),
+#             nn.Sigmoid(),
+#         )
+
+#         # 5. Final Readout Projection
+#         self.proj = nn.Linear(n_heads * n_latent, out_channels)
+#         self.activate2 = nn.PReLU()
+
+#         # Graph storage
+#         self.fixed_edges = None
+#         self.edge_features = None
+#         self.use_fixed_edges = False
+
+#     def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=12):
+#         edge_index = knn(
+#             torch.cat((x_context / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
+#             torch.cat((x_query / 1000.0, self.scale_time * x_query_t.reshape(-1, 1)), dim=1),
+#             k=k,
+#         ).flip(0)
+
+#         # Relative spatial and temporal distance squared
+#         r_spatial_sq = torch.sum(
+#             ((x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel) ** 2,
+#             dim=1,
+#             keepdim=True,
+#         )
+
+#         r_time_sq = (
+#             (1000.0 * self.scale_time * (x_query_t[edge_index[1]].reshape(-1, 1) - x_context_t[edge_index[0]].reshape(-1, 1)))
+#             / self.scale_rel
+#         ) ** 2
+
+#         edge_attr = torch.cat((r_spatial_sq, r_time_sq), dim=1)
+#         return edge_index, edge_attr
+
+#     def forward(
+#         self,
+#         inpts,
+#         x_query,
+#         x_context,
+#         x_query_t,
+#         x_context_t,
+#         embed_context,  # Shape: [N_context, embed_dim]
+#         k=12,
+#         fixed_type=0,
+#     ):
+#         if not self.use_fixed_edges:
+#             edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+#         else:
+#             edge_index = self.fixed_edges
+#             edge_attr = self.edge_features
+
+#         # Pass node features, edge attributes, and scale embeddings to propagate
+#         interpolated = self.propagate(
+#             edge_index,
+#             x=inpts,
+#             embed=embed_context,
+#             edge_attr=edge_attr,
+#             size=(x_context.shape[0], x_query.shape[0]),
+#         )
+
+#         # Flatten heads [N_query, n_heads * n_latent]
+#         flattened = interpolated.view(x_query.shape[0], -1)
+
+#         # Final readout
+#         out = self.proj(flattened)
+#         return self.activate2(out)
+
+#     def message(self, x_j, embed_j, index, edge_attr):
+#         # x_j: Raw context node features [Num_edges, inpt_dim]
+#         # embed_j: Context scale embeddings [Num_edges, embed_dim]
+
+#         # Combine node features with scale embedding
+#         node_and_scale = torch.cat((x_j, embed_j), dim=-1)
+
+#         # 1. Transform context features into Values & Scale-Conditioned Gains
+#         value_embed = self.f_values(node_and_scale).view(-1, self.n_heads, self.n_latent)
+#         gain = 0.5 + 2.0 * self.f_gain(node_and_scale).view(-1, self.n_heads, self.n_latent)
+#         value_embed = value_embed * gain
+
+#         # 2. Dynamic Gaussian Bandwidth (Conditioned on target kernel sizes!)
+#         gammas = F.softplus(self.f_gamma(node_and_scale)).view(-1, self.n_heads, 2)
+#         g_sp = gammas[:, :, 0:1]  # Spatial bandwidth
+#         g_tm = gammas[:, :, 1:2]  # Temporal bandwidth
+
+#         r_sp_sq = edge_attr[:, 0:1].unsqueeze(1)
+#         r_tm_sq = edge_attr[:, 1:2].unsqueeze(1)
+
+#         distance_logits = -1.0 * (g_sp * r_sp_sq + g_tm * r_tm_sq).squeeze(-1)
+
+#         # 3. Context Feature Score Modulation
+#         feature_logits = self.f_feature_score(node_and_scale)
+
+#         # Combined Attention Logit
+#         logits = distance_logits + feature_logits
+#         alpha = softmax(logits, index)
+
+#         return alpha.unsqueeze(-1) * value_embed
+
+#     def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=12):
+#         edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+#         self.fixed_edges = edge_index
+#         self.edge_features = edge_attr
+#         self.use_fixed_edges = True
 
 
-		if self.use_sigmoid == True:
-			y = (torch.round(torch.sigmoid(y[:,1]))*y[:,0]).reshape(-1,1)
-			x = (torch.round(torch.sigmoid(x[:,1]))*x[:,0]).reshape(-1,1)
 
-		if self.use_src_pred == True:
-			return y, x, arv_p, arv_s, src
 
-		else:
-			return y, x, arv_p, arv_s
+# class SpaceTimeAttention(MessagePassing):
+#     """Multi-Resolution Continuous Space-Time Interpolator.
+#     Directly conditioned on physical domain scale embeddings for exact multi-scale Gaussian rendering.
+#     """
 
-		
-	## Maye need to add new module that maps to the association - source locations
-	def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, t_query, n_reshape = 1):
+#     def __init__(
+#         self,
+#         inpt_dim,
+#         out_channels,
+#         n_dim,
+#         n_latent,
+#         embed_dim=32,
+#         n_hidden=30,
+#         n_heads=5,
+#         scale_rel=1.0,
+#         scale_time=1.0,
+#         device="cuda",
+#     ):
+#         super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
+#         self.n_heads = n_heads
+#         self.n_latent = n_latent
+#         self.out_channels = out_channels
+#         self.scale_rel = scale_rel
+#         self.scale_time = scale_time
+
+#         # 1. Feature Value Transformation (fuses context features and scale embedding)
+#         self.f_values = nn.Sequential(
+#             nn.Linear(inpt_dim + embed_dim, n_heads * n_latent),
+#             nn.PReLU(),
+#         )
+
+#         # 2. Dynamic Bandwidth Predictor (predicts spatial & temporal gammas per head from scale embed)
+#         self.f_gamma = nn.Linear(inpt_dim + embed_dim, n_heads * 2)
+
+#         # 3. Context Feature Score Modulation & Super-Resolution Gain Gate
+#         self.f_feature_score = nn.Linear(inpt_dim + embed_dim, n_heads)
+#         self.f_gain = nn.Sequential(
+#             nn.Linear(inpt_dim + embed_dim, n_heads * n_latent),
+#             nn.Sigmoid(),
+#         )
+
+#         # 4. Final Readout Projection
+#         self.proj = nn.Linear(n_heads * n_latent, out_channels)
+#         self.activate2 = nn.PReLU()
+
+#         # Graph storage
+#         self.fixed_edges = None
+#         self.edge_features = None
+#         self.use_fixed_edges = False
+
+#     def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=12):
+#         edge_index = knn(
+#             torch.cat((x_context / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
+#             torch.cat((x_query / 1000.0, self.scale_time * x_query_t.reshape(-1, 1)), dim=1),
+#             k=k,
+#         ).flip(0)
+
+#         # Relative spatial and temporal distance squared
+#         r_spatial_sq = torch.sum(
+#             ((x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel) ** 2,
+#             dim=1,
+#             keepdim=True,
+#         )
+#         r_time_sq = (
+#             (1000.0 * self.scale_time * (x_query_t[edge_index[1]].reshape(-1, 1) - x_context_t[edge_index[0]].reshape(-1, 1)))
+#             / self.scale_rel
+#         ) ** 2
+
+#         edge_attr = torch.cat((r_spatial_sq, r_time_sq), dim=1)
+#         return edge_index, edge_attr
+
+#     def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, embed_context, k=12, fixed_type=0):
+#         if not self.use_fixed_edges:
+#             edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+#         else:
+#             edge_index, edge_attr = self.fixed_edges, self.edge_features
+
+#         # Pass node features, edge attributes, and scale embeddings to propagate
+#         interpolated = self.propagate(
+#             edge_index,
+#             x=inpts,
+#             embed=embed_context,
+#             edge_attr=edge_attr,
+#             size=(x_context.shape[0], x_query.shape[0]),
+#         )
+
+#         flattened = interpolated.view(x_query.shape[0], -1)
+#         out = self.proj(flattened)
+#         return self.activate2(out)
+
+#     # def message(self, x_j, embed_j, index, edge_attr):
+#     #     # Combine node features with scale embedding
+#     #     node_and_scale = torch.cat((x_j, embed_j), dim=-1)
+
+#     #     # 1. Transform context features into Values & Scale-Conditioned Gains
+#     #     value_embed = self.f_values(node_and_scale).view(-1, self.n_heads, self.n_latent)
+#     #     gain = 0.5 + 2.0 * self.f_gain(node_and_scale).view(-1, self.n_heads, self.n_latent)
+#     #     value_embed = value_embed * gain
+
+#     #     # 2. Dynamic Gaussian Bandwidth (Conditioned on target kernel sizes!)
+#     #     gammas = F.softplus(self.f_gamma(node_and_scale)).view(-1, self.n_heads, 2)
+#     #     g_sp, g_tm = gammas[:, :, 0:1], gammas[:, :, 1:2]
+#     #     r_sp_sq, r_tm_sq = edge_attr[:, 0:1].unsqueeze(1), edge_attr[:, 1:2].unsqueeze(1)
+
+#     #     distance_logits = -1.0 * (g_sp * r_sp_sq + g_tm * r_tm_sq).squeeze(-1)
+
+#     #     # 3. Context Feature Score Modulation & Softmax Attention
+#     #     logits = distance_logits + self.f_feature_score(node_and_scale)
+#     #     alpha = softmax(logits, index)
+
+#     #     return alpha.unsqueeze(-1) * value_embed
+
+# 	def message(self, x_j, embed_j, index, edge_attr):
+#         # Combine node features with scale embedding
+#         node_and_scale = torch.cat((x_j, embed_j), dim=-1)
+
+#         # 1. Transform context features into Values & Scale-Conditioned Gains
+#         value_embed = self.f_values(node_and_scale).view(-1, self.n_heads, self.n_latent)
+#         gain = 0.5 + 2.0 * self.f_gain(node_and_scale).view(-1, self.n_heads, self.n_latent)
+#         value_embed = value_embed * gain
+
+#         # 2. Dynamic Gaussian Bandwidth (Exponential map matches log-scale embeddings)
+#         log_gammas = self.f_gamma(node_and_scale).view(-1, self.n_heads, 2)
+#         log_gammas = torch.clamp(log_gammas, min=-10.0, max=10.0)
+#         gammas = torch.exp(log_gammas)
+        
+#         g_sp, g_tm = gammas[:, :, 0:1], gammas[:, :, 1:2]
+#         r_sp_sq, r_tm_sq = edge_attr[:, 0:1].unsqueeze(1), edge_attr[:, 1:2].unsqueeze(1)
+
+#         distance_logits = -1.0 * (g_sp * r_sp_sq + g_tm * r_tm_sq).squeeze(-1)
+
+#         # 3. Context Feature Score Modulation & Softmax Attention
+#         logits = distance_logits + self.f_feature_score(node_and_scale)
+#         alpha = softmax(logits, index)
+
+#         return alpha.unsqueeze(-1) * value_embed
 	
-		embed_context = self.embed_vector(self.embedding_vector).expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
+#     def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=12):
+#         edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+#         self.fixed_edges = edge_index
+#         self.edge_features = edge_attr
+#         self.use_fixed_edges = True
 
-		n_line_nodes = Slice.shape[0]
-		# mask_p_thresh = 0.025
-		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
-		if self.use_absolute_pos == True:
-			Slice = torch.cat((Slice, locs_use_cart[self.A_src_in_sta[0]]/(3.0*self.scale_rel), x_temp_cuda_cart[self.A_src_in_sta[1]]/(3.0*self.scale_rel)), dim = 1)
 
-		if self.use_absolute_offset == True:
-			# Slice = torch.cat((Slice, A_src_in_edges.x[:,0:3], torch.sqrt(torch.sum(A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)), dim = 1)
-			norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-			rel_pos = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, torch.exp(-1.0*norm_pos*F.softplus(self.w_gamma))), dim = 1)
-			Slice = torch.cat((Slice, rel_pos), dim = 1)
-			
-		
-		if self.attach_time == True:
-			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
-
-		Slice = torch.cat((Slice, embed_context), dim = 1)
-		pos_rel_sta, pos_rel_src = None, None
-		
-		
-		if self.use_embedding == True:
-			# inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
-			ndim_slice = -1 if (self.attach_time == True)*(self.use_absolute_offset == False) else -8
-			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  Slice[:, ndim_slice::]), dim = 1) if ((self.attach_time == True) or (self.use_absolute_offset == True)) else torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device) # .to(Slice.device)
-			inpt_embedding = torch.cat((inpt_embedding, embed_context), dim = 1)
-
-			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t)
-			Slice = torch.cat((Slice, embedding), dim = 1)
-
-		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
-
-
-		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, n_sta, n_temp)
-		x = self.SpatialAggregation1(x, self.A_src, x_temp_cuda) # x_temp_cuda_cart
-		# x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
-		# if self.use_expanded == True:
-		# 	x = x + self.alpha_expand1*self.SpatialAggregation1_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
-		# x = self.SpatialAggregation2(x, A_src, x_temp_cuda)
-		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
-			gate = torch.sigmoid(self.gate_expanded(torch.cat((x, x_expand), dim = 1)))
-			x = x + gate*x_expand
-		
-		x = self.SpatialAggregation2(x, self.A_src, x_temp_cuda)
-		# if self.use_expanded == True:
-		# 	x = x + self.alpha_expand2*self.SpatialAggregation2_expanded(x, self.Ac, x_temp_cuda) # x_temp_cuda_cart
-
-		x_spatial = self.SpatialAggregation3(x, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
-		
-		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t) # second slowest module (could use this embedding to seed source source attention vector).
-		x = self.proj_soln2(x)
-
-		if self.use_sigmoid == True:
-			x = (torch.round(torch.sigmoid(x[:,1]))*x[:,0]).reshape(-1,1)
-
-		if n_reshape > 1: ## Use this to map (n_reshape) repeated spatial queries (x_temp_cuda_cart) at different origin times, to predictions for fixed coordinates and across time
-			x = x.reshape(-1,n_reshape,1)
-
-		return [], x
-
-  
-#### EXTRA
-
-
-class VModel(nn.Module):
-
-	def __init__(self, n_phases = 2, n_hidden = 50, n_embed = 10, device = 'cuda'): # v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, 
-		super(VModel, self).__init__()
-
-		## Relative offset prediction [2]
-		self.fc1_1 = nn.Linear(3 + n_embed, n_hidden)
-		self.fc1_2 = nn.Linear(n_hidden, n_hidden)
-		self.fc1_3 = nn.Linear(n_hidden, n_hidden)
-		self.fc1_4 = nn.ModuleList()
-		for j in range(n_phases):
-			self.fc1_4.append(nn.Linear(n_hidden, 1))
-			# self.fc1_41 = nn.Linear(n_hidden, 1)
-			# self.fc1_42 = nn.Linear(n_hidden, 1)
-		self.activate1_1 = lambda x: torch.sin(x)
-		self.activate1_2 = lambda x: torch.sin(x)
-		self.activate1_3 = lambda x: torch.sin(x)
-		self.activate = nn.Softplus()
-		self.mask = torch.zeros((1, 3)).to(device) # + n_embed)).to(device)
-		self.mask[0,2] = 1.0
-		self.n_phases = n_phases
-
-	def fc1_block(self, x):
-
-		# x = x*torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(x.device)
-		x1 = self.activate1_1(self.fc1_1(x))
-		x = self.activate1_2(self.fc1_2(x1)) + x1
-		x1 = self.activate1_3(self.fc1_3(x)) + x
-		# out = [self.activate(self.fc1_4[j](x1)) for j in range(self.n_phases)]
-
-		return [self.activate(self.fc1_4[j](x1)) for j in range(self.n_phases)]
-
-	def forward(self, src, embed):
-
-		out = self.fc1_block(torch.cat((src, embed), dim = 1))
-		lout = [out[0]]
-		for j in range(1, self.n_phases):
-			lout.append(out[0]*out[j])
-		# out[:,1] = out[:,0]*out[:,1] ## Vs is a fraction of Vp
-
-		return torch.cat(lout, dim = 1)
-
-
-class TravelTimesPN1(nn.Module):
-
-        def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, corrs = None, locs_corr = None, device = 'cuda'):
-                super(TravelTimesPN1, self).__init__()
-
-                ## Relative offset prediction [2]
-                self.fc1_1 = nn.Linear(4 + n_phases + n_embed, n_hidden)
-                self.fc1_2 = nn.Linear(n_hidden, n_hidden)
-                self.fc1_3 = nn.Linear(n_hidden, n_hidden)
-                # self.fc1_4 = nn.Linear(n_hidden, n_phases)
-                self.activate1_1 = lambda x: torch.sin(x)
-                self.activate1_2 = lambda x: torch.sin(x)
-                self.activate1_3 = lambda x: torch.sin(x)
-
-                ## Absolute position prediction [3]
-                self.fc2_1 = nn.Linear(7 + n_phases + n_embed, n_hidden)
-                self.fc2_2 = nn.Linear(n_hidden, n_hidden)
-                self.fc2_3 = nn.Linear(n_hidden, n_hidden)
-                # self.fc2_4 = nn.Linear(n_hidden, n_phases)
-                self.activate2_1 = lambda x: torch.sin(x)
-                self.activate2_2 = lambda x: torch.sin(x)
-                self.activate2_3 = lambda x: torch.sin(x)
-
-                self.merge = nn.Sequential(nn.Linear(2*n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_phases))
-
-                ## Embed source [3]
-                # self.fc3_1 = nn.Linear(3 + 2 + 1, n_hidden)
-                self.fc3_1 = nn.Linear(4, n_hidden)
-                self.fc3_2 = nn.Linear(n_hidden, n_hidden)
-                self.fc3_3 = nn.Linear(n_hidden, n_hidden)
-                self.fc3_4 = nn.Linear(n_hidden, n_embed)
-                self.activate3_1 = lambda x: torch.sin(x)
-                self.activate3_2 = lambda x: torch.sin(x)
-                self.activate3_3 = lambda x: torch.sin(x)
-
-                ## Projection functions
-                self.ftrns1 = ftrns1
-                self.ftrns2 = ftrns2
-                # self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
-                # self.tscale = torch.Tensor([trav_val]).to(device)
-                self.v_mean = torch.Tensor(v_mean).to(device)
-                self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
-                self.device = device
-                self.norm_pos = norm_pos
-                self.inorm_pos = inorm_pos
-                self.inorm_time = inorm_time
-                self.norm_vel = norm_vel
-                self.conversion_factor = conversion_factor
-                self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
-                self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
-                self.scale_angles = torch.Tensor([180.0, 180.0]).reshape(1,-1).to(device) ## Make these adaptive
-                self.scale_depths = torch.Tensor([300e3]).reshape(1,-1).to(device)
-                if locs_corr is not None:
-                        self.tree_corr = cKDTree(ftrns1(torch.Tensor(locs_corr).to(device)).cpu().detach().numpy())
-                        self.corrs = torch.Tensor(corrs).to(device)
-                        self.use_corr = True
-                else:
-                        self.use_corr = False
-
-                if n_srcs > 0:
-                        self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))) # .to(device)
-                        self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))) # .to(device)
-
-                # self.Tp_average
-
-        def fc1_block(self, x):
-
-                x1 = self.activate1_1(self.fc1_1(x))
-                x = self.activate1_2(self.fc1_2(x1)) + x1
-                x1 = self.activate1_3(self.fc1_3(x)) + x
-
-                return x1 # self.fc1_4(x1)
-
-        def fc2_block(self, x):
-
-                x1 = self.activate2_1(self.fc2_1(x))
-                x = self.activate2_2(self.fc2_2(x1)) + x1
-                x1 = self.activate2_3(self.fc2_3(x)) + x
-
-                return x1 # self.fc2_4(x1)
-
-        def fc3_block(self, x):
-
-                x1 = self.activate3_1(self.fc3_1(x))
-                x = self.activate3_2(self.fc3_2(x1)) + x1
-                x1 = self.activate3_3(self.fc3_3(x)) + x
-
-                return self.fc3_4(x1)
-
-        def embed_src(self, src):
-
-                return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), self.norm_pos(src[:,2].reshape(-1,1))), dim = 1))
-
-        # def embed_src(self, src):
-
-        #       return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), src[:,0:2]/self.scale_angles, src[:,[2]]/self.scale_depths), dim = 1))
-
-        def src_proj(self, src):
-
-                return self.norm_pos(self.ftrns1(src))
-
-        def forward(self, sta, src, method = 'pairs', train = False):
-
-                # embed_src = self.fc3_block(self.norm_pos(self.ftrns1(src)))
-                # embed_src = self.embed_src(src*self.mask)
-                embed_src = self.embed_src(src)
-
-                if method == 'direct':
-
-                        sta_proj = self.norm_pos(self.ftrns1(sta))
-                        src_proj = self.norm_pos(self.ftrns1(src))
-
-                        if train == True:
-                                src_proj = Variable(src_proj, requires_grad = True)
-
-                        base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)
-
-                        pred1 = self.fc1_block( torch.cat((sta_proj - src_proj, self.norm_pos(src[:,2].reshape(-1,1)), base_val, embed_src), dim = 1) )
-                        pred2 = self.fc2_block( torch.cat((sta_proj, src_proj, self.norm_pos(src[:,2]).reshape(-1,1), base_val, embed_src), dim = 1) )
-                        pred = self.merge(torch.cat((pred1, pred2), dim = 1))
-
-                        if train == True:
-                                return base_val, pred, src_proj, embed_src
-
-                        else:
-                                if self.use_corr == True:
-                                        imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
-                                        return torch.relu(self.inorm_time(base_val + pred) + self.corrs[imatch,:])
-
-                                else:
-                                        return torch.relu(self.inorm_time(base_val + pred))
-
-
-                elif method == 'pairs':
-
-                        ## First, create all pairs of srcs and recievers
-                        src_repeat = self.norm_pos(self.ftrns1(src)).repeat_interleave(len(sta), dim = 0) # /self.scale
-                        sta_repeat = self.norm_pos(self.ftrns1(sta)).repeat(len(src), 1) # /self.scale
-                        src_embed_repeat = embed_src.repeat_interleave(len(sta), dim = 0)
-
-                        if train == True:
-                                src_repeat = Variable(src_repeat, requires_grad = True)
-
-                        base_val = self.conversion_factor*(torch.norm(sta_repeat - src_repeat, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)) # .reshape(len(src), len(sta), -1)
-
-                        pred1 = self.fc1_block(torch.cat((sta_repeat - src_repeat, self.norm_pos(src[:,2].reshape(-1,1)).repeat_interleave(len(sta), dim = 0), base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
-                        pred2 = self.fc2_block(torch.cat((sta_repeat, src_repeat, self.norm_pos(src[:,2].reshape(-1,1)).repeat_interleave(len(sta), dim = 0), base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
-                        pred = self.merge(torch.cat((pred1, pred2), dim = 1)).reshape(len(src), len(sta), -1)
-
-                        if train == True:
-                                return base_val.reshape(len(src), len(sta), -1), pred, src_repeat.reshape(len(src), len(sta), -1), src_embed_repeat.reshape(len(src), len(sta), -1)
-
-                        else:
-
-                                if self.use_corr == True:
-                                        imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
-                                        return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred) + self.corrs[imatch,:].unsqueeze(0))
-
-                                return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
-                                # return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
-
-
-
-class TravelTimesPN(nn.Module):
-
-	def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, corrs = None, locs_corr = None, device = 'cuda'):
-		super(TravelTimesPN, self).__init__()
-
-		## Relative offset prediction [2]
-		self.fc1_1 = nn.Linear(3 + n_phases + n_embed, n_hidden)
-		self.fc1_2 = nn.Linear(n_hidden, n_hidden)
-		self.fc1_3 = nn.Linear(n_hidden, n_hidden)
-		# self.fc1_4 = nn.Linear(n_hidden, n_phases)
-		self.activate1_1 = lambda x: torch.sin(x)
-		self.activate1_2 = lambda x: torch.sin(x)
-		self.activate1_3 = lambda x: torch.sin(x)
-
-		## Absolute position prediction [3]
-		self.fc2_1 = nn.Linear(6 + n_phases + n_embed, n_hidden)
-		self.fc2_2 = nn.Linear(n_hidden, n_hidden)
-		self.fc2_3 = nn.Linear(n_hidden, n_hidden)
-		# self.fc2_4 = nn.Linear(n_hidden, n_phases)
-		self.activate2_1 = lambda x: torch.sin(x)
-		self.activate2_2 = lambda x: torch.sin(x)
-		self.activate2_3 = lambda x: torch.sin(x)
-
-		self.merge = nn.Sequential(nn.Linear(2*n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_phases))
-
-		## Embed source [3]
-		# self.fc3_1 = nn.Linear(3 + 2 + 1, n_hidden)
-		self.fc3_1 = nn.Linear(3, n_hidden)
-		self.fc3_2 = nn.Linear(n_hidden, n_hidden)
-		self.fc3_3 = nn.Linear(n_hidden, n_hidden)
-		self.fc3_4 = nn.Linear(n_hidden, n_embed)
-		self.activate3_1 = lambda x: torch.sin(x)
-		self.activate3_2 = lambda x: torch.sin(x)
-		self.activate3_3 = lambda x: torch.sin(x)
-
-		## Projection functions
-		self.ftrns1 = ftrns1
-		self.ftrns2 = ftrns2
-		# self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
-		# self.tscale = torch.Tensor([trav_val]).to(device)
-		self.v_mean = torch.Tensor(v_mean).to(device)
-		self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
-		self.device = device
-		self.norm_pos = norm_pos
-		self.inorm_pos = inorm_pos
-		self.inorm_time = inorm_time
-		self.norm_vel = norm_vel
-		self.conversion_factor = conversion_factor
-		self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
-		self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
-		self.scale_angles = torch.Tensor([180.0, 180.0]).reshape(1,-1).to(device) ## Make these adaptive
-		self.scale_depths = torch.Tensor([300e3]).reshape(1,-1).to(device)
-		if locs_corr is not None:
-			self.tree_corr = cKDTree(ftrns1(torch.Tensor(locs_corr).to(device)).cpu().detach().numpy())
-			self.corrs = torch.Tensor(corrs).to(device)
-			self.use_corr = True
-		else:
-			self.use_corr = False
-		
-		if n_srcs > 0:
-			self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))) # .to(device)
-			self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))) # .to(device)
-
-		# self.Tp_average
-
-	def fc1_block(self, x):
-
-		x1 = self.activate1_1(self.fc1_1(x))
-		x = self.activate1_2(self.fc1_2(x1)) + x1
-		x1 = self.activate1_3(self.fc1_3(x)) + x
-
-		return x1 # self.fc1_4(x1)
-
-	def fc2_block(self, x):
-
-		x1 = self.activate2_1(self.fc2_1(x))
-		x = self.activate2_2(self.fc2_2(x1)) + x1
-		x1 = self.activate2_3(self.fc2_3(x)) + x
-
-		return x1 # self.fc2_4(x1)
-
-	def fc3_block(self, x):
-
-		x1 = self.activate3_1(self.fc3_1(x))
-		x = self.activate3_2(self.fc3_2(x1)) + x1
-		x1 = self.activate3_3(self.fc3_3(x)) + x
-
-		return self.fc3_4(x1)
-
-	def embed_src(self, src):
-
-		return self.fc3_block(self.norm_pos(self.ftrns1(src)))
-
-	# def embed_src(self, src):
-
-	# 	return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), src[:,0:2]/self.scale_angles, src[:,[2]]/self.scale_depths), dim = 1))
-
-	def src_proj(self, src):
-
-		return self.norm_pos(self.ftrns1(src))
-
-	def forward(self, sta, src, method = 'pairs', train = False):
-
-		# embed_src = self.fc3_block(self.norm_pos(self.ftrns1(src)))
-		# embed_src = self.embed_src(src*self.mask)
-		embed_src = self.embed_src(src)
-
-		if method == 'direct':
-
-			sta_proj = self.norm_pos(self.ftrns1(sta))
-			src_proj = self.norm_pos(self.ftrns1(src))
-
-			if train == True:
-				src_proj = Variable(src_proj, requires_grad = True)
-
-			base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)
-
-			pred1 = self.fc1_block( torch.cat((sta_proj - src_proj, base_val, embed_src), dim = 1) )
-			pred2 = self.fc2_block( torch.cat((sta_proj, src_proj, base_val, embed_src), dim = 1) )
-			pred = self.merge(torch.cat((pred1, pred2), dim = 1))
-
-			if train == True:
-				return base_val, pred, src_proj, embed_src
-
-			else:
-				if self.use_corr == True:
-					imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
-					return torch.relu(self.inorm_time(base_val + pred) + self.corrs[imatch,:])
-
-				else:
-					return torch.relu(self.inorm_time(base_val + pred))
-
-		
-		elif method == 'pairs':
-
-			## First, create all pairs of srcs and recievers
-			src_repeat = self.norm_pos(self.ftrns1(src)).repeat_interleave(len(sta), dim = 0) # /self.scale
-			sta_repeat = self.norm_pos(self.ftrns1(sta)).repeat(len(src), 1) # /self.scale
-			src_embed_repeat = embed_src.repeat_interleave(len(sta), dim = 0)
-
-			if train == True:
-				src_repeat = Variable(src_repeat, requires_grad = True)
-
-			base_val = self.conversion_factor*(torch.norm(sta_repeat - src_repeat, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)) # .reshape(len(src), len(sta), -1)
-
-			pred1 = self.fc1_block(torch.cat((sta_repeat - src_repeat, base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
-			pred2 = self.fc2_block(torch.cat((sta_repeat, src_repeat, base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
-			pred = self.merge(torch.cat((pred1, pred2), dim = 1)).reshape(len(src), len(sta), -1)
-
-			if train == True:
-				return base_val.reshape(len(src), len(sta), -1), pred, src_repeat.reshape(len(src), len(sta), -1), src_embed_repeat.reshape(len(src), len(sta), -1)
-
-			else:
-
-				if self.use_corr == True:
-					imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
-					return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred) + self.corrs[imatch,:].unsqueeze(0))		
-
-				return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
-				# return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
-
-
-## Magnitude class
-class Magnitude(nn.Module):
-	def __init__(self, locs, grid, ftrns1_diff, ftrns2_diff, k = 1, device = 'cuda'):
-		# super(Magnitude, self).__init__(aggr = 'max') # node dim
-		super(Magnitude, self).__init__() # node dim
-		## Predict magnitudes with trainable coefficients,
-		## and spatial-reciver biases (with knn interp k)
-		# In elliptical coordinates
-		self.locs = locs
-		self.grid = grid
-		self.grid_cart = ftrns1_diff(grid)
-		self.ftrns1 = ftrns1_diff
-		self.ftrns2 = ftrns2_diff
-		self.k = k
-		self.device = device
-
-		## Setup like regular log_amp = C1 * Mag + C2 * log_dist_depths_0 + C3 * log_dist_depths + Bias (for each phase type)
-		self.mag_coef = nn.Parameter(torch.ones(2))
-		self.epicenter_spatial_coef = nn.Parameter(torch.ones(2))
-		self.depth_spatial_coef = nn.Parameter(torch.zeros(2))
-		self.bias = nn.Parameter(torch.zeros(grid.shape[0], locs.shape[0], 2))
-		self.activate = nn.Softplus()
-		self.grid_save = nn.Parameter(grid, requires_grad = False)
-		self.zvec = torch.Tensor([1.0,1.0,0.0]).reshape(1,-1).to(device)
-		# self.bias = nn.Parameter(torch.zeros(locs.shape[0], grid.shape[0], 2), requires_grad = True).to(device)
-	
-	## Need to double check these routines
-	def log_amplitudes(self, ind, src, mag, phase):
-		## Input src: n_srcs x 3;
-		## ind: indices into absolute locs array (can repeat, for phase types)
-		## log_amp (base 10), for each ind
-		## phase type for each ind 
-
-		# Compute pairwise distances;
-		fudge = 1.0 # add before log10, to avoid log10(0)
-		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1(src*self.zvec).unsqueeze(1) - self.ftrns1(self.locs[ind]*self.zvec).unsqueeze(0), dim = 2) + fudge)
-		pw_log_dist_depths = torch.log10(abs(src[:,2].view(-1,1) - self.locs[ind,2].view(1,-1)) + fudge)
-		inds = knn(self.grid_cart/1000.0, self.ftrns1(src)/1000.0, k = self.k)[1].reshape(-1,self.k) ## for each of the second one, find indices in the first
-		bias = self.bias[inds][:,:,ind,phase].mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
-		log_amp = mag*torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device)) - self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
-		# log_amp = mag*torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device)) + self.epicenter_spatial_coef[phase]*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
-		## Can directly use torch_scatter to coalesce the data
-		
-		return log_amp
-
-	def train(self, ind, src, mag, phase):
-		## Input src: n_srcs x 3;
-		## ind: indices into absolute locs array (can repeat, for phase types)
-		## log_amp (base 10), for each ind
-		## phase type for each ind 
-
-		# Compute pairwise distances;
-		fudge = 1.0 # add before log10, to avoid log10(0)
-		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1(src*self.zvec) - self.ftrns1(self.locs[ind]*self.zvec), dim = 1) + fudge)
-		pw_log_dist_depths = torch.log10(abs(src[:,2].view(-1) - self.locs[ind,2].view(-1)) + fudge)
-		sta_ind = ind.repeat_interleave(self.k)
-		inds = knn(self.grid_cart/1000.0, self.ftrns1(src)/1000.0, k = self.k) # [1] # .reshape(-1,self.k) ## for each of the second one, find indices in the first
-
-		bias = self.bias[inds[1], sta_ind, :] # .mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
-		bias = scatter(bias, inds[0], dim = 0, reduce = 'mean')[torch.arange(len(src)).long().to(self.device),phase]
-		log_amp = mag*torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device)) - self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
-
-		return log_amp
-	
-	## Note, closer between amplitudes and forward
-	def forward(self, ind, src, log_amp, phase):
-		## Input src: n_srcs x 3;
-		## ind: indices into absolute locs array (can repeat, for phase types)
-		## log_amp (base 10), for each ind
-		## phase type for each ind
-
-		# Compute pairwise distances;
-		fudge = 1.0 # add before log10, to avoid log10(0)
-		pw_log_dist_zero = torch.log10(torch.norm(self.ftrns1(src*self.zvec).unsqueeze(1) - self.ftrns1(self.locs[ind]*self.zvec).unsqueeze(0), dim = 2) + fudge)
-		pw_log_dist_depths = torch.log10(abs(src[:,2].view(-1,1) - self.locs[ind,2].view(1,-1)) + fudge)
-		inds = knn(self.grid_cart/1000.0, self.ftrns1(src)/1000.0, k = self.k)[1].reshape(-1,self.k) ## for each of the second one, find indices in the first
-		bias = self.bias[inds][:,:,ind,phase].mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
-		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
-
-		return mag
-
-		## Can directly use torch_scatter to coalesce the data
-		# bias = self.bias[inds][:,:,ind,phase].mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
-		# log_amp = mag*torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device)) + self.epicenter_spatial_coef[phase]*pw_log_dist_zero + self.depth_spatial_coef[phase]*pw_log_dist_depths + bias
-
-
-		## Can directly use torch_scatter to coalesce the data?
-		# mag = (log_amp - self.epicenter_spatial_coef[phase]*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device))
-
-
-		# self.f_arrival_query_1 = nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden) # add edge data (observed arrival - theoretical arrival)
-		# self.f_arrival_query_2 = nn.Linear(n_hidden, n_heads*n_latent) # Could use nn.Sequential to combine these.
-		# self.f_src_context_1 = nn.Linear(ndim_arv_in + 5, n_hidden) # only use single tranform layer for source embdding (which already has sufficient information)
-		# self.f_src_context_2 = nn.Linear(n_hidden, n_heads*n_latent) # only use single tranform layer for source embdding (which already has sufficient information)
-
-		# self.f_pick_query = nn.Sequential(nn.Linear(ndim_src_in + ndim_arv_in + 5 + 1, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-		
-		# + 1
-
-
-		# self.activate1 = nn.PReLU()
-		# self.activate2 = nn.PReLU()
-		# self.activate3 = nn.PReLU()
-
-		## Append dummy edge
-		# edges = torch.cat((edges, edge_dummy), dim = 1)
-		# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src,1)), dim = 0) ## The dummy "source index"
-		# src_index = torch.cat((src_index, n_src*torch.ones(n_arv*n_src,1)).to(device), dim = 0) ## The dummy "source index"
-		# self_link = torch.cat((self_link, torch.zeros(n_arv*n_src,1)).to(device), dim = 0)
-		## Could use search sorted to insert into edge list (sorted)
-		## Append dummy edges (new sending nodes from index n_arv*n_src (e.g., > all real picks) to all real nodes)
-
-
-
-		## Use gate to merge the two branches
-		# gate = torch.sigmoid(self.gate_linear(src_embed_trns[src_ind_repeat]))
-		# out = self.proj_2(
-		#     gate * self.embed_src(src_embed_trns[src_ind_repeat]) +
-		#     (1 - gate) * self.activate4(self.proj_1(...))
-		# )
-
-
-		# if self.use_src_context == True:
-
-		# 	aggregate = self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), sembed = src_embed_trns, stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = ipick.repeat(n_src), atime = tpick.repeat(n_src), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), size = (N, M)).view(-1, self.n_latent*self.n_heads)))
-		# 	# gate = torch.sigmoid(self.gate_src(torch.cat((src_embed_trns[src_ind_repeat], aggregate), dim = 1)))
-		# 	gate = torch.sigmoid(self.gate_src(torch.cat((F.layer_norm(src_embed_trns[src_ind_repeat], src_embed_trns[src_ind_repeat].shape[-1:]), F.layer_norm(aggregate, aggregate.shape[-1:])), dim = 1)))
-		# 	out = self.proj_2(self.downscale*gate*self.embed_src(src_embed_trns[src_ind_repeat]) + aggregate)
-		# 	# out = self.proj_2(self.embed_src(src_embed_trns[src_ind_repeat]) + ) # M is output. Taking mean over heads
-
-		# else:
 
