@@ -2163,7 +2163,16 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.use_sigmoid = use_sigmoid
 		self.use_src_pred = use_src_pred
 		self.use_absolute_offset = use_absolute_offset
-		self.w_gamma = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
+
+		if use_absolute_offset == True:
+			# Predict scale-conditioned gamma offsets from domain context
+	        self.f_gamma = nn.Linear(embed_vector_dim, 4)
+	        # Base log-gammas (e.g. multi-scale physical bounds)
+	        self.log_gamma_base = nn.Parameter(
+	            torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
+	        )
+		
+		# self.w_gamma = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
 		# self.use_src_pred = self.Arrivals.src_pred
 		# self.scale_output = torch.Tensor([1.0/10.0]).to(device)
 		# self.use_sigmoid = use_sigmoid
@@ -2179,23 +2188,26 @@ class GCN_Detection_Network_extended(nn.Module):
 		assert(x_temp_cuda_cart.shape[1] == 3)
 		
 		embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
-		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)		
+		pos_rel_sta, pos_rel_src = None, None
+		
 		
 		if self.use_absolute_offset == True:
 			norm_pos = torch.sqrt(torch.sum(A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-			rel_pos = torch.cat((A_src_in_edges.x[:,0:3]/norm_pos, torch.exp(-1.0*norm_pos*F.softplus(self.w_gamma))), dim = 1)
-			Slice = torch.cat((Slice, rel_pos), dim = 1)
-
-		if self.attach_time == True:
-			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
+	        gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
+	        gammas = torch.exp(self.log_gamma_base + gamma_offset)
+	        spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
+	        rel_pos_feat = torch.cat((A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, A_src_in_edges.x[:,3:4]), dim=-1)
+			Slice = torch.cat((Slice, rel_pos_feat), dim = 1)
+		
+		# if self.attach_time == True:
+		# 	Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
 		
 		# # FiLM Scale & Shift (Optional fine-tuning pattern):
 		# gamma_scale = self.film_gamma(embed_context)  # [1, in_channels]
 		# beta_shift  = self.film_beta(embed_context)   # [1, in_channels]
 		# tr_conditioned = tr * gamma_scale + beta_shift
-		
-		# Slice = torch.cat((Slice, embed_context.expand(n_line_nodes, -1)), dim = 1)
-		pos_rel_sta, pos_rel_src = None, None
+		# Slice = torch.cat((Slice, embed_context.expand(n_line_nodes, -1)), dim = 1)	
 		
 		if self.use_embedding == True:
 			# inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1) if self.attach_time == True else torch.ones(len(Slice),1).to(Slice.device)
@@ -2367,18 +2379,18 @@ class GCN_Detection_Network_extended(nn.Module):
 		n_line_nodes = Slice.shape[0]
 		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
-		
+		pos_rel_sta, pos_rel_src = None, None
+		assert(x_temp_cuda_cart.shape[1] == 3)
+
 		
 		if self.use_absolute_offset == True:
 			norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-			rel_pos = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, torch.exp(-1.0*norm_pos*F.softplus(self.w_gamma))), dim = 1)
-			Slice = torch.cat((Slice, rel_pos), dim = 1)
+	        gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
+	        gammas = torch.exp(self.log_gamma_base + gamma_offset)
+	        spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
+	        rel_pos_feat = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, self.A_src_in_edges.x[:,3:4]), dim=-1)
+			Slice = torch.cat((Slice, rel_pos_feat), dim = 1)
 		
-		if self.attach_time == True:
-			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
-		
-		# Slice = torch.cat((Slice, self.embed_context.expand(n_line_nodes, -1)), dim = 1)
-		pos_rel_sta, pos_rel_src = None, None
 		
 		if self.use_embedding == True:
 			ndim_slice = -1 if (self.attach_time == True)*(self.use_absolute_offset == False) else -8
@@ -2456,17 +2468,18 @@ class GCN_Detection_Network_extended(nn.Module):
 		n_line_nodes = Slice.shape[0]
 		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
+		pos_rel_sta, pos_rel_src = None, None
+		assert(x_temp_cuda_cart.shape[1] == 3)
 		
+
 		if self.use_absolute_offset == True:
 			norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-			rel_pos = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, torch.exp(-1.0*norm_pos*F.softplus(self.w_gamma))), dim = 1)
-			Slice = torch.cat((Slice, rel_pos), dim = 1)
-
-		if self.attach_time == True:
-			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[self.A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
-
-		# Slice = torch.cat((Slice, self.embed_context.expand(n_line_nodes, -1)), dim = 1)
-		pos_rel_sta, pos_rel_src = None, None
+	        gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
+	        gammas = torch.exp(self.log_gamma_base + gamma_offset)
+	        spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
+	        rel_pos_feat = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, self.A_src_in_edges.x[:,3:4]), dim=-1)
+			Slice = torch.cat((Slice, rel_pos_feat), dim = 1)
+		
 		
 		if self.use_embedding == True:
 			ndim_slice = -1 if (self.attach_time == True)*(self.use_absolute_offset == False) else -8
