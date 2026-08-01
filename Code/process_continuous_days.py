@@ -2125,23 +2125,41 @@ for cnt, strs in enumerate([0]):
 
 
 	find_matched_events = True ## Check this if use_shift is true
-	if 	find_matched_events == True:
+	if find_matched_events == True:
 
 		try:
+		
 			t0 = UTCDateTime(date[0], date[1], date[2])
 			min_magnitude = 0.1
-			srcs_known = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
-			print('Processing %d known events'%len(srcs_known))
+
+			calibration_file = path_to_file + 'Calibration' + seperator + '%d'%date[0] + seperator + '%s_reference_%d_%d_%d_ver_1.npz'%(name_of_project, date[0], date[1], date[2])
+			if os.path.isfile(calibration_file) == True:
+				z = np.load(calibration_file)
+				srcs_known = z['srcs_ref']
+				z.close()
+
+			else:
+				srcs_known = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
+				print('Processing %d known events'%len(srcs_known))
 	
 	
-			temporal_win_match = 5.0
-			spatial_win_match = 35e3
+			temporal_win_match = 3.0*src_t_kernel
+			spatial_win_match = 3.0*src_x_kernel
 			matches1 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
 			if len(ifind_not_nan) > 0:
 				matches2 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv[ifind_not_nan], ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
 				matches2[:,1] = ifind_not_nan[matches2[:,1]]
 			else:
 				matches2 = np.nan*np.zeros((0,2))
+
+			if len(matches2) > 0:
+				res = srcs_known[matches2[:,0],0:4] - srcs_trv[matches2[:,1],0:4]
+				print('\nMatched events %d/%d (%0.4f)'%(len(matches2), len(srcs_known), len(matches2)/len(srcs_known)))
+				print('Precision: %0.4f \n'%(len(matches2)/(len(matches2) + (len(srcs_trv) - len(matches2)))))
+				print('Res [mean]: '); print(list(res.mean(0)))
+				print('\nRes [std]: '); print(list(res.std(0)))			
+				
+		
 		except:
 			print('Failed on finding matched events')
 			find_matched_events = False
