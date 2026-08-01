@@ -2384,15 +2384,15 @@ class GCN_Detection_Network_extended(nn.Module):
 		
 		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, n_sta, n_temp)
-		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
-		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda)
+		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda)
 		if self.use_expanded == True:
 			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
-			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(x_local.shape[0], -1)), dim = 1)))
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, self.embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
 			x = x_local
-		x_spatial = self.SpatialAggregation3(x, embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		x_spatial = self.SpatialAggregation3(x, self.embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
 
 		# use_direct_output = False
@@ -2416,10 +2416,10 @@ class GCN_Detection_Network_extended(nn.Module):
 		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, self.embed_context, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
 
 		if self.use_expanded == False:
-			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src, embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src, self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
 
 		else: ## This assumes that DataAggregationAssociationPhase does not use expanded version
-			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src[0], embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
+			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src[0], self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
 
 		## Arrival embedding
 		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, self.tlatent, trv_out = trv_out_q)
@@ -2472,11 +2472,11 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
 		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, n_sta, n_temp)
-		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
-		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
 		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
-			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(x_local.shape[0], -1)), dim = 1)))
+			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, self.embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
 			x = x_local
