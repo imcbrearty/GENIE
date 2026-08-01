@@ -4279,14 +4279,16 @@ for batch_idx, inputs in enumerate(loader):
 			for j in range(2):
 				i1 = np.where(Lbls_query[i0][:,0].cpu().detach().numpy() > 0.1)[0]
 				i2 = np.where(out[1][:,0].cpu().detach().numpy() > 0.1)[0]
+				i1 = i1[np.argsort(Lbls_query[i0][i1,0].cpu().detach().numpy())]
+				i2 = i2[np.argsort(out[1][i2,0].cpu().detach().numpy())]
 				ax[2*j].scatter(X_query[i0][i1,3].cpu().detach().numpy(), X_query[i0][i1,j].cpu().detach().numpy(), c = Lbls_query[i0][i1,0].cpu().detach().numpy())
 				ax[2*j + 1].scatter(X_query[i0][i2,3].cpu().detach().numpy(), X_query[i0][i2,j].cpu().detach().numpy(), c = out[1][i2,0].cpu().detach().numpy())
-				ax[2*j].set_xlim(X_query[i0][:,3].amin(), X_query[i0][:,3].amax())
+				ax[2*j].set_xlim(X_query[i0][:,3].amin(), X_query[i0][:,3].amax()) # ; ax[2*j].set_aspect(1.0/np.cos(np.pi*
 				ax[2*j + 1].set_xlim(X_query[i0][:,3].amin(), X_query[i0][:,3].amax())
 				ax[2*j].set_ylim(X_query[i0][:,j].amin(), X_query[i0][:,j].amax())
 				ax[2*j + 1].set_ylim(X_query[i0][:,j].amin(), X_query[i0][:,j].amax())
 
-			fig.set_size_inches(10,8)
+			fig.set_size_inches(10,10)
 			fig.savefig(path_to_file + 'Plots/example_sources_%d.png'%cnt_plot)
 
 			fig, ax = plt.subplots(2, 1, sharex = True, sharey = True)
