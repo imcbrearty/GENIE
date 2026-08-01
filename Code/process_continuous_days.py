@@ -2212,6 +2212,7 @@ for cnt, strs in enumerate([0]):
 		file_save['trv_srcs_init1'] = trv_out_srcs_init1
 		file_save['trv_srcs_init2'] = trv_out_srcs_init2
 		file_save['n_remove'] = n_remove
+		file_save['n_skipped'] = n_skipped
 		file_save['time'] = st_time - time.time()
 		file_save['cnt_isolated_picks'] = cnt_isolated_picks
 		file_save['rbest'] = rbest
