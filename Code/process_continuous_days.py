@@ -2252,7 +2252,7 @@ for cnt, strs in enumerate([0]):
 
 		# success_count = success_count + 1
 		file_save.close()
-		print('Saved file %0.4f'%(time.time() - st_time))
+		print('\nSaved file %0.4f'%(time.time() - st_time))
 
 		write_HypoDD_file = True
 		if write_HypoDD_file == True:
