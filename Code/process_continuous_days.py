@@ -1065,6 +1065,7 @@ for cnt, strs in enumerate([0]):
 
 	## May need to adapt the scale_time for different density of nodes
 	## Why print statements in build_sampling_grid
+	print('Check or reduce density of X_query_slice; also check time width and target width') # and depth_upscale_factor and buffer scale
 	for inc, lat_val in enumerate(lat_range_events):
 		# 2. Calculate the lon degrees needed to cover target_width
 		# We use the inverse of the longitudinal distance formula
