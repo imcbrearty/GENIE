@@ -2186,7 +2186,12 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		if self.attach_time == True:
 			Slice = torch.cat((Slice, 1000.0*self.scale_time*x_temp_cuda_t[A_src_in_sta[1]].reshape(-1,1)/(15.0*self.scale_rel)), dim = 1)
-
+		
+		# # FiLM Scale & Shift (Optional fine-tuning pattern):
+		# gamma_scale = self.film_gamma(embed_context)  # [1, in_channels]
+		# beta_shift  = self.film_beta(embed_context)   # [1, in_channels]
+		# tr_conditioned = tr * gamma_scale + beta_shift
+		
 		Slice = torch.cat((Slice, embed_context.expand(n_line_nodes, -1)), dim = 1)
 		pos_rel_sta, pos_rel_src = None, None
 		
