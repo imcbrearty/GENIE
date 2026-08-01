@@ -41,6 +41,7 @@ from scipy import stats
 import networkx as nx
 from scipy.stats import gaussian_kde
 from scipy.spatial.distance import cdist
+from scipy.spatial import distance_matrix
 # from scipy.interpolate import RegularGridInterpolator
 from sklearn.neighbors import kneighbors_graph
 from scipy.interpolate import RegularGridInterpolator
@@ -4647,7 +4648,7 @@ def get_domain_bounds(points_lla, scale=1.05, lat_range = None, lon_range = None
 
 
 
-def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, max_time_shift_range = None, file_index = 0, date = [2000, 1, 1], n_grids = 1, initialize = None, fixed_domain = None, use_paths = False, rbest = None, mn = None, optimize_station_graphs = False, optimize_source_graphs = False, use_domain_approximate = True, use_tuner = True, name_of_project = '', verbose = True, device = 'cpu'):
+def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, max_time_shift_range = None, file_index = 0, date = [2000, 1, 1], n_grids = 1, initialize = None, fixed_domain = None, use_paths = False, rbest = None, mn = None, optimize_station_graphs = False, optimize_source_graphs = False, use_domain_approximate = False, use_tuner = True, name_of_project = '', verbose = True, device = 'cpu'):
 
     if initialize is None: # else: [lat_range, lon_range, ]
         domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -4831,7 +4832,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
     else:
 
         ## Call fit domain
-        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, max_time_shift_range = max_time_shift_range, n_rand_srcs = 150, quantile_times = 0.3, quantile_times_srcs = 0.35, n_grids = n_grids, use_tuner = use_tuner, initialize = initialize, fixed_domain = fixed_domain, verbose = verbose, device = device)
+        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, max_time_shift_range = max_time_shift_range, n_grids = n_grids, use_tuner = use_tuner, initialize = initialize, fixed_domain = fixed_domain, verbose = verbose, device = device) # n_rand_srcs = 150 quantile_times = 0.3, quantile_times_srcs = 0.35
 
         # if initialize is None:
         #     file_load = 'Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2])
@@ -5169,7 +5170,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
 
 
-def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 5.0, n_rand_srcs = 150, quantile_times = 0.3, quantile_times_srcs = 0.35, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
+def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 5.0, n_rand_srcs = 250, quantile_times = 0.4, quantile_times_srcs = 0.4, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
     # if domain is None:
     #     domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -5243,28 +5244,92 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
     assert(r_max >= r_min)
 
 
-    Dt_offsets = []
-    for i in range(n_rand_srcs):
+    use_previous_approach = False
+    if use_previous_approach == True:
+        Dt_offsets = []
+        for i in range(n_rand_srcs):
+            
+            src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
+                                             k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))), vel_avg=Vc, vel_min=Vc*0.75,
+                                             scan_step_m=domain_scale['W_phys_m']/2.0, W_phys_m = domain_scale['W_phys_m'], W_t = domain_scale['W_t_s'], use_global = use_global, r_min = r_min, r_max = r_max, device=device)
+            
+            if len(side_lobes) > 0:
+                dt_sort = np.sort(np.abs(np.array([s['dt_offset'] for s in side_lobes])))
+                Dt_offsets.append(np.quantile(dt_sort, quantile_times))
+                # trv_out = trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(src_true).to(device)).cpu().detach().numpy()
+                # trv_out_sidelobes = np.vstack([trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(s['pos_src'].reshape(1,-1)).to(device)).cpu().detach().numpy() + s['dt_offset'] for s in side_lobes])
+    
+    
+        Dt_offsets = np.array(Dt_offsets)
+        time_shift_range = np.round(np.quantile(Dt_offsets, quantile_times_srcs), 2) # /2.0
+    
+        # min_time_range = 5.0  
+        time_shift_range = max(time_shift_range, min_time_range)
+    
+        if max_time_shift_range is not None:
+            time_shift_range = min(time_shift_range, max_time_shift_range)
+
+    else:
+    
+        # 1. Compute inter-station distances (nearest neighbor and local cluster density)
+        nn_dists_m = cKDTree(ftrns1_abs(locs_use)).query(ftrns1_abs(locs_use), k = 2)[0][:,1]
+        # np.fill_diagonal(sta_dists, np.inf)
+        # nn_dists_m = np.min(sta_dists, axis=1)  # Distance to nearest neighbor for each station
+        # Typical inter-station travel time across adjacent stations
+        t_interstation_median = float(np.median(nn_dists_m) / Vc)
+        t_interstation_max = float(np.percentile(nn_dists_m, 90) / Vc)
+    
+        # 2. Kernel baseline limits (Model's spatio-temporal scope)
+        w_t_sec = domain_scale.get('W_t_s', 3.0)
         
-        src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
-                                         k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))), vel_avg=Vc, vel_min=Vc*0.75,
-                                         scan_step_m=domain_scale['W_phys_m']/2.0, W_phys_m = domain_scale['W_phys_m'], W_t = domain_scale['W_t_s'], use_global = use_global, r_min = r_min, r_max = r_max, device=device)
+        # Minimum window floor: at least 1 inter-station hop or 1.5x kernel scale
+        min_time_range = max(1.5 * w_t_sec, 1.0 * t_interstation_median)
+    
+        # 3. Maximum Cap:
+        # Use max() so ultra-dense networks (like DAS with ~0.01s station transit) 
+        # don't collapse max_time_cap below the kernel prediction window.
+        spacing_based_cap = 3.0 * t_interstation_max
+        kernel_based_cap = 10.0 * w_t_sec
         
-        if len(side_lobes) > 0:
-            dt_sort = np.sort(np.abs(np.array([s['dt_offset'] for s in side_lobes])))
-            Dt_offsets.append(np.quantile(dt_sort, quantile_times))
-            # trv_out = trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(src_true).to(device)).cpu().detach().numpy()
-            # trv_out_sidelobes = np.vstack([trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(s['pos_src'].reshape(1,-1)).to(device)).cpu().detach().numpy() + s['dt_offset'] for s in side_lobes])
+        # Taking max ensures dense arrays still retain a kernel-sized prediction window
+        max_time_cap = max(spacing_based_cap, kernel_based_cap)
+        
+        # Absolute ceiling (e.g., 60s or domain cap) to prevent runaway graph size on extreme sparse global networks
+        max_time_cap = min(max_time_cap, domain_scale.get('max_allowed_dt_s', 120.0 if max_time_shift_range is None else max_time_shift_range))
+    
+        # 4. Flatten all detected side-lobe offsets across Monte Carlo simulations
+        all_dt_offsets = []
+        for i in range(n_rand_srcs):
+            src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(
+                locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
+                k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))),
+                vel_avg=Vc, vel_min=Vc*0.85,
+                scan_step_m=domain_scale['W_phys_m']/2.0, 
+                W_phys_m=domain_scale['W_phys_m'], 
+                W_t=domain_scale['W_t_s'], 
+                use_global=use_global, 
+                r_min=r_min, 
+                r_max=r_max, 
+                device=device
+            )
+            
+            if len(side_lobes) > 0:
+                all_dt_offsets.extend([abs(s['dt_offset']) for s in side_lobes])
+    
+        # 5. Extract quantile and apply physical bounds
+        # target_quantile = 0.75  # Fixed quantile over aggregate distribution
+    
+        if len(all_dt_offsets) > 0:
+            raw_time_shift = float(np.quantile(all_dt_offsets, quantile_times))
+        else:
+            raw_time_shift = min_time_range
+    
+        time_shift_range = np.clip(raw_time_shift, min_time_range, max_time_cap)
+        time_shift_range = float(np.round(time_shift_range, 2))
 
 
-    Dt_offsets = np.array(Dt_offsets)
-    time_shift_range = np.round(np.quantile(Dt_offsets, quantile_times_srcs), 2) # /2.0
 
-    # min_time_range = 5.0  
-    time_shift_range = max(time_shift_range, min_time_range)
 
-    if max_time_shift_range is not None:
-        time_shift_range = np.min(time_shift_range, max_time_shift_range)
 
     scale_time_base = domain_scale['W_phys_m']/domain_scale['W_t_s']
 
