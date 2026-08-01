@@ -4288,7 +4288,7 @@ for batch_idx, inputs in enumerate(loader):
 				ax[2*j].set_ylim(X_query[i0][:,j].amin(), X_query[i0][:,j].amax())
 				ax[2*j + 1].set_ylim(X_query[i0][:,j].amin(), X_query[i0][:,j].amax())
 
-			fig.set_size_inches(10,10)
+			fig.set_size_inches(10,8)
 			fig.savefig(path_to_file + 'Plots/example_sources_%d.png'%cnt_plot)
 
 			fig, ax = plt.subplots(2, 1, sharex = True, sharey = True)
