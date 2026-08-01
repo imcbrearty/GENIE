@@ -593,10 +593,10 @@ elif step_size == 'half':
 	assert(use_adaptive_window == True)
 
 # pred_params = [t_win, kernel_sig_t, src_t_kernel, src_x_kernel, src_depth_kernel]
-tc_win = pred_params[2]*1.35 # 1.25 # process_config['tc_win'] # Temporal window (s) to link events in Local Marching
-sp_win = pred_params[3]*1.35 # 1.25 #  process_config['sp_win'] # Distance (m) to link events in Local Marching
-d_win = pred_params[3]*1.35/110e3 # 1.25 ## Converting km to degrees, roughly
-d_win_depth = pred_params[4]*1.35 # 1.25 ## proportional to depth kernel
+tc_win = pred_params[2]*2.5 # 1.35 # 1.25 # process_config['tc_win'] # Temporal window (s) to link events in Local Marching
+sp_win = pred_params[3]*2.5 # 1.35 # 1.25 #  process_config['sp_win'] # Distance (m) to link events in Local Marching
+# d_win = pred_params[3]*1.35/110e3 # 1.25 ## Converting km to degrees, roughly
+# d_win_depth = pred_params[4]*1.35 # 1.25 ## proportional to depth kernel
 src_t_kernel = pred_params[2] ## temporal source kernel size
 
 ## Make topography surface
@@ -2143,8 +2143,8 @@ for cnt, strs in enumerate([0]):
 				print('Processing %d known events'%len(srcs_known))
 	
 	
-			temporal_win_match = 3.0*src_t_kernel
-			spatial_win_match = 3.0*src_x_kernel
+			temporal_win_match = 5.0*src_t_kernel
+			spatial_win_match = 5.0*src_x_kernel
 			matches1 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
 			if len(ifind_not_nan) > 0:
 				matches2 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv[ifind_not_nan], ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
