@@ -3058,7 +3058,7 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 		x_src_query[:n_pin, :3] = lp_srcs[:n_pin, :3]
 
 		# Pin target times for bounded sources falling within the valid time window
-		ifind_src = np.where(np.abs(lp_srcs[:n_pin, 3]) <= (t_win / 2.0))[0]
+		ifind_src = np.where(np.abs(lp_srcs[:n_pin, 3]) <= (t_shift_range / 2.0))[0]
 		tq_sample[ifind_src] = torch.tensor(lp_srcs[ifind_src, 3], dtype=torch.float32, device=device)
 
 
@@ -3743,6 +3743,8 @@ np.random.seed() ## randomize seed
 losses = np.zeros(n_epochs)
 mx_trgt_1, mx_trgt_2, mx_trgt_3, mx_trgt_4 = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
 mx_pred_1, mx_pred_2, mx_pred_3, mx_pred_4 = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
+mz.set_scale_coefficients(src_x_kernel*2.0, scale_time, kernel_sig_t, kernel_sig_t*3.0, src_x_kernel, src_t_kernel, time_shift_range)
+
 
 weights = torch.Tensor([0.1, 0.4, 0.25, 0.25]).to(device)
 
