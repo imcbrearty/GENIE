@@ -138,7 +138,7 @@ compute_magnitudes = process_config['compute_magnitudes']
 min_log_amplitude_val = process_config['min_log_amplitude_val']
 use_topography = process_config['use_topography']
 process_known_events = process_config['process_known_events']
-use_fixed_domain = process_config.get('use_fixed_domain', True)
+use_fixed_domain = process_config.get('use_fixed_domain', False)
 use_offset_quality_control = process_config.get('use_offset_quality_control', True)
 offset_ratio_quality_control = process_config.get('offset_ratio_quality_control', 2.0) # 3.0
 
