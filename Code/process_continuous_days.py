@@ -1712,154 +1712,48 @@ for cnt, strs in enumerate([0]):
 			# iwhere_cnts = np.zeros(0)
 
 
-		for i in range(srcs_refined.shape[0]):
+		use_batched_locations = True
+		use_path_sigma = False
 
-			arv_p, ind_p, arv_s, ind_s = np.copy(Picks_P_perm[i][:,0]), np.copy(Picks_P_perm[i][:,1].astype('int')), np.copy(Picks_S_perm[i][:,0]), np.copy(Picks_S_perm[i][:,1].astype('int'))
-			ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
+		if use_batched_locations == False:
 
-			if len(ind_unique_arrivals) == 0:
-				srcs_trv.append(np.nan*np.ones((1, 4)))
-				del_arv_p.append(0)
-				del_arv_s.append(0)
-				continue			
-			
+			for i in range(srcs_refined.shape[0]):
 
-			perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
-			perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
-			locs_use_slice = locs_use[ind_unique_arrivals]
-			ind_p_perm_slice = perm_vec_arrivals[ind_p]
-			ind_s_perm_slice = perm_vec_arrivals[ind_s]
-			if len(ind_p_perm_slice) > 0:
-				assert(ind_p_perm_slice.min() > -1)
-			if len(ind_s_perm_slice) > 0:
-				assert(ind_s_perm_slice.min() > -1)
-
-
-			overwrite_val = False ## Use previous location (since picks are the same)
-			if (inc_repeat == (repeat_iters - 1))*(inc_repeat > 0)*(use_overwrite_locations == True)*(i in iwhere_cnts):
-				xmle = src_matched[np.where(i == iwhere_cnts)[0][0]]
-				xmle, origin = xmle[0:3].reshape(1,-1), xmle[3]
-				logprob, skipped_p_ind, skipped_s_ind = np.nan, [], []
-				overwrite_val = True
-
-				# # xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
-				# inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
-				# inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
-				# xmle1, origin_rel1, _, _, _ = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
-				# origin1 = srcs_refined[i,3] + origin_rel1
-
-				# try:
-				# 	assert(np.linalg.norm(ftrns1(xmle) - ftrns1(xmle1), axis = 1).max() < 30e3)
-				# 	assert(np.abs(origin - origin1).item() < 10)
-				# except:
-				# 	print('Not same [1]')
-				# 	cnt_false += 1
-
-			else:
-
-				# xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
-				inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
-				inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
-				xmle, origin_rel, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
-				origin = srcs_refined[i,3] + origin_rel
-
-			if use_offset_quality_control == True:
-				offset_dist = np.linalg.norm(ftrns1(xmle.reshape(1,-1)) - ftrns1(srcs_refined[i,:].reshape(1,-1)), axis = 1)
-				if offset_dist > offset_ratio_quality_control*src_x_kernel:
-					print('Removing event based on offset: %0.4d (%0.4f)'%(offset_dist, offset_dist/src_x_kernel))
-					xmle = np.nan*np.ones((1, 3))
-					n_skipped += 1
-
-
-			if np.isnan(xmle).sum() > 0:
-				srcs_trv.append(np.nan*np.ones((1, 4)))
-				del_arv_p.append(0)
-				del_arv_s.append(0)
-				continue
-
-			pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + origin
-			res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
-			res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
-
-			if (use_quality_check == True)*(overwrite_val == False):
-				tval_p = pred_out[0,ind_p_perm_slice,0] - origin
-				tval_s = pred_out[0,ind_s_perm_slice,1] - origin
-				tval_p[tval_p <= 0] = 0.01
-				tval_s[tval_s <= 0] = 0.01
-				rel_error_p = np.abs(res_p/tval_p)
-				rel_error_s = np.abs(res_s/tval_s)
-				# idel_p = np.where((rel_error_p > max_relative_error)*((pred_out[0,ind_p_perm_slice,0] - origin) > min_time_buffer))[0]
-				# idel_s = np.where((rel_error_s > max_relative_error)*((pred_out[0,ind_s_perm_slice,1] - origin) > min_time_buffer))[0]
-				idel_p = np.where((rel_error_p > max_relative_error)*(np.abs(res_p) > min_time_buffer))[0]
-				idel_s = np.where((rel_error_s > max_relative_error)*(np.abs(res_s) > min_time_buffer))[0]
-				del_arv_p.append(len(idel_p))
-				del_arv_s.append(len(idel_s))
-						  
-				if len(idel_p) > 0:
-					arv_p = np.delete(arv_p, idel_p, axis = 0)
-					ind_p = np.delete(ind_p, idel_p, axis = 0)
-					Picks_P[i] = np.delete(Picks_P[i], idel_p, axis = 0)
-					Picks_P_perm[i] = np.delete(Picks_P_perm[i], idel_p, axis = 0)
-
-				if len(idel_s) > 0:
-					arv_s = np.delete(arv_s, idel_s, axis = 0)
-					ind_s = np.delete(ind_s, idel_s, axis = 0)
-					Picks_S[i] = np.delete(Picks_S[i], idel_s, axis = 0)
-					Picks_S_perm[i] = np.delete(Picks_S_perm[i], idel_s, axis = 0)
-				
+				arv_p, ind_p, arv_s, ind_s = np.copy(Picks_P_perm[i][:,0]), np.copy(Picks_P_perm[i][:,1].astype('int')), np.copy(Picks_S_perm[i][:,0]), np.copy(Picks_S_perm[i][:,1].astype('int'))
 				ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
-		
+
 				if len(ind_unique_arrivals) == 0:
 					srcs_trv.append(np.nan*np.ones((1, 4)))
-					# srcs_sigma.append(np.nan)
+					del_arv_p.append(0)
+					del_arv_s.append(0)
 					continue			
 				
+
 				perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
 				perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
 				locs_use_slice = locs_use[ind_unique_arrivals]
 				ind_p_perm_slice = perm_vec_arrivals[ind_p]
 				ind_s_perm_slice = perm_vec_arrivals[ind_s]
-				
 				if len(ind_p_perm_slice) > 0:
 					assert(ind_p_perm_slice.min() > -1)
 				if len(ind_s_perm_slice) > 0:
 					assert(ind_s_perm_slice.min() > -1)
 
-				if ((len(idel_p) > 0) + (len(idel_s) > 0)) > 0: ## If arrivals have been removed, re-locate
-					if (min_required_picks is not False)*(min_required_sta is not False):
-						if ((len(ind_unique_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
-							srcs_trv.append(np.nan*np.ones((1, 4)))
-							continue
-		
-					else:
-						if len(ind_unique_arrivals) == 0:
-							srcs_trv.append(np.nan*np.ones((1, 4)))
-							continue
-					
-					# if (len(list(set(skipped_p_ind).intersection(set(idel_p)))) == len(idel_p))*(len(list(set(skipped_s_ind).intersection(set(idel_s)))) == len(idel_s)):
-					if (set(idel_p).issubset(skipped_p_ind))*(set(idel_s).issubset(skipped_s_ind)):
-						print('Overlapped deleted indices %d %d'%(len(idel_p), len(idel_s)))
-						# pass ## In this case, quality removed picks are same as trimmed skipped indices
 
-						# inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
-						# inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
-						# # xmle, origin_rel, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
-						# xmle1, origin_rel1, _, _, _ = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
-						# origin1 = srcs_refined[i,3] + origin_rel1
+				overwrite_val = False ## Use previous location (since picks are the same)
+				if (inc_repeat == (repeat_iters - 1))*(inc_repeat > 0)*(use_overwrite_locations == True)*(i in iwhere_cnts):
+					xmle = src_matched[np.where(i == iwhere_cnts)[0][0]]
+					xmle, origin = xmle[0:3].reshape(1,-1), xmle[3]
+					logprob, skipped_p_ind, skipped_s_ind = np.nan, [], []
+					overwrite_val = True
 
-						# try:
-						# 	assert(np.linalg.norm(ftrns1(xmle) - ftrns1(xmle1), axis = 1).max() < 30e3)
-						# 	assert(np.abs(origin - origin1).item() < 10)
-						# except:
-						# 	print('Not same [2]')
-						# 	cnt_false1 += 1
+				else:
 
-					else:
-
-						inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
-						inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
-						xmle, origin_rel, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
-						origin = srcs_refined[i,3] + origin_rel
+					# xmle, origin, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, arv_p - srcs_refined[i,3], ind_p_perm_slice, arv_s - srcs_refined[i,3], ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
+					inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
+					inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
+					xmle, origin_rel, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
+					origin = srcs_refined[i,3] + origin_rel
 
 				if use_offset_quality_control == True:
 					offset_dist = np.linalg.norm(ftrns1(xmle.reshape(1,-1)) - ftrns1(srcs_refined[i,:].reshape(1,-1)), axis = 1)
@@ -1868,17 +1762,388 @@ for cnt, strs in enumerate([0]):
 						xmle = np.nan*np.ones((1, 3))
 						n_skipped += 1
 
+
 				if np.isnan(xmle).sum() > 0:
 					srcs_trv.append(np.nan*np.ones((1, 4)))
+					del_arv_p.append(0)
+					del_arv_s.append(0)
 					continue
 
-			else:
-				del_arv_p.append(0)
-				del_arv_s.append(0)
+				pred_out = trv(torch.Tensor(locs_use_slice).to(device), torch.Tensor(xmle).to(device)).cpu().detach().numpy() + origin
+				res_p = pred_out[0,ind_p_perm_slice,0] - arv_p
+				res_s = pred_out[0,ind_s_perm_slice,1] - arv_s
+
+				if (use_quality_check == True)*(overwrite_val == False):
+					tval_p = pred_out[0,ind_p_perm_slice,0] - origin
+					tval_s = pred_out[0,ind_s_perm_slice,1] - origin
+					tval_p[tval_p <= 0] = 0.01
+					tval_s[tval_s <= 0] = 0.01
+					rel_error_p = np.abs(res_p/tval_p)
+					rel_error_s = np.abs(res_s/tval_s)
+					# idel_p = np.where((rel_error_p > max_relative_error)*((pred_out[0,ind_p_perm_slice,0] - origin) > min_time_buffer))[0]
+					# idel_s = np.where((rel_error_s > max_relative_error)*((pred_out[0,ind_s_perm_slice,1] - origin) > min_time_buffer))[0]
+					idel_p = np.where((rel_error_p > max_relative_error)*(np.abs(res_p) > min_time_buffer))[0]
+					idel_s = np.where((rel_error_s > max_relative_error)*(np.abs(res_s) > min_time_buffer))[0]
+					del_arv_p.append(len(idel_p))
+					del_arv_s.append(len(idel_s))
+							  
+					if len(idel_p) > 0:
+						arv_p = np.delete(arv_p, idel_p, axis = 0)
+						ind_p = np.delete(ind_p, idel_p, axis = 0)
+						Picks_P[i] = np.delete(Picks_P[i], idel_p, axis = 0)
+						Picks_P_perm[i] = np.delete(Picks_P_perm[i], idel_p, axis = 0)
+
+					if len(idel_s) > 0:
+						arv_s = np.delete(arv_s, idel_s, axis = 0)
+						ind_s = np.delete(ind_s, idel_s, axis = 0)
+						Picks_S[i] = np.delete(Picks_S[i], idel_s, axis = 0)
+						Picks_S_perm[i] = np.delete(Picks_S_perm[i], idel_s, axis = 0)
+					
+					ind_unique_arrivals = np.sort(np.unique(np.concatenate((ind_p, ind_s), axis = 0)).astype('int'))
+			
+					if len(ind_unique_arrivals) == 0:
+						srcs_trv.append(np.nan*np.ones((1, 4)))
+						# srcs_sigma.append(np.nan)
+						continue			
+					
+					perm_vec_arrivals = -1*np.ones(locs_use.shape[0]).astype('int')
+					perm_vec_arrivals[ind_unique_arrivals] = np.arange(len(ind_unique_arrivals))
+					locs_use_slice = locs_use[ind_unique_arrivals]
+					ind_p_perm_slice = perm_vec_arrivals[ind_p]
+					ind_s_perm_slice = perm_vec_arrivals[ind_s]
+					
+					if len(ind_p_perm_slice) > 0:
+						assert(ind_p_perm_slice.min() > -1)
+					if len(ind_s_perm_slice) > 0:
+						assert(ind_s_perm_slice.min() > -1)
+
+					if ((len(idel_p) > 0) + (len(idel_s) > 0)) > 0: ## If arrivals have been removed, re-locate
+						if (min_required_picks is not False)*(min_required_sta is not False):
+							if ((len(ind_unique_arrivals) == 0) + ((len(arv_p) + len(arv_s)) < min_required_picks) + (len(np.unique(np.concatenate((ind_p, ind_s), axis = 0))) < min_required_sta)) > 0:
+								srcs_trv.append(np.nan*np.ones((1, 4)))
+								continue
+			
+						else:
+							if len(ind_unique_arrivals) == 0:
+								srcs_trv.append(np.nan*np.ones((1, 4)))
+								continue
+						
+						# if (len(list(set(skipped_p_ind).intersection(set(idel_p)))) == len(idel_p))*(len(list(set(skipped_s_ind).intersection(set(idel_s)))) == len(idel_s)):
+						if (set(idel_p).issubset(skipped_p_ind))*(set(idel_s).issubset(skipped_s_ind)):
+							print('Overlapped deleted indices %d %d'%(len(idel_p), len(idel_s)))
+							# pass ## In this case, quality removed picks are same as trimmed skipped indices
+
+							# inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
+							# inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
+							# # xmle, origin_rel, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-max_t/2.0, max_t/2.0], surface_profile = surface_profile, device = device)
+							# xmle1, origin_rel1, _, _, _ = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
+							# origin1 = srcs_refined[i,3] + origin_rel1
+
+							# try:
+							# 	assert(np.linalg.norm(ftrns1(xmle) - ftrns1(xmle1), axis = 1).max() < 30e3)
+							# 	assert(np.abs(origin - origin1).item() < 10)
+							# except:
+							# 	print('Not same [2]')
+							# 	cnt_false1 += 1
+
+						else:
+
+							inpt_rel_p = np.copy(arv_p - srcs_refined[i,3])
+							inpt_rel_s = np.copy(arv_s - srcs_refined[i,3])
+							xmle, origin_rel, logprob, skipped_p_ind, skipped_s_ind = differential_evolution_location_trim(trv, locs_use_slice, inpt_rel_p, ind_p_perm_slice, inpt_rel_s, ind_s_perm_slice, lat_range_extend, lon_range_extend, depth_range, [-3*src_t_kernel, 3*src_t_kernel], surface_profile = surface_profile, device = device)
+							origin = srcs_refined[i,3] + origin_rel
+
+					if use_offset_quality_control == True:
+						offset_dist = np.linalg.norm(ftrns1(xmle.reshape(1,-1)) - ftrns1(srcs_refined[i,:].reshape(1,-1)), axis = 1)
+						if offset_dist > offset_ratio_quality_control*src_x_kernel:
+							print('Removing event based on offset: %0.4d (%0.4f)'%(offset_dist, offset_dist/src_x_kernel))
+							xmle = np.nan*np.ones((1, 3))
+							n_skipped += 1
+
+					if np.isnan(xmle).sum() > 0:
+						srcs_trv.append(np.nan*np.ones((1, 4)))
+						continue
+
+				else:
+					del_arv_p.append(0)
+					del_arv_s.append(0)
 
 
-			srcs_trv.append(np.concatenate((xmle.reshape(-1)[0:3].reshape(1,-1), np.array([origin]).reshape(1,-1)), axis = 1))
-		
+				srcs_trv.append(np.concatenate((xmle.reshape(-1)[0:3].reshape(1,-1), np.array([origin]).reshape(1,-1)), axis = 1))
+	
+
+		else:
+
+
+			# ==============================================================================
+			# BATCHED LOOP REPLACEMENT (CONDITIONAL 2-PASS DE + UNIFIED QC)
+			# ==============================================================================
+
+
+			# [Phase 1] Map Global Station IDs -> Local Batch Indices (P & S)
+			#     │
+			# [Phase 2] Run Batched Pass 1 DE
+			#     │
+			# [Phase 3] Compute Residuals & Quality Control
+			#     ├── No QC Drops? ──────────> Mutate Global Matrices -> Finalize Location
+			#     └── QC Drops Active Picks? ─> Remap Surviving Station IDs -> Append to Pass 2
+			#                                        │
+			# [Phase 4] Run Batched Pass 2 DE ──────┘
+			#     │
+			#     └── Compute Unified Original Indices (P & S) -> Mutate Global Matrices -> Finalize Location
+			#                                        │
+			# [Phase 5] Aggregate Results into srcs_trv, del_arv_p, del_arv_s
+
+
+			num_srcs = srcs_refined.shape[0]
+			# MAX_BATCH_SIZE = 500
+
+			MAX_BATCH_SIZE = estimate_optimal_batch_size(
+				trv, 
+				avg_stations_per_event=20, 
+				de_pop_size=40, 
+				target_vram_fraction=0.65
+			)
+			print(f"Dynamically configured MAX_BATCH_SIZE: {MAX_BATCH_SIZE}")
+
+			def run_batched_de_in_chunks(event_list, bounds_min, bounds_max, chunk_size=500):
+				all_de_results = []
+				for start_idx in range(0, len(event_list), chunk_size):
+					chunk = event_list[start_idx : start_idx + chunk_size]
+					chunk_results = apply_batched_differential_evolution_location(
+						trv_pairwise, chunk, bounds_min, bounds_max, use_path_sigma = use_path_sigma,
+						surface_profile=surface_profile, device=device
+					)
+					all_de_results.extend(chunk_results)
+				return all_de_results
+
+			# --- Phase 1: Construct Input Objects for Pass 1 DE ---
+			event_data_pass1 = []
+			event_map_pass1 = []
+
+			for i in range(num_srcs):
+				arv_p, ind_p = np.copy(Picks_P_perm[i][:, 0]), np.copy(Picks_P_perm[i][:, 1].astype(int))
+				arv_s, ind_s = np.copy(Picks_S_perm[i][:, 0]), np.copy(Picks_S_perm[i][:, 1].astype(int))
+				ind_unique = np.unique(np.concatenate((ind_p, ind_s)))
+
+				if len(ind_unique) == 0:
+					event_map_pass1.append({'valid': False, 'orig_idx': i})
+					continue
+
+				perm_vec = -1 * np.ones(locs_use.shape[0], dtype=int)
+				perm_vec[ind_unique] = np.arange(len(ind_unique))
+				locs_slice = locs_use[ind_unique]
+
+				overwrite_val = ((inc_repeat == (repeat_iters - 1)) and (inc_repeat > 0) and 
+								 (use_overwrite_locations is True) and (i in iwhere_cnts))
+
+				if overwrite_val:
+					xmle_ov = src_matched[np.where(i == iwhere_cnts)[0][0]]
+					event_map_pass1.append({
+						'valid': True, 'overwrite': True, 'orig_idx': i,
+						'xmle': xmle_ov[0:3].reshape(1, -1), 'origin': xmle_ov[3],
+						'arv_p': arv_p, 'ind_p': ind_p, 'arv_s': arv_s, 'ind_s': ind_s
+					})
+				else:
+					t0_ref = srcs_refined[i, 3]
+					event_data_pass1.append({
+						'arv_p': arv_p - t0_ref, 'ind_p': perm_vec[ind_p],
+						'arv_s': arv_s - t0_ref, 'ind_s': perm_vec[ind_s],
+						'locs': locs_slice
+					})
+					event_map_pass1.append({
+						'valid': True, 'overwrite': False, 'orig_idx': i, 't0_ref': t0_ref,
+						'batch_de_idx': len(event_data_pass1) - 1,
+						'arv_p': arv_p, 'ind_p': ind_p, 'ind_p_slice': perm_vec[ind_p],
+						'arv_s': arv_s, 'ind_s': ind_s, 'ind_s_slice': perm_vec[ind_s],
+						'locs_slice': locs_slice
+					})
+
+			time_bound = [-3 * src_t_kernel, 3 * src_t_kernel]
+			bounds_min = [lat_range_extend[0], lon_range_extend[0], depth_range[0], time_bound[0]]
+			bounds_max = [lat_range_extend[1], lon_range_extend[1], depth_range[1], time_bound[1]]
+
+			# --- Phase 2: Execute Pass 1 DE ---
+			if len(event_data_pass1) > 0:
+				de_results_pass1 = run_batched_de_in_chunks(event_data_pass1, bounds_min, bounds_max, MAX_BATCH_SIZE)
+
+
+			# --- Phase 3: QC & Conditional Pass 2 Preparation ---
+			del_arv_p_dict, del_arv_s_dict = {}, {}
+			final_locations = {}
+			event_data_pass2 = []
+			event_map_pass2 = []
+
+			for item in event_map_pass1:
+				i = item['orig_idx']
+				if not item['valid']:
+					del_arv_p_dict[i] = del_arv_s_dict[i] = 0
+					continue
+
+				if item['overwrite']:
+					final_locations[i] = (item['xmle'], item['origin'], [], [])
+					continue
+
+				de_res = de_results_pass1[item['batch_de_idx']]
+				xmle, origin = de_res[0], item['t0_ref'] + de_res[1]
+				skipped_p, skipped_s = de_res[3], de_res[4]
+
+				if use_offset_quality_control:
+					offset_dist = np.linalg.norm(ftrns1(xmle.reshape(1, -1)) - ftrns1(srcs_refined[i, :].reshape(1, -1)), axis=1)
+					if offset_dist > offset_ratio_quality_control * src_x_kernel:
+						n_skipped += 1
+						final_locations[i] = (np.nan * np.ones((1, 3)), np.nan, [], [])
+						del_arv_p_dict[i] = del_arv_s_dict[i] = 0
+						continue
+
+				if np.isnan(xmle).sum() > 0:
+					final_locations[i] = (np.nan * np.ones((1, 3)), np.nan, [], [])
+					del_arv_p_dict[i] = del_arv_s_dict[i] = 0
+					continue
+
+				# Compute Residuals for Pass 1 Location
+				locs_gpu = torch.as_tensor(item['locs_slice'], dtype=torch.float32, device=device)
+				src_gpu = torch.as_tensor(xmle, dtype=torch.float32, device=device)
+				pred_out = trv(locs_gpu, src_gpu).cpu().detach().numpy() + origin
+
+				res_p = pred_out[0, item['ind_p_slice'], 0] - item['arv_p']
+				res_s = pred_out[0, item['ind_s_slice'], 1] - item['arv_s']
+
+				# Pick row indices trimmed by DE (0 <= k < N_picks)
+				skipped_p_arr = np.array(skipped_p, dtype=int) if len(skipped_p) > 0 else np.array([], dtype=int)
+				skipped_s_arr = np.array(skipped_s, dtype=int) if len(skipped_s) > 0 else np.array([], dtype=int)
+				
+				qc_p_ind = np.array([], dtype=int)
+				qc_s_ind = np.array([], dtype=int)
+
+				if use_quality_check:
+					tval_p = np.maximum(pred_out[0, item['ind_p_slice'], 0] - origin, 0.01)
+					tval_s = np.maximum(pred_out[0, item['ind_s_slice'], 1] - origin, 0.01)
+
+					qc_mask_p = (np.abs(res_p / tval_p) > max_relative_error) & (np.abs(res_p) > min_time_buffer)
+					qc_mask_s = (np.abs(res_s / tval_s) > max_relative_error) & (np.abs(res_s) > min_time_buffer)
+
+					qc_p_ind = np.where(qc_mask_p)[0]
+					qc_s_ind = np.where(qc_mask_s)[0]
+
+				# Combined pick row indices to delete across all arrays
+				idel_p = np.unique(np.concatenate((skipped_p_arr, qc_p_ind))).astype(int) if (len(skipped_p_arr) + len(qc_p_ind)) > 0 else np.array([], dtype=int)
+				idel_s = np.unique(np.concatenate((skipped_s_arr, qc_s_ind))).astype(int) if (len(skipped_s_arr) + len(qc_s_ind)) > 0 else np.array([], dtype=int)
+
+				del_arv_p_dict[i] = len(idel_p)
+				del_arv_s_dict[i] = len(idel_s)
+
+				# Filter local pick arrays (item['ind_p'] contains global station IDs)
+				arv_p_clean = np.delete(item['arv_p'], idel_p, axis=0) if len(idel_p) > 0 else item['arv_p']
+				ind_p_clean = np.delete(item['ind_p'], idel_p, axis=0) if len(idel_p) > 0 else item['ind_p']
+				arv_s_clean = np.delete(item['arv_s'], idel_s, axis=0) if len(idel_s) > 0 else item['arv_s']
+				ind_s_clean = np.delete(item['ind_s'], idel_s, axis=0) if len(idel_s) > 0 else item['ind_s']
+
+				# Minimum Pick & Station Validation
+				surviving_sta = np.unique(np.concatenate((ind_p_clean, ind_s_clean)))
+				if (min_required_picks is not False) and (min_required_sta is not False):
+					if (len(surviving_sta) == 0) or ((len(arv_p_clean) + len(arv_s_clean)) < min_required_picks) or (len(surviving_sta) < min_required_sta):
+						final_locations[i] = (np.nan * np.ones((1, 3)), np.nan, [], [])
+						continue
+				elif len(surviving_sta) == 0:
+					final_locations[i] = (np.nan * np.ones((1, 3)), np.nan, [], [])
+					continue
+
+				# CONDITIONAL PASS 2 CHECK
+				qc_dropped_active_p = not set(qc_p_ind).issubset(skipped_p_arr) if len(qc_p_ind) > 0 else False
+				qc_dropped_active_s = not set(qc_s_ind).issubset(skipped_s_arr) if len(qc_s_ind) > 0 else False
+
+				if qc_dropped_active_p or qc_dropped_active_s:
+					# Re-map surviving global station IDs to new contiguous slice indices
+					perm_vec_new = -1 * np.ones(locs_use.shape[0], dtype=int)
+					perm_vec_new[surviving_sta] = np.arange(len(surviving_sta))
+					
+					event_data_pass2.append({
+						'arv_p': arv_p_clean - item['t0_ref'], 'ind_p': perm_vec_new[ind_p_clean],
+						'arv_s': arv_s_clean - item['t0_ref'], 'ind_s': perm_vec_new[ind_s_clean],
+						'locs': locs_use[surviving_sta]
+					})
+					event_map_pass2.append({
+						'orig_idx': i, 't0_ref': item['t0_ref'], 'batch_de_idx': len(event_data_pass2) - 1,
+						'idel_p': idel_p, 'idel_s': idel_s
+					})
+				else:
+					# Pass 1 finalized: Mutate global matrices now
+					if len(idel_p) > 0:
+						Picks_P[i] = np.delete(Picks_P[i], idel_p, axis=0)
+						Picks_P_perm[i] = np.delete(Picks_P_perm[i], idel_p, axis=0)
+					if len(idel_s) > 0:
+						Picks_S[i] = np.delete(Picks_S[i], idel_s, axis=0)
+						Picks_S_perm[i] = np.delete(Picks_S_perm[i], idel_s, axis=0)
+					
+					final_locations[i] = (xmle, origin, skipped_p, skipped_s)
+
+
+			# --- Phase 4: Execute Pass 2 DE (Only for needed events) ---
+			if len(event_data_pass2) > 0:
+				de_results_pass2 = run_batched_de_in_chunks(event_data_pass2, bounds_min, bounds_max, MAX_BATCH_SIZE)
+
+				for item in event_map_pass2:
+					i = item['orig_idx']
+					de_res = de_results_pass2[item['batch_de_idx']]
+					xmle, origin = de_res[0], item['t0_ref'] + de_res[1]
+
+					if use_offset_quality_control:
+						offset_dist = np.linalg.norm(ftrns1(xmle.reshape(1, -1)) - ftrns1(srcs_refined[i, :].reshape(1, -1)), axis=1)
+						if offset_dist > offset_ratio_quality_control * src_x_kernel:
+							n_skipped += 1
+							final_locations[i] = (np.nan * np.ones((1, 3)), np.nan, [], [])
+							continue
+
+					pass2_skipped_p = np.array(de_res[3], dtype=int) if len(de_res[3]) > 0 else np.array([], dtype=int)
+					pass2_skipped_s = np.array(de_res[4], dtype=int) if len(de_res[4]) > 0 else np.array([], dtype=int)
+
+					# --- Single-Pass Index Remapping for P-Phases ---
+					combined_del_p = list(item['idel_p'])
+					if len(pass2_skipped_p) > 0:
+						surviving_orig_p = np.delete(np.arange(len(Picks_P[i])), item['idel_p'])
+						p2_dropped_orig_p = surviving_orig_p[pass2_skipped_p]
+						combined_del_p.extend(p2_dropped_orig_p)
+
+					# --- Single-Pass Index Remapping for S-Phases ---
+					combined_del_s = list(item['idel_s'])
+					if len(pass2_skipped_s) > 0:
+						surviving_orig_s = np.delete(np.arange(len(Picks_S[i])), item['idel_s'])
+						p2_dropped_orig_s = surviving_orig_s[pass2_skipped_s]
+						combined_del_s.extend(p2_dropped_orig_s)
+
+					# Apply unified deletions to global matrices
+					if len(combined_del_p) > 0:
+						Picks_P[i] = np.delete(Picks_P[i], combined_del_p, axis=0)
+						Picks_P_perm[i] = np.delete(Picks_P_perm[i], combined_del_p, axis=0)
+					if len(combined_del_s) > 0:
+						Picks_S[i] = np.delete(Picks_S[i], combined_del_s, axis=0)
+						Picks_S_perm[i] = np.delete(Picks_S_perm[i], combined_del_s, axis=0)
+
+					del_arv_p_dict[i] += len(pass2_skipped_p)
+					del_arv_s_dict[i] += len(pass2_skipped_s)
+
+					final_locations[i] = (xmle, origin, de_res[3], de_res[4])
+
+
+			# --- Phase 5: Final Aggregation ---
+			srcs_trv = []
+			del_arv_p = []
+			del_arv_s = []
+
+			for i in range(num_srcs):
+				del_arv_p.append(del_arv_p_dict.get(i, 0))
+				del_arv_s.append(del_arv_s_dict.get(i, 0))
+
+				if i in final_locations and not np.isnan(final_locations[i][0]).any():
+					xmle, origin, _, _ = final_locations[i]
+					srcs_trv.append(np.hstack([xmle.reshape(1, 3), np.array([[origin]])]))
+				else:
+					srcs_trv.append(np.nan * np.ones((1, 4)))
+
+
+
+
 		srcs_trv = np.vstack(srcs_trv)
 		del_arv_p = np.hstack(del_arv_p)
 		del_arv_s = np.hstack(del_arv_s)
@@ -2311,6 +2576,3 @@ for cnt, strs in enumerate([0]):
 		
 		print('Detected %d events'%(len(srcs_trv)))
 		print('Finished saving file %d %d %d'%(date[0], date[1], date[2]))
-
-
-
