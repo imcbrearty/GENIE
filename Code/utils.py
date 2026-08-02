@@ -117,7 +117,7 @@ def ecef2lla_diff(x, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908
 	
 	return torch.cat((180.0*lat[:,None]/pi, 180.0*lon[:,None]/pi, alt[:,None]), axis = 1)
 
-def lla2ecef_exact_scaled(p, scale_depth=1.0, a=6378137.0, e=0.0818191908426215):
+def lla2ecef_scaled(p, scale_depth=1.0, a=6378137.0, e=0.0818191908426215):
     """
     Exact 3D ECEF conversion with radial depth scaling.
     Zero projection distortion across arbitrarily large domains.
