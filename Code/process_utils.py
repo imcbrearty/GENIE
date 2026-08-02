@@ -40,6 +40,87 @@ with open('train_config.yaml', 'r') as file:
 eps = train_config['kernel_sig_t']*5.0 # Use this value to set resolution for the temporal embedding grid
 # scale_time = train_config['scale_time']
 
+# class LocalMarching(MessagePassing):
+
+#     def __init__(self, device="cpu"):
+#         super(LocalMarching, self).__init__(aggr="max")  # node dim
+#         self.device = device
+
+#     def forward(
+#         self,
+#         srcs,
+#         ftrns1,
+#         tc_win=5,
+#         sp_win=35e3,
+#         n_steps_max=100,
+#         tol=1e-12,
+#         scale_depth=1.0,
+#         use_directed=True,
+# 		return_indices = False,
+#     ):
+# 		if len(srcs) == 0:
+# 		    return (srcs, np.array([], dtype=int)) if return_indices else srcs
+# 		if len(srcs) == 1:
+# 		    return (srcs, np.array([0], dtype=int)) if return_indices else srcs
+
+# 		with torch.no_grad():		
+	
+# 	        # Convert to tensor on target device
+# 	        srcs_tensor = torch.tensor(srcs, dtype=torch.float32, device=self.device)
+	
+# 	        # 1. Coordinate calculation (identical to original scale vector logic)
+# 	        scale_vec = torch.tensor(
+# 	            [1.0, 1.0, scale_depth], dtype=torch.float32, device=self.device
+# 	        )
+# 	        xyz = (
+# 	            torch.tensor(ftrns1(srcs[:, 0:3]), dtype=torch.float32, device=self.device)
+# 	            * scale_vec
+# 	        )
+# 	        times = srcs_tensor[:, 3].view(-1, 1)
+	
+# 	        # 2. Replicate cKDTree dual radius queries via broadcast masking
+# 	        time_mask = torch.abs(times - times.T) <= tc_win
+# 	        space_mask = torch.cdist(xyz, xyz, p=2.0) <= sp_win
+	
+# 	        # Intersect masks (replaces the set intersection step)
+# 	        combined_mask = time_mask & space_mask
+# 	        edges = torch.nonzero(combined_mask).t().long().contiguous()
+	
+# 	        # 3. Handle directionality if requested
+# 	        if use_directed:
+# 	            # Matches your original logic: srcs_tensor[edges[1], -1] <= srcs_tensor[edges[0], -1]
+# 	            # Assumes column -1 is the comparison weight/maxima attribute
+# 				high_to_low = srcs_tensor[edges[0], -1] >= srcs_tensor[edges[1], -1]
+# 	    		edges = edges[:, high_to_low]
+	
+# 	        # 4. Global Propagation (Bypasses NetworkX completely since this is an isolated cluster)
+# 	        vals = srcs_tensor[:, 4].view(-1, 1)  # original: srcs[nodes, 4]
+# 	        vals_initial = vals.clone()
+	
+# 	        vtol = 1e9
+# 	        nt = 0
+# 	        num_nodes = srcs_tensor.size(0)
+	
+# 			while (vtol > tol) and (nt < n_steps_max):
+# 				vals0 = vals.clone()
+# 				vals = self.propagate(edges, x=vals, size = (num_nodes, num_nodes))
+# 				vtol = torch.max(torch.abs(vals - vals0)).item()
+# 				nt += 1
+	
+# 	        # 5. Extract results matching your starting state mask
+# 	        ip_slice = torch.where(torch.isclose(vals_initial[:, 0], vals[:, 0], rtol=tol))[
+# 	            0
+# 	        ]
+
+# 		if return_indices == False:
+		
+#         	return srcs[ip_slice.cpu().numpy()]
+
+# 		else:
+				
+#         	return srcs[ip_slice.cpu().numpy()], ip_slice.cpu().detach().numpy()
+
+
 class LocalMarching(MessagePassing):
 
     def __init__(self, device="cpu"):
@@ -56,63 +137,66 @@ class LocalMarching(MessagePassing):
         tol=1e-12,
         scale_depth=1.0,
         use_directed=True,
+        return_indices=False,
     ):
+        # 0. Early Exit Safeguards (Handles tuple vs array return expectations)
         if len(srcs) == 0:
-            return srcs
+            return (srcs, np.array([], dtype=int)) if return_indices else srcs
         if len(srcs) == 1:
-            return srcs  # Direct fallback matching your single node preservation logic
+            return (srcs, np.array([0], dtype=int)) if return_indices else srcs
 
-        # Convert to tensor on target device
-        srcs_tensor = torch.tensor(srcs, dtype=torch.float32, device=self.device)
+        with torch.no_grad():
+            # Convert to tensor on target device
+            srcs_tensor = torch.tensor(srcs, dtype=torch.float32, device=self.device)
 
-        # 1. Coordinate calculation (identical to original scale vector logic)
-        scale_vec = torch.tensor(
-            [1.0, 1.0, scale_depth], dtype=torch.float32, device=self.device
-        )
-        xyz = (
-            torch.tensor(ftrns1(srcs[:, 0:3]), dtype=torch.float32, device=self.device)
-            * scale_vec
-        )
-        times = srcs_tensor[:, 3].view(-1, 1)
+            # 1. Coordinate calculation
+            scale_vec = torch.tensor(
+                [1.0, 1.0, scale_depth], dtype=torch.float32, device=self.device
+            )
+            xyz = (
+                torch.tensor(ftrns1(srcs[:, 0:3]), dtype=torch.float32, device=self.device)
+                * scale_vec
+            )
+            times = srcs_tensor[:, 3].view(-1, 1)
 
-        # 2. Replicate cKDTree dual radius queries via broadcast masking
-        time_mask = torch.abs(times - times.T) <= tc_win
-        space_mask = torch.cdist(xyz, xyz, p=2.0) <= sp_win
+            # 2. Replicate cKDTree dual radius queries via broadcast masking
+            time_mask = torch.abs(times - times.T) <= tc_win
+            space_mask = torch.cdist(xyz, xyz, p=2.0) <= sp_win
 
-        # Intersect masks (replaces the set intersection step)
-        combined_mask = time_mask & space_mask
-        edges = torch.nonzero(combined_mask).t().long().contiguous()
+            # Intersect masks
+            combined_mask = time_mask & space_mask
+            edges = torch.nonzero(combined_mask).t().long().contiguous()
 
-        # 3. Handle directionality if requested
-        if use_directed:
-            # Matches your original logic: srcs_tensor[edges[1], -1] <= srcs_tensor[edges[0], -1]
-            # Assumes column -1 is the comparison weight/maxima attribute
-            max_val = torch.where(
-                srcs_tensor[edges[1], -1] <= srcs_tensor[edges[0], -1]
-            )[0]
-            edges = edges[:, max_val]
+            # 3. Handle directionality (Peak -> Neighbor high-to-low propagation)
+            if use_directed:
+                # Column -1 contains confidence/score. High-to-low edge direction allows
+                # peak values to flow outward and suppress subordinate neighbors.
+                high_to_low = srcs_tensor[edges[0], -1] >= srcs_tensor[edges[1], -1]
+                edges = edges[:, high_to_low]
 
-        # 4. Global Propagation (Bypasses NetworkX completely since this is an isolated cluster)
-        vals = srcs_tensor[:, 4].view(-1, 1)  # original: srcs[nodes, 4]
-        vals_initial = vals.clone()
+            # 4. Global Propagation
+            vals = srcs_tensor[:, 4].view(-1, 1)  # Assuming column 4 is score/value
+            vals_initial = vals.clone()
 
-        vtol = 1e9
-        nt = 0
-        num_nodes = srcs_tensor.size(0)
+            vtol = 1e9
+            nt = 0
+            num_nodes = srcs_tensor.size(0)
 
-		
-        while (vtol > tol) and (nt < n_steps_max):
-            vals0 = vals.clone()
-            vals = self.propagate(edges, x=vals, size = (num_nodes, num_nodes))
-            vtol = torch.max(torch.abs(vals - vals0)).item()
-            nt += 1
+            while (vtol > tol) and (nt < n_steps_max):
+                vals0 = vals.clone()
+                vals = self.propagate(edges, x=vals, size=(num_nodes, num_nodes))
+                vtol = torch.max(torch.abs(vals - vals0)).item()
+                nt += 1
 
-        # 5. Extract results matching your starting state mask
-        ip_slice = torch.where(torch.isclose(vals_initial[:, 0], vals[:, 0], rtol=tol))[
-            0
-        ]
+            # 5. Extract retained local peak indices
+            ip_slice = torch.where(torch.isclose(vals_initial[:, 0], vals[:, 0], rtol=tol))[0]
+            ip_retained_np = ip_slice.cpu().numpy()
 
-        return srcs[ip_slice.cpu().numpy()]
+            if return_indices:
+                return srcs[ip_retained_np], ip_retained_np
+            else:
+                return srcs[ip_retained_np]
+
 
 class LocalMarching1(MessagePassing): # make equivelent version with sum operations.
 	def __init__(self, device = 'cpu'):
