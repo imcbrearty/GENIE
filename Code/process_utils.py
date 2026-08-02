@@ -2381,6 +2381,43 @@ def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind
 #         batch_skipped_indices
 #     )
 
+
+def estimate_optimal_batch_size(
+    model, 
+    avg_stations_per_event=20, 
+    de_pop_size=40, 
+    target_vram_fraction=0.7, 
+    min_batch=50, 
+    max_batch=2000
+):
+    """
+    Dynamically estimates maximum batch size based on available GPU VRAM.
+    """
+    if not torch.cuda.is_available() or next(model.parameters()).device.type == 'cpu':
+        # CPU Memory Fallback: Stick to smaller batch size to prevent CPU thread thrashing
+        return 100
+
+    device = next(model.parameters()).device
+    total_vram = torch.cuda.get_device_properties(device).total_memory
+    allocated_vram = torch.cuda.memory_allocated(device)
+    free_vram = total_vram - allocated_vram
+
+    # Budget allocation (e.g., target 70% of available memory to avoid OOM spikes)
+    usable_vram_bytes = free_vram * target_vram_fraction
+
+    # Estimate bytes per single event pair pass:
+    # Forward pass: ~3 hidden layers with width 50 (fp32 = 4 bytes)
+    # Plus intermediate repeat/norm operations and DE population dimension (P)
+    bytes_per_eval = (avg_stations_per_event * de_pop_size) * (50 * 4 * 6) 
+    
+    # Calculate estimated batch capacity
+    est_batch = int(usable_vram_bytes / bytes_per_eval)
+
+    # Clamp bounds to safe limits
+    optimal_batch = int(np.clip(est_batch, min_batch, max_batch))
+    return optimal_batch
+
+
 def batched_differential_evolution_location_with_trim(
     trv_pairwise,
     flat_stations,      # (N_total_picks, 3)
