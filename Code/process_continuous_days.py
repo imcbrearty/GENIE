@@ -1019,7 +1019,8 @@ for cnt, strs in enumerate([0]):
 				scale_depth_clustering = 0.2
 				sub_srcs = Out_2_sparse[segment_indices[comp_mask]]
 				mp = LocalMarching(device = device) ## Check n_steps_max = 2
-				refined = mp(sub_srcs, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False)
+				# refined = mp(sub_srcs, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False)
+				refined = mp(sub_srcs, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 1, use_directed = True)
 				cnt_marching += 1
 
 				if len(refined) > 0:
@@ -1406,13 +1407,14 @@ for cnt, strs in enumerate([0]):
 	############### ############### ############### ###############
 
 	mp = LocalMarching(device = device)
-	srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
+	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
+	srcs_refined, ip_retained = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 1, return_indices = True, use_directed = True) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
 
 
 	## Rather than this matching, use bipartite assignment (however this can have memory issues)
-	tree_refined = cKDTree(np.concatenate((ftrns1(srcs_refined), scale_time*srcs_refined[:,[3]]), axis = 1))
-	ip_retained = tree_refined.query(np.concatenate((ftrns1(srcs_refined_1), scale_time*srcs_refined_1[:,[3]]), axis = 1))[1]
-	ip_retained = np.unique(ip_retained)
+	# tree_refined = cKDTree(np.concatenate((ftrns1(srcs_refined), scale_time*srcs_refined[:,[3]]), axis = 1))
+	# ip_retained = tree_refined.query(np.concatenate((ftrns1(srcs_refined_1), scale_time*srcs_refined_1[:,[3]]), axis = 1))[1]
+	# ip_retained = np.unique(ip_retained)
 
 	# tree_refined = cKDTree(ftrns1(srcs_refined))
 	# ip_retained = tree_refined.query(ftrns1(srcs_refined_1))[1]
