@@ -2067,46 +2067,45 @@ def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind
 
 
 
+
 def batched_differential_evolution_location_with_trim(
     trv_pairwise,
-    flat_stations,     # (N_total_picks, 3)
-    flat_arrivals,     # (N_total_picks,)
-    flat_phases,       # (N_total_picks,) 0 for P, 1 for S
-    flat_event_idx,    # (N_total_picks,) event index in [0, B-1]
-    flat_weights,      # (N_total_picks,)
-    bounds_min, bounds_max,  # [lat_min, lon_min, depth_min, time_min], [lat_max, ...]
+    flat_stations,      # (N_total_picks, 3) - Pre-grouped by event!
+    flat_arrivals,      # (N_total_picks,)
+    flat_phases,        # (N_total_picks,) 0 for P, 1 for S
+    flat_event_idx,     # (N_total_picks,) event index in [0, B-1]
+    flat_weights,       # (N_total_picks,)
+    bounds_min, bounds_max,  # [x_min, y_min, z_min, t_min], [x_max, ...]
     popsize=75, maxiter=400, trim=0.2, mutation=(0.5, 1.0),
     min_picks=5, sig_t=1.5, device='cuda', surface_profile=None,
     untrim_factor=1.25, polish=True, polish_iters=25
 ):
-    """
-    Batched GPU Differential Evolution with Post-Un-Trim Autograd Polish.
-    Processes B events with arbitrary/ragged station counts simultaneously.
-    """
     dev = torch.device(device)
-    B = int(flat_event_idx.max().item() + 1)  # Total events
-    N_total = flat_stations.shape[0]           # Total picks across batch
-    D = 4                                      # lat, lon, depth, origin_time
+    B = int(np.max(flat_event_idx) + 1)
+    N_total = flat_stations.shape[0]
+    D = 4
 
-    # Transfer flat tensors to GPU
     sta_gpu = torch.as_tensor(flat_stations, dtype=torch.float32, device=dev)
     arr_gpu = torch.as_tensor(flat_arrivals, dtype=torch.float32, device=dev)
     pha_gpu = torch.as_tensor(flat_phases, dtype=torch.long, device=dev)
     evt_gpu = torch.as_tensor(flat_event_idx, dtype=torch.long, device=dev)
     w_gpu   = torch.as_tensor(flat_weights, dtype=torch.float32, device=dev)
 
-    # Pre-calculate pick counts & trimming thresholds per event
-    ones = torch.ones(N_total, device=dev)
+    # --- 1. Pre-calculate Pick Counts & Trimming Thresholds ---
+    ones = torch.ones(N_total, device=dev, dtype=torch.long)
     picks_per_event = torch.zeros(B, dtype=torch.long, device=dev)
-    picks_per_event.scatter_add_(0, evt_gpu, ones.long())
+    picks_per_event.scatter_add_(0, evt_gpu, ones)
     
     num_trim_per_event = torch.floor(trim * picks_per_event.float()).long()
     keep_counts = picks_per_event - num_trim_per_event
 
-    # Clamp trimming so no event drops below min_picks
     too_few = keep_counts < min_picks
     num_trim_per_event[too_few] = torch.clamp(picks_per_event[too_few] - min_picks, min=0)
     keep_counts = picks_per_event - num_trim_per_event
+
+    # Offsets for Local Segment Ranking
+    event_starts = torch.cumsum(picks_per_event, dim=0) - picks_per_event if B > 1 else torch.zeros(1, dtype=torch.long, device=dev)
+    local_pick_idx = (torch.arange(N_total, device=dev) - event_starts[evt_gpu]).unsqueeze(1)
 
     # Prep Surface Profile Constants
     surf_data = None
@@ -2124,50 +2123,69 @@ def batched_differential_evolution_location_with_trim(
     b_max = torch.as_tensor(bounds_max, dtype=torch.float32, device=dev).view(1, 1, D)
     b_range = b_max - b_min
 
-    # --- 1. Objective Function for Global DE (Fixed % Trim) ---
+    # --- 2. Fully Vectorized Loss Function ---
     def compute_de_loss(coords_phys, t0_phys):
-        P = coords_phys.shape[1]  # PopSize
+        P = coords_phys.shape[1]
         
         sta_expanded = sta_gpu.repeat_interleave(P, dim=0)
         src_coords_expanded = coords_phys[evt_gpu].view(-1, 3)
         t0_expanded = t0_phys[evt_gpu].view(-1)
 
         pred_times_pair = trv_pairwise(sta_expanded, src_coords_expanded)
-        pha_expanded = pha_gpu.repeat_interleave(P)
-        pred_travel_times = pred_times_pair[torch.arange(N_total * P, device=dev), pha_expanded]
+        pha_expanded = pha_gpu.repeat_interleave(P).unsqueeze(1)
+        pred_travel_times = torch.gather(pred_times_pair, 1, pha_expanded).squeeze(1)
         pred_arrivals = pred_travel_times + t0_expanded
 
         arr_expanded = arr_gpu.repeat_interleave(P)
         w_expanded   = w_gpu.repeat_interleave(P)
+        
         sq_err = ((arr_expanded - pred_arrivals) ** 2) * w_expanded / (sig_t ** 2)
         sq_err = sq_err.view(N_total, P)
 
-        loss_matrix = torch.zeros((B, P), device=dev)
-        for b in range(B):
-            event_mask = (evt_gpu == b)
-            event_sq_err = sq_err[event_mask]
+        if trim > 0:
+            # Safe numeric offset sorting key without bitwise risks
+            encoded_keys = evt_gpu.unsqueeze(1).double() * 1e12 + sq_err.double()
+
+            # Vectorized GPU sort across dim=0
+            _, sort_indices = torch.sort(encoded_keys, dim=0)
             
-            n_trim_b = num_trim_per_event[b].item()
-            n_keep_b = keep_counts[b].item()
+            # Gather sorted values
+            sorted_sq_err = torch.gather(sq_err, 0, sort_indices)
+            sorted_evt = torch.gather(evt_gpu.unsqueeze(1).expand(-1, P), 0, sort_indices)
+            local_ranks = torch.gather(local_pick_idx.expand(-1, P), 0, sort_indices)
 
-            if n_trim_b > 0:
-                sorted_err, _ = torch.sort(event_sq_err, dim=0)
-                loss_matrix[b] = 0.5 * sorted_err[:n_keep_b].sum(dim=0) / n_keep_b
-            else:
-                loss_matrix[b] = 0.5 * event_sq_err.mean(dim=0)
+            # Apply per-event trim mask
+            keep_thresholds = keep_counts[sorted_evt]
+            keep_mask = (local_ranks < keep_thresholds)
 
-        # Apply Surface Penalty
+            kept_sq_err = torch.where(keep_mask, sorted_sq_err, 0.0)
+            
+            # Scatter sum back to (B, P) loss matrix
+            loss_matrix = torch.zeros((B, P), device=dev)
+            loss_matrix.scatter_add_(0, sorted_evt, kept_sq_err)
+            loss_matrix = 0.5 * (loss_matrix / keep_counts.unsqueeze(1).float())
+
+        else:
+            loss_matrix = torch.zeros((B, P), device=dev)
+            evt_gpu_expanded = evt_gpu.unsqueeze(1).expand(-1, P)
+            loss_matrix.scatter_add_(0, evt_gpu_expanded, sq_err)
+            loss_matrix = 0.5 * (loss_matrix / picks_per_event.float().unsqueeze(1))
+
+        # Surface Topography Penalty
         if surf_data:
             x1, x2, z = coords_phys[:, :, 0], coords_phys[:, :, 1], coords_phys[:, :, 2]
             i1 = torch.clamp(((x1 - surf_data['x1_min']) / surf_data['dx1']).long(), 0, surf_data['n1'] - 1)
             i2 = torch.clamp(((x2 - surf_data['x2_min']) / surf_data['dx2']).long(), 0, surf_data['n2'] - 1)
-            surf_elev = surf_data['elev'][i1 + i2 * surf_data['n1']]
+            
+            flat_grid_idx = i1 + i2 * surf_data['n1']
+            surf_elev = surf_data['elev'][flat_grid_idx]
+            
             air_mask = (z < surf_elev)
             loss_matrix = torch.where(air_mask, loss_matrix + 1e5, loss_matrix)
 
         return loss_matrix
 
-    # --- 2. Initialize and Run Differential Evolution Loop ---
+    # --- 3. DE Optimization Loop ---
     pop_norm = torch.rand((B, popsize, D), device=dev)
 
     with torch.no_grad():
@@ -2175,18 +2193,23 @@ def batched_differential_evolution_location_with_trim(
         t_phys = b_min[:, :, 3:4] + pop_norm[:, :, 3:4] * b_range[:, :, 3:4]
         loss = compute_de_loss(c_phys, t_phys)
 
+    self_idx = torch.arange(popsize, device=dev).unsqueeze(0).unsqueeze(-1)
+
     for g in range(maxiter):
         F = mutation[0] + torch.rand(1, device=dev).item() * (mutation[1] - mutation[0])
         CR = 0.9
 
         best_idx = torch.argmin(loss, dim=1)
-        best_pop = torch.gather(pop_norm, 1, best_idx.view(B, 1, 1).expand(-1, -1, D))
+        best_pop = torch.gather(pop_norm, 1, best_idx.view(B, 1, 1).expand(B, 1, D))
 
-        idx = torch.argsort(torch.rand((B, popsize, popsize), device=dev), dim=-1)
+        # Random candidate selection excluding self
+        rand_weights = torch.rand((B, popsize, popsize), device=dev)
+        rand_weights.scatter_(2, self_idx.expand(B, popsize, 1), -1.0)
+        idx = torch.argsort(rand_weights, dim=-1, descending=True)
         r1, r2 = idx[:, :, 0], idx[:, :, 1]
         
-        x_r1 = torch.gather(pop_norm, 1, r1.unsqueeze(-1).expand(-1, -1, D))
-        x_r2 = torch.gather(pop_norm, 1, r2.unsqueeze(-1).expand(-1, -1, D))
+        x_r1 = torch.gather(pop_norm, 1, r1.unsqueeze(-1).expand(B, popsize, D))
+        x_r2 = torch.gather(pop_norm, 1, r2.unsqueeze(-1).expand(B, popsize, D))
 
         mutant = torch.clamp(best_pop + F * (x_r1 - x_r2), 0.0, 1.0)
 
@@ -2205,12 +2228,11 @@ def batched_differential_evolution_location_with_trim(
         pop_norm = torch.where(improved.unsqueeze(-1), trial_pop_norm, pop_norm)
         loss = torch.where(improved, trial_loss, loss)
 
-    # Extract DE Winners
     best_idx = torch.argmin(loss, dim=1)
-    best_sol_norm = torch.gather(pop_norm, 1, best_idx.view(B, 1, 1).expand(-1, -1, D)).squeeze(1)
-    de_sol_phys = b_min.squeeze(1) + best_sol_norm * b_range.squeeze(1)
+    best_sol_norm = torch.gather(pop_norm, 1, best_idx.view(B, 1, 1).expand(B, 1, D)).view(B, D)
+    de_sol_phys = b_min.view(B, D) + best_sol_norm * b_range.view(B, D)
 
-    # --- 3. Compute Residuals & Build Un-Trimmed Active Mask ---
+    # --- 4. Compute Residuals & Build Active Mask ---
     active_pick_mask = torch.ones(N_total, dtype=torch.bool, device=dev)
     batch_skipped_indices = []
 
@@ -2222,39 +2244,36 @@ def batched_differential_evolution_location_with_trim(
         t0_expanded = t_de[evt_gpu].view(-1)
 
         pred_times_pair = trv_pairwise(sta_gpu, src_coords_expanded)
-        pred_travel_times = pred_times_pair[torch.arange(N_total, device=dev), pha_gpu]
+        pred_travel_times = torch.gather(pred_times_pair, 1, pha_gpu.unsqueeze(1)).squeeze(1)
         pred_arrivals = pred_travel_times + t0_expanded
 
-        weighted_abs_res = (torch.abs(arr_gpu - pred_arrivals) * torch.sqrt(w_gpu) / sig_t).cpu().numpy()
+        weighted_abs_res = torch.abs(arr_gpu - pred_arrivals) * torch.sqrt(w_gpu) / sig_t
 
         for b in range(B):
-            mask = (flat_event_idx == b)
+            mask = (evt_gpu == b)
             event_res = weighted_abs_res[mask]
-            event_pick_indices = np.where(mask)[0]
+            event_pick_indices = torch.where(mask)[0]
             
             n_trim_b = num_trim_per_event[b].item()
-            if n_trim_b > 0:
-                sort_idx = np.argsort(event_res)
-                keep_cnt = keep_counts[b].item()
+            keep_cnt = keep_counts[b].item()
 
+            if n_trim_b > 0 and keep_cnt > 0:
+                sort_idx = torch.argsort(event_res)
                 max_kept = event_res[sort_idx[:keep_cnt]].max()
                 candidates = sort_idx[keep_cnt:]
                 
                 floor_buffer = 0.10 / sig_t
-                tolerance = max(max_kept * untrim_factor, max_kept + floor_buffer)
+                tolerance = torch.max(max_kept * untrim_factor, max_kept + floor_buffer)
 
-                # Identify true outliers
-                skipped_local = [idx for idx in candidates if event_res[idx] > tolerance]
+                skipped_local = candidates[event_res[candidates] > tolerance]
                 global_skipped = event_pick_indices[skipped_local]
                 
-                batch_skipped_indices.append(global_skipped)
-                
-                # Exclude ONLY true outliers from polish
+                batch_skipped_indices.append(global_skipped.cpu().numpy())
                 active_pick_mask[global_skipped] = False
             else:
                 batch_skipped_indices.append(np.array([], dtype=int))
 
-    # --- 4. Autograd Polish (Includes valid + un-trimmed picks; Excludes outliers) ---
+    # --- 5. Autograd Polish ---
     best_sol_phys = de_sol_phys.detach().clone()
     
     if polish:
@@ -2264,17 +2283,15 @@ def batched_differential_evolution_location_with_trim(
         for _ in range(polish_iters):
             optimizer.zero_grad()
             
-            # Forward pass using ONLY active (non-outlier) picks
             src_coords_expanded = best_sol_phys[:, 0:3][evt_gpu].view(-1, 3)
             t0_expanded = best_sol_phys[:, 3][evt_gpu].view(-1)
 
             pred_times_pair = trv_pairwise(sta_gpu, src_coords_expanded)
-            pred_travel_times = pred_times_pair[torch.arange(N_total, device=dev), pha_gpu]
+            pred_travel_times = torch.gather(pred_times_pair, 1, pha_gpu.unsqueeze(1)).squeeze(1)
             pred_arrivals = pred_travel_times + t0_expanded
 
             sq_err = ((arr_gpu - pred_arrivals) ** 2) * w_gpu / (sig_t ** 2)
             
-            # Zero out losses from true outliers
             masked_sq_err = sq_err * active_pick_mask.float()
             p_loss = 0.5 * masked_sq_err.sum()
             
@@ -2282,17 +2299,16 @@ def batched_differential_evolution_location_with_trim(
             optimizer.step()
 
             with torch.no_grad():
-                best_sol_phys.clamp_(b_min.squeeze(), b_max.squeeze())
+                best_sol_phys.clamp_(b_min.view(1, D), b_max.view(1, D))
 
     final_coords = best_sol_phys[:, 0:3].detach()
     final_time = best_sol_phys[:, 3].detach()
 
-    # Calculate final probabilities per event
     with torch.no_grad():
         c_f = final_coords.unsqueeze(1)
         t_f = final_time.view(B, 1, 1)
-        final_loss = compute_de_loss(c_f, t_f)  # (B, 1)
-        final_prob = -final_loss.squeeze(-1).cpu().numpy()
+        final_loss = compute_de_loss(c_f, t_f)
+        final_prob = -final_loss.view(B).cpu().numpy()
 
     return (
         final_coords.cpu().numpy(),
@@ -2302,24 +2318,14 @@ def batched_differential_evolution_location_with_trim(
     )
 
 
+
+
 def apply_batched_differential_evolution_location(
     trv_pairwise, event_data_list, bounds_min, bounds_max, **kwargs
 ):
     """
     Wrapper function that formats ragged event data, runs flat GPU DE, 
-    and converts results back to individual per-event outputs matching the legacy code.
-    
-    Input event_data_list: List of dicts, each containing:
-      {
-         'locs': (N_sta, 3) array,
-         'arv_p': 1D array, 'ind_p': 1D array of P indices in locs,
-         'arv_s': 1D array, 'ind_s': 1D array of S indices in locs,
-         'weight': [w_p, w_s] or 1D array of pick weights
-      }
-      
-    Returns:
-      List of tuples matching legacy return structure:
-      [(final_coords, final_time, final_prob, skipped_p, skipped_s), ...]
+    and converts results back to individual per-event outputs matching legacy code.
     """
     flat_stations = []
     flat_arrivals = []
@@ -2329,6 +2335,8 @@ def apply_batched_differential_evolution_location(
     
     # Track local P and S pick index mappings for demuxing
     event_pick_maps = []
+    
+    valid_event_b_indices = []
 
     for b, evt in enumerate(event_data_list):
         arv_p = evt['arv_p']
@@ -2346,6 +2354,9 @@ def apply_batched_differential_evolution_location(
             event_pick_maps.append(None)
             continue
 
+        # Track valid events
+        valid_event_b_indices.append(b)
+
         # Extract station coordinates for P and S picks
         p_stations = locs[ind_p] if n_p > 0 else np.empty((0, 3))
         s_stations = locs[ind_s] if n_s > 0 else np.empty((0, 3))
@@ -2358,31 +2369,33 @@ def apply_batched_differential_evolution_location(
             w_p = np.full(n_p, w_in[0])
             w_s = np.full(n_s, w_in[1])
 
-        # Concatenate into flat arrays
+        # Concatenate into flat arrays using the internal valid index (0 to B_valid - 1)
+        b_valid = len(valid_event_b_indices) - 1
+        
         flat_stations.append(np.vstack([p_stations, s_stations]))
         flat_arrivals.append(np.concatenate([arv_p, arv_s]))
         flat_phases.append(np.concatenate([np.zeros(n_p, dtype=int), np.ones(n_s, dtype=int)]))
         flat_weights.append(np.concatenate([w_p, w_s]))
-        flat_event_idx.append(np.full(n_picks, b, dtype=int))
+        flat_event_idx.append(np.full(n_picks, b_valid, dtype=int))
 
         # Store mapping to map flat skipped pick indices back to local P/S indices
         event_pick_maps.append({'n_p': n_p, 'n_s': n_s})
 
-    # Edge case: No valid events in list
+    # Edge case: No valid events in entire list
     if len(flat_stations) == 0:
         return [
             (np.nan * np.ones((1, 3)), np.nan, np.nan, np.array([]), np.array([]))
             for _ in event_data_list
         ]
 
-    # Combine into unified flat 1D/2D arrays
+    # Combine into unified flat arrays
     flat_sta = np.vstack(flat_stations)
     flat_arr = np.concatenate(flat_arrivals)
     flat_pha = np.concatenate(flat_phases)
     flat_evt = np.concatenate(flat_event_idx)
     flat_w   = np.concatenate(flat_weights)
 
-    # Execute GPU Optimization
+    # Execute GPU Optimization across valid events
     final_coords, final_time, final_prob, batch_skipped_global = batched_differential_evolution_location_with_trim(
         trv_pairwise, flat_sta, flat_arr, flat_pha, flat_evt, flat_w,
         bounds_min, bounds_max, **kwargs
@@ -2390,26 +2403,27 @@ def apply_batched_differential_evolution_location(
 
     # Demux results back into per-event legacy outputs
     legacy_results = []
-    
+    valid_counter = 0
+
     for b in range(len(event_data_list)):
         pick_map = event_pick_maps[b]
         
-        # Handle empty/zero-pick events
+        # Handle empty/zero-pick events safely
         if pick_map is None:
             legacy_results.append((
                 np.nan * np.ones((1, 3)), np.nan, np.nan, np.array([]), np.array([])
             ))
             continue
 
-        c_b = final_coords[b].reshape(1, -1)
-        t_b = final_time[b]
-        p_b = final_prob[b]
+        c_b = final_coords[valid_counter].reshape(1, -1)
+        t_b = final_time[valid_counter]
+        p_b = final_prob[valid_counter]
 
         # Convert global flat skipped indices back to local event P and S indices
-        global_skipped = batch_skipped_global[b]
+        global_skipped = batch_skipped_global[valid_counter]
         
-        # Find global starting index offset for event b in flat array
-        event_start_idx = np.where(flat_evt == b)[0][0]
+        # Find global starting index offset for valid_counter in flat array
+        event_start_idx = np.where(flat_evt == valid_counter)[0][0]
         local_skipped = global_skipped - event_start_idx
 
         n_p = pick_map['n_p']
@@ -2417,9 +2431,9 @@ def apply_batched_differential_evolution_location(
         skipped_s = np.array([idx - n_p for idx in local_skipped if idx >= n_p], dtype=int)
 
         legacy_results.append((c_b, t_b, p_b, skipped_p, skipped_s))
+        valid_counter += 1
 
     return legacy_results
-
 
 def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
 
