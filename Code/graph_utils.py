@@ -8021,15 +8021,157 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), vel_pha
 #     return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
 
 
-def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
-                                     k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, W_t=3.0, vel_avg=6500.0, vel_min=4875.0,
-                                     r_min=None, r_max=None, use_global=False, num_candidates=50000, device='cpu'):
-    import torch
-    import numpy as np
+# def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
+#                                      k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, W_t=3.0, vel_avg=6500.0, vel_min=4875.0,
+#                                      r_min=None, r_max=None, use_global=False, num_candidates=50000, device='cpu'):
+#     import torch
+#     import numpy as np
 
+#     device = torch.device(device)
+#     station_xyz = torch.tensor(ftrns1(station_latlonz), device=device, dtype=torch.float32)
+    
+#     src_true_init = np.array([np.mean(domain_lat_range), np.mean(domain_lon_range), np.mean(domain_depth_range)]).reshape(1, -1)
+#     src_true_init_xyz = torch.tensor(ftrns1(src_true_init), device=device, dtype=torch.float32)
+#     all_dists_init = torch.cdist(src_true_init_xyz, station_xyz).squeeze(0)
+#     _, sta_idx_init = torch.topk(all_dists_init, k=k_stations, largest=False)
+    
+#     active_cluster_dists = torch.cdist(station_xyz[sta_idx_init], station_xyz[sta_idx_init])
+#     local_aperture = torch.max(active_cluster_dists).item()
+    
+#     # # --- Adaptive Scaling Engine Restored ---
+#     # if local_aperture < 300000.0:
+#     #     vel_avg = 3500.0
+#     #     vel_min = 2500.0
+#     # elif local_aperture < 1500000.0:
+#     #     vel_avg = 4700.0
+#     #     vel_min = 4000.0
+#     # else:
+#     #     vel_avg = 6500.0
+#     #     vel_min = 5000.0                                         
+
+#     # --- Corrected P-Wave Adaptive Velocity Engine ---
+
+#     override_vc = True
+#     if override_vc == True:
+#         if local_aperture < 100000.0:         # < 100 km (Local / High-frequency Regional)
+#             vel_avg = 6000.0                   # Upper crustal P-wave (Pg)
+#             vel_min = 5500.0
+#         elif local_aperture < 1000000.0:      # 100 km to 1,000 km (Regional)
+#             vel_avg = 8000.0                   # Mantle lid / Refracted P-wave (Pn)
+#             vel_min = 7200.0
+#         elif local_aperture < 3000000.0:      # 1,000 km to 3,000 km (Regional-to-Teleseismic)
+#             vel_avg = 10000.0                  # Upper-to-lower mantle transitions
+#             vel_min = 8500.0
+#         else:                                 # > 3,000 km (Global Teleseismic Array)
+#             vel_avg = 13000.0                  # Deep lower mantle P-waves (P/Pdiff)
+#             vel_min = 10500.0
+            
+
+#     d_array = 1.2 * local_aperture
+#     max_radius_m = d_array / 2.0
+#     max_dt = d_array / vel_min
+    
+#     src_true = np.array([np.random.uniform(*domain_lat_range), np.random.uniform(*domain_lon_range), np.random.uniform(*domain_depth_range)]).reshape(1, -1)
+#     src_true_xyz = torch.tensor(ftrns1(src_true), device=device, dtype=torch.float32)
+
+#     trial_points, _ = regular_sobolov(num_candidates, lat_range=domain_lat_range, lon_range=domain_lon_range, depth_range=domain_depth_range, time_range=max_dt, use_time=True, use_global=use_global, scale_time=vel_avg, N_target=num_candidates, buffer_scale=0.0, r_min=r_min, r_max=r_max)
+#     trial_points = torch.Tensor(trial_points).to(device)
+
+#     all_dists = torch.cdist(src_true_xyz, station_xyz).squeeze(0)
+#     _, sta_idx = torch.topk(all_dists, k=k_stations, largest=False)
+#     active_stas_xyz = station_xyz[sta_idx]
+    
+#     # Unpack trial candidates explicitly to feed the scale-agnostic layout
+#     cand_xyz = torch.tensor(ftrns1(trial_points[:, :3].cpu().numpy()), device=device, dtype=torch.float32)
+#     cand_dt = trial_points[:, 3]
+
+#     # --- Scale-Agnostic Engine Execution ---
+#     if local_aperture < 300000.0:
+#         t_obs = torch.norm(active_stas_xyz - src_true_xyz, dim=1) / vel_avg
+#         t_calc = torch.cdist(cand_xyz, active_stas_xyz) / vel_avg
+#     else:
+#         a, b = 6378137.0, 6356752.3142
+#         sta_norm = active_stas_xyz / torch.norm(active_stas_xyz, dim=1, keepdim=True)
+#         src_true_norm = src_true_xyz / torch.norm(src_true_xyz, dim=1, keepdim=True)
+#         cand_norm = cand_xyz / torch.norm(cand_xyz, dim=1, keepdim=True)
+        
+#         r_stas = a * b / torch.sqrt((b * sta_norm[:, 0])**2 + (b * sta_norm[:, 1])**2 + (a * sta_norm[:, 2])**2)
+#         r_src_true = a * b / torch.sqrt((b * src_true_norm[:, 0])**2 + (b * src_true_norm[:, 1])**2 + (a * src_true_norm[:, 2])**2)
+#         r_cand = a * b / torch.sqrt((b * cand_norm[:, 0])**2 + (b * cand_norm[:, 1])**2 + (a * cand_norm[:, 2])**2)
+        
+#         cos_theta_true = torch.clamp(torch.mm(src_true_norm, sta_norm.T), -1.0, 1.0).squeeze(0)
+#         t_obs = (torch.acos(cos_theta_true) * (0.5 * (r_stas + r_src_true))) / vel_avg
+        
+#         r_avg_matrix = 0.5 * (r_cand.unsqueeze(1) + r_stas.unsqueeze(0))
+#         cos_theta_cand = torch.clamp(torch.mm(cand_norm, sta_norm.T), -1.0, 1.0)
+#         t_calc = (torch.acos(cos_theta_cand) * r_avg_matrix) / vel_avg
+
+#     t_obs_picks = np.concatenate((t_obs.cpu().numpy().reshape(-1, 1), sta_idx.cpu().numpy().reshape(-1, 1)), axis=1)
+    
+#     # Scope Parameters Safely Restored
+#     W_t_scalar = 1.0
+#     rel_threshold = k_stations * 0.15                                         
+#     mismatch = torch.abs((t_obs.unsqueeze(0) - t_calc) - cand_dt.unsqueeze(1))
+#     coherence = torch.exp(-mismatch / (W_t_scalar*W_t)).sum(dim=1)
+
+#     # Box-Intersection Suppression Gate
+#     d_space_true = torch.norm(cand_xyz - src_true_xyz, dim=1)
+#     d_time_true = torch.abs(cand_dt - 0.0)
+    
+#     is_inside_spatial_core = d_space_true <= (W_phys_m * 1.5)
+#     is_inside_temporal_core = d_time_true <= (W_t * 1.5)
+#     is_main_peak = is_inside_spatial_core & is_inside_temporal_core
+#     valid_mask = (~is_main_peak) & (coherence > rel_threshold)
+    
+#     candidate_indices = torch.where(valid_mask)[0]
+#     srcs_init = torch.cat((trial_points[candidate_indices], coherence[candidate_indices].reshape(-1,1)), dim=1)
+#     peaks = []
+
+#     # while len(srcs_init) > int(0.02*num_candidates):
+#     #     n_remove = np.minimum(len(srcs_init) - int(0.02*num_candidates), int(len(srcs_init)/3))
+#     #     idel = np.sort(np.random.choice(len(srcs_init), size=n_remove, replace=False))
+#     #     srcs_init = torch.Tensor(np.delete(srcs_init.cpu().detach().numpy(), idel, axis=0)).to(device)
+                                         
+#     # Sort candidates by coherence score (column index 4) descending and take top N
+#     if len(srcs_init) > int(0.02 * num_candidates):
+#         max_keep = int(0.02 * num_candidates)
+#         _, top_indices = torch.topk(srcs_init[:, 4], k=max_keep)
+#         srcs_init = srcs_init[top_indices]
+
+#     if len(srcs_init) > 0:
+#         mp = LocalMarching(device=device)
+#         srcs_maxima = mp(srcs_init.cpu().detach().numpy(), ftrns1, tc_win=W_t, sp_win=(1.5*W_phys_m), scale_depth=0.2, n_steps_max=2)
+#         srcs_maxima = torch.Tensor(srcs_maxima).to(device)
+
+#         if len(srcs_maxima) > 0:
+#             for i in range(len(srcs_maxima)):
+#                 p_coord = srcs_maxima[i]
+#                 p_xyz = torch.tensor(ftrns1(p_coord[:3].cpu().numpy().reshape(1,-1)), device=device).reshape(-1)
+#                 d_s_final = torch.norm(p_xyz - src_true_xyz)
+#                 d_t_final = torch.abs(p_coord[3] - 0.0) * vel_avg
+                
+#                 peaks.append({
+#                     'pos': p_xyz, 'pos_src': p_coord[:3].cpu().numpy(), 'val': srcs_maxima[i,4],
+#                     'dt_offset': p_coord[3].item(), 'dist_offset_m': d_s_final.item(),
+#                     'dist_4d_m': torch.sqrt(d_s_final**2 + d_t_final**2).item()
+#                 })
+
+#     return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
+
+
+# import torch
+# import numpy as np
+
+def probe_network_sidelobes_geodetic(
+    station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, 
+    ftrns1, ftrns2, k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, 
+    W_t=3.0, vel_avg=6500.0, vel_min=4875.0, r_min=None, r_max=None, 
+    use_global=False, num_candidates=50000, device='cpu'
+):
     device = torch.device(device)
     station_xyz = torch.tensor(ftrns1(station_latlonz), device=device, dtype=torch.float32)
     
+    # 1. Initialize Array Aperture
     src_true_init = np.array([np.mean(domain_lat_range), np.mean(domain_lon_range), np.mean(domain_depth_range)]).reshape(1, -1)
     src_true_init_xyz = torch.tensor(ftrns1(src_true_init), device=device, dtype=torch.float32)
     all_dists_init = torch.cdist(src_true_init_xyz, station_xyz).squeeze(0)
@@ -8038,54 +8180,46 @@ def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_l
     active_cluster_dists = torch.cdist(station_xyz[sta_idx_init], station_xyz[sta_idx_init])
     local_aperture = torch.max(active_cluster_dists).item()
     
-    # # --- Adaptive Scaling Engine Restored ---
-    # if local_aperture < 300000.0:
-    #     vel_avg = 3500.0
-    #     vel_min = 2500.0
-    # elif local_aperture < 1500000.0:
-    #     vel_avg = 4700.0
-    #     vel_min = 4000.0
-    # else:
-    #     vel_avg = 6500.0
-    #     vel_min = 5000.0                                         
-
-    # --- Corrected P-Wave Adaptive Velocity Engine ---
-
+    # 2. P-Wave Adaptive Velocity Scaling
     override_vc = True
-    if override_vc == True:
-        if local_aperture < 100000.0:         # < 100 km (Local / High-frequency Regional)
-            vel_avg = 6000.0                   # Upper crustal P-wave (Pg)
-            vel_min = 5500.0
+    if override_vc:
+        if local_aperture < 100000.0:          # < 100 km (Local)
+            vel_avg, vel_min = 6000.0, 5500.0
         elif local_aperture < 1000000.0:      # 100 km to 1,000 km (Regional)
-            vel_avg = 8000.0                   # Mantle lid / Refracted P-wave (Pn)
-            vel_min = 7200.0
+            vel_avg, vel_min = 8000.0, 7200.0
         elif local_aperture < 3000000.0:      # 1,000 km to 3,000 km (Regional-to-Teleseismic)
-            vel_avg = 10000.0                  # Upper-to-lower mantle transitions
-            vel_min = 8500.0
-        else:                                 # > 3,000 km (Global Teleseismic Array)
-            vel_avg = 13000.0                  # Deep lower mantle P-waves (P/Pdiff)
-            vel_min = 10500.0
+            vel_avg, vel_min = 10000.0, 8500.0
+        else:                                 # > 3,000 km (Global Teleseismic)
+            vel_avg, vel_min = 13000.0, 10500.0
             
-
     d_array = 1.2 * local_aperture
     max_radius_m = d_array / 2.0
     max_dt = d_array / vel_min
     
-    src_true = np.array([np.random.uniform(*domain_lat_range), np.random.uniform(*domain_lon_range), np.random.uniform(*domain_depth_range)]).reshape(1, -1)
+    # 3. Generate Ground-Truth Target & Candidate Grid
+    src_true = np.array([
+        np.random.uniform(*domain_lat_range), 
+        np.random.uniform(*domain_lon_range), 
+        np.random.uniform(*domain_depth_range)
+    ]).reshape(1, -1)
     src_true_xyz = torch.tensor(ftrns1(src_true), device=device, dtype=torch.float32)
 
-    trial_points, _ = regular_sobolov(num_candidates, lat_range=domain_lat_range, lon_range=domain_lon_range, depth_range=domain_depth_range, time_range=max_dt, use_time=True, use_global=use_global, scale_time=vel_avg, N_target=num_candidates, buffer_scale=0.0, r_min=r_min, r_max=r_max)
-    trial_points = torch.Tensor(trial_points).to(device)
+    trial_points, _ = regular_sobolov(
+        num_candidates, lat_range=domain_lat_range, lon_range=domain_lon_range, 
+        depth_range=domain_depth_range, time_range=max_dt, use_time=True, 
+        use_global=use_global, scale_time=vel_avg, N_target=num_candidates, 
+        buffer_scale=0.0, r_min=r_min, r_max=r_max
+    )
+    trial_points = torch.tensor(trial_points, device=device, dtype=torch.float32)
 
     all_dists = torch.cdist(src_true_xyz, station_xyz).squeeze(0)
     _, sta_idx = torch.topk(all_dists, k=k_stations, largest=False)
     active_stas_xyz = station_xyz[sta_idx]
     
-    # Unpack trial candidates explicitly to feed the scale-agnostic layout
     cand_xyz = torch.tensor(ftrns1(trial_points[:, :3].cpu().numpy()), device=device, dtype=torch.float32)
     cand_dt = trial_points[:, 3]
 
-    # --- Scale-Agnostic Engine Execution ---
+    # 4. Compute Travel Times
     if local_aperture < 300000.0:
         t_obs = torch.norm(active_stas_xyz - src_true_xyz, dim=1) / vel_avg
         t_calc = torch.cdist(cand_xyz, active_stas_xyz) / vel_avg
@@ -8106,52 +8240,52 @@ def probe_network_sidelobes_geodetic(station_latlonz, domain_lat_range, domain_l
         cos_theta_cand = torch.clamp(torch.mm(cand_norm, sta_norm.T), -1.0, 1.0)
         t_calc = (torch.acos(cos_theta_cand) * r_avg_matrix) / vel_avg
 
-    t_obs_picks = np.concatenate((t_obs.cpu().numpy().reshape(-1, 1), sta_idx.cpu().numpy().reshape(-1, 1)), axis=1)
+    t_obs_picks = torch.cat((t_obs.view(-1, 1), sta_idx.view(-1, 1)), dim=1).cpu().numpy()
     
-    # Scope Parameters Safely Restored
+    # 5. Coherence Mapping & Main Peak Gate
     W_t_scalar = 1.0
-    rel_threshold = k_stations * 0.15                                         
+    rel_threshold = k_stations * 0.15                                           
     mismatch = torch.abs((t_obs.unsqueeze(0) - t_calc) - cand_dt.unsqueeze(1))
-    coherence = torch.exp(-mismatch / (W_t_scalar*W_t)).sum(dim=1)
+    coherence = torch.exp(-mismatch / (W_t_scalar * W_t)).sum(dim=1)
 
-    # Box-Intersection Suppression Gate
     d_space_true = torch.norm(cand_xyz - src_true_xyz, dim=1)
     d_time_true = torch.abs(cand_dt - 0.0)
     
-    is_inside_spatial_core = d_space_true <= (W_phys_m * 1.5)
+    # Matching search radius with suppression core (1.5x W_phys_m)
+    search_radius = 1.5 * W_phys_m
+    is_inside_spatial_core = d_space_true <= search_radius
     is_inside_temporal_core = d_time_true <= (W_t * 1.5)
     is_main_peak = is_inside_spatial_core & is_inside_temporal_core
     valid_mask = (~is_main_peak) & (coherence > rel_threshold)
     
     candidate_indices = torch.where(valid_mask)[0]
-    srcs_init = torch.cat((trial_points[candidate_indices], coherence[candidate_indices].reshape(-1,1)), dim=1)
+    srcs_init = torch.cat((trial_points[candidate_indices], coherence[candidate_indices].view(-1, 1)), dim=1)
     peaks = []
 
-    # while len(srcs_init) > int(0.02*num_candidates):
-    #     n_remove = np.minimum(len(srcs_init) - int(0.02*num_candidates), int(len(srcs_init)/3))
-    #     idel = np.sort(np.random.choice(len(srcs_init), size=n_remove, replace=False))
-    #     srcs_init = torch.Tensor(np.delete(srcs_init.cpu().detach().numpy(), idel, axis=0)).to(device)
-                                         
-    # Sort candidates by coherence score (column index 4) descending and take top N
+    # Keep top 2% strongest candidates
     if len(srcs_init) > int(0.02 * num_candidates):
         max_keep = int(0.02 * num_candidates)
         _, top_indices = torch.topk(srcs_init[:, 4], k=max_keep)
         srcs_init = srcs_init[top_indices]
 
+    # 6. Peak Suppression via Local Marching
     if len(srcs_init) > 0:
         mp = LocalMarching(device=device)
-        srcs_maxima = mp(srcs_init.cpu().detach().numpy(), ftrns1, tc_win=W_t, sp_win=W_phys_m, scale_depth=0.2, n_steps_max=2)
-        srcs_maxima = torch.Tensor(srcs_maxima).to(device)
+        # Using 1.5 * W_phys_m for sp_win guarantees full cluster suppression
+        srcs_maxima = mp(
+            srcs_init, ftrns1, tc_win=1.5 * W_t, sp_win=search_radius, 
+            scale_depth=0.2, n_steps_max=5, use_directed=True
+        )
 
         if len(srcs_maxima) > 0:
             for i in range(len(srcs_maxima)):
                 p_coord = srcs_maxima[i]
-                p_xyz = torch.tensor(ftrns1(p_coord[:3].cpu().numpy().reshape(1,-1)), device=device).reshape(-1)
+                p_xyz = torch.tensor(ftrns1(p_coord[:3].cpu().numpy().reshape(1, -1)), device=device).reshape(-1)
                 d_s_final = torch.norm(p_xyz - src_true_xyz)
                 d_t_final = torch.abs(p_coord[3] - 0.0) * vel_avg
                 
                 peaks.append({
-                    'pos': p_xyz, 'pos_src': p_coord[:3].cpu().numpy(), 'val': srcs_maxima[i,4],
+                    'pos': p_xyz, 'pos_src': p_coord[:3].cpu().numpy(), 'val': p_coord[4].item(),
                     'dt_offset': p_coord[3].item(), 'dist_offset_m': d_s_final.item(),
                     'dist_4d_m': torch.sqrt(d_s_final**2 + d_t_final**2).item()
                 })
