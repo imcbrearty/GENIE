@@ -980,7 +980,7 @@ for cnt, strs in enumerate([0]):
 	Out_2_sparse = Out_2_sparse[isort]
 
 	# Depth scaling setup
-	scale_depth_clustering = 0.2
+	scale_depth_clustering = 0.5 ## Decrease this some for teleseismic applications (or large depth uncertainity)
 	# Equivalent, slightly cleaner lambda definition
 	ftrns1_use = ftrns1 if scale_depth_clustering == 1.0 else (lambda x: ftrns1_scaled(x, scale_depth_clustering))
 
