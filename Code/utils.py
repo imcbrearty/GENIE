@@ -117,6 +117,30 @@ def ecef2lla_diff(x, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908
 	
 	return torch.cat((180.0*lat[:,None]/pi, 180.0*lon[:,None]/pi, alt[:,None]), axis = 1)
 
+def lla2ecef_exact_scaled(p, scale_depth=1.0, a=6378137.0, e=0.0818191908426215):
+    """
+    Exact 3D ECEF conversion with radial depth scaling.
+    Zero projection distortion across arbitrarily large domains.
+    
+    p: N x 3 array of [lat (deg), lon (deg), depth (m)]
+    scale_depth: float (e.g. 0.5 expands depth linking radius by 2x)
+    """
+    p_float = p.astype(np.float64)
+    lat = np.radians(p_float[:, 0])
+    lon = np.radians(p_float[:, 1])
+    
+    # Scale depth radially along local ellipsoidal normal
+    depth_scaled = p_float[:, 2] * scale_depth
+    
+    N = a / np.sqrt(1.0 - (e**2) * (np.sin(lat)**2))
+    
+    x = (N + depth_scaled) * np.cos(lat) * np.cos(lon)
+    y = (N + depth_scaled) * np.cos(lat) * np.sin(lon)
+    z = ((1.0 - e**2) * N + depth_scaled) * np.sin(lat)
+    
+    return np.column_stack((x, y, z))
+
+
 def rotation_matrix(a, b, c):
 
 	# a, b, c = vec
