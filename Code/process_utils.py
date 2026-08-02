@@ -2127,8 +2127,8 @@ def batched_differential_evolution_location_with_trim(
         x2_u = np.unique(surface_profile[:, 1])
         n1, n2 = len(x1_u), len(x2_u)
         
-        # Grid layout: (1, 1, Rows/Y, Cols/X)
-        grid_z = surface_profile[:, 2].reshape(n1, n2).T
+        # Grid layout: reshape to (n1, n2) matching unique sorted axes
+        grid_z = surface_profile[:, 2].reshape(n1, n2)
         surf_grid_tensor = torch.as_tensor(grid_z, dtype=torch.float32, device=dev).unsqueeze(0).unsqueeze(0)
         
         surf_data = {
@@ -2382,12 +2382,6 @@ def batched_differential_evolution_location_with_trim(
     )
 
 
-
-
-
-
-
-
 def apply_batched_differential_evolution_location(
     trv_pairwise, event_data_list, bounds_min, bounds_max, **kwargs
 ):
@@ -2401,10 +2395,9 @@ def apply_batched_differential_evolution_location(
     flat_event_idx = []
     flat_weights = []
     
-    # Track local P and S pick index mappings for demuxing
-    event_pick_maps = []
-    
-    valid_event_b_indices = []
+    # Track local metadata and global pick offsets
+    event_meta = []
+    current_offset = 0
 
     for b, evt in enumerate(event_data_list):
         arv_p = evt['arv_p']
@@ -2419,17 +2412,12 @@ def apply_batched_differential_evolution_location(
         n_picks = n_p + n_s
 
         if n_picks == 0:
-            event_pick_maps.append(None)
+            event_meta.append(None)
             continue
 
-        # Track valid events
-        valid_event_b_indices.append(b)
-
-        # Extract station coordinates for P and S picks
         p_stations = locs[ind_p] if n_p > 0 else np.empty((0, 3))
         s_stations = locs[ind_s] if n_s > 0 else np.empty((0, 3))
 
-        # Assign pick weights
         if len(w_in) == n_picks:
             w_p = w_in[:n_p]
             w_s = w_in[n_p:]
@@ -2437,8 +2425,7 @@ def apply_batched_differential_evolution_location(
             w_p = np.full(n_p, w_in[0])
             w_s = np.full(n_s, w_in[1])
 
-        # Concatenate into flat arrays using the internal valid index (0 to B_valid - 1)
-        b_valid = len(valid_event_b_indices) - 1
+        b_valid = len([m for m in event_meta if m is not None])
         
         flat_stations.append(np.vstack([p_stations, s_stations]))
         flat_arrivals.append(np.concatenate([arv_p, arv_s]))
@@ -2446,40 +2433,42 @@ def apply_batched_differential_evolution_location(
         flat_weights.append(np.concatenate([w_p, w_s]))
         flat_event_idx.append(np.full(n_picks, b_valid, dtype=int))
 
-        # Store mapping to map flat skipped pick indices back to local P/S indices
-        event_pick_maps.append({'n_p': n_p, 'n_s': n_s})
+        # Store explicit pick mapping & global start offset
+        event_meta.append({
+            'n_p': n_p,
+            'n_s': n_s,
+            'start_offset': current_offset
+        })
+        
+        current_offset += n_picks
 
     # Edge case: No valid events in entire list
     if len(flat_stations) == 0:
         return [
-            (np.nan * np.ones((1, 3)), np.nan, np.nan, np.array([]), np.array([]))
+            (np.nan * np.ones((1, 3)), np.nan, np.nan, np.array([], dtype=int), np.array([], dtype=int))
             for _ in event_data_list
         ]
 
-    # Combine into unified flat arrays
     flat_sta = np.vstack(flat_stations)
     flat_arr = np.concatenate(flat_arrivals)
     flat_pha = np.concatenate(flat_phases)
     flat_evt = np.concatenate(flat_event_idx)
     flat_w   = np.concatenate(flat_weights)
 
-    # Execute GPU Optimization across valid events
     final_coords, final_time, final_prob, batch_skipped_global = batched_differential_evolution_location_with_trim(
         trv_pairwise, flat_sta, flat_arr, flat_pha, flat_evt, flat_w,
         bounds_min, bounds_max, **kwargs
     )
 
-    # Demux results back into per-event legacy outputs
     legacy_results = []
     valid_counter = 0
 
     for b in range(len(event_data_list)):
-        pick_map = event_pick_maps[b]
+        meta = event_meta[b]
         
-        # Handle empty/zero-pick events safely
-        if pick_map is None:
+        if meta is None:
             legacy_results.append((
-                np.nan * np.ones((1, 3)), np.nan, np.nan, np.array([]), np.array([])
+                np.nan * np.ones((1, 3)), np.nan, np.nan, np.array([], dtype=int), np.array([], dtype=int)
             ))
             continue
 
@@ -2487,21 +2476,21 @@ def apply_batched_differential_evolution_location(
         t_b = final_time[valid_counter]
         p_b = final_prob[valid_counter]
 
-        # Convert global flat skipped indices back to local event P and S indices
         global_skipped = batch_skipped_global[valid_counter]
         
-        # Find global starting index offset for valid_counter in flat array
-        event_start_idx = np.where(flat_evt == valid_counter)[0][0]
-        local_skipped = global_skipped - event_start_idx
+        # Robust relative indexing using stored start offset
+        local_skipped = global_skipped - meta['start_offset']
 
-        n_p = pick_map['n_p']
-        skipped_p = np.array([idx for idx in local_skipped if idx < n_p], dtype=int)
-        skipped_s = np.array([idx - n_p for idx in local_skipped if idx >= n_p], dtype=int)
+        n_p = meta['n_p']
+        skipped_p = local_skipped[local_skipped < n_p].astype(int)
+        skipped_s = (local_skipped[local_skipped >= n_p] - n_p).astype(int)
 
         legacy_results.append((c_b, t_b, p_b, skipped_p, skipped_s))
         valid_counter += 1
 
     return legacy_results
+
+
 
 def MLE_particle_swarm_location_with_hull(trv, locs_use, arv_p, ind_p, arv_s, ind_s, lat_range, lon_range, depth_range, dx_depth, hull, ftrns1, ftrns2, sig_t = 3.0, n = 300, eps_thresh = 100, eps_steps = 5, init_vel = 1000, max_steps = 300, save_swarm = False, device = 'cpu'):
 
