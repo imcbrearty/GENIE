@@ -121,10 +121,87 @@ eps = train_config['kernel_sig_t']*5.0 # Use this value to set resolution for th
 #         	return srcs[ip_slice.cpu().numpy()], ip_slice.cpu().detach().numpy()
 
 
+# class LocalMarching(MessagePassing):
+
+#     def __init__(self, device="cpu"):
+#         super(LocalMarching, self).__init__(aggr="max")  # node dim
+#         self.device = device
+
+#     def forward(
+#         self,
+#         srcs,
+#         ftrns1,
+#         tc_win=5,
+#         sp_win=35e3,
+#         n_steps_max=100,
+#         tol=1e-12,
+#         scale_depth=1.0,
+#         use_directed=True,
+#         return_indices=False,
+#     ):
+#         # 0. Early Exit Safeguards (Handles tuple vs array return expectations)
+#         if len(srcs) == 0:
+#             return (srcs, np.array([], dtype=int)) if return_indices else srcs
+#         if len(srcs) == 1:
+#             return (srcs, np.array([0], dtype=int)) if return_indices else srcs
+
+#         with torch.no_grad():
+#             # Convert to tensor on target device
+#             srcs_tensor = torch.tensor(srcs, dtype=torch.float32, device=self.device)
+
+#             # 1. Coordinate calculation
+#             scale_vec = torch.tensor(
+#                 [1.0, 1.0, scale_depth], dtype=torch.float32, device=self.device
+#             )
+#             xyz = (
+#                 torch.tensor(ftrns1(srcs[:, 0:3]), dtype=torch.float32, device=self.device)
+#                 * scale_vec
+#             )
+#             times = srcs_tensor[:, 3].view(-1, 1)
+
+#             # 2. Replicate cKDTree dual radius queries via broadcast masking
+#             time_mask = torch.abs(times - times.T) <= tc_win
+#             space_mask = torch.cdist(xyz, xyz, p=2.0) <= sp_win
+
+#             # Intersect masks
+#             combined_mask = time_mask & space_mask
+#             edges = torch.nonzero(combined_mask).t().long().contiguous()
+
+#             # 3. Handle directionality (Peak -> Neighbor high-to-low propagation)
+#             if use_directed:
+#                 # Column -1 contains confidence/score. High-to-low edge direction allows
+#                 # peak values to flow outward and suppress subordinate neighbors.
+#                 high_to_low = srcs_tensor[edges[0], -1] >= srcs_tensor[edges[1], -1]
+#                 edges = edges[:, high_to_low]
+
+#             # 4. Global Propagation
+#             vals = srcs_tensor[:, 4].view(-1, 1)  # Assuming column 4 is score/value
+#             vals_initial = vals.clone()
+
+#             vtol = 1e9
+#             nt = 0
+#             num_nodes = srcs_tensor.size(0)
+
+#             while (vtol > tol) and (nt < n_steps_max):
+#                 vals0 = vals.clone()
+#                 vals = self.propagate(edges, x=vals, size=(num_nodes, num_nodes))
+#                 vtol = torch.max(torch.abs(vals - vals0)).item()
+#                 nt += 1
+
+#             # 5. Extract retained local peak indices
+#             ip_slice = torch.where(torch.isclose(vals_initial[:, 0], vals[:, 0], rtol=tol))[0]
+#             ip_retained_np = ip_slice.cpu().numpy()
+
+#             if return_indices:
+#                 return srcs[ip_retained_np], ip_retained_np
+#             else:
+#                 return srcs[ip_retained_np]
+
+
 class LocalMarching(MessagePassing):
 
     def __init__(self, device="cpu"):
-        super(LocalMarching, self).__init__(aggr="max")  # node dim
+        super(LocalMarching, self).__init__(aggr="max")
         self.device = device
 
     def forward(
@@ -139,15 +216,15 @@ class LocalMarching(MessagePassing):
         use_directed=True,
         return_indices=False,
     ):
-        # 0. Early Exit Safeguards (Handles tuple vs array return expectations)
+        # 0. Early Exit Safeguards
         if len(srcs) == 0:
             return (srcs, np.array([], dtype=int)) if return_indices else srcs
         if len(srcs) == 1:
             return (srcs, np.array([0], dtype=int)) if return_indices else srcs
 
         with torch.no_grad():
-            # Convert to tensor on target device
             srcs_tensor = torch.tensor(srcs, dtype=torch.float32, device=self.device)
+            num_nodes = srcs_tensor.size(0)
 
             # 1. Coordinate calculation
             scale_vec = torch.tensor(
@@ -159,7 +236,7 @@ class LocalMarching(MessagePassing):
             )
             times = srcs_tensor[:, 3].view(-1, 1)
 
-            # 2. Replicate cKDTree dual radius queries via broadcast masking
+            # 2. Dual radius queries via broadcast masking
             time_mask = torch.abs(times - times.T) <= tc_win
             space_mask = torch.cdist(xyz, xyz, p=2.0) <= sp_win
 
@@ -167,20 +244,36 @@ class LocalMarching(MessagePassing):
             combined_mask = time_mask & space_mask
             edges = torch.nonzero(combined_mask).t().long().contiguous()
 
-            # 3. Handle directionality (Peak -> Neighbor high-to-low propagation)
+            # ⚡ 3. FAST-PATH: DIRECTED GRAPH (N-Step Invariant)
+            # If directed, any N >= 1 produces the exact same peaks as N=1.
+            # We skip MessagePassing loops completely!
             if use_directed:
-                # Column -1 contains confidence/score. High-to-low edge direction allows
-                # peak values to flow outward and suppress subordinate neighbors.
+                # Flow strictly from Higher/Equal score to Lower score
                 high_to_low = srcs_tensor[edges[0], -1] >= srcs_tensor[edges[1], -1]
                 edges = edges[:, high_to_low]
 
-            # 4. Global Propagation
-            vals = srcs_tensor[:, 4].view(-1, 1)  # Assuming column 4 is score/value
+                # Exclude self-loops (i == j) to count strictly incoming edges from neighbors
+                non_self_edges = edges[:, edges[0] != edges[1]]
+                
+                # In-degree count of incoming messages from higher/equal neighbors
+                in_degree = torch.bincount(non_self_edges[1], minlength=num_nodes)
+                
+                # Retain nodes with ZERO incoming non-self edges (True Local Maxima)
+                ip_slice = torch.where(in_degree == 0)[0]
+                ip_retained_np = ip_slice.cpu().numpy()
+
+                if return_indices:
+                    return srcs[ip_retained_np], ip_retained_np
+                else:
+                    return srcs[ip_retained_np]
+
+            # 4. SLOW-PATH: UNDIRECTED GRAPH (Multi-Hop Watershed Propagation)
+            # Message passing is only necessary for multi-hop undirected graph flattening.
+            vals = srcs_tensor[:, 4].view(-1, 1)  # Coherence scores
             vals_initial = vals.clone()
 
             vtol = 1e9
             nt = 0
-            num_nodes = srcs_tensor.size(0)
 
             while (vtol > tol) and (nt < n_steps_max):
                 vals0 = vals.clone()
@@ -188,7 +281,7 @@ class LocalMarching(MessagePassing):
                 vtol = torch.max(torch.abs(vals - vals0)).item()
                 nt += 1
 
-            # 5. Extract retained local peak indices
+            # Extract retained local peak indices
             ip_slice = torch.where(torch.isclose(vals_initial[:, 0], vals[:, 0], rtol=tol))[0]
             ip_retained_np = ip_slice.cpu().numpy()
 
