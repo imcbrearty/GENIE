@@ -2070,7 +2070,7 @@ def differential_evolution_location_trim(trv, locs_use, arv_p, ind_p, arv_s, ind
 
 def batched_differential_evolution_location_with_trim(
     trv_pairwise,
-    flat_stations,      # (N_total_picks, 3) - Pre-grouped by event!
+    flat_stations,      # (N_total_picks, 3)
     flat_arrivals,      # (N_total_picks,)
     flat_phases,        # (N_total_picks,) 0 for P, 1 for S
     flat_event_idx,     # (N_total_picks,) event index in [0, B-1]
@@ -2078,8 +2078,8 @@ def batched_differential_evolution_location_with_trim(
     bounds_min, bounds_max,  # [x_min, y_min, z_min, t_min], [x_max, ...]
     popsize=75, maxiter=400, trim=0.2, mutation=(0.5, 1.0),
     min_picks=5, sig_t=1.5, device='cuda', surface_profile=None,
-    untrim_factor=1.25, polish=True, polish_iters=25
-):
+    untrim_factor=1.25, polish=True, polish_iters=15):
+    
     dev = torch.device(device)
     B = int(np.max(flat_event_idx) + 1)
     N_total = flat_stations.shape[0]
@@ -2091,7 +2091,13 @@ def batched_differential_evolution_location_with_trim(
     evt_gpu = torch.as_tensor(flat_event_idx, dtype=torch.long, device=dev)
     w_gpu   = torch.as_tensor(flat_weights, dtype=torch.float32, device=dev)
 
-    # --- 1. Pre-calculate Pick Counts & Trimming Thresholds ---
+    # Pre-allocate expanded tensors for DE evaluation
+    sta_expanded_p = sta_gpu.repeat_interleave(popsize, dim=0)
+    arr_expanded_p = arr_gpu.repeat_interleave(popsize)
+    w_expanded_p   = w_gpu.repeat_interleave(popsize)
+    pha_expanded_p = pha_gpu.repeat_interleave(popsize).unsqueeze(1)
+
+    # --- 1. Pre-calculate Pick Counts & Local Pick Indices ---
     ones = torch.ones(N_total, device=dev, dtype=torch.long)
     picks_per_event = torch.zeros(B, dtype=torch.long, device=dev)
     picks_per_event.scatter_add_(0, evt_gpu, ones)
@@ -2103,83 +2109,108 @@ def batched_differential_evolution_location_with_trim(
     num_trim_per_event[too_few] = torch.clamp(picks_per_event[too_few] - min_picks, min=0)
     keep_counts = picks_per_event - num_trim_per_event
 
-    # Offsets for Local Segment Ranking
-    event_starts = torch.cumsum(picks_per_event, dim=0) - picks_per_event if B > 1 else torch.zeros(1, dtype=torch.long, device=dev)
-    local_pick_idx = (torch.arange(N_total, device=dev) - event_starts[evt_gpu]).unsqueeze(1)
+    # Order-agnostic calculation of local rank per event
+    sorted_evt_init, perm_init = torch.sort(evt_gpu)
+    local_pick_idx = torch.zeros(N_total, dtype=torch.long, device=dev)
+    
+    event_starts = torch.zeros(B, dtype=torch.long, device=dev)
+    if B > 1:
+        event_starts[1:] = torch.cumsum(picks_per_event, dim=0)[:-1]
+    
+    local_pick_idx[perm_init] = torch.arange(N_total, device=dev) - event_starts[sorted_evt_init]
+    local_pick_idx = local_pick_idx.unsqueeze(1)
 
-    # Prep Surface Profile Constants
+    # --- Surface Elevation Pre-processing ---
     surf_data = None
     if surface_profile is not None:
-        x1_dim = np.unique(surface_profile[:, 0])
-        x2_dim = np.unique(surface_profile[:, 1])
+        x1_u = np.unique(surface_profile[:, 0])
+        x2_u = np.unique(surface_profile[:, 1])
+        n1, n2 = len(x1_u), len(x2_u)
+        
+        # Grid layout: (1, 1, Rows/Y, Cols/X)
+        grid_z = surface_profile[:, 2].reshape(n1, n2).T
+        surf_grid_tensor = torch.as_tensor(grid_z, dtype=torch.float32, device=dev).unsqueeze(0).unsqueeze(0)
+        
         surf_data = {
-            'x1_min': x1_dim[0], 'x2_min': x2_dim[0],
-            'dx1': np.diff(x1_dim)[0], 'dx2': np.diff(x2_dim)[0],
-            'n1': len(x1_dim), 'n2': len(x2_dim),
-            'elev': torch.as_tensor(surface_profile[:, 2], dtype=torch.float32, device=dev)
+            'x1_min': x1_u[0], 'x1_max': x1_u[-1],
+            'x2_min': x2_u[0], 'x2_max': x2_u[-1],
+            'grid': surf_grid_tensor
         }
 
     b_min = torch.as_tensor(bounds_min, dtype=torch.float32, device=dev).view(1, 1, D)
     b_max = torch.as_tensor(bounds_max, dtype=torch.float32, device=dev).view(1, 1, D)
     b_range = b_max - b_min
 
-    # --- 2. Fully Vectorized Loss Function ---
+    def get_surface_elevation(x1, x2):
+        if surf_data is None:
+            return torch.zeros_like(x1)
+        
+        orig_shape = x1.shape
+        x1_flat = x1.reshape(-1)
+        x2_flat = x2.reshape(-1)
+
+        span_x1 = max(surf_data['x1_max'] - surf_data['x1_min'], 1e-5)
+        span_x2 = max(surf_data['x2_max'] - surf_data['x2_min'], 1e-5)
+        
+        norm_x1 = torch.clamp(2.0 * (x1_flat - surf_data['x1_min']) / span_x1 - 1.0, -1.0, 1.0)
+        norm_x2 = torch.clamp(2.0 * (x2_flat - surf_data['x2_min']) / span_x2 - 1.0, -1.0, 1.0)
+        
+        # F.grid_sample expects (X, Y) -> (norm_x2, norm_x1)
+        grid_coords = torch.stack([norm_x2, norm_x1], dim=-1).unsqueeze(0).unsqueeze(2)
+        sampled = F.grid_sample(surf_data['grid'], grid_coords, mode='bilinear', padding_mode='border', align_corners=True)
+        
+        return sampled.view(-1).reshape(orig_shape)
+
+    # --- 2. Loss Function ---
     def compute_de_loss(coords_phys, t0_phys):
         P = coords_phys.shape[1]
         
-        sta_expanded = sta_gpu.repeat_interleave(P, dim=0)
+        if P == popsize:
+            sta_expanded = sta_expanded_p
+            arr_expanded = arr_expanded_p
+            w_expanded   = w_expanded_p
+            pha_expanded = pha_expanded_p
+        else:
+            sta_expanded = sta_gpu.repeat_interleave(P, dim=0)
+            arr_expanded = arr_gpu.repeat_interleave(P)
+            w_expanded   = w_gpu.repeat_interleave(P)
+            pha_expanded = pha_gpu.repeat_interleave(P).unsqueeze(1)
+
         src_coords_expanded = coords_phys[evt_gpu].view(-1, 3)
         t0_expanded = t0_phys[evt_gpu].view(-1)
 
         pred_times_pair = trv_pairwise(sta_expanded, src_coords_expanded)
-        pha_expanded = pha_gpu.repeat_interleave(P).unsqueeze(1)
         pred_travel_times = torch.gather(pred_times_pair, 1, pha_expanded).squeeze(1)
         pred_arrivals = pred_travel_times + t0_expanded
 
-        arr_expanded = arr_gpu.repeat_interleave(P)
-        w_expanded   = w_gpu.repeat_interleave(P)
-        
         sq_err = ((arr_expanded - pred_arrivals) ** 2) * w_expanded / (sig_t ** 2)
         sq_err = sq_err.view(N_total, P)
 
         if trim > 0:
-            # Safe numeric offset sorting key without bitwise risks
             encoded_keys = evt_gpu.unsqueeze(1).double() * 1e12 + sq_err.double()
-
-            # Vectorized GPU sort across dim=0
             _, sort_indices = torch.sort(encoded_keys, dim=0)
             
-            # Gather sorted values
             sorted_sq_err = torch.gather(sq_err, 0, sort_indices)
             sorted_evt = torch.gather(evt_gpu.unsqueeze(1).expand(-1, P), 0, sort_indices)
             local_ranks = torch.gather(local_pick_idx.expand(-1, P), 0, sort_indices)
 
-            # Apply per-event trim mask
             keep_thresholds = keep_counts[sorted_evt]
             keep_mask = (local_ranks < keep_thresholds)
 
             kept_sq_err = torch.where(keep_mask, sorted_sq_err, 0.0)
             
-            # Scatter sum back to (B, P) loss matrix
             loss_matrix = torch.zeros((B, P), device=dev)
             loss_matrix.scatter_add_(0, sorted_evt, kept_sq_err)
-            loss_matrix = 0.5 * (loss_matrix / keep_counts.unsqueeze(1).float())
-
+            loss_matrix = 0.5 * (loss_matrix / torch.clamp(keep_counts, min=1).unsqueeze(1).float())
         else:
             loss_matrix = torch.zeros((B, P), device=dev)
             evt_gpu_expanded = evt_gpu.unsqueeze(1).expand(-1, P)
             loss_matrix.scatter_add_(0, evt_gpu_expanded, sq_err)
-            loss_matrix = 0.5 * (loss_matrix / picks_per_event.float().unsqueeze(1))
+            loss_matrix = 0.5 * (loss_matrix / torch.clamp(picks_per_event, min=1).float().unsqueeze(1))
 
-        # Surface Topography Penalty
         if surf_data:
             x1, x2, z = coords_phys[:, :, 0], coords_phys[:, :, 1], coords_phys[:, :, 2]
-            i1 = torch.clamp(((x1 - surf_data['x1_min']) / surf_data['dx1']).long(), 0, surf_data['n1'] - 1)
-            i2 = torch.clamp(((x2 - surf_data['x2_min']) / surf_data['dx2']).long(), 0, surf_data['n2'] - 1)
-            
-            flat_grid_idx = i1 + i2 * surf_data['n1']
-            surf_elev = surf_data['elev'][flat_grid_idx]
-            
+            surf_elev = get_surface_elevation(x1, x2)
             air_mask = (z < surf_elev)
             loss_matrix = torch.where(air_mask, loss_matrix + 1e5, loss_matrix)
 
@@ -2193,25 +2224,23 @@ def batched_differential_evolution_location_with_trim(
         t_phys = b_min[:, :, 3:4] + pop_norm[:, :, 3:4] * b_range[:, :, 3:4]
         loss = compute_de_loss(c_phys, t_phys)
 
-    self_idx = torch.arange(popsize, device=dev).unsqueeze(0).unsqueeze(-1)
-
     for g in range(maxiter):
-        F = mutation[0] + torch.rand(1, device=dev).item() * (mutation[1] - mutation[0])
+        F_val = mutation[0] + torch.rand(1, device=dev).item() * (mutation[1] - mutation[0])
         CR = 0.9
 
         best_idx = torch.argmin(loss, dim=1)
         best_pop = torch.gather(pop_norm, 1, best_idx.view(B, 1, 1).expand(B, 1, D))
 
-        # Random candidate selection excluding self
-        rand_weights = torch.rand((B, popsize, popsize), device=dev)
-        rand_weights.scatter_(2, self_idx.expand(B, popsize, 1), -1.0)
-        idx = torch.argsort(rand_weights, dim=-1, descending=True)
-        r1, r2 = idx[:, :, 0], idx[:, :, 1]
+        target = torch.arange(popsize, device=dev).expand(B, popsize)
         
-        x_r1 = torch.gather(pop_norm, 1, r1.unsqueeze(-1).expand(B, popsize, D))
-        x_r2 = torch.gather(pop_norm, 1, r2.unsqueeze(-1).expand(B, popsize, D))
+        r1 = (target + torch.randint(1, popsize, (B, popsize), device=dev)) % popsize
+        r2 = (r1 + torch.randint(1, popsize - 1, (B, popsize), device=dev)) % popsize
+        r2 = torch.where(r2 == target, (r2 + 1) % popsize, r2)
 
-        mutant = torch.clamp(best_pop + F * (x_r1 - x_r2), 0.0, 1.0)
+        x_r1 = torch.gather(pop_norm, 1, r1.unsqueeze(-1).expand(-1, -1, D))
+        x_r2 = torch.gather(pop_norm, 1, r2.unsqueeze(-1).expand(-1, -1, D))
+
+        mutant = torch.clamp(best_pop + F_val * (x_r1 - x_r2), 0.0, 1.0)
 
         cross_mask = torch.rand((B, popsize, D), device=dev) < CR
         j_rand = torch.randint(0, D, (B, popsize, 1), device=dev)
@@ -2249,38 +2278,53 @@ def batched_differential_evolution_location_with_trim(
 
         weighted_abs_res = torch.abs(arr_gpu - pred_arrivals) * torch.sqrt(w_gpu) / sig_t
 
+        encoded_res = evt_gpu.double() * 1e12 + weighted_abs_res.double()
+        _, sort_idx = torch.sort(encoded_res)
+        
+        sorted_res = weighted_abs_res[sort_idx]
+        sorted_evt = evt_gpu[sort_idx]
+        local_ranks = local_pick_idx.squeeze(1)[sort_idx]
+
+        keep_cnts = keep_counts[sorted_evt]
+        is_candidate = (local_ranks >= keep_cnts) & (num_trim_per_event[sorted_evt] > 0)
+
+        kept_res_masked = torch.where(local_ranks < keep_cnts, sorted_res, torch.tensor(-1e9, device=dev))
+        max_kept_res = torch.full((B,), -1e9, device=dev)
+        max_kept_res.scatter_reduce_(0, sorted_evt, kept_res_masked, reduce='amax', include_self=True)
+
+        floor_buffer = 0.10 / sig_t
+        event_tolerances = torch.max(max_kept_res * untrim_factor, max_kept_res + floor_buffer)
+
+        is_skipped = is_candidate & (sorted_res > event_tolerances[sorted_evt])
+        active_pick_mask[sort_idx[is_skipped]] = False
+
+        skipped_globals = sort_idx[is_skipped].cpu().numpy()
+        skipped_events = sorted_evt[is_skipped].cpu().numpy()
         for b in range(B):
-            mask = (evt_gpu == b)
-            event_res = weighted_abs_res[mask]
-            event_pick_indices = torch.where(mask)[0]
-            
-            n_trim_b = num_trim_per_event[b].item()
-            keep_cnt = keep_counts[b].item()
+            batch_skipped_indices.append(skipped_globals[skipped_events == b])
 
-            if n_trim_b > 0 and keep_cnt > 0:
-                sort_idx = torch.argsort(event_res)
-                max_kept = event_res[sort_idx[:keep_cnt]].max()
-                candidates = sort_idx[keep_cnt:]
-                
-                floor_buffer = 0.10 / sig_t
-                tolerance = torch.max(max_kept * untrim_factor, max_kept + floor_buffer)
+    active_counts = torch.zeros(B, device=dev)
+    active_counts.scatter_add_(0, evt_gpu, active_pick_mask.float())
+    active_counts = torch.clamp(active_counts, min=1.0)
 
-                skipped_local = candidates[event_res[candidates] > tolerance]
-                global_skipped = event_pick_indices[skipped_local]
-                
-                batch_skipped_indices.append(global_skipped.cpu().numpy())
-                active_pick_mask[global_skipped] = False
-            else:
-                batch_skipped_indices.append(np.array([], dtype=int))
-
-    # --- 5. Autograd Polish ---
+    # --- 5. L-BFGS Polish with Smooth Penalties ---
     best_sol_phys = de_sol_phys.detach().clone()
     
     if polish:
         best_sol_phys.requires_grad_(True)
-        optimizer = torch.optim.Adam([best_sol_phys], lr=1e-2)
+        optimizer = torch.optim.LBFGS(
+            [best_sol_phys],
+            lr=1.0,
+            max_iter=polish_iters,
+            history_size=10,
+            line_search_fn='strong_wolfe'
+        )
 
-        for _ in range(polish_iters):
+        b_min_flat = b_min.view(1, D)
+        b_max_flat = b_max.view(1, D)
+        b_range_flat = b_range.view(1, D)
+
+        def closure():
             optimizer.zero_grad()
             
             src_coords_expanded = best_sol_phys[:, 0:3][evt_gpu].view(-1, 3)
@@ -2291,22 +2335,42 @@ def batched_differential_evolution_location_with_trim(
             pred_arrivals = pred_travel_times + t0_expanded
 
             sq_err = ((arr_gpu - pred_arrivals) ** 2) * w_gpu / (sig_t ** 2)
-            
             masked_sq_err = sq_err * active_pick_mask.float()
-            p_loss = 0.5 * masked_sq_err.sum()
             
+            event_losses = torch.zeros(B, device=dev)
+            event_losses.scatter_add_(0, evt_gpu, masked_sq_err)
+            
+            p_loss = 0.5 * torch.mean(event_losses / active_counts)
+
+            # Smooth scale-normalized boundary penalty
+            norm_viol_min = torch.relu(b_min_flat - best_sol_phys) / b_range_flat
+            norm_viol_max = torch.relu(best_sol_phys - b_max_flat) / b_range_flat
+            bound_penalty = 1e4 * torch.sum(norm_viol_min ** 2 + norm_viol_max ** 2)
+            p_loss = p_loss + bound_penalty
+
+            if surf_data:
+                x1 = best_sol_phys[:, 0].unsqueeze(1)
+                x2 = best_sol_phys[:, 1].unsqueeze(1)
+                z  = best_sol_phys[:, 2].unsqueeze(1)
+                
+                surf_elev = get_surface_elevation(x1, x2)
+                
+                penetration = torch.relu(surf_elev - z)
+                penalty = 1e3 * torch.sum((penetration / b_range_flat[0, 2]) ** 2)
+                p_loss = p_loss + penalty
+
             p_loss.backward()
-            optimizer.step()
+            return p_loss
 
-            with torch.no_grad():
-                best_sol_phys.clamp_(b_min.view(1, D), b_max.view(1, D))
-
-    final_coords = best_sol_phys[:, 0:3].detach()
-    final_time = best_sol_phys[:, 3].detach()
+        optimizer.step(closure)
 
     with torch.no_grad():
-        c_f = final_coords.unsqueeze(1)
-        t_f = final_time.view(B, 1, 1)
+        final_sol_phys = torch.clamp(best_sol_phys, b_min.view(1, D), b_max.view(1, D))
+        final_coords = final_sol_phys[:, 0:3]
+        final_time = final_sol_phys[:, 3]
+
+        c_f = final_coords.unsqueeze(1)          # Shape: (B, 1, 3)
+        t_f = final_time.view(B, 1, 1)           # Shape: (B, 1, 1)
         final_loss = compute_de_loss(c_f, t_f)
         final_prob = -final_loss.view(B).cpu().numpy()
 
@@ -2316,6 +2380,10 @@ def batched_differential_evolution_location_with_trim(
         final_prob,
         batch_skipped_indices
     )
+
+
+
+
 
 
 
