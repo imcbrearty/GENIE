@@ -623,10 +623,24 @@ X_query = build_sampling_grid(lat_range, lon_range, lat_range, lon_range, depth_
 X_query_cart = torch.Tensor(ftrns1(X_query)).to(device)
 
 ## Estimate average grid spacing
-tree_grid = cKDTree(np.concatenate((X_query_cart.cpu().detach().numpy(), 1000.0*scale_time*X_query[:,3].reshape(-1,1)), axis = 1))
+# tree_grid = cKDTree(np.concatenate((X_query_cart.cpu().detach().numpy(), 1000.0*scale_time*X_query[:,3].reshape(-1,1)), axis = 1))
+# irand_check = np.sort(np.random.choice(len(X_query_cart), size = int(0.05*len(X_query_cart)), replace = False))
+# dist_grid = np.median(tree_grid.query(np.concatenate((X_query_cart[irand_check].cpu().detach().numpy(), 1000.0*scale_time*X_query[irand_check,3].reshape(-1,1)), axis = 1), k = 5)[0][:,1::].mean(1))
+# print('Median offset in sampling grid: %0.4f'%(dist_grid))
+
+## Estimate average grid spacing
+xval = np.concatenate((X_query_cart.cpu().detach().numpy(), 1000.0*scale_time*X_query[:,3].reshape(-1,1)), axis = 1)
+tree_grid = cKDTree(xval)
 irand_check = np.sort(np.random.choice(len(X_query_cart), size = int(0.05*len(X_query_cart)), replace = False))
-dist_grid = np.median(tree_grid.query(np.concatenate((X_query_cart[irand_check].cpu().detach().numpy(), 1000.0*scale_time*X_query[irand_check,3].reshape(-1,1)), axis = 1), k = 5)[0][:,1::].mean(1))
-print('Median offset in sampling grid: %0.4f'%(dist_grid))
+ind_neighbors = tree_grid.query(xval[irand_check], k = 5)
+dist_spc_grid = np.median(np.linalg.norm(np.expand_dims(xval[irand_check], axis = 1) - xval[ind_neighbors[1][:,1::]], axis = 2).mean(1))
+dist_time_grid = np.median(np.abs(X_query[irand_check,3].reshape(-1,1) - X_query[ind_neighbors[1][:,1::],3]).mean(1))
+print('Median offset in sampling grid: %0.4f m, %0.4f s'%(dist_spc_grid, dist_time_grid))
+
+
+
+
+
 
 loaded_mag_model = False
 if compute_magnitudes == True:
