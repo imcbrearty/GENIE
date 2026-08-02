@@ -8276,11 +8276,12 @@ def probe_network_sidelobes_geodetic(
             srcs_init.cpu().detach().numpy(), ftrns1, tc_win=1.5 * W_t, sp_win=search_radius, 
             scale_depth=0.2, n_steps_max=5, use_directed=True
         )
+        srcs_maxima = torch.tensor(srcs_maxima, device = device, dtype = torch.float32)
 
         if len(srcs_maxima) > 0:
             for i in range(len(srcs_maxima)):
                 p_coord = srcs_maxima[i]
-                p_xyz = torch.tensor(ftrns1(p_coord[:3].reshape(1,-1)), device=device).reshape(-1)
+                p_xyz = torch.tensor(ftrns1(p_coord[:3].reshape(1,-1).cpu().detach().numpy()), device=device).reshape(-1)
                 d_s_final = torch.norm(p_xyz - src_true_xyz)
                 d_t_final = torch.abs(p_coord[3] - 0.0) * vel_avg
                 
