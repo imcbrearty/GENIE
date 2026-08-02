@@ -1270,12 +1270,19 @@ for cnt, strs in enumerate([0]):
 
 			# Find coarse peak coordinate
 			iargmax_coarse = np.argmax(out_vals)
-			best_coarse_loc = X_query_val[iargmax_coarse, 0:3]
+			best_coarse_loc = X_query_val[iargmax_coarse, 0:4]
 
+			
 			# --- PASS 2: Fine Grid Refinement around Coarse Peak ---
 			X_query_fine = np.copy(X_query_grid_fine[inearest])
-			X_query_fine[:, 0:3] = X_query_grid_fine[inearest][:, 0:3] - X_query_grid_fine[inearest][:, 0:3].mean(0, keepdims=True) + best_coarse_loc.reshape(1, -1)
-
+			# X_query_fine[:, 0:3] = X_query_grid_fine[inearest][:, 0:3] - X_query_grid_fine[inearest][:, 0:3].mean(0, keepdims=True) + best_coarse_loc.reshape(1, -1)
+			# Center both Spatial (0:3) and Temporal (3) axes on the coarse peak
+			X_query_fine[:, 0:4] = (
+				X_query_grid_fine[inearest][:, 0:4] 
+				- X_query_grid_fine[inearest][:, 0:4].mean(0, keepdims=True) 
+				+ best_coarse_loc.reshape(1, -1)
+			)
+			
 			# Domain clipping for Fine Grid (Primary range -> Extended range fallback)
 			inside_fine = np.where(
 				(X_query_fine[:, 0] > lat_range[0]) & (X_query_fine[:, 0] < lat_range[1]) &
