@@ -1046,13 +1046,15 @@ for cnt, strs in enumerate([0]):
 	     ########### ########## ########### ###########
 
 
+
+
 	## Find latitude range of events
-	target_width = sp_win/2.0 # /2.0 # 2 * grid_win
-	lat_range_events = np.arange(srcs[:,0].min(), srcs[:,0].max() + np.diff(lat_range_extend)/5.0, np.diff(lat_range_extend)/5.0)
+	st_process = time.time()
+
+	target_width = sp_win # /2.0 # /2.0 # 2 * grid_win
+	lat_range_events = np.arange(srcs[:,0].min(), srcs[:,0].max() + np.diff(lat_range_extend)/10.0, np.diff(lat_range_extend)/10.0)
 	lat_deg_span = target_width / (np.deg2rad(1) * earth_radius)
 
-
-	st_process = time.time()
 	X_query_grid = []
 	srcs_refined_l = []
 	trv_out_srcs_l = []
@@ -1062,103 +1064,320 @@ for cnt, strs in enumerate([0]):
 	lp_meta_l = []
 
 
-
-	## May need to adapt the scale_time for different density of nodes
-	## Why print statements in build_sampling_grid
-	print('Check or reduce density of X_query_slice; also check time width and target width') # and depth_upscale_factor and buffer scale
-	for inc, lat_val in enumerate(lat_range_events):
-		# 2. Calculate the lon degrees needed to cover target_width
-		# We use the inverse of the longitudinal distance formula
-		# Delta_Lon = Width / (deg_to_rad * R * cos(lat))
-		## For each lat value, determine typical lon range to span the source label kernel width
-		lat_rad = np.radians(lat_val)
-		lon_deg_span = target_width / (np.deg2rad(1) * earth_radius * np.cos(lat_rad))
-		lat_range_slice = np.array([lat_val - lat_deg_span/2.0, lat_val + lat_deg_span/2.0])
-		lon_range_slice = np.array([np.mean(lon_range) - lon_deg_span/2.0, np.mean(lon_range) + lon_deg_span/2.0])
-		X_query_slice = build_sampling_grid(lat_range_slice, lon_range_slice, lat_range_slice, lon_range_slice, [np.mean(depth_range) - target_width/2.0, np.mean(depth_range) + target_width/2.0], tc_win/2.0, 1000.0*scale_time, 2*n_query_grid, ftrns1, ftrns2, verbose = False if inc > 0 else True, use_global = use_global, depth_upscale_factor = 2.0, buffer_scale = 2.0)
-		X_query_grid.append(X_query_slice)
+	use_updated_srcs_refined = True
+	if use_updated_srcs_refined == False:
 
 
-	print('Begin sources refined')
+		## May need to adapt the scale_time for different density of nodes
+		## Why print statements in build_sampling_grid
+		print('Check or reduce density of X_query_slice; also check time width and target width') # and depth_upscale_factor and buffer scale
+		for inc, lat_val in enumerate(lat_range_events):
+			# 2. Calculate the lon degrees needed to cover target_width
+			# We use the inverse of the longitudinal distance formula
+			# Delta_Lon = Width / (deg_to_rad * R * cos(lat))
+			## For each lat value, determine typical lon range to span the source label kernel width
+			lat_rad = np.radians(lat_val)
+			lon_deg_span = target_width / (np.deg2rad(1) * earth_radius * np.cos(lat_rad))
+			lat_range_slice = np.array([lat_val - lat_deg_span/2.0, lat_val + lat_deg_span/2.0])
+			lon_range_slice = np.array([np.mean(lon_range) - lon_deg_span/2.0, np.mean(lon_range) + lon_deg_span/2.0])
+			X_query_slice = build_sampling_grid(lat_range_slice, lon_range_slice, lat_range_slice, lon_range_slice, [np.mean(depth_range) - target_width/2.0, np.mean(depth_range) + target_width/2.0], tc_win/2.0, 1000.0*scale_time, 2*n_query_grid, ftrns1, ftrns2, verbose = False if inc > 0 else True, use_global = use_global, depth_upscale_factor = 2.0, buffer_scale = 2.0)
+			X_query_grid.append(X_query_slice)
 
-	tree_lats = cKDTree(lat_range_events.reshape(-1,1))
-	for n in range(len(srcs)):
 
-		inearest = tree_lats.query(srcs[n,0].reshape(1,1))[1][0] # np.argmin(np.abs())
-		X_query_val = np.copy(X_query_grid[inearest]) # [:,0:3]
-		X_query_val[:,0:3] = X_query_grid[inearest][:,0:3] - X_query_grid[inearest][:,0:3].mean(0, keepdims = True) + srcs[n,0:3].reshape(1,-1)
-		inside = np.where((X_query_val[:,0] > lat_range[0])*(X_query_val[:,0] < lat_range[1])*(X_query_val[:,1] > lon_range[0])*(X_query_val[:,1] < lon_range[1])*(X_query_val[:,2] > depth_range[0])*(X_query_val[:,2] < depth_range[1]))[0]
-		if len(inside) == 0:
-			inside = np.where((X_query_val[:,0] > lat_range_extend[0])*(X_query_val[:,0] < lat_range_extend[1])*(X_query_val[:,1] > lon_range_extend[0])*(X_query_val[:,1] < lon_range_extend[1])*(X_query_val[:,2] > depth_range[0])*(X_query_val[:,2] < depth_range[1]))[0]
-		X_query_val = X_query_val[inside]
-		X_query_cart_val = torch.Tensor(ftrns1(X_query_val)).to(device)
+		print('Begin sources refined')
 
-		## Extract inputs
-		out_vals = np.zeros(len(X_query_val))
-		for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
+		tree_lats = cKDTree(lat_range_events.reshape(-1,1))
+		for n in range(len(srcs)):
 
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, srcs[[n],3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
-			assert(len(Inpts) == 1)
+			inearest = tree_lats.query(srcs[n,0].reshape(1,1))[1][0] # np.argmin(np.abs())
+			X_query_val = np.copy(X_query_grid[inearest]) # [:,0:3]
+			X_query_val[:,0:3] = X_query_grid[inearest][:,0:3] - X_query_grid[inearest][:,0:3].mean(0, keepdims = True) + srcs[n,0:3].reshape(1,-1)
+			inside = np.where((X_query_val[:,0] > lat_range[0])*(X_query_val[:,0] < lat_range[1])*(X_query_val[:,1] > lon_range[0])*(X_query_val[:,1] < lon_range[1])*(X_query_val[:,2] > depth_range[0])*(X_query_val[:,2] < depth_range[1]))[0]
+			if len(inside) == 0:
+				inside = np.where((X_query_val[:,0] > lat_range_extend[0])*(X_query_val[:,0] < lat_range_extend[1])*(X_query_val[:,1] > lon_range_extend[0])*(X_query_val[:,1] < lon_range_extend[1])*(X_query_val[:,2] > depth_range[0])*(X_query_val[:,2] < depth_range[1]))[0]
+			X_query_val = X_query_val[inside]
+			X_query_cart_val = torch.Tensor(ftrns1(X_query_val)).to(device)
 
-			if use_phase_types == False: ## Does this check lp_phases correctly?
-				for i in range(len(Inpts)):
-					Inpts[i][:,2::] = 0.0 ## Phase type informed features zeroed out
-					Masks[i][:,2::] = 0.0
-
-			out = mz_list[x_grid_ind].forward_fixed_source(Inpts[0], Masks[0], torch.Tensor(lp_times[0]).to(device), torch.Tensor(lp_stations[0]).long().to(device), torch.Tensor(lp_phases[0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_query_cart_val, torch.Tensor(X_query_val[:,[3]]).to(device)) # n_reshape = len(tq_search)
-			out_vals += out[1].reshape(-1).cpu().detach().numpy()/len(x_grid_ind_list_1)
-
-		max_val, iargmax = out_vals.max(), np.argmax(out_vals)
-		if (max_val >= thresh)*(len(lp_times[0]) > 0): ## Save local maxima values
-			src_max = np.copy(X_query_val[iargmax]).reshape(1,-1)
-			src_max[0,3] += srcs[n,3]
-			srcs_refined_l.append(np.concatenate((src_max, np.array([max_val]).reshape(1,1)), axis = 1))
-			trv_out_srcs_slice = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined_l[-1].reshape(1,-1)).to(device)).detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)		
-			trv_out_srcs_l.append(trv_out_srcs_slice.cpu())
-
-			# X_save[:,2] = src_max[i,2]
-			X_save = np.copy(src_max)
-			X_save_cart = torch.Tensor(ftrns1(X_save)).to(device)
-
+			## Extract inputs
+			out_vals = np.zeros(len(X_query_val))
 			for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 
-				## For these cases, re-extract inputs and compute the association predictions
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, src_max[[0],3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
-				ipick, tpick = lp_stations[0].astype('int'), lp_times[0]
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, srcs[[n],3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
 				assert(len(Inpts) == 1)
 
-				if use_phase_types == False:
+				if use_phase_types == False: ## Does this check lp_phases correctly?
 					for i in range(len(Inpts)):
 						Inpts[i][:,2::] = 0.0 ## Phase type informed features zeroed out
 						Masks[i][:,2::] = 0.0
-			
-				if inc == 0:
-					Out_p_save = [np.zeros(len(lp_times[j])) for j in range(len(Inpts))]
-					Out_s_save = [np.zeros(len(lp_times[j])) for j in range(len(Inpts))]
-					Save_picks.append(np.concatenate((tpick.reshape(-1,1), ipick.reshape(-1,1)), axis = 1))
-					lp_meta_l.append(lp_meta[0])
 
-				# out = mz_list[x_grid_ind].forward_fixed(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).long().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_save_cart, torch.Tensor(ftrns1(srcs_refined[i,0:3].reshape(1,-1))).to(device), tq, torch.zeros(1).to(device), trv_out_srcs_slice[[i],:,:])
-				out = mz_list[x_grid_ind].forward_fixed(Inpts[0], Masks[0], torch.Tensor(lp_times[0]).to(device), torch.Tensor(lp_stations[0]).long().to(device), torch.Tensor(lp_phases[0].reshape(-1,1)).long().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_save_cart, torch.Tensor(ftrns1(src_max[0,0:3].reshape(1,-1))).to(device), torch.Tensor([src_max[0,3]]).reshape(1,1).to(device), torch.zeros(1).to(device), trv_out_srcs_slice[[0],:,:])
+				out = mz_list[x_grid_ind].forward_fixed_source(Inpts[0], Masks[0], torch.Tensor(lp_times[0]).to(device), torch.Tensor(lp_stations[0]).long().to(device), torch.Tensor(lp_phases[0].reshape(-1,1)).float().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_query_cart_val, torch.Tensor(X_query_val[:,[3]]).to(device)) # n_reshape = len(tq_search)
+				out_vals += out[1].reshape(-1).cpu().detach().numpy()/len(x_grid_ind_list_1)
 
-				# Out_save[i,:,:] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
-				Out_p_save[0] += out[2][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
-				Out_s_save[0] += out[3][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
+			max_val, iargmax = out_vals.max(), np.argmax(out_vals)
+			if (max_val >= thresh)*(len(lp_times[0]) > 0): ## Save local maxima values
+				src_max = np.copy(X_query_val[iargmax]).reshape(1,-1)
+				src_max[0,3] += srcs[n,3]
+				srcs_refined_l.append(np.concatenate((src_max, np.array([max_val]).reshape(1,1)), axis = 1))
+				trv_out_srcs_slice = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined_l[-1].reshape(1,-1)).to(device)).detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)		
+				trv_out_srcs_l.append(trv_out_srcs_slice.cpu())
 
-			for i in range(len(Inpts)):
-				Out_p_save_l.append(Out_p_save[i])
-				Out_s_save_l.append(Out_s_save[i])
+				# X_save[:,2] = src_max[i,2]
+				X_save = np.copy(src_max)
+				X_save_cart = torch.Tensor(ftrns1(X_save)).to(device)
 
-		# print('Located %d (refined): %0.3f, %0.3f, %0.3f, %0.3f, %0.3f (%0.3f)'%(n, src_max[0,0], src_max[0,1], src_max[0,2], src_max[0,3], max_val, srcs[n,4]))
+				for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 
-	srcs_refined = np.vstack(srcs_refined_l)
-	iarg_sort = np.argsort(srcs_refined[:,3])
-	srcs_refined = srcs_refined[iarg_sort]
-	trv_out_srcs_l = [trv_out_srcs_l[j] for j in iarg_sort]
-	Out_p_save_l = [Out_p_save_l[j] for j in iarg_sort]
-	Out_s_save_l = [Out_s_save_l[j] for j in iarg_sort]
-	lp_meta_l = [lp_meta_l[j] for j in iarg_sort]
-	Save_picks = [Save_picks[j] for j in iarg_sort]
+					## For these cases, re-extract inputs and compute the association predictions
+					[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, src_max[[0],3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
+					ipick, tpick = lp_stations[0].astype('int'), lp_times[0]
+					assert(len(Inpts) == 1)
+
+					if use_phase_types == False:
+						for i in range(len(Inpts)):
+							Inpts[i][:,2::] = 0.0 ## Phase type informed features zeroed out
+							Masks[i][:,2::] = 0.0
+				
+					if inc == 0:
+						Out_p_save = [np.zeros(len(lp_times[j])) for j in range(len(Inpts))]
+						Out_s_save = [np.zeros(len(lp_times[j])) for j in range(len(Inpts))]
+						Save_picks.append(np.concatenate((tpick.reshape(-1,1), ipick.reshape(-1,1)), axis = 1))
+						lp_meta_l.append(lp_meta[0])
+
+					# out = mz_list[x_grid_ind].forward_fixed(torch.Tensor(Inpts[i]).to(device), torch.Tensor(Masks[i]).to(device), torch.Tensor(lp_times[i]).to(device), torch.Tensor(lp_stations[i]).long().to(device), torch.Tensor(lp_phases[i].reshape(-1,1)).long().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_save_cart, torch.Tensor(ftrns1(srcs_refined[i,0:3].reshape(1,-1))).to(device), tq, torch.zeros(1).to(device), trv_out_srcs_slice[[i],:,:])
+					out = mz_list[x_grid_ind].forward_fixed(Inpts[0], Masks[0], torch.Tensor(lp_times[0]).to(device), torch.Tensor(lp_stations[0]).long().to(device), torch.Tensor(lp_phases[0].reshape(-1,1)).long().to(device), torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind], torch.Tensor(x_grids[x_grid_ind][:,3].reshape(-1,1)).to(device), X_save_cart, torch.Tensor(ftrns1(src_max[0,0:3].reshape(1,-1))).to(device), torch.Tensor([src_max[0,3]]).reshape(1,1).to(device), torch.zeros(1).to(device), trv_out_srcs_slice[[0],:,:])
+
+					# Out_save[i,:,:] += out[1][:,:,0].cpu().detach().numpy()/n_scale_x_grid_1
+					Out_p_save[0] += out[2][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
+					Out_s_save[0] += out[3][0,:,0].cpu().detach().numpy()/n_scale_x_grid_1
+
+				for i in range(len(Inpts)):
+					Out_p_save_l.append(Out_p_save[i])
+					Out_s_save_l.append(Out_s_save[i])
+
+
+
+	else:
+
+
+		# ==============================================================================
+		# WGS84-SAFE COARSE-TO-FINE GRID GENERATION
+		# ==============================================================================
+
+		N_QUERY_COARSE = 1000
+		N_QUERY_FINE = 500
+
+		X_query_grid_coarse = []
+		X_query_grid_fine = []
+
+		print('Building WGS84-scaled coarse and fine query grids...')
+
+		target_width = sp_win # / 2.0
+		lat_deg_span = target_width / (np.deg2rad(1) * earth_radius)
+
+		for inc, lat_val in enumerate(lat_range_events):
+			lat_rad = np.radians(lat_val)
+			lon_deg_span = target_width / (np.deg2rad(1) * earth_radius * np.cos(lat_rad))
+
+			lat_range_slice = np.array([lat_val - lat_deg_span / 2.0, lat_val + lat_deg_span / 2.0])
+			lon_range_slice = np.array([np.mean(lon_range) - lon_deg_span / 2.0, np.mean(lon_range) + lon_deg_span / 2.0])
+			depth_slice = [np.mean(depth_range) - target_width / 2.0, np.mean(depth_range) + target_width / 2.0]
+
+			# 1. Coarse Grid (~250 points across full target width)
+			X_coarse = build_sampling_grid(
+				lat_range_slice, lon_range_slice, lat_range_slice, lon_range_slice,
+				depth_slice, tc_win / 2.0, 1000.0 * scale_time, N_QUERY_COARSE,
+				ftrns1, ftrns2, verbose=(inc == 0), use_global=use_global,
+				depth_upscale_factor=2.0, buffer_scale=2.0
+			)
+			X_query_grid_coarse.append(X_coarse)
+
+			# 2. Fine Local Grid (~100 points focused in tight ~15% sub-window)
+			lat_fine_slice = np.array([lat_val - (lat_deg_span * 0.15) / 2.0, lat_val + (lat_deg_span * 0.15) / 2.0])
+			lon_fine_slice = np.array([np.mean(lon_range) - (lon_deg_span * 0.15) / 2.0, np.mean(lon_range) + (lon_deg_span * 0.15) / 2.0])
+			depth_fine_slice = [np.mean(depth_range) - (target_width * 0.15) / 2.0, np.mean(depth_range) + (target_width * 0.15) / 2.0]
+
+			X_fine = build_sampling_grid(
+				lat_fine_slice, lon_fine_slice, lat_fine_slice, lon_fine_slice,
+				depth_fine_slice, (tc_win * 0.2) / 2.0, 1000.0 * scale_time, N_QUERY_FINE,
+				ftrns1, ftrns2, verbose=False, use_global=use_global,
+				depth_upscale_factor=1.0, buffer_scale=1.0
+			)
+			X_query_grid_fine.append(X_fine)
+
+
+
+		# ==============================================================================
+		# SOURCES REFINED QUERY LOOP
+		# ==============================================================================
+
+		print('Begin sources refined')
+		tree_lats = cKDTree(lat_range_events.reshape(-1, 1))
+
+		for n in range(len(srcs)):
+
+			inearest = tree_lats.query(srcs[n, 0].reshape(1, 1))[1][0]
+
+			# --- PASS 1: Coarse Grid Evaluation ---
+			X_query_val = np.copy(X_query_grid_coarse[inearest])
+			X_query_val[:, 0:3] = X_query_grid_coarse[inearest][:, 0:3] - X_query_grid_coarse[inearest][:, 0:3].mean(0, keepdims=True) + srcs[n, 0:3].reshape(1, -1)
+
+			# Domain clipping (Primary range -> Extended range fallback)
+			inside_coarse = np.where(
+				(X_query_val[:, 0] > lat_range[0]) & (X_query_val[:, 0] < lat_range[1]) &
+				(X_query_val[:, 1] > lon_range[0]) & (X_query_val[:, 1] < lon_range[1]) &
+				(X_query_val[:, 2] > depth_range[0]) & (X_query_val[:, 2] < depth_range[1])
+			)[0]
+
+			if len(inside_coarse) == 0:
+				inside_coarse = np.where(
+					(X_query_val[:, 0] > lat_range_extend[0]) & (X_query_val[:, 0] < lat_range_extend[1]) &
+					(X_query_val[:, 1] > lon_range_extend[0]) & (X_query_val[:, 1] < lon_range_extend[1]) &
+					(X_query_val[:, 2] > depth_range[0]) & (X_query_val[:, 2] < depth_range[1])
+				)[0]
+
+			# Skip source evaluation if coarse grid lies entirely outside physical bounds
+			if len(inside_coarse) == 0:
+				continue
+
+			X_query_val = X_query_val[inside_coarse]
+			X_query_cart_val = torch.Tensor(ftrns1(X_query_val)).to(device)
+
+			# Initial Input Extraction (for primary location search using srcs[n, 3])
+			out_vals = np.zeros(len(X_query_val))
+			for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(
+					trv_pairwise, P, srcs[[n], 3], ind_use, locs, x_grids[x_grid_ind],
+					A_src_in_sta_l[x_grid_ind], trv_times=x_grids_trv[x_grid_ind],
+					max_t=max_t, min_t=min_t, kernel_sig_t=pred_params[1],
+					dt=dt_embed_discretize, use_sign_input=use_sign_input, device=device
+				)
+				assert len(Inpts) == 1
+
+				if not use_phase_types:
+					for i in range(len(Inpts)):
+						Inpts[i][:, 2:] = 0.0
+						Masks[i][:, 2:] = 0.0
+
+				out = mz_list[x_grid_ind].forward_fixed_source(
+					Inpts[0], Masks[0], torch.Tensor(lp_times[0]).to(device),
+					torch.Tensor(lp_stations[0]).long().to(device),
+					torch.Tensor(lp_phases[0].reshape(-1, 1)).float().to(device),
+					torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind],
+					torch.Tensor(x_grids[x_grid_ind][:, 3].reshape(-1, 1)).to(device),
+					X_query_cart_val, torch.Tensor(X_query_val[:, [3]]).to(device)
+				)
+				out_vals += out[1].reshape(-1).cpu().detach().numpy() / len(x_grid_ind_list_1)
+
+			# Find coarse peak coordinate
+			iargmax_coarse = np.argmax(out_vals)
+			best_coarse_loc = X_query_val[iargmax_coarse, 0:3]
+
+			# --- PASS 2: Fine Grid Refinement around Coarse Peak ---
+			X_query_fine = np.copy(X_query_grid_fine[inearest])
+			X_query_fine[:, 0:3] = X_query_grid_fine[inearest][:, 0:3] - X_query_grid_fine[inearest][:, 0:3].mean(0, keepdims=True) + best_coarse_loc.reshape(1, -1)
+
+			# Domain clipping for Fine Grid (Primary range -> Extended range fallback)
+			inside_fine = np.where(
+				(X_query_fine[:, 0] > lat_range[0]) & (X_query_fine[:, 0] < lat_range[1]) &
+				(X_query_fine[:, 1] > lon_range[0]) & (X_query_fine[:, 1] < lon_range[1]) &
+				(X_query_fine[:, 2] > depth_range[0]) & (X_query_fine[:, 2] < depth_range[1])
+			)[0]
+
+			if len(inside_fine) == 0:
+				inside_fine = np.where(
+					(X_query_fine[:, 0] > lat_range_extend[0]) & (X_query_fine[:, 0] < lat_range_extend[1]) &
+					(X_query_fine[:, 1] > lon_range_extend[0]) & (X_query_fine[:, 1] < lon_range_extend[1]) &
+					(X_query_fine[:, 2] > depth_range[0]) & (X_query_fine[:, 2] < depth_range[1])
+				)[0]
+
+			# Fallback: If fine grid gets completely clipped out near an extreme boundary, keep the coarse peak
+			if len(inside_fine) > 0:
+				X_query_fine = X_query_fine[inside_fine]
+			else:
+				X_query_fine = X_query_val[[iargmax_coarse]]
+
+			X_query_cart_fine = torch.Tensor(ftrns1(X_query_fine)).to(device)
+
+			out_vals_fine = np.zeros(len(X_query_fine))
+			for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
+				# Reuse same Inpts extracted for srcs[n, 3] to score fine points around the coarse location
+				out = mz_list[x_grid_ind].forward_fixed_source(
+					Inpts[0], Masks[0], torch.Tensor(lp_times[0]).to(device),
+					torch.Tensor(lp_stations[0]).long().to(device),
+					torch.Tensor(lp_phases[0].reshape(-1, 1)).float().to(device),
+					torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind],
+					torch.Tensor(x_grids[x_grid_ind][:, 3].reshape(-1, 1)).to(device),
+					X_query_cart_fine, torch.Tensor(X_query_fine[:, [3]]).to(device)
+				)
+				out_vals_fine += out[1].reshape(-1).cpu().detach().numpy() / len(x_grid_ind_list_1)
+
+			max_val, iargmax = out_vals_fine.max(), np.argmax(out_vals_fine)
+
+			# --- PASS 3: Association Predictions using Refined Origin Time ---
+			if (max_val >= thresh) and (len(lp_times[0]) > 0):
+				src_max = np.copy(X_query_fine[iargmax]).reshape(1, -1)
+				src_max[0, 3] += srcs[n, 3]
+				srcs_refined_l.append(np.concatenate((src_max, np.array([max_val]).reshape(1, 1)), axis=1))
+
+				trv_out_srcs_slice = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined_l[-1].reshape(1, -1)).to(device)).detach()
+				trv_out_srcs_l.append(trv_out_srcs_slice.cpu())
+
+				X_save = np.copy(src_max)
+				X_save_cart = torch.Tensor(ftrns1(X_save)).to(device)
+
+				for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
+					# Second call required: Re-extract inputs using src_max[[0], 3] origin time for associations
+					[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(
+						trv_pairwise, P, src_max[[0], 3], ind_use, locs, x_grids[x_grid_ind],
+						A_src_in_sta_l[x_grid_ind], trv_times=x_grids_trv[x_grid_ind],
+						max_t=max_t, min_t=min_t, kernel_sig_t=pred_params[1],
+						dt=dt_embed_discretize, use_sign_input=use_sign_input, device=device
+					)
+					ipick, tpick = lp_stations[0].astype(int), lp_times[0]
+					assert len(Inpts) == 1
+
+					if not use_phase_types:
+						for i in range(len(Inpts)):
+							Inpts[i][:, 2:] = 0.0
+							Masks[i][:, 2:] = 0.0
+
+					if inc == 0:
+						Out_p_save = [np.zeros(len(lp_times[j])) for j in range(len(Inpts))]
+						Out_s_save = [np.zeros(len(lp_times[j])) for j in range(len(Inpts))]
+						Save_picks.append(np.concatenate((tpick.reshape(-1, 1), ipick.reshape(-1, 1)), axis=1))
+						lp_meta_l.append(lp_meta[0])
+
+					out = mz_list[x_grid_ind].forward_fixed(
+						Inpts[0], Masks[0], torch.Tensor(lp_times[0]).to(device),
+						torch.Tensor(lp_stations[0]).long().to(device),
+						torch.Tensor(lp_phases[0].reshape(-1, 1)).long().to(device),
+						torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind],
+						torch.Tensor(x_grids[x_grid_ind][:, 3].reshape(-1, 1)).to(device),
+						X_save_cart, torch.Tensor(ftrns1(src_max[0, 0:3].reshape(1, -1))).to(device),
+						torch.Tensor([src_max[0, 3]]).reshape(1, 1).to(device),
+						torch.zeros(1).to(device), trv_out_srcs_slice[[0], :, :]
+					)
+
+					Out_p_save[0] += out[2][0, :, 0].cpu().detach().numpy() / n_scale_x_grid_1
+					Out_s_save[0] += out[3][0, :, 0].cpu().detach().numpy() / n_scale_x_grid_1
+
+				for i in range(len(Inpts)):
+					Out_p_save_l.append(Out_p_save[i])
+					Out_s_save_l.append(Out_s_save[i])
+
+
+	if len(srcs_refined_l) > 0:
+		srcs_refined = np.vstack(srcs_refined_l)
+		iarg_sort = np.argsort(srcs_refined[:, 3])
+		srcs_refined = srcs_refined[iarg_sort]
+		trv_out_srcs_l = [trv_out_srcs_l[j] for j in iarg_sort]
+		Out_p_save_l = [Out_p_save_l[j] for j in iarg_sort]
+		Out_s_save_l = [Out_s_save_l[j] for j in iarg_sort]
+		lp_meta_l = [lp_meta_l[j] for j in iarg_sort]
+		Save_picks = [Save_picks[j] for j in iarg_sort]
+	else:
+		srcs_refined = np.empty((0, 5))  # lat, lon, depth, time, score
+		trv_out_srcs_l, Out_p_save_l, Out_s_save_l, lp_meta_l, Save_picks = [], [], [], [], []
 
 
 	############### ############### ############### ###############
