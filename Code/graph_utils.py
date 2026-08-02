@@ -8264,7 +8264,7 @@ def probe_network_sidelobes_geodetic(
 
     # Keep top 2% strongest candidates
     if len(srcs_init) > int(0.02 * num_candidates):
-        max_keep = int(0.02 * num_candidates)
+        max_keep = min(srcs_init.shape[0], max(int(0.02 * num_candidates), 5000))
         _, top_indices = torch.topk(srcs_init[:, 4], k=max_keep)
         srcs_init = srcs_init[top_indices]
 
@@ -8273,7 +8273,7 @@ def probe_network_sidelobes_geodetic(
         mp = LocalMarching(device=device)
         # Using 1.5 * W_phys_m for sp_win guarantees full cluster suppression
         srcs_maxima = mp(
-            srcs_init, ftrns1, tc_win=1.5 * W_t, sp_win=search_radius, 
+            srcs_init.cpu().detach().numpy(), ftrns1, tc_win=1.5 * W_t, sp_win=search_radius, 
             scale_depth=0.2, n_steps_max=5, use_directed=True
         )
 
