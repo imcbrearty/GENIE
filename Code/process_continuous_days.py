@@ -1430,7 +1430,7 @@ for cnt, strs in enumerate([0]):
 
 	mp = LocalMarching(device = device)
 	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
-	srcs_refined, ip_retained = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 1, return_indices = True, use_directed = True) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
+	srcs_refined, ip_retained = mp(srcs_refined, ftrns1_use, tc_win = tc_win, sp_win = sp_win, scale_depth = 1.0, n_steps_max = 1, return_indices = True, use_directed = True) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
 
 
 	## Rather than this matching, use bipartite assignment (however this can have memory issues)
