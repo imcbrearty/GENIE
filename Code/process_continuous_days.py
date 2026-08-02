@@ -320,7 +320,9 @@ else:
 	earth_radius = 6378137.0
 	ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # just subtract mean
 	ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn) # just subtract mean
-
+	ftrns1_scaled = lambda x, scale: (rbest @ (lla2ecef_scaled(x, scale_depth = scale) - mn).T).T # just subtract mean
+	
+	
 	ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T # just subtract mean
 	ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device) # just subtract mean
 
