@@ -974,68 +974,88 @@ for cnt, strs in enumerate([0]):
 	############### ############### ############### ###############
 
 	## Use disconnected components (using scaled kernel distances?) of Out_2_sparse, then iterate Local Marching on disconnected components
+	## Use disconnected components of Out_2_sparse, then iterate Local Marching on disconnected components
 	Out_2_sparse = np.vstack(Out_2_sparse)
-	isort = np.argsort(Out_2_sparse[:,3])
+	isort = np.argsort(Out_2_sparse[:, 3])
 	Out_2_sparse = Out_2_sparse[isort]
-	coords_norm = np.concatenate((ftrns1(Out_2_sparse[:,0:3])/sp_win, Out_2_sparse[:,[3]]/tc_win), axis = 1)
+
+	# Depth scaling setup
+	scale_depth_clustering = 0.2
+	# Equivalent, slightly cleaner lambda definition
+	ftrns1_use = ftrns1 if scale_depth_clustering == 1.0 else (lambda x: ftrns1_scaled(x, scale_depth_clustering))
+
+	coords_norm = np.concatenate((ftrns1_use(Out_2_sparse[:, 0:3]) / sp_win, Out_2_sparse[:, [3]] / tc_win), axis=1)
 
 	gap_buffer = 1.1
+	skip_isolated_nodes = False
+	skip_low_degree_nodes = False
+
 	time_diffs = np.diff(coords_norm[:, 3])
 	gap_indices = np.where(time_diffs > gap_buffer)[0] + 1
 	segments = np.split(np.arange(len(coords_norm)), gap_indices)
 
 	srcs_l = []
 	cnt_marching = 0
+
+	# Instantiate GPU Local Marching ONCE outside the loops
+	mp = LocalMarching(device=device)
+
 	for segment_indices in segments:
 
 		if len(segment_indices) == 0:
 			continue
-		    
-		# If it's a lone point, it can't be a peak in this logic
+
+		# Single-point segment handling
 		if len(segment_indices) == 1:
-			# Optional: add logic here if you want to keep single detections
+			if not skip_isolated_nodes:
+				srcs_l.append(Out_2_sparse[segment_indices])
 			continue
 
-		# query_pairs finds all pairs within distance r=1.0
-		# This replaces your old intersection of tree_t and tree_x
-		# Build the 4D Tree
+		# Build 4D Tree on CPU
 		tree = cKDTree(coords_norm[segment_indices])
 		local_edges = tree.query_pairs(r=1.0, output_type='ndarray')
 
-		## Now find disconnected components of edges
+		# Find disconnected components
 		if len(local_edges) > 0:
-			# Find clusters within this temporal segment
 			N_seg = len(segment_indices)
 			adj = csr_matrix((np.ones(len(local_edges)), (local_edges[:, 0], local_edges[:, 1])), shape=(N_seg, N_seg))
 			n_comps, labels = connected_components(adj, directed=False)
-    
-			# Iterate through the clusters found in this segment
-			for i in range(n_comps):
 
-				refined = []
+			for i in range(n_comps):
 				comp_mask = (labels == i)
-				if np.sum(comp_mask) < 3: # Noise filter
+				cluster_size = np.sum(comp_mask)
+
+				# QC Filter Logic:
+				# Size 1 clusters inside a multi-edge segment
+				if cluster_size == 1:
+					if not skip_isolated_nodes:
+						srcs_l.append(Out_2_sparse[segment_indices[comp_mask]])
 					continue
-            
-				# Extract sub-cloud and march
-				scale_depth_clustering = 0.2
+
+				# Size 2 clusters
+				if cluster_size < 3 and skip_low_degree_nodes:
+					continue
+
+				# Size >= 3 or low degree filter disabled -> Run Local Marching
 				sub_srcs = Out_2_sparse[segment_indices[comp_mask]]
-				mp = LocalMarching(device = device) ## Check n_steps_max = 2
-				# refined = mp(sub_srcs, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False)
-				refined = mp(sub_srcs, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 1, use_directed = True)
+				refined = mp(sub_srcs, ftrns1_use, tc_win=tc_win, sp_win=sp_win, scale_depth=1.0, n_steps_max=1, use_directed=True) # Pre-scaled in ftrns1_use
 				cnt_marching += 1
 
 				if len(refined) > 0:
 					srcs_l.append(refined)
 
+		else:
+			# Entire segment has zero edges -> all nodes are isolated
+			if not skip_isolated_nodes:
+				srcs_l.append(Out_2_sparse[segment_indices])
+
+	if len(srcs_l) == 0:
+		print('No sources detected, finishing script')
+		continue
 
 	srcs = np.vstack(srcs_l)
-	if len(srcs) == 0:
-		print('No sources detected, finishing script')
-		continue ## No sources, continue
-
-	print('Detected %d number of initial local maxima (%d distinct Local Marchings)'%(srcs.shape[0], cnt_marching))
-	srcs = srcs[np.argsort(srcs[:,3])]
+	print('Detected %d initial local maxima (%d distinct Local Marchings)' % (srcs.shape[0], cnt_marching))
+	srcs = srcs[np.argsort(srcs[:, 3])]
 
 	## Set fixed edges to false
 	if use_fixed_edges == True:
