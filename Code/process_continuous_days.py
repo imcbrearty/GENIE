@@ -2244,7 +2244,7 @@ for cnt, strs in enumerate([0]):
 			)
 			print(f"Dynamically configured MAX_BATCH_SIZE: {MAX_BATCH_SIZE}")
 
-			def run_batched_de_in_chunks(event_list, bounds_min, bounds_max, chunk_size=500):
+			def run_batched_de_in_chunks(event_list, bounds_min, bounds_max, use_path_sigma = False, chunk_size=500):
 				all_de_results = []
 				for start_idx in range(0, len(event_list), chunk_size):
 					chunk = event_list[start_idx : start_idx + chunk_size]
