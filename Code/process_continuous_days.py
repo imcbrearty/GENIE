@@ -1354,7 +1354,8 @@ for cnt, strs in enumerate([0]):
 				# 	X_query_cart_fine, torch.Tensor(X_query_fine[:, [3]]).to(device)
 				# )
 				out = mz_list[x_grid_ind] = mz_list[x_grid_ind].forward_queries(X_query_cart_fine, torch.Tensor(X_query_fine[:, [3]]).to(device))
-				out_vals_fine += out[1].reshape(-1).cpu().detach().numpy() / len(x_grid_ind_list_1)
+				# out_vals_fine += out[1].reshape(-1).cpu().detach().numpy() / len(x_grid_ind_list_1)
+				out_vals_fine += out.reshape(-1).cpu().detach().numpy() / len(x_grid_ind_list_1)
 
 			max_val, iargmax = out_vals_fine.max(), np.argmax(out_vals_fine)
 
