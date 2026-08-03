@@ -711,7 +711,7 @@ def extract_inputs_from_data_fixed_grids_with_phase_type(trv, locs, ind_use, arr
 
 # 	return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta]
 
-def extract_input_from_data(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta, trv_times = None, max_t = 300.0, min_t = 0.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, use_sign_input = False, return_embedding = False, device = 'cpu'): ## pred_params[1]
+def extract_input_from_data_backup(trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta, trv_times = None, max_t = 300.0, min_t = 0.0, kernel_sig_t = 5.0, dt = 0.2, batch_grids = False, use_asserts = True, verbose = False, use_sign_input = False, return_embedding = False, device = 'cpu'): ## pred_params[1]
 
 	## Travel time calculator
 	## Picks
@@ -1037,7 +1037,7 @@ class PrecomputedEmbedding:
         self.slope_embed_s = torch.sign(-1.0 * torch.diff(self.embed_s, append=self.embed_s[[-1]] + (self.embed_s[[-1]] - self.embed_s[[-2]]), dim=0))
 
 
-def extract_input_from_data1(
+def extract_input_from_data(
     trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta,
     precomputed_embedding=None, trv_times=None, max_t=300.0, min_t=0.0, 
     kernel_sig_t=5.0, dt=0.2, batch_grids=False, use_asserts=True, 
