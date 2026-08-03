@@ -2166,11 +2166,11 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		if use_absolute_offset == True:
 			# Predict scale-conditioned gamma offsets from domain context
-	        self.f_gamma = nn.Linear(embed_vector_dim, 4)
-	        # Base log-gammas (e.g. multi-scale physical bounds)
-	        self.log_gamma_base = nn.Parameter(
-	            torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-	        )
+			self.f_gamma = nn.Linear(embed_vector_dim, 4)
+			# Base log-gammas (e.g. multi-scale physical bounds)
+			self.log_gamma_base = nn.Parameter(
+				torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
+			)
 		
 		# self.w_gamma = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
 		# self.use_src_pred = self.Arrivals.src_pred
@@ -2194,10 +2194,10 @@ class GCN_Detection_Network_extended(nn.Module):
 		
 		if self.use_absolute_offset == True:
 			norm_pos = torch.sqrt(torch.sum(A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-	        gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
-	        gammas = torch.exp(self.log_gamma_base + gamma_offset)
-	        spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
-	        rel_pos_feat = torch.cat((A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, A_src_in_edges.x[:,3:4]), dim=-1)
+			gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
+			gammas = torch.exp(self.log_gamma_base + gamma_offset)
+			spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
+			rel_pos_feat = torch.cat((A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, A_src_in_edges.x[:,3:4]), dim=-1)
 			Slice = torch.cat((Slice, rel_pos_feat), dim = 1)
 		
 		# if self.attach_time == True:
@@ -2385,10 +2385,10 @@ class GCN_Detection_Network_extended(nn.Module):
 		
 		if self.use_absolute_offset == True:
 			norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-	        gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
-	        gammas = torch.exp(self.log_gamma_base + gamma_offset)
-	        spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
-	        rel_pos_feat = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, self.A_src_in_edges.x[:,3:4]), dim=-1)
+			gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
+			gammas = torch.exp(self.log_gamma_base + gamma_offset)
+			spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
+			rel_pos_feat = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, self.A_src_in_edges.x[:,3:4]), dim=-1)
 			Slice = torch.cat((Slice, rel_pos_feat), dim = 1)
 		
 		
@@ -2474,10 +2474,10 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		if self.use_absolute_offset == True:
 			norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-	        gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
-	        gammas = torch.exp(self.log_gamma_base + gamma_offset)
-	        spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
-	        rel_pos_feat = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, self.A_src_in_edges.x[:,3:4]), dim=-1)
+			gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
+			gammas = torch.exp(self.log_gamma_base + gamma_offset)
+			spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
+			rel_pos_feat = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, self.A_src_in_edges.x[:,3:4]), dim=-1)
 			Slice = torch.cat((Slice, rel_pos_feat), dim = 1)
 		
 		
@@ -2974,6 +2974,5 @@ class Magnitude(nn.Module):
 
 		## Can directly use torch_scatter to coalesce the data?
 		# mag = (log_amp - self.epicenter_spatial_coef[phase]*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device))
-
 
 
