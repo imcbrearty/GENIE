@@ -141,6 +141,7 @@ process_known_events = process_config['process_known_events']
 use_fixed_domain = process_config.get('use_fixed_domain', False)
 use_offset_quality_control = process_config.get('use_offset_quality_control', True)
 offset_ratio_quality_control = process_config.get('offset_ratio_quality_control', 2.0) # 3.0
+use_debug = process_config.get('use_debug', False)
 
 ## Minimum required picks and stations per event
 min_required_picks = process_config['min_required_picks']
@@ -713,6 +714,27 @@ locs_use = locs[ind_use]
 stas_use = stas[ind_use]
 
 
+if use_debug == True: ## If true, check matched events during processing
+	calibration_file = path_to_file + 'Calibration' + seperator + '%d'%date[0] + seperator + '%s_reference_%d_%d_%d_ver_1.npz'%(name_of_project, date[0], date[1], date[2])
+	if os.path.isfile(calibration_file) == True:
+		z = np.load(calibration_file)
+		srcs_known = z['srcs_ref']
+		z.close()
+		
+	else:
+		try:
+			t0 = UTCDateTime(date[0], date[1], date[2])
+			srcs_known = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
+			print('Processing %d known events'%len(srcs_known))
+		except:
+			srcs_known = np.zeros((0,4))
+			
+	if len(srcs_known) == 0:
+		use_debug = False
+	else:
+		print('Using debug: checking %d reference events'%(len(srcs_known)))
+	
+
 # if use_fixed_domain == False:
 # 	assert(np.abs(ind_use - np.arange(len(locs))).max() == 0)
 
@@ -991,6 +1013,7 @@ for cnt, strs in enumerate([0]):
 	
 	print('Continuous processing time %0.4f'%(time.time() - st_process))
 
+	
 	############### ############### ############### ###############
 	     ############### Local Peak Finding ###############
 	############### ############### ############### ###############
@@ -1078,7 +1101,11 @@ for cnt, strs in enumerate([0]):
 	srcs = np.vstack(srcs_l)
 	print('Detected %d initial local maxima (%d distinct Local Marchings)' % (srcs.shape[0], cnt_marching))
 	srcs = srcs[np.argsort(srcs[:, 3])]
-
+	if use_debug == True:
+		matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
+		print('Initial source detections'); check_matched_events(srcs_known, srcs, matches)
+		
+	
 	## Set fixed edges to false
 	if use_fixed_edges == True:
 		assert(len(x_grid_ind_list) == 1)
@@ -1458,11 +1485,19 @@ for cnt, strs in enumerate([0]):
 	############### ############### ############### ###############
 	     ############### Remove Merged ###############
 	############### ############### ############### ###############
-
+	if use_debug == True:
+		matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
+		print('Srcs refined (initial):'); check_matched_events(srcs_known, srcs_refined, matches)
+	
 	mp = LocalMarching(device = device)
 	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
 	srcs_refined, ip_retained = mp(srcs_refined, ftrns1_use, tc_win = tc_win, sp_win = sp_win, scale_depth = 1.0, n_steps_max = 1, return_indices = True, use_directed = True) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
 
+
+	if use_debug == True:
+		matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
+		print('Srcs refined (merged):'); check_matched_events(srcs_known, srcs_refined, matches)
+		
 
 	## Rather than this matching, use bipartite assignment (however this can have memory issues)
 	# tree_refined = cKDTree(np.concatenate((ftrns1(srcs_refined), scale_time*srcs_refined[:,[3]]), axis = 1))
@@ -1488,7 +1523,8 @@ for cnt, strs in enumerate([0]):
 	Out_s_save = [Out_s_save[i] for i in iargsort]
 	Save_picks = [Save_picks[i] for i in iargsort]
 	lp_meta = [lp_meta_l[i] for i in iargsort]
-
+	trv_out_srcs_l = [trv_out_srcs_l[i] for i in iargsort] 
+	
 	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach()
 	trv_out_srcs_init2 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
 	print('Number sources (after sources refined and second local marching): %d (Time %0.4f)'%(len(srcs_refined), (time.time() - st_process)))
@@ -1966,6 +2002,10 @@ for cnt, strs in enumerate([0]):
 
 		print('Number sources (after competitive assignment): %d (Time %0.4f)'%(len(srcs_refined), time.time() - st_process))
 
+		if use_debug == True:
+			matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
+			print('Post competitive assignment [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_refined, matches)
+			
 
 		     ########### ########## ########### ###########
 		########### ############### ############### ###############
@@ -2452,7 +2492,11 @@ for cnt, strs in enumerate([0]):
 		###### Only keep events with minimum number of picks and observing stations #########
 		print('Number sources (after travel time locations and quality control): %d (Time %0.4f)'%(len(srcs_trv), time.time() - st_process))
 		
+		if use_debug == True:
+			matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
+			print('Post location [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_trv, matches)
 
+		
 		# Count number of P and S picks
 		cnt_p, cnt_s = np.zeros(srcs_refined.shape[0]), np.zeros(srcs_refined.shape[0])
 		for i in range(srcs_refined.shape[0]):
