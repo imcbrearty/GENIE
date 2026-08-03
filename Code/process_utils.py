@@ -2360,7 +2360,88 @@ class TopKSeismicEmbeddingEngine:
         return [Inpts, Masks], picks
 
 
+class ExactTopKSeismicEngine:
+    """Calculates exact sub-grid Top-K nearest arrivals directly on GPU edges."""
 
+    def __init__(
+        self,
+        P,
+        locs,
+        ind_use,
+        A_src_in_sta=None,
+        trv_times=None,
+        kernel_sig_t=2.84730416,
+        k_nearest=2,
+        device="cpu",
+    ):
+        self.device = device
+        self.kernel_sig_t = float(kernel_sig_t)
+        self.k = k_nearest
+        self.locs = locs
+        self.ind_use = np.asanyarray(ind_use)
+        self.n_stations = len(locs)
+
+        if A_src_in_sta is not None:
+            self.n_edges = len(A_src_in_sta[0])
+            sta_idx_local = A_src_in_sta[0]
+            edge_global_sta = self.ind_use[sta_idx_local].astype(int)
+            self.sta_ids_gpu = torch.as_tensor(edge_global_sta, device=self.device).long()
+
+            src_indices = A_src_in_sta[1]
+            if trv_times is not None:
+                trv_sliced = trv_times[src_indices, edge_global_sta, :]
+                self.trv_edges_gpu = torch.as_tensor(trv_sliced, device=self.device, dtype=torch.float32)
+        else:
+            self.n_edges = 0
+
+        self.update_picks(P)
+
+    def update_picks(self, P_new):
+        sta_mask = np.isin(P_new[:, 1].astype(int), self.ind_use)
+        self.P = P_new[sta_mask]
+        self.P_times_gpu = torch.as_tensor(self.P[:, 0], device=self.device, dtype=torch.float32)
+        self.P_sta_gpu = torch.as_tensor(self.P[:, 1], device=self.device, dtype=torch.long)
+        self.P_phase_gpu = torch.as_tensor(self.P[:, 4], device=self.device, dtype=torch.long)
+
+    def _get_topk_gaussian_for_arrival(self, arrival_times, phase_filter=None):
+        """Finds top-K nearest picks to arrival times on each station edge."""
+        # Matrix of time differences: (N_edges, N_picks)
+        time_diffs = torch.abs(arrival_times.unsqueeze(1) - self.P_times_gpu.unsqueeze(0))
+
+        # Station match mask
+        sta_match = self.sta_ids_gpu.unsqueeze(1) == self.P_sta_gpu.unsqueeze(0)
+
+        if phase_filter is not None:
+            phase_match = self.P_phase_gpu.unsqueeze(0) == phase_filter
+            valid_mask = sta_match & phase_match
+        else:
+            valid_mask = sta_match
+
+        # Mask out mismatched station picks with infinity
+        time_diffs = torch.where(valid_mask, time_diffs, torch.tensor(float("inf"), device=self.device))
+
+        # Smallest K time offsets
+        topk_diffs, _ = torch.topk(time_diffs, k=self.k, dim=1, largest=False)
+
+        # Convert to Gaussian misfits
+        gaussians = torch.exp(-0.5 * (topk_diffs / self.kernel_sig_t) ** 2)
+        return torch.nan_to_num(gaussians, nan=0.0)
+
+    def extract_inputs(self, t0, min_t=0.0, max_t=300.0, t_win=10.0):
+        t0_val = float(np.squeeze(t0))
+
+        arrival_p = self.trv_edges_gpu[:, 0] + t0_val
+        arrival_s = self.trv_edges_gpu[:, 1] + t0_val
+
+        col0 = self._get_topk_gaussian_for_arrival(arrival_p, phase_filter=None)
+        col1 = self._get_topk_gaussian_for_arrival(arrival_s, phase_filter=None)
+        col2 = self._get_topk_gaussian_for_arrival(arrival_p, phase_filter=0)
+        col3 = self._get_topk_gaussian_for_arrival(arrival_s, phase_filter=1)
+
+        val_embed = torch.cat((col0, col1, col2, col3), dim=-1)
+        Masks = [1.0 * (val_embed > 0.01)]
+
+        return [val_embed, Masks]
 
 
 
