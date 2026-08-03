@@ -953,6 +953,284 @@ def extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, m
 
 	return [lp_times, lp_stations, lp_phases, lp_meta]
 
+
+class PrecomputedEmbedding:
+    """
+    Computes a continuous global Gaussian time-series embedding for all picks in P.
+    Enables O(1) direct tensor indexing during t0 sliding window queries.
+    """
+    def __init__(
+        self, P, locs, min_t=0.0, max_t=300.0, kernel_sig_t=5.0, dt=0.2, device='cpu'
+    ):
+        self.dt = float(dt)
+        self.kernel_sig_t = float(kernel_sig_t)
+        self.device = device
+        self.n_stations = len(locs)
+
+        # ----------------------------------------------------------------------
+        # Global Bounds Accounting for min_t (can be negative) & max_t + padding
+        # ----------------------------------------------------------------------
+        t_offset = 3.0 * self.kernel_sig_t
+        self.T_start = float(np.min(P[:, 0])) + min_t - t_offset
+        self.T_end = float(np.max(P[:, 0])) + max_t + t_offset
+
+        self.n_time_series = int(np.round((self.T_end - self.T_start) / self.dt)) + 1
+
+        # ----------------------------------------------------------------------
+        # Build 1D continuous Gaussian embeddings (P-wave and S-wave)
+        # ----------------------------------------------------------------------
+        ifind_p = (P[:, 4] == 0)
+        ifind_s = (P[:, 4] == 1)
+
+        # 64-bit precision time offset arithmetic
+        rel_p_times = P[ifind_p, 0] - self.T_start
+        rel_s_times = P[ifind_s, 0] - self.T_start
+
+        nearest_index_p = np.round(rel_p_times / self.dt).astype(int)
+        nearest_index_s = np.round(rel_s_times / self.dt).astype(int)
+
+        num_extra = int(np.ceil(3 * self.kernel_sig_t / self.dt))
+        vec_repeat = np.arange(-num_extra, num_extra + 1, dtype=int)
+
+        # Temporal broadcasting
+        indices_p = nearest_index_p[:, None] + vec_repeat[None, :]
+        indices_s = nearest_index_s[:, None] + vec_repeat[None, :]
+
+        imask_p = (indices_p >= 0) & (indices_p < self.n_time_series)
+        imask_s = (indices_s >= 0) & (indices_s < self.n_time_series)
+
+        indices_p_clamped = np.clip(indices_p, 0, self.n_time_series - 1)
+        indices_s_clamped = np.clip(indices_s, 0, self.n_time_series - 1)
+
+        time_vals_p = rel_p_times[:, None] - (indices_p_clamped * self.dt)
+        time_vals_s = rel_s_times[:, None] - (indices_s_clamped * self.dt)
+
+        vals_p = (imask_p * np.exp(-0.5 * (time_vals_p**2) / (self.kernel_sig_t**2))).reshape(-1)
+        vals_s = (imask_s * np.exp(-0.5 * (time_vals_s**2) / (self.kernel_sig_t**2))).reshape(-1)
+
+        station_p = P[ifind_p, 1].astype(int)
+        station_s = P[ifind_s, 1].astype(int)
+
+        write_indices_p = (indices_p_clamped + station_p[:, None] * self.n_time_series).reshape(-1)
+        write_indices_s = (indices_s_clamped + station_s[:, None] * self.n_time_series).reshape(-1)
+
+        dim_size = self.n_time_series * self.n_stations
+
+        # Scatter max onto GPU target
+        self.embed_p = scatter(
+            torch.as_tensor(vals_p, dtype=torch.float32, device=self.device),
+            torch.as_tensor(write_indices_p, dtype=torch.long, device=self.device),
+            dim=0, dim_size=dim_size, reduce='max'
+        )
+
+        self.embed_s = scatter(
+            torch.as_tensor(vals_s, dtype=torch.float32, device=self.device),
+            torch.as_tensor(write_indices_s, dtype=torch.long, device=self.device),
+            dim=0, dim_size=dim_size, reduce='max'
+        )
+
+        self.embed = torch.maximum(self.embed_p, self.embed_s)
+
+        # Pre-calculate slopes if required
+        self.slope_embed = torch.sign(-1.0 * torch.diff(self.embed, append=self.embed[[-1]] + (self.embed[[-1]] - self.embed[[-2]]), dim=0))
+        self.slope_embed_p = torch.sign(-1.0 * torch.diff(self.embed_p, append=self.embed_p[[-1]] + (self.embed_p[[-1]] - self.embed_p[[-2]]), dim=0))
+        self.slope_embed_s = torch.sign(-1.0 * torch.diff(self.embed_s, append=self.embed_s[[-1]] + (self.embed_s[[-1]] - self.embed_s[[-2]]), dim=0))
+
+
+def extract_input_from_data(
+    trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta,
+    precomputed_embedding=None, trv_times=None, max_t=300.0, min_t=0.0, 
+    kernel_sig_t=5.0, dt=0.2, batch_grids=False, use_asserts=True, 
+    verbose=False, use_sign_input=False, return_embedding=False, device='cpu'
+):
+    if verbose:
+        st_start = time.time()
+
+    t_offset = 3.0 * kernel_sig_t
+    t_min_bound = t0 + min_t - 2.0 * kernel_sig_t
+    t_max_bound = t0 + max_t + 2.0 * kernel_sig_t
+
+    # Filter pick slice for window
+    p_mask = (P[:, 0] > t_min_bound) & (P[:, 0] < t_max_bound)
+    P_slice = P[p_mask]
+    station_mask = np.isin(P_slice[:, 1], ind_use)
+    P_slice = P_slice[station_mask]
+
+    # =========================================================================
+    # PATH A: Use Pre-computed Continuous Global Embedding (FAST O(1))
+    # =========================================================================
+    if precomputed_embedding is not None:
+        emb = precomputed_embedding
+        
+        # Calculate travel times
+        if trv_times is None:
+            trv_calc = trv_pairwise(
+                torch.as_tensor(locs[ind_use[A_src_in_sta[0]]], device=device),
+                torch.as_tensor(x_grid[A_src_in_sta[1]], device=device)
+            ).cpu().detach().numpy()
+            abs_arr_times = t0 + trv_calc
+        else:
+            abs_arr_times = t0 + trv_times[A_src_in_sta[1], ind_use[A_src_in_sta[0]], :]
+
+        # 64-bit float math on CPU to sample index conversion
+        global_sample_p = np.round((abs_arr_times[:, 0] - emb.T_start) / emb.dt).astype(int)
+        global_sample_s = np.round((abs_arr_times[:, 1] - emb.T_start) / emb.dt).astype(int)
+
+        # Clamp safely to continuous tensor length
+        global_sample_p = np.clip(global_sample_p, 0, emb.n_time_series - 1)
+        global_sample_s = np.clip(global_sample_s, 0, emb.n_time_series - 1)
+
+        # Global Flat Index = station_index * n_time_series + global_sample_index
+        sta_indices = ind_use[A_src_in_sta[0]].astype(int)
+        trv_read_ind_p = global_sample_p + sta_indices * emb.n_time_series
+        trv_read_ind_s = global_sample_s + sta_indices * emb.n_time_series
+
+        val_embed_p = emb.embed[trv_read_ind_p]
+        val_embed_s = emb.embed[trv_read_ind_s]
+        val_embed_p1 = emb.embed_p[trv_read_ind_p]
+        val_embed_s1 = emb.embed_s[trv_read_ind_s]
+
+        if use_sign_input:
+            val_embed_p *= emb.slope_embed[trv_read_ind_p]
+            val_embed_s *= emb.slope_embed[trv_read_ind_s]
+            val_embed_p1 *= emb.slope_embed_p[trv_read_ind_p]
+            val_embed_s1 *= emb.slope_embed_s[trv_read_ind_s]
+
+        val_embed = torch.stack((val_embed_p, val_embed_s, val_embed_p1, val_embed_s1), dim=1)
+        
+        write_indices = torch.arange(len(A_src_in_sta[0]), dtype=torch.long, device=device)
+        Inpts = [scatter(val_embed, write_indices, dim=0, dim_size=len(A_src_in_sta[0]), reduce='sum')]
+        Masks = [1.0 * (torch.abs(Inpts[-1]) > 0.01)]
+
+    # =========================================================================
+    # PATH B: Fallback On-the-Fly Window Computation
+    # =========================================================================
+    else:
+        if len(P_slice) == 0:
+            ind_unique = np.array([], dtype=int)
+            n_sta_unique = 0
+        else:
+            ind_unique = np.unique(P_slice[:, 1]).astype(int)
+            n_sta_unique = len(ind_unique)
+
+        abs_time_ref_0 = t0 + min_t - t_offset
+        abs_time_ref_max = t0 + max_t + t_offset
+        n_time_series = int(np.round((abs_time_ref_max - abs_time_ref_0) / dt)) + 1
+
+        if n_sta_unique > 0:
+            perm_vec_slice = -np.ones(locs.shape[0], dtype=int)
+            perm_vec_slice[ind_unique] = np.arange(n_sta_unique)
+            P_ind_perm = perm_vec_slice[P_slice[:, 1].astype(int)]
+
+            ifind_p = (P_slice[:, 4] == 0)
+            ifind_s = (P_slice[:, 4] == 1)
+
+            rel_p_times = P_slice[ifind_p, 0] - abs_time_ref_0
+            rel_s_times = P_slice[ifind_s, 0] - abs_time_ref_0
+
+            nearest_index_p = np.round(rel_p_times / dt).astype(int)
+            nearest_index_s = np.round(rel_s_times / dt).astype(int)
+
+            num_extra = int(np.ceil(3 * kernel_sig_t / dt))
+            vec_repeat = np.arange(-num_extra, num_extra + 1, dtype=int)
+
+            indices_p = nearest_index_p[:, None] + vec_repeat[None, :]
+            indices_s = nearest_index_s[:, None] + vec_repeat[None, :]
+
+            imask_p = (indices_p >= 0) & (indices_p < n_time_series)
+            imask_s = (indices_s >= 0) & (indices_s < n_time_series)
+
+            indices_p_clamped = np.clip(indices_p, 0, n_time_series - 1)
+            indices_s_clamped = np.clip(indices_s, 0, n_time_series - 1)
+
+            time_vals_p = rel_p_times[:, None] - (indices_p_clamped * dt)
+            time_vals_s = rel_s_times[:, None] - (indices_s_clamped * dt)
+
+            vals_p = (imask_p * np.exp(-0.5 * (time_vals_p**2) / (kernel_sig_t**2))).reshape(-1)
+            vals_s = (imask_s * np.exp(-0.5 * (time_vals_s**2) / (kernel_sig_t**2))).reshape(-1)
+
+            write_indices_p = (indices_p_clamped + P_ind_perm[ifind_p][:, None] * n_time_series).reshape(-1)
+            write_indices_s = (indices_s_clamped + P_ind_perm[ifind_s][:, None] * n_time_series).reshape(-1)
+
+            dim_size = n_time_series * n_sta_unique
+            embed_p = scatter(torch.as_tensor(vals_p, dtype=torch.float32, device=device),
+                              torch.as_tensor(write_indices_p, dtype=torch.long, device=device),
+                              dim=0, dim_size=dim_size, reduce='max')
+
+            embed_s = scatter(torch.as_tensor(vals_s, dtype=torch.float32, device=device),
+                              torch.as_tensor(write_indices_s, dtype=torch.long, device=device),
+                              dim=0, dim_size=dim_size, reduce='max')
+
+            embed = torch.maximum(embed_p, embed_s)
+        else:
+            embed_p = torch.zeros(0, device=device)
+            embed_s = torch.zeros(0, device=device)
+            embed = torch.zeros(0, device=device)
+
+        if return_embedding:
+            return embed_p, embed_s, ind_unique, abs_time_ref_0, n_time_series, n_sta_unique
+
+        perm_vec = -np.ones(len(locs), dtype=int)
+        if n_sta_unique > 0:
+            perm_vec[ind_unique] = np.arange(n_sta_unique)
+
+        A_src_in_sta_proj = perm_vec[A_src_in_sta[0]]
+        ifind = np.where(A_src_in_sta_proj > -1)[0]
+
+        if len(ifind) == 0 or n_sta_unique == 0:
+            Inpts = [torch.zeros((len(A_src_in_sta[0]), 4), device=device)]
+            Masks = [torch.zeros((len(A_src_in_sta[0]), 4), device=device)]
+        else:
+            if trv_times is None:
+                trv_calc = trv_pairwise(
+                    torch.as_tensor(locs[ind_use[A_src_in_sta[0][ifind]]], device=device),
+                    torch.as_tensor(x_grid[A_src_in_sta[1][ifind]], device=device)
+                ).cpu().detach().numpy()
+                trv_out_ind = ((trv_calc + t0 - abs_time_ref_0) / dt).astype(int)
+            else:
+                trv_out_ind = ((trv_times[A_src_in_sta[1][ifind], ind_use[A_src_in_sta[0][ifind]], :] + t0 - abs_time_ref_0) / dt).astype(int)
+
+            trv_out_ind_p = np.clip(trv_out_ind[:, 0], 0, n_time_series - 1)
+            trv_out_ind_s = np.clip(trv_out_ind[:, 1], 0, n_time_series - 1)
+
+            trv_read_ind_p = trv_out_ind_p + A_src_in_sta_proj[ifind] * n_time_series
+            trv_read_ind_s = trv_out_ind_s + A_src_in_sta_proj[ifind] * n_time_series
+
+            val_embed_p = embed[trv_read_ind_p]
+            val_embed_s = embed[trv_read_ind_s]
+            val_embed_p1 = embed_p[trv_read_ind_p]
+            val_embed_s1 = embed_s[trv_read_ind_s]
+
+            if use_sign_input:
+                slope_embed = torch.sign(-1.0 * torch.diff(embed, append=embed[[-1]] + (embed[[-1]] - embed[[-2]]), dim=0))
+                slope_embed_p = torch.sign(-1.0 * torch.diff(embed_p, append=embed_p[[-1]] + (embed_p[[-1]] - embed_p[[-2]]), dim=0))
+                slope_embed_s = torch.sign(-1.0 * torch.diff(embed_s, append=embed_s[[-1]] + (embed_s[[-1]] - embed_s[[-2]]), dim=0))
+
+                val_embed_p *= slope_embed[trv_read_ind_p]
+                val_embed_s *= slope_embed[trv_read_ind_s]
+                val_embed_p1 *= slope_embed_p[trv_read_ind_p]
+                val_embed_s1 *= slope_embed_s[trv_read_ind_s]
+
+            write_indices = torch.as_tensor(ifind, dtype=torch.long, device=device)
+            val_embed = torch.stack((val_embed_p, val_embed_s, val_embed_p1, val_embed_s1), dim=1)
+
+            Inpts = [scatter(val_embed, write_indices, dim=0, dim_size=len(A_src_in_sta[0]), reduce='sum')]
+            Masks = [1.0 * (torch.abs(Inpts[-1]) > 0.01)]
+
+    # --------------------------------------------------------------------------
+    # Pick Metadata Extraction
+    # --------------------------------------------------------------------------
+    lp_times, lp_stations, lp_phases, lp_meta = extract_pick_inputs_from_data(
+        P_slice, locs, ind_use, t0, max_t, min_t=min_t, use_batch=False, verbose=False
+    )
+
+    if verbose:
+        print(f"Extraction step took {time.time() - st_start:.4f}s")
+
+    return [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta]
+
+
+
 def build_src_src_product(Ac_src_src, A_src_in_sta, locs, x_grid, device = 'cpu'):
 
 	n_sta = len(locs)
