@@ -264,7 +264,7 @@ def hash_rows(val):
 	return val[:,0].to(torch.int64) << 32 | val[:,1].to(torch.int64)
 
 ## Check matched events
-def check_matches(srcs_known, srcs, matches):
+def check_matched_events(srcs_known, srcs, matches):
 	if len(matches) > 0:
 		res = srcs_known[matches[:,0],0:4] - srcs[matches[:,1],0:4]
 		print('\nMatched events:')
