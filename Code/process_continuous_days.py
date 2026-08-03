@@ -1172,6 +1172,7 @@ for cnt, strs in enumerate([0]):
 
 		print('Begin sources refined')
 
+		cnt_srcs, total_srcs = 0, len(srcs)
 		tree_lats = cKDTree(lat_range_events.reshape(-1,1))
 		for n in range(len(srcs)):
 
@@ -1208,7 +1209,9 @@ for cnt, strs in enumerate([0]):
 				srcs_refined_l.append(np.concatenate((src_max, np.array([max_val]).reshape(1,1)), axis = 1))
 				trv_out_srcs_slice = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined_l[-1].reshape(1,-1)).to(device)).detach() # .cpu().detach().numpy() # + srcs[:,3].reshape(-1,1,1)		
 				trv_out_srcs_l.append(trv_out_srcs_slice.cpu())
-
+				print('Srcs refined %d/%d'%(cnt_srcs, total_srcs))
+				cnt_srcs += 1
+				
 				# X_save[:,2] = src_max[i,2]
 				X_save = np.copy(src_max)
 				X_save_cart = torch.Tensor(ftrns1(X_save)).to(device)
