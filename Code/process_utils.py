@@ -4535,7 +4535,8 @@ def batched_differential_evolution_location_with_trim(
 
     best_idx = torch.argmin(loss, dim=1)
     best_sol_norm = torch.gather(pop_norm, 1, best_idx.view(B, 1, 1).expand(B, 1, D)).view(B, D)
-    de_sol_phys = b_min.view(B, D) + best_sol_norm * b_range.view(B, D)
+    # de_sol_phys = b_min.view(B, D) + best_sol_norm * b_range.view(B, D)
+    de_sol_phys = b_min.view(1, -1) + best_sol_norm * b_range.view(1, -1)
 
     # --- 4. Compute Residuals & Build Active Mask ---
     active_pick_mask = torch.ones(N_total, dtype=torch.bool, device=dev)
