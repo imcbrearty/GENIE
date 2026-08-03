@@ -2461,7 +2461,7 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		
 	## Maye need to add new module that maps to the association - source locations
-	def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, t_query, n_reshape = 1):
+	def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, t_query, n_reshape = 1, save_state = False):
 	
 		# embed_context = self.embed_vector(self.embedding_vector).expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
 
