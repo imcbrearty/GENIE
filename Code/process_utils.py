@@ -2375,9 +2375,61 @@ class SeismicEmbeddingEngine:
 
         return [Inpts, Masks], picks
 
+    def extract_inputs_batch(
+        self,
+        t0_batch,  # Array or Tensor of shape (B,)
+        min_t=0.0,
+        max_t=300.0,
+        t_win=10.0,
+    ):
+        """
+        Batched extraction for multiple t0 values simultaneously.
+        Input:  t0_batch of shape (B,)
+        Output: Inpts tensor of shape (B, N_edges, 4)
+        """
+        t0_tensor = torch.as_tensor(t0_batch, device=self.device, dtype=torch.float32).view(-1, 1) # (B, 1)
+        B = t0_tensor.shape[0]
+        # 1. Broad-cast Travel Times across Batch: (B, N_edges)
+        arrival_p = self.trv_edges_gpu.unsqueeze(0)[:, :, 0] + t0_tensor # (B, N_edges)
+        arrival_s = self.trv_edges_gpu.unsqueeze(0)[:, :, 1] + t0_tensor # (B, N_edges)
 
+        # 2. Vectorized Time Indexing & Clamping
+        idx_p = torch.round((arrival_p - self.T_start) / self.dt).long()
+        idx_s = torch.round((arrival_s - self.T_start) / self.dt).long()
 
+        valid_p = (idx_p >= 0) & (idx_p < self.n_time_series)
+        valid_s = (idx_s >= 0) & (idx_s < self.n_time_series)
 
+        clamp_p = torch.clamp(idx_p, 0, self.n_time_series - 1)
+        clamp_s = torch.clamp(idx_s, 0, self.n_time_series - 1)
+
+        # Broadcast station IDs across batch: (B, N_edges)
+        sta_ids = self.sta_ids_gpu.unsqueeze(0).expand(B, -1)
+        # 3. Batch Sampling direct from continuous embedding
+        val_p = self.embed[sta_ids, clamp_p] * valid_p
+        val_s = self.embed[sta_ids, clamp_s] * valid_s
+
+        val_p1 = self.embed_p[sta_ids, clamp_p] * valid_p
+        val_s1 = self.embed_s[sta_ids, clamp_s] * valid_s
+
+        if self.use_sign_input:
+            val_p *= self.slope_embed[sta_ids, clamp_p]
+            val_s *= self.slope_embed[sta_ids, clamp_s]
+
+            val_p1 *= self.slope_embed_p[sta_ids, clamp_p]
+            val_s1 *= self.slope_embed_s[sta_ids, clamp_s]
+
+        # Stack channels: (B, N_edges, 4)
+        val_embed = torch.stack((val_p, val_s, val_p1, val_s1), dim=-1)
+        # 4. Batched Scatter Reduction along dim=1
+        # Expands edge src indices across batch
+
+        edge_src_batched = self.A_src_gpu.unsqueeze(0).expand(B, -1)
+        # Aggregated features per batch item
+        Inpts = scatter(val_embed, edge_src_batched, dim=1, dim_size=self.n_edges, reduce="sum")
+        Masks = 1.0 * (torch.abs(Inpts) > 0.01)
+        
+        return Inpts, Masks
 
 
 
