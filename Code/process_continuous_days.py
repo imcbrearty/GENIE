@@ -763,6 +763,8 @@ cnt_isolated_picks = 0
 use_updated_input = True
 dt_embed_discretize = np.round(pred_params[1]/15.0, 2) # 0.05 ## Picks are discretized to this amount if using updated input to speed up input
 
+assert(len(x_grids) == 1) ## If not this, need to build the pick engines in the loop
+
 
 
 ############### ############### ############### ###############
@@ -787,6 +789,7 @@ for cnt, strs in enumerate([0]):
 	############### ############### ############### ###############
 
 	A_src_in_sta_l = []
+	pick_engines = []
 	
 	for i in range(len(x_grids)):
 
@@ -815,6 +818,24 @@ for cnt, strs in enumerate([0]):
 		mz_list[i].set_adjacencies(A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_prod_flipped, A_src_in_sta, A_src_src, torch.Tensor(A_edges_time_p).long().to(device), torch.Tensor(A_edges_time_s).long().to(device), torch.Tensor(dt_partition).to(device), trv_out, torch.Tensor(ftrns1(locs_use)).to(device), torch.Tensor(ftrns1(x_grids[i])).to(device))
 		A_src_in_sta_l.append(A_src_in_sta.cpu().detach().numpy())
 
+		## Pick engine
+		engine = SeismicEmbeddingEngine(
+		    P=P,
+		    locs=locs,
+		    ind_use=ind_use,
+		    A_src_in_sta=A_src_in_sta_l[i],
+		    trv_times=x_grids_trv[i],
+		    dt=dt_embed_discretize,
+		    kernel_sig_t=kernel_sig_t,
+		    t_pad=3.0*kernel_sig_t,
+		    use_sign_input=use_sign_input,
+		    precompute=True,  # Builds GPU global grid once for continuous O(1) sampling
+		    device=device,
+		)
+		pick_engines.append(engine)
+
+	
+	
 
 	check_overflow = True
 	if (use_updated_input == True)*(check_overflow == True): ## Check if embedding correctly preserved all travel time indices (overflow can happen on GPU for very large spatial domains x number of stations when using scatter)
@@ -947,7 +968,8 @@ for cnt, strs in enumerate([0]):
 		thresh_ratio = (2.5/3.0)
 		for x_grid_ind in x_grid_ind_list:
 
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, tsteps_slice, ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
+			# [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, tsteps_slice, ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = pick_engines[x_grid_ind].extract_inputs(t0 = tsteps_slice, min_t = min_t, max_t = max_t, t_win = 2.0*kernel_sig_t)
 
 			if use_phase_types == False:
 				for i in range(len(Inpts)):
@@ -1139,7 +1161,9 @@ for cnt, strs in enumerate([0]):
 			out_vals = np.zeros(len(X_query_val))
 			for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, srcs[[n],3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
+				# [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, srcs[[n],3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = pick_engines[x_grid_ind].extract_inputs(t0 = srcs[[n],3], min_t = min_t, max_t = max_t, t_win = 2.0*kernel_sig_t)
+				
 				assert(len(Inpts) == 1)
 
 				if use_phase_types == False: ## Does this check lp_phases correctly?
@@ -1165,7 +1189,10 @@ for cnt, strs in enumerate([0]):
 				for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 
 					## For these cases, re-extract inputs and compute the association predictions
-					[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, src_max[[0],3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
+					# [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, src_max[[0],3], ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
+					[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = pick_engines[x_grid_ind].extract_inputs(t0 = src_max[[0],3], min_t = min_t, max_t = max_t, t_win = 2.0*kernel_sig_t)
+
+					
 					ipick, tpick = lp_stations[0].astype('int'), lp_times[0]
 					assert(len(Inpts) == 1)
 
@@ -1200,8 +1227,8 @@ for cnt, strs in enumerate([0]):
 		# WGS84-SAFE COARSE-TO-FINE GRID GENERATION
 		# ==============================================================================
 
-		N_QUERY_COARSE = 1000
-		N_QUERY_FINE = 500
+		N_QUERY_COARSE = 2000
+		N_QUERY_FINE = 1000
 
 		X_query_grid_coarse = []
 		X_query_grid_fine = []
@@ -1282,12 +1309,13 @@ for cnt, strs in enumerate([0]):
 			# Initial Input Extraction (for primary location search using srcs[n, 3])
 			out_vals = np.zeros(len(X_query_val))
 			for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
-				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(
-					trv_pairwise, P, srcs[[n], 3], ind_use, locs, x_grids[x_grid_ind],
-					A_src_in_sta_l[x_grid_ind], trv_times=x_grids_trv[x_grid_ind],
-					max_t=max_t, min_t=min_t, kernel_sig_t=pred_params[1],
-					dt=dt_embed_discretize, use_sign_input=use_sign_input, device=device
-				)
+				# [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(
+				# 	trv_pairwise, P, srcs[[n], 3], ind_use, locs, x_grids[x_grid_ind],
+				# 	A_src_in_sta_l[x_grid_ind], trv_times=x_grids_trv[x_grid_ind],
+				# 	max_t=max_t, min_t=min_t, kernel_sig_t=pred_params[1],
+				# 	dt=dt_embed_discretize, use_sign_input=use_sign_input, device=device
+				# )
+				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = pick_engines[x_grid_ind].extract_inputs(t0 = srcs[[n], 3], min_t = min_t, max_t = max_t, t_win = 2.0*kernel_sig_t)
 				assert len(Inpts) == 1
 
 				if not use_phase_types:
@@ -1373,12 +1401,13 @@ for cnt, strs in enumerate([0]):
 
 				for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 					# Second call required: Re-extract inputs using src_max[[0], 3] origin time for associations
-					[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(
-						trv_pairwise, P, src_max[[0], 3], ind_use, locs, x_grids[x_grid_ind],
-						A_src_in_sta_l[x_grid_ind], trv_times=x_grids_trv[x_grid_ind],
-						max_t=max_t, min_t=min_t, kernel_sig_t=pred_params[1],
-						dt=dt_embed_discretize, use_sign_input=use_sign_input, device=device
-					)
+					# [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(
+					# 	trv_pairwise, P, src_max[[0], 3], ind_use, locs, x_grids[x_grid_ind],
+					# 	A_src_in_sta_l[x_grid_ind], trv_times=x_grids_trv[x_grid_ind],
+					# 	max_t=max_t, min_t=min_t, kernel_sig_t=pred_params[1],
+					# 	dt=dt_embed_discretize, use_sign_input=use_sign_input, device=device
+					# )
+					[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = pick_engines[x_grid_ind].extract_inputs(t0 = src_max[[0], 3], min_t = min_t, max_t = max_t, t_win = 2.0*kernel_sig_t)
 					ipick, tpick = lp_stations[0].astype(int), lp_times[0]
 					assert len(Inpts) == 1
 
