@@ -2237,9 +2237,9 @@ for cnt, strs in enumerate([0]):
 			# MAX_BATCH_SIZE = 500
 
 			MAX_BATCH_SIZE = estimate_optimal_batch_size(
-				trv, 
-				avg_stations_per_event=20, 
-				de_pop_size=40, 
+				trv_pairwise1, 
+				avg_stations_per_event=np.mean([np.mean([len(Picks_P[j]) for j in range(len(Picks_P))]), np.mean([len(Picks_S[j]) for j in range(len(Picks_S))])]), 
+				de_pop_size=75, 
 				target_vram_fraction=0.65
 			)
 			print(f"Dynamically configured MAX_BATCH_SIZE: {MAX_BATCH_SIZE}")
