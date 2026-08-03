@@ -1379,14 +1379,258 @@ def extract_pick_inputs_from_data(P_slice, locs, ind_use, time_samples, max_t, m
 # from torch_scatter import scatter
 
 
+# class SeismicEmbeddingEngine:
+#     """
+#     Unified manager for global/dynamic seismic embeddings and pick extraction.
+    
+#     Automatically handles:
+#     1. Global sorting of P by pick arrival time at initialization.
+#     2. Optional global precomputed embedding grids on GPU.
+#     3. Fast indexing/slicing for batch model inputs.
+#     """
+
+#     def __init__(
+#         self,
+#         P,
+#         locs,
+#         ind_use,
+#         dt=0.19,
+#         kernel_sig_t=2.84730416,
+#         t_pad=100.0,
+#         use_sign_input=True,
+#         precompute=True,
+#         device="cpu",
+#     ):
+#         self.device = device
+#         self.dt = float(dt)
+#         self.kernel_sig_t = float(kernel_sig_t)
+#         self.t_pad = float(t_pad)
+#         self.use_sign_input = use_sign_input
+#         self.locs = locs
+#         self.ind_use = ind_use
+#         self.n_stations = len(locs)
+
+#         # ---------------------------------------------------------------------
+#         # 1. Sort P globally once by pick time (Column 0)
+#         # ---------------------------------------------------------------------
+#         sta_mask = np.isin(P[:, 1].astype(int), self.ind_use)
+#         P_filtered = P[sta_mask]
+
+#         if len(P_filtered) == 0:
+#             raise ValueError("No picks found in P corresponding to stations in ind_use.")
+
+#         sort_idx = np.argsort(P_filtered[:, 0])
+#         self.P = P_filtered[sort_idx]  # Stored pre-sorted globally
+
+#         # ---------------------------------------------------------------------
+#         # 2. Setup Time References
+#         # ---------------------------------------------------------------------
+#         raw_start = self.P[0, 0] - self.t_pad
+#         self.T_start = float(np.floor(raw_start / self.dt) * self.dt)
+#         self.T_end = float(np.max(self.P[:, 0]) + self.t_pad)
+#         self.n_time_series = int(np.round((self.T_end - self.T_start) / self.dt)) + 1
+
+#         # Precalculated global tensors
+#         self.embed = None
+#         self.embed_p = None
+#         self.embed_s = None
+#         self.slope_embed = None
+#         self.slope_embed_p = None
+#         self.slope_embed_s = None
+
+#         if precompute:
+#             self._build_global_embedding()
+
+#     def _build_global_embedding(self):
+#         """Internal helper: builds global embedding tensors on startup."""
+#         abs_time_ref = self.T_start + np.arange(self.n_time_series) * self.dt
+
+#         ifind_p = np.where(self.P[:, 4] == 0)[0]
+#         ifind_s = np.where(self.P[:, 4] == 1)[0]
+
+#         nearest_index_p = np.round((self.P[ifind_p, 0] - self.T_start) / self.dt).astype(int)
+#         nearest_index_s = np.round((self.P[ifind_s, 0] - self.T_start) / self.dt).astype(int)
+
+#         num_index_extra = int(np.ceil(3.0 * self.kernel_sig_t / self.dt))
+#         vec_repeat = np.arange(-num_index_extra, num_index_extra + 1, dtype=int)
+
+#         indices_p = nearest_index_p.reshape(-1, 1) + vec_repeat.reshape(1, -1)
+#         indices_s = nearest_index_s.reshape(-1, 1) + vec_repeat.reshape(1, -1)
+
+#         imask_p = (indices_p >= 0) & (indices_p < self.n_time_series)
+#         imask_s = (indices_s >= 0) & (indices_s < self.n_time_series)
+
+#         indices_p_clamped = np.clip(indices_p, 0, self.n_time_series - 1)
+#         indices_s_clamped = np.clip(indices_s, 0, self.n_time_series - 1)
+
+#         time_vals_p = self.P[ifind_p, 0].reshape(-1, 1) - abs_time_ref[indices_p_clamped]
+#         time_vals_s = self.P[ifind_s, 0].reshape(-1, 1) - abs_time_ref[indices_s_clamped]
+
+#         vals_p = (imask_p * np.exp(-0.5 * (time_vals_p**2) / (self.kernel_sig_t**2))).reshape(-1)
+#         vals_s = (imask_s * np.exp(-0.5 * (time_vals_s**2) / (self.kernel_sig_t**2))).reshape(-1)
+
+#         sta_ids_p = self.P[ifind_p, 1].astype(int)
+#         sta_ids_s = self.P[ifind_s, 1].astype(int)
+
+#         write_indices_p = (indices_p_clamped + sta_ids_p.reshape(-1, 1) * self.n_time_series).reshape(-1)
+#         write_indices_s = (indices_s_clamped + sta_ids_s.reshape(-1, 1) * self.n_time_series).reshape(-1)
+
+#         total_size = self.n_stations * self.n_time_series
+
+#         embed_p_1d = scatter(
+#             torch.Tensor(vals_p).to(self.device),
+#             torch.Tensor(write_indices_p).long().to(self.device),
+#             dim=0, dim_size=total_size, reduce="max"
+#         )
+#         embed_s_1d = scatter(
+#             torch.Tensor(vals_s).to(self.device),
+#             torch.Tensor(write_indices_s).long().to(self.device),
+#             dim=0, dim_size=total_size, reduce="max"
+#         )
+
+#         self.embed_p = embed_p_1d.view(self.n_stations, self.n_time_series)
+#         self.embed_s = embed_s_1d.view(self.n_stations, self.n_time_series)
+
+#         self.embed_p[:, 0] = 0.0
+#         self.embed_s[:, 0] = 0.0
+#         self.embed_p[:, -1] = 0.0
+#         self.embed_s[:, -1] = 0.0
+
+#         self.embed = torch.maximum(self.embed_p, self.embed_s)
+
+#         if self.use_sign_input:
+#             self.slope_embed = torch.sign(-1.0 * torch.diff(self.embed, append=self.embed[:, [-1]], dim=1))
+#             self.slope_embed_p = torch.sign(-1.0 * torch.diff(self.embed_p, append=self.embed_p[:, [-1]], dim=1))
+#             self.slope_embed_s = torch.sign(-1.0 * torch.diff(self.embed_s, append=self.embed_s[:, [-1]], dim=1))
+
+#     def extract_inputs(
+#         self,
+#         t0,
+#         x_grid,
+#         A_src_in_sta,
+#         trv_pairwise=None,
+#         trv_times=None,
+#         max_t=300.0,
+#         min_t=0.0,
+#         t_win=10.0,
+#     ):
+#         """
+#         Extract model input tensors and picks for a given time sample t0.
+#         Uses fast O(1) GPU lookups if precomputed, or dynamic extraction if not.
+#         """
+#         t0_val = float(np.squeeze(t0))
+#         min_t_val = float(np.squeeze(min_t))
+#         max_t_val = float(np.squeeze(max_t))
+
+#         t_min_bound = t0_val + min_t_val - 2.0 * self.kernel_sig_t
+#         t_max_bound = t0_val + max_t_val + 2.0 * self.kernel_sig_t
+
+#         # ---------------------------------------------------------------------
+#         # 1. Fast O(log N) Slice of Pre-sorted P
+#         # ---------------------------------------------------------------------
+#         idx_start = np.searchsorted(self.P[:, 0], t_min_bound, side="left")
+#         idx_end = np.searchsorted(self.P[:, 0], t_max_bound, side="right")
+#         P_slice = self.P[idx_start:idx_end]
+
+#         edge_global_sta = self.ind_use[A_src_in_sta[0]].astype(int)
+#         ifind = np.arange(len(A_src_in_sta[0]))
+
+#         # ---------------------------------------------------------------------
+#         # 2. Extract Embedding Features (Precomputed Path)
+#         # ---------------------------------------------------------------------
+#         if self.embed is not None:
+#             if len(ifind) == 0:
+#                 Inpts = [torch.zeros((len(A_src_in_sta[0]), 4), device=self.device)]
+#                 Masks = [torch.zeros((len(A_src_in_sta[0]), 4), device=self.device)]
+#             else:
+#                 if trv_times is None:
+#                     trv_calc = trv_pairwise(
+#                         torch.Tensor(self.locs[self.ind_use]).to(self.device)[A_src_in_sta[0][ifind]],
+#                         torch.Tensor(x_grid).to(self.device)[A_src_in_sta[1][ifind]],
+#                     ).cpu().detach().numpy()
+#                     arrival_time_p = trv_calc[:, 0] + t0_val
+#                     arrival_time_s = trv_calc[:, 1] + t0_val
+#                 else:
+#                     trv_val = trv_times[A_src_in_sta[1][ifind], self.ind_use[A_src_in_sta[0][ifind]], :]
+#                     arrival_time_p = trv_val[:, 0] + t0_val
+#                     arrival_time_s = trv_val[:, 1] + t0_val
+
+#                 trv_out_ind_p = np.round((arrival_time_p - self.T_start) / self.dt).astype(int)
+#                 trv_out_ind_s = np.round((arrival_time_s - self.T_start) / self.dt).astype(int)
+
+#                 valid_p = (trv_out_ind_p >= 0) & (trv_out_ind_p < self.n_time_series)
+#                 valid_s = (trv_out_ind_s >= 0) & (trv_out_ind_s < self.n_time_series)
+
+#                 clamp_p = np.clip(trv_out_ind_p, 0, self.n_time_series - 1)
+#                 clamp_s = np.clip(trv_out_ind_s, 0, self.n_time_series - 1)
+
+#                 sta_ids = torch.as_tensor(edge_global_sta[ifind], device=self.device).long()
+#                 idx_p = torch.as_tensor(clamp_p, device=self.device).long()
+#                 idx_s = torch.as_tensor(clamp_s, device=self.device).long()
+
+#                 val_embed_p = self.embed[sta_ids, idx_p] * torch.as_tensor(valid_p, device=self.device)
+#                 val_embed_s = self.embed[sta_ids, idx_s] * torch.as_tensor(valid_s, device=self.device)
+#                 val_embed_p1 = self.embed_p[sta_ids, idx_p] * torch.as_tensor(valid_p, device=self.device)
+#                 val_embed_s1 = self.embed_s[sta_ids, idx_s] * torch.as_tensor(valid_s, device=self.device)
+
+#                 if self.use_sign_input:
+#                     val_embed_p *= self.slope_embed[sta_ids, idx_p]
+#                     val_embed_s *= self.slope_embed[sta_ids, idx_s]
+#                     val_embed_p1 *= self.slope_embed_p[sta_ids, idx_p]
+#                     val_embed_s1 *= self.slope_embed_s[sta_ids, idx_s]
+
+#                 val_embed = torch.cat(
+#                     (val_embed_p.reshape(-1, 1), val_embed_s.reshape(-1, 1),
+#                      val_embed_p1.reshape(-1, 1), val_embed_s1.reshape(-1, 1)),
+#                     dim=1
+#                 )
+#                 write_indices = torch.Tensor(ifind).long().to(self.device)
+
+#                 Inpts = [scatter(val_embed, write_indices, dim=0, dim_size=len(A_src_in_sta[0]), reduce="sum")]
+#                 Masks = [1.0 * (torch.abs(Inpts[-1]) > 0.01)]
+
+#         # ---------------------------------------------------------------------
+#         # 3. Extract Picks Using Pre-sorted Fast Bounds
+#         # ---------------------------------------------------------------------
+#         t_center = t0_val + min_t_val + (max_t_val - min_t_val) / 2.0
+#         r = t_win + (max_t_val - min_t_val) / 2.0
+
+#         p_start = np.searchsorted(P_slice[:, 0], t_center - r, side="left")
+#         p_end = np.searchsorted(P_slice[:, 0], t_center + r, side="right")
+#         meta = P_slice[p_start:p_end]
+
+#         perm_vec = -1 * np.ones(self.n_stations, dtype=int)
+#         perm_vec[self.ind_use] = np.arange(len(self.ind_use))
+
+#         indices = perm_vec[meta[:, 1].astype(int)]
+#         ineed = np.where(indices > -1)[0]
+
+#         times = meta[ineed, 0]
+#         indices = indices[ineed]
+#         phase_vals = meta[ineed, 4]
+#         meta_filtered = meta[ineed]
+
+#         lex_sort = np.lexsort((times, indices))
+
+#         picks = [
+#             [times[lex_sort] - t0_val],
+#             [indices[lex_sort]],
+#             [phase_vals[lex_sort]],
+#             [meta_filtered[lex_sort]],
+#         ]
+
+#         return [Inpts, Masks], picks
+
+
+import numpy as np
+import torch
+from torch_scatter import scatter
+
+
 class SeismicEmbeddingEngine:
     """
-    Unified manager for global/dynamic seismic embeddings and pick extraction.
-    
-    Automatically handles:
-    1. Global sorting of P by pick arrival time at initialization.
-    2. Optional global precomputed embedding grids on GPU.
-    3. Fast indexing/slicing for batch model inputs.
+    Unified manager for seismic embeddings and pick extraction.
+    Supports both precomputed global grids and fast dynamic local generation.
     """
 
     def __init__(
@@ -1405,32 +1649,13 @@ class SeismicEmbeddingEngine:
         self.dt = float(dt)
         self.kernel_sig_t = float(kernel_sig_t)
         self.t_pad = float(t_pad)
+        self.t_offset = 3.0 * self.kernel_sig_t
         self.use_sign_input = use_sign_input
         self.locs = locs
         self.ind_use = ind_use
         self.n_stations = len(locs)
 
-        # ---------------------------------------------------------------------
-        # 1. Sort P globally once by pick time (Column 0)
-        # ---------------------------------------------------------------------
-        sta_mask = np.isin(P[:, 1].astype(int), self.ind_use)
-        P_filtered = P[sta_mask]
-
-        if len(P_filtered) == 0:
-            raise ValueError("No picks found in P corresponding to stations in ind_use.")
-
-        sort_idx = np.argsort(P_filtered[:, 0])
-        self.P = P_filtered[sort_idx]  # Stored pre-sorted globally
-
-        # ---------------------------------------------------------------------
-        # 2. Setup Time References
-        # ---------------------------------------------------------------------
-        raw_start = self.P[0, 0] - self.t_pad
-        self.T_start = float(np.floor(raw_start / self.dt) * self.dt)
-        self.T_end = float(np.max(self.P[:, 0]) + self.t_pad)
-        self.n_time_series = int(np.round((self.T_end - self.T_start) / self.dt)) + 1
-
-        # Precalculated global tensors
+        # Global precomputed placeholders
         self.embed = None
         self.embed_p = None
         self.embed_s = None
@@ -1438,11 +1663,33 @@ class SeismicEmbeddingEngine:
         self.slope_embed_p = None
         self.slope_embed_s = None
 
+        # Sort and store picks
+        self.update_picks(P)
+
         if precompute:
             self._build_global_embedding()
 
+    def update_picks(self, P_new):
+        """Allows swapping or updating P with new dataset arrivals dynamically."""
+        sta_mask = np.isin(P_new[:, 1].astype(int), self.ind_use)
+        P_filtered = P_new[sta_mask]
+
+        if len(P_filtered) == 0:
+            self.P = np.empty((0, P_new.shape[1] if P_new.ndim > 1 else 5))
+            return
+
+        # Sort globally once upon ingestion
+        sort_idx = np.argsort(P_filtered[:, 0])
+        self.P = P_filtered[sort_idx]
+
+        # Reset time references
+        raw_start = self.P[0, 0] - self.t_pad
+        self.T_start = float(np.floor(raw_start / self.dt) * self.dt)
+        self.T_end = float(np.max(self.P[:, 0]) + self.t_pad)
+        self.n_time_series = int(np.round((self.T_end - self.T_start) / self.dt)) + 1
+
     def _build_global_embedding(self):
-        """Internal helper: builds global embedding tensors on startup."""
+        """Internal helper: precomputes global GPU embedding grid."""
         abs_time_ref = self.T_start + np.arange(self.n_time_series) * self.dt
 
         ifind_p = np.where(self.P[:, 4] == 0)[0]
@@ -1491,10 +1738,8 @@ class SeismicEmbeddingEngine:
         self.embed_p = embed_p_1d.view(self.n_stations, self.n_time_series)
         self.embed_s = embed_s_1d.view(self.n_stations, self.n_time_series)
 
-        self.embed_p[:, 0] = 0.0
-        self.embed_s[:, 0] = 0.0
-        self.embed_p[:, -1] = 0.0
-        self.embed_s[:, -1] = 0.0
+        self.embed_p[:, 0], self.embed_p[:, -1] = 0.0, 0.0
+        self.embed_s[:, 0], self.embed_s[:, -1] = 0.0, 0.0
 
         self.embed = torch.maximum(self.embed_p, self.embed_s)
 
@@ -1514,10 +1759,6 @@ class SeismicEmbeddingEngine:
         min_t=0.0,
         t_win=10.0,
     ):
-        """
-        Extract model input tensors and picks for a given time sample t0.
-        Uses fast O(1) GPU lookups if precomputed, or dynamic extraction if not.
-        """
         t0_val = float(np.squeeze(t0))
         min_t_val = float(np.squeeze(min_t))
         max_t_val = float(np.squeeze(max_t))
@@ -1525,9 +1766,7 @@ class SeismicEmbeddingEngine:
         t_min_bound = t0_val + min_t_val - 2.0 * self.kernel_sig_t
         t_max_bound = t0_val + max_t_val + 2.0 * self.kernel_sig_t
 
-        # ---------------------------------------------------------------------
-        # 1. Fast O(log N) Slice of Pre-sorted P
-        # ---------------------------------------------------------------------
+        # 1. Fast O(log N) slice of pre-sorted P
         idx_start = np.searchsorted(self.P[:, 0], t_min_bound, side="left")
         idx_end = np.searchsorted(self.P[:, 0], t_max_bound, side="right")
         P_slice = self.P[idx_start:idx_end]
@@ -1535,26 +1774,27 @@ class SeismicEmbeddingEngine:
         edge_global_sta = self.ind_use[A_src_in_sta[0]].astype(int)
         ifind = np.arange(len(A_src_in_sta[0]))
 
-        # ---------------------------------------------------------------------
-        # 2. Extract Embedding Features (Precomputed Path)
-        # ---------------------------------------------------------------------
-        if self.embed is not None:
-            if len(ifind) == 0:
-                Inpts = [torch.zeros((len(A_src_in_sta[0]), 4), device=self.device)]
-                Masks = [torch.zeros((len(A_src_in_sta[0]), 4), device=self.device)]
+        if len(ifind) == 0:
+            Inpts = [torch.zeros((len(A_src_in_sta[0]), 4), device=self.device)]
+            Masks = [torch.zeros((len(A_src_in_sta[0]), 4), device=self.device)]
+        else:
+            # Travel time evaluation
+            if trv_times is None:
+                trv_calc = trv_pairwise(
+                    torch.Tensor(self.locs[self.ind_use]).to(self.device)[A_src_in_sta[0][ifind]],
+                    torch.Tensor(x_grid).to(self.device)[A_src_in_sta[1][ifind]],
+                ).cpu().detach().numpy()
+                arrival_time_p = trv_calc[:, 0] + t0_val
+                arrival_time_s = trv_calc[:, 1] + t0_val
             else:
-                if trv_times is None:
-                    trv_calc = trv_pairwise(
-                        torch.Tensor(self.locs[self.ind_use]).to(self.device)[A_src_in_sta[0][ifind]],
-                        torch.Tensor(x_grid).to(self.device)[A_src_in_sta[1][ifind]],
-                    ).cpu().detach().numpy()
-                    arrival_time_p = trv_calc[:, 0] + t0_val
-                    arrival_time_s = trv_calc[:, 1] + t0_val
-                else:
-                    trv_val = trv_times[A_src_in_sta[1][ifind], self.ind_use[A_src_in_sta[0][ifind]], :]
-                    arrival_time_p = trv_val[:, 0] + t0_val
-                    arrival_time_s = trv_val[:, 1] + t0_val
+                trv_val = trv_times[A_src_in_sta[1][ifind], self.ind_use[A_src_in_sta[0][ifind]], :]
+                arrival_time_p = trv_val[:, 0] + t0_val
+                arrival_time_s = trv_val[:, 1] + t0_val
 
+            # =================================================================
+            # MODE A: Precomputed Lookup
+            # =================================================================
+            if self.embed is not None:
                 trv_out_ind_p = np.round((arrival_time_p - self.T_start) / self.dt).astype(int)
                 trv_out_ind_s = np.round((arrival_time_s - self.T_start) / self.dt).astype(int)
 
@@ -1579,19 +1819,116 @@ class SeismicEmbeddingEngine:
                     val_embed_p1 *= self.slope_embed_p[sta_ids, idx_p]
                     val_embed_s1 *= self.slope_embed_s[sta_ids, idx_s]
 
-                val_embed = torch.cat(
-                    (val_embed_p.reshape(-1, 1), val_embed_s.reshape(-1, 1),
-                     val_embed_p1.reshape(-1, 1), val_embed_s1.reshape(-1, 1)),
-                    dim=1
-                )
-                write_indices = torch.Tensor(ifind).long().to(self.device)
+            # =================================================================
+            # MODE B: Dynamic On-The-Fly Generation
+            # =================================================================
+            else:
+                raw_start_b = t0_val + min_t_val - self.t_offset
+                t_start_b = float(np.floor(raw_start_b / self.dt) * self.dt)
+                t_end_b = t0_val + max_t_val + self.t_offset
+                n_time_series = int(np.round((t_end_b - t_start_b) / self.dt)) + 1
+                abs_time_ref = t_start_b + np.arange(n_time_series) * self.dt
 
-                Inpts = [scatter(val_embed, write_indices, dim=0, dim_size=len(A_src_in_sta[0]), reduce="sum")]
-                Masks = [1.0 * (torch.abs(Inpts[-1]) > 0.01)]
+                ind_unique = np.sort(np.unique(P_slice[:, 1]).astype(int))
+                n_sta_unique = len(ind_unique)
 
-        # ---------------------------------------------------------------------
-        # 3. Extract Picks Using Pre-sorted Fast Bounds
-        # ---------------------------------------------------------------------
+                global_to_unique_map = -1 * np.ones(self.n_stations, dtype=int)
+                if n_sta_unique > 0:
+                    global_to_unique_map[ind_unique] = np.arange(n_sta_unique)
+
+                edge_unique_sta = global_to_unique_map[edge_global_sta]
+
+                ifind_p = np.where(P_slice[:, 4] == 0)[0]
+                ifind_s = np.where(P_slice[:, 4] == 1)[0]
+
+                if n_sta_unique > 0:
+                    P_ind_perm = global_to_unique_map[P_slice[:, 1].astype(int)]
+
+                    nearest_index_p = np.round((P_slice[ifind_p, 0] - abs_time_ref[0]) / self.dt).astype(int)
+                    nearest_index_s = np.round((P_slice[ifind_s, 0] - abs_time_ref[0]) / self.dt).astype(int)
+
+                    num_index_extra = int(np.ceil(3.0 * self.kernel_sig_t / self.dt))
+                    vec_repeat = np.arange(-num_index_extra, num_index_extra + 1, dtype=int)
+
+                    indices_p = nearest_index_p.reshape(-1, 1) + vec_repeat.reshape(1, -1)
+                    indices_s = nearest_index_s.reshape(-1, 1) + vec_repeat.reshape(1, -1)
+
+                    imask_p = (indices_p >= 0) & (indices_p < n_time_series)
+                    imask_s = (indices_s >= 0) & (indices_s < n_time_series)
+
+                    indices_p_clamped = np.clip(indices_p, 0, n_time_series - 1)
+                    indices_s_clamped = np.clip(indices_s, 0, n_time_series - 1)
+
+                    time_vals_p = P_slice[ifind_p, 0].reshape(-1, 1) - abs_time_ref[indices_p_clamped]
+                    time_vals_s = P_slice[ifind_s, 0].reshape(-1, 1) - abs_time_ref[indices_s_clamped]
+
+                    vals_p = (imask_p * np.exp(-0.5 * (time_vals_p**2) / (self.kernel_sig_t**2))).reshape(-1)
+                    vals_s = (imask_s * np.exp(-0.5 * (time_vals_s**2) / (self.kernel_sig_t**2))).reshape(-1)
+
+                    write_indices_p = (indices_p_clamped + P_ind_perm[ifind_p].reshape(-1, 1) * n_time_series).reshape(-1)
+                    write_indices_s = (indices_s_clamped + P_ind_perm[ifind_s].reshape(-1, 1) * n_time_series).reshape(-1)
+
+                    embed_p = scatter(
+                        torch.Tensor(vals_p).to(self.device),
+                        torch.Tensor(write_indices_p).long().to(self.device),
+                        dim=0, dim_size=n_time_series * n_sta_unique, reduce="max"
+                    ).view(n_sta_unique, n_time_series)
+
+                    embed_s = scatter(
+                        torch.Tensor(vals_s).to(self.device),
+                        torch.Tensor(write_indices_s).long().to(self.device),
+                        dim=0, dim_size=n_time_series * n_sta_unique, reduce="max"
+                    ).view(n_sta_unique, n_time_series)
+
+                    embed_p[:, 0], embed_p[:, -1] = 0.0, 0.0
+                    embed_s[:, 0], embed_s[:, -1] = 0.0, 0.0
+
+                    embed = torch.maximum(embed_p, embed_s)
+                else:
+                    embed_p = torch.zeros((0, n_time_series), device=self.device)
+                    embed_s = torch.zeros((0, n_time_series), device=self.device)
+                    embed = torch.zeros((0, n_time_series), device=self.device)
+
+                trv_out_ind_p = np.round((arrival_time_p - abs_time_ref[0]) / self.dt).astype(int)
+                trv_out_ind_s = np.round((arrival_time_s - abs_time_ref[0]) / self.dt).astype(int)
+
+                valid_p = (trv_out_ind_p >= 0) & (trv_out_ind_p < n_time_series)
+                valid_s = (trv_out_ind_s >= 0) & (trv_out_ind_s < n_time_series)
+
+                clamp_p = np.clip(trv_out_ind_p, 0, n_time_series - 1)
+                clamp_s = np.clip(trv_out_ind_s, 0, n_time_series - 1)
+
+                sta_ids = torch.as_tensor(edge_unique_sta[ifind], device=self.device).long()
+                idx_p = torch.as_tensor(clamp_p, device=self.device).long()
+                idx_s = torch.as_tensor(clamp_s, device=self.device).long()
+
+                val_embed_p = embed[sta_ids, idx_p] * torch.as_tensor(valid_p, device=self.device)
+                val_embed_s = embed[sta_ids, idx_s] * torch.as_tensor(valid_s, device=self.device)
+                val_embed_p1 = embed_p[sta_ids, idx_p] * torch.as_tensor(valid_p, device=self.device)
+                val_embed_s1 = embed_s[sta_ids, idx_s] * torch.as_tensor(valid_s, device=self.device)
+
+                if self.use_sign_input:
+                    diff_embed = torch.sign(-1.0 * torch.diff(embed, append=embed[:, [-1]], dim=1))
+                    diff_embed_p = torch.sign(-1.0 * torch.diff(embed_p, append=embed_p[:, [-1]], dim=1))
+                    diff_embed_s = torch.sign(-1.0 * torch.diff(embed_s, append=embed_s[:, [-1]], dim=1))
+
+                    val_embed_p *= diff_embed[sta_ids, idx_p]
+                    val_embed_s *= diff_embed[sta_ids, idx_s]
+                    val_embed_p1 *= diff_embed_p[sta_ids, idx_p]
+                    val_embed_s1 *= diff_embed_s[sta_ids, idx_s]
+
+            # Common scatter reduction
+            val_embed = torch.cat(
+                (val_embed_p.reshape(-1, 1), val_embed_s.reshape(-1, 1),
+                 val_embed_p1.reshape(-1, 1), val_embed_s1.reshape(-1, 1)),
+                dim=1
+            )
+            write_indices = torch.Tensor(ifind).long().to(self.device)
+
+            Inpts = [scatter(val_embed, write_indices, dim=0, dim_size=len(A_src_in_sta[0]), reduce="sum")]
+            Masks = [1.0 * (torch.abs(Inpts[-1]) > 0.01)]
+
+        # 2. Extract Picks
         t_center = t0_val + min_t_val + (max_t_val - min_t_val) / 2.0
         r = t_win + (max_t_val - min_t_val) / 2.0
 
