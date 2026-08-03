@@ -1958,6 +1958,10 @@ class SeismicEmbeddingEngine:
 
         return [Inpts, Masks], picks
 
+# 4. Summary Matrix: Which Mode Should You Use?Parameter / Featureprecompute=Trueprecompute=FalseStartup / Init TimeSeveral seconds (allocates GPU matrices)$< 0.001$ seconds
+# GPU RAM UsageConstant fixed allocation for whole datasetDynamic / minimal (frees per step)Per-Step Execution SpeedFastest ($O(1)$ GPU matrix slicing)
+# Moderate ($O(T_{\text{local}})$ scatter)Best ForStatic offline datasets, long training runsReal-time streaming, massive datasets, rapid prototyping
+
 
 def extract_input_from_data1(
     trv_pairwise, P, t0, ind_use, locs, x_grid, A_src_in_sta,
