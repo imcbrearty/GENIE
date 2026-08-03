@@ -1446,7 +1446,7 @@ for cnt, strs in enumerate([0]):
 	lp_meta_l = [lp_meta_l[i] for i in ip_retained]
 	Save_picks = [Save_picks[i] for i in ip_retained]
 	srcs_refined = srcs_refined[ip_retained]
-	
+	trv_out_srcs_l = [trv_out_srcs_l[i] for i in ip_retained] 
 
 	# st_time = time.time()
 	print('Begin competetive assignment')
