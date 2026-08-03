@@ -1301,7 +1301,7 @@ for cnt, strs in enumerate([0]):
 					torch.Tensor(lp_phases[0].reshape(-1, 1)).float().to(device),
 					torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind],
 					torch.Tensor(x_grids[x_grid_ind][:, 3].reshape(-1, 1)).to(device),
-					X_query_cart_val, torch.Tensor(X_query_val[:, [3]]).to(device)
+					X_query_cart_val, torch.Tensor(X_query_val[:, [3]]).to(device), save_state = True)
 				)
 				out_vals += out[1].reshape(-1).cpu().detach().numpy() / len(x_grid_ind_list_1)
 
@@ -1345,14 +1345,15 @@ for cnt, strs in enumerate([0]):
 			out_vals_fine = np.zeros(len(X_query_fine))
 			for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 				# Reuse same Inpts extracted for srcs[n, 3] to score fine points around the coarse location
-				out = mz_list[x_grid_ind].forward_fixed_source(
-					Inpts[0], Masks[0], torch.Tensor(lp_times[0]).to(device),
-					torch.Tensor(lp_stations[0]).long().to(device),
-					torch.Tensor(lp_phases[0].reshape(-1, 1)).float().to(device),
-					torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind],
-					torch.Tensor(x_grids[x_grid_ind][:, 3].reshape(-1, 1)).to(device),
-					X_query_cart_fine, torch.Tensor(X_query_fine[:, [3]]).to(device)
-				)
+				# out = mz_list[x_grid_ind].forward_fixed_source(
+				# 	Inpts[0], Masks[0], torch.Tensor(lp_times[0]).to(device),
+				# 	torch.Tensor(lp_stations[0]).long().to(device),
+				# 	torch.Tensor(lp_phases[0].reshape(-1, 1)).float().to(device),
+				# 	torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind],
+				# 	torch.Tensor(x_grids[x_grid_ind][:, 3].reshape(-1, 1)).to(device),
+				# 	X_query_cart_fine, torch.Tensor(X_query_fine[:, [3]]).to(device)
+				# )
+				out = mz_list[x_grid_ind] = forward_queries(X_query_cart_fine, torch.Tensor(X_query_fine[:, [3]]).to(device))
 				out_vals_fine += out[1].reshape(-1).cpu().detach().numpy() / len(x_grid_ind_list_1)
 
 			max_val, iargmax = out_vals_fine.max(), np.argmax(out_vals_fine)
