@@ -2493,11 +2493,11 @@ for cnt, strs in enumerate([0]):
 		assert(len(srcs_trv) == len(Picks_S))
 		assert(len(srcs_trv) == len(srcs_refined))
 		###### Only keep events with minimum number of picks and observing stations #########
-		print('Number sources (after travel time locations and quality control): %d (Time %0.4f)'%(len(srcs_trv), time.time() - st_process))
+		print('Number sources (after travel time locations and quality control): %d (Time %0.4f)'%(len(np.where(np.isfinite(srcs_trv[:,0]))[0]), time.time() - st_process))
 		
 		if use_debug == True:
-			matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
-			print('Post location [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_trv, matches)
+			matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv[np.where(np.isfinite(srcs_trv[:,0]))[0]], ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
+			print('Post location [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_trv[np.where(np.isfinite(srcs_trv[:,0]))[0]], matches)
 
 		
 		# Count number of P and S picks
@@ -2535,6 +2535,10 @@ for cnt, strs in enumerate([0]):
 			Picks_S_perm = [Picks_S_perm[j] for j in ikeep]
 
 		print('Number sources (after minimum number of picks and stations): %d'%len(srcs_trv))
+		
+		if use_debug == True:
+			matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
+			print('Post location (min stations) [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_trv, matches)
 		
 		####################################################################################
 
