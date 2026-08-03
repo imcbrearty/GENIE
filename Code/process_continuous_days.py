@@ -1408,7 +1408,7 @@ for cnt, strs in enumerate([0]):
 				# 	torch.Tensor(x_grids[x_grid_ind][:, 3].reshape(-1, 1)).to(device),
 				# 	X_query_cart_fine, torch.Tensor(X_query_fine[:, [3]]).to(device)
 				# )
-				out = mz_list[x_grid_ind] = mz_list[x_grid_ind].forward_queries(X_query_cart_fine, torch.Tensor(X_query_fine[:, [3]]).to(device))
+				out = mz_list[x_grid_ind].forward_queries(X_query_cart_fine, torch.Tensor(X_query_fine[:, [3]]).to(device))
 				# out_vals_fine += out[1].reshape(-1).cpu().detach().numpy() / len(x_grid_ind_list_1)
 				out_vals_fine += out.reshape(-1).cpu().detach().numpy() / len(x_grid_ind_list_1)
 
