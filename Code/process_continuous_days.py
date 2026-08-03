@@ -1302,7 +1302,7 @@ for cnt, strs in enumerate([0]):
 					torch.Tensor(ftrns1(locs_use)).to(device), x_grids_cart_torch[x_grid_ind],
 					torch.Tensor(x_grids[x_grid_ind][:, 3].reshape(-1, 1)).to(device),
 					X_query_cart_val, torch.Tensor(X_query_val[:, [3]]).to(device), save_state = True)
-				)
+				
 				out_vals += out[1].reshape(-1).cpu().detach().numpy() / len(x_grid_ind_list_1)
 
 			# Find coarse peak coordinate
