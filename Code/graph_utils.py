@@ -5236,11 +5236,11 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 
     bounds = [(lat_range_extend[0], lat_range_extend[1])]
     soln = differential_evolution(optimize_r_min, bounds, popsize = 50, maxiter = 1000, disp = True if verbose == True else False)
-    r_min = optimize_r_min(np.array([soln.x]))[0]; print('\n')
+    r_min = optimize_r_min(np.array([soln.x]))[0]; if disp == True: print('\n')
 
     bounds = [(lat_range_extend[0], lat_range_extend[1])]
     soln = differential_evolution(optimize_r_max, bounds, popsize = 50, maxiter = 1000, disp = True if verbose == True else False)
-    r_max = -1.0*optimize_r_max(np.array([soln.x]))[0]; print('\n')
+    r_max = -1.0*optimize_r_max(np.array([soln.x]))[0]; if disp == True: print('\n')
     assert(r_max >= r_min)
 
 
