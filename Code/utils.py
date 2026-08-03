@@ -263,6 +263,17 @@ def get_analytical_transform(center_loc):
 def hash_rows(val):
 	return val[:,0].to(torch.int64) << 32 | val[:,1].to(torch.int64)
 
+## Check matched events
+def check_matches(srcs_known, srcs, matches):
+	if len(matches) > 0:
+		res = srcs_known[matches[:,0],0:4] - srcs[matches[:,1],0:4]
+		print('\nMatched events:')
+		print('Recall: %d/%d (%0.4f)'%(len(matches), len(srcs_known), len(matches)/len(srcs_known)))
+		print('Precision: %0.4f \n'%(len(matches)/(len(matches) + (len(srcs) - len(matches)))))
+		print('Total events %d'%(len(srcs)))
+		print('\nRes [mean]: '); print(list(res.mean(0)))
+		print('\nRes [std]: '); print(list(res.std(0)))
+
 ### K-means scripts
 
 def kmeans_packing(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1, lr = 0.01):
