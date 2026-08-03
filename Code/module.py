@@ -2503,6 +2503,9 @@ class GCN_Detection_Network_extended(nn.Module):
 			
 		x_spatial = self.SpatialAggregation3(x, self.embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 
+		if save_state == True:
+			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
+		
 		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
 		x = self.proj_soln2(x)
 
