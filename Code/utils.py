@@ -1036,6 +1036,57 @@ def generate_travel_time_noise(
     return total_noise, is_excess
 
 
+
+def decompose_error_ellipsoid(cov_cart, scale_val1, scale_val2, scale_factor):
+    """
+    Decomposes a 3x3 Cartesian spatial covariance matrix into 1D components,
+    geographic errors, and 3D confidence ellipsoid principal axes.
+    """
+    diag_cov = np.diag(cov_cart)
+    if np.any(diag_cov < 0) or np.any(~np.isfinite(diag_cov)):
+        return {
+            'sigma': np.nan, 'sigma_scaled': np.nan,
+            'dxyz': np.array([np.nan, np.nan, np.nan]),
+            'dxyz_scaled': np.array([np.nan, np.nan, np.nan]),
+            'dgeo': np.array([np.nan, np.nan, np.nan]),
+            'dgeo_scaled': np.array([np.nan, np.nan, np.nan]),
+            'ellip_axes': np.array([np.nan, np.nan, np.nan]),
+            'ellip_axes_scaled': np.array([np.nan, np.nan, np.nan]),
+            'ellip_vectors': np.full((3, 3), np.nan)
+        }
+
+    # 1. Standard 1D Cartesian components [dx, dy, dz] & Total Norm
+    dxyz = np.sqrt(diag_cov)
+    sigma = np.linalg.norm(dxyz)
+
+    # 2. Geographic components [dlat, dlon, ddepth]
+    dgeo = np.array([dxyz[0] / scale_val1, dxyz[1] / scale_val2, dxyz[2]])
+
+    # 3. 3D Ellipsoid Decomposition (Major -> Intermediate -> Minor)
+    evals, evecs = np.linalg.eigh(cov_cart)
+    sort_idx = np.argsort(evals)[::-1]
+    evals = evals[sort_idx]
+    evecs = evecs[:, sort_idx]  # Columns are principal unit vectors (x, y, z)
+
+    axes_lengths = np.sqrt(np.maximum(0, evals))
+
+    return {
+        'sigma': sigma,
+        'sigma_scaled': sigma * scale_factor,
+        'dxyz': dxyz,
+        'dxyz_scaled': dxyz * scale_factor,
+        'dgeo': dgeo,
+        'dgeo_scaled': dgeo * scale_factor,
+        'ellip_axes': axes_lengths,
+        'ellip_axes_scaled': axes_lengths * scale_factor,
+        'ellip_vectors': evecs
+    }
+
+
+
+
+
+
 ## With correlated bias
 # def generate_travel_time_noise(
 #     t_r,
