@@ -1103,7 +1103,7 @@ for cnt, strs in enumerate([0]):
 	srcs = srcs[np.argsort(srcs[:, 3])]
 	if use_debug == True:
 		matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
-		print('Initial source detections'); check_matched_events(srcs_known, srcs, matches)
+		print('\nInitial source detections'); check_matched_events(srcs_known, srcs, matches)
 		
 	
 	## Set fixed edges to false
@@ -1490,7 +1490,7 @@ for cnt, strs in enumerate([0]):
 	############### ############### ############### ###############
 	if use_debug == True:
 		matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
-		print('Srcs refined (initial):'); check_matched_events(srcs_known, srcs_refined, matches)
+		print('\nSrcs refined (initial):'); check_matched_events(srcs_known, srcs_refined, matches)
 	
 	mp = LocalMarching(device = device)
 	# srcs_refined_1 = mp(srcs_refined, ftrns1, tc_win = tc_win, sp_win = sp_win, scale_depth = scale_depth_clustering, n_steps_max = 2, use_directed = False) # tc_win = 2*dt_win, sp_win = 2*dist_offset, scale_depth = scale_depth_clustering, use_directed = False, n_steps_max = 5
@@ -1499,7 +1499,7 @@ for cnt, strs in enumerate([0]):
 
 	if use_debug == True:
 		matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
-		print('Srcs refined (merged):'); check_matched_events(srcs_known, srcs_refined, matches)
+		print('\nSrcs refined (merged):'); check_matched_events(srcs_known, srcs_refined, matches)
 		
 
 	## Rather than this matching, use bipartite assignment (however this can have memory issues)
@@ -2007,7 +2007,7 @@ for cnt, strs in enumerate([0]):
 
 		if use_debug == True:
 			matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
-			print('Post competitive assignment [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_refined, matches)
+			print('\nPost competitive assignment [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_refined, matches)
 			
 
 		     ########### ########## ########### ###########
@@ -2497,7 +2497,7 @@ for cnt, strs in enumerate([0]):
 		
 		if use_debug == True:
 			matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv[np.where(np.isfinite(srcs_trv[:,0]))[0]], ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
-			print('Post location [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_trv[np.where(np.isfinite(srcs_trv[:,0]))[0]], matches)
+			print('\nPost location [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_trv[np.where(np.isfinite(srcs_trv[:,0]))[0]], matches)
 
 		
 		# Count number of P and S picks
@@ -2538,7 +2538,7 @@ for cnt, strs in enumerate([0]):
 		
 		if use_debug == True:
 			matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
-			print('Post location (min stations) [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_trv, matches)
+			print('\nPost location (min stations) [%d]:'%inc_repeat); check_matched_events(srcs_known, srcs_trv, matches)
 		
 		####################################################################################
 
