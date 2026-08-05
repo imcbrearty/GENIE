@@ -1037,12 +1037,17 @@ def generate_travel_time_noise(
 
 
 
-def decompose_error_ellipsoid(cov_cart, scale_val1, scale_val2, scale_factor):
+
+
+def decompose_error_ellipsoid(cov_raw, scale_val1, scale_val2, scale_factor, dt0=np.nan):
     """
-    Decomposes a 3x3 Cartesian spatial covariance matrix into 1D components,
-    geographic errors, and 3D confidence ellipsoid principal axes.
+    Decomposes 3x3 covariance matrix into 1D errors, geographic errors, 
+    and full 3D rotated error ellipsoid.
+    
+    cov_raw: 3x3 spatial covariance in [deg^2, deg^2, m^2]
+    scale_val1, scale_val2: meters per degree
     """
-    diag_cov = np.diag(cov_cart)
+    diag_cov = np.diag(cov_raw)
     if np.any(diag_cov < 0) or np.any(~np.isfinite(diag_cov)):
         return {
             'sigma': np.nan, 'sigma_scaled': np.nan,
@@ -1050,25 +1055,36 @@ def decompose_error_ellipsoid(cov_cart, scale_val1, scale_val2, scale_factor):
             'dxyz_scaled': np.array([np.nan, np.nan, np.nan]),
             'dgeo': np.array([np.nan, np.nan, np.nan]),
             'dgeo_scaled': np.array([np.nan, np.nan, np.nan]),
+            'dt0': np.nan, 'dt0_scaled': np.nan,
             'ellip_axes': np.array([np.nan, np.nan, np.nan]),
             'ellip_axes_scaled': np.array([np.nan, np.nan, np.nan]),
             'ellip_vectors': np.full((3, 3), np.nan)
         }
 
-    # 1. Standard 1D Cartesian components [dx, dy, dz] & Total Norm
-    dxyz = np.sqrt(diag_cov)
+    # 1. Standard 1D uncertainties
+    dlat_deg = np.sqrt(np.maximum(0, diag_cov[0]))
+    dlon_deg = np.sqrt(np.maximum(0, diag_cov[1]))
+    dz_m     = np.sqrt(np.maximum(0, diag_cov[2]))
+
+    dgeo = np.array([dlat_deg, dlon_deg, dz_m])
+
+    dx_m = dlat_deg * scale_val1
+    dy_m = dlon_deg * scale_val2
+    dxyz = np.array([dx_m, dy_m, dz_m])
+
+    # 3D spatial norm (meters)
     sigma = np.linalg.norm(dxyz)
 
-    # 2. Geographic components [dlat, dlon, ddepth]
-    dgeo = np.array([dxyz[0] / scale_val1, dxyz[1] / scale_val2, dxyz[2]])
+    # 2. Transform FULL 3x3 covariance matrix to meters^2 (preserves cross-correlations)
+    S = np.diag([scale_val1, scale_val2, 1.0])
+    cov_cart_m2 = S @ cov_raw @ S
 
-    # 3. 3D Ellipsoid Decomposition (Major -> Intermediate -> Minor)
-    evals, evecs = np.linalg.eigh(cov_cart)
+    # 3. Principal Axes & Orientation Eigenvectors
+    evals, evecs = np.linalg.eigh(cov_cart_m2)
     sort_idx = np.argsort(evals)[::-1]
-    evals = evals[sort_idx]
-    evecs = evecs[:, sort_idx]  # Columns are principal unit vectors (x, y, z)
 
-    axes_lengths = np.sqrt(np.maximum(0, evals))
+    axes_lengths = np.sqrt(np.maximum(0, evals[sort_idx]))
+    evecs = evecs[:, sort_idx]
 
     return {
         'sigma': sigma,
@@ -1077,10 +1093,19 @@ def decompose_error_ellipsoid(cov_cart, scale_val1, scale_val2, scale_factor):
         'dxyz_scaled': dxyz * scale_factor,
         'dgeo': dgeo,
         'dgeo_scaled': dgeo * scale_factor,
+        'dt0': dt0,
+        'dt0_scaled': dt0 * scale_factor if np.isfinite(dt0) else np.nan,
         'ellip_axes': axes_lengths,
         'ellip_axes_scaled': axes_lengths * scale_factor,
         'ellip_vectors': evecs
     }
+
+
+
+
+
+
+
 
 
 
