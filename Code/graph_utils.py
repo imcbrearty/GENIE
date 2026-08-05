@@ -4648,7 +4648,7 @@ def get_domain_bounds(points_lla, scale=1.05, lat_range = None, lon_range = None
 
 
 
-def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, max_time_shift_range = None, file_index = 0, date = [2000, 1, 1], n_grids = 1, initialize = None, fixed_domain = None, use_paths = False, rbest = None, mn = None, optimize_station_graphs = False, optimize_source_graphs = False, use_domain_approximate = False, use_tuner = True, name_of_project = '', verbose = True, device = 'cpu'):
+def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, max_time_shift_range = None, file_index = 0, date = [2000, 1, 1], n_grids = 1, initialize = None, fixed_domain = None, use_paths = False, rbest = None, mn = None, optimize_station_graphs = False, optimize_source_graphs = False, use_domain_approximate = False, use_tuner = True, n_tuner_steps = 50, name_of_project = '', verbose = True, device = 'cpu'):
 
     if initialize is None: # else: [lat_range, lon_range, ]
         domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -4832,7 +4832,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
     else:
 
         ## Call fit domain
-        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, max_time_shift_range = max_time_shift_range, n_grids = n_grids, use_tuner = use_tuner, initialize = initialize, fixed_domain = fixed_domain, verbose = verbose, device = device) # n_rand_srcs = 150 quantile_times = 0.3, quantile_times_srcs = 0.35
+        fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = use_global, max_nodes = max_nodes, n_trgt_nodes = n_trgt_nodes, Vc = Vc, file_index = file_index, date = date, rbest = rbest, mn = mn, domain = domain, max_time_shift_range = max_time_shift_range, n_grids = n_grids, use_tuner = use_tuner, n_tuner_steps = n_tuner_steps, initialize = initialize, fixed_domain = fixed_domain, verbose = verbose, device = device) # n_rand_srcs = 150 quantile_times = 0.3, quantile_times_srcs = 0.35
 
         # if initialize is None:
         #     file_load = 'Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2])
