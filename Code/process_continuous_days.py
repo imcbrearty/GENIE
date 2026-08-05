@@ -58,7 +58,7 @@ GRIDS_DIR = BASE_DIR / "Grids"
 PICKS_DIR = BASE_DIR / "Picks"
 DOMAINS_DIR = BASE_DIR / "Domains"
 MODELS_DIR = BASE_DIR / "GNN_TrainedModels"
-path_to_file = BASE_DIR
+path_to_file = str(BASE_DIR) + '/' if '/' in str(BASE_DIR) else '\\'
 
 st_time = time.time()
 argvs = sys.argv + [0, 0]  # Ensures default zero values if args are missing
@@ -101,16 +101,13 @@ min_time_buffer = process_config["min_time_buffer"]
 compute_magnitudes = process_config["compute_magnitudes"]
 use_topography = process_config["use_topography"]
 process_known_events = process_config["process_known_events"]
-use_variable_domain = process_config.get("use_variable_domain", True)
 min_spc_allowed = process_config.get("min_spc_allowed", None)
 use_path_sigma = process_config.get("use_path_sigma", False)
-Vc = process_config.get("V_scale", 6500.0)  # Velocity used for estimating kernel sizes
-scale_domain = config.get("scale_domain", 1.1)  # Scale domain boundaries
 
 use_offset_quality_control = process_config.get("use_offset_quality_control", True)
 offset_ratio_quality_control = process_config.get("offset_ratio_quality_control", 2.0)
 use_additional_quality_control = process_config.get("use_additional_quality_control", False)
-use_debug = process_config.get("use_debug", False)
+use_debug = process_config.get("use_debug", True)
 
 min_required_picks = process_config["min_required_picks"]
 min_required_sta = process_config["min_required_sta"]
@@ -126,7 +123,24 @@ use_sign_input = config.get("use_sign_input", False)
 use_station_corrections = config.get("use_station_corrections", False)
 use_expanded = config["use_expanded"]
 use_time_shift = config["use_time_shift"]
-use_adaptive_window = process_config.get("use_adaptive_window", False)
+use_adaptive_window = process_config.get("use_adaptive_window", True)
+
+
+## Variable domain parameters
+n_trgt_nodes = process_config.get("n_trgt_nodes", int(200e3))
+use_variable_domain = process_config.get("use_variable_domain", True)
+number_of_spatial_nodes = process_config.get("number_of_spatial_nodes", 3000)
+use_approximate_domain = process_config.get("use_approximate_domain", False)
+optimize_station_graphs = process_config.get("optimize_station_graphs", False)
+optimize_source_graphs = process_config.get("optimize_source_graphs", False)
+use_paths = process_config.get("use_paths", False)
+Vc = process_config.get("V_scale", 6500.0)  # Velocity used for estimating kernel sizes
+scale_domain = config.get("scale_domain", 1.1)  # Scale domain boundaries
+use_tuner = process_config.get("use_tuner", True)
+n_tuner_steps = process_config.get("n_tuner_steps", 15)
+# use_global = process_config.get("use_global", False)
+
+
 
 assert use_time_shift, "use_time_shift must be True"
 assert use_physics_informed, "use_physics_informed must be True"
@@ -197,6 +211,15 @@ with np.load(stations_file) as z_sta:
     stas = z_sta["stas"]
     mn = z_sta["mn"]
     rbest = z_sta["rbest"]
+
+
+# earth_radius = 6378137.0
+ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T
+ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)
+ftrns1_scaled = lambda x, scale: (rbest @ (lla2ecef_scaled(x, scale_depth = scale) - mn).T).T
+ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device=device) - mn_cuda).T).T
+ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device=device)
+
 
 # -----------------------------------------------------------------------------
 # 4. Branch Selection (Fixed vs Variable Domain)
@@ -302,15 +325,16 @@ else:
             locs_use = np.copy(locs_shifted)
 
     deg_padding = np.nan
-    n_trgt_nodes = process_config.get("n_trgt_nodes", int(200e3))
-    number_of_spatial_nodes = process_config.get("number_of_spatial_nodes", 3000)
-    use_approximate_domain = process_config.get("use_approximate_domain", True)
-    optimize_station_graphs = process_config.get("optimize_station_graphs", False)
-    optimize_source_graphs = process_config.get("optimize_source_graphs", False)
-    use_paths = process_config.get("use_paths", False)
-    # use_global = process_config.get("use_global", False)
-    use_tuner = process_config.get("use_tuner", True)
+    # n_trgt_nodes = process_config.get("n_trgt_nodes", int(200e3))
+    # number_of_spatial_nodes = process_config.get("number_of_spatial_nodes", 3000)
+    # use_approximate_domain = process_config.get("use_approximate_domain", True)
+    # optimize_station_graphs = process_config.get("optimize_station_graphs", False)
+    # optimize_source_graphs = process_config.get("optimize_source_graphs", False)
+    # use_paths = process_config.get("use_paths", False)
+    # # use_global = process_config.get("use_global", False)
+    # use_tuner = process_config.get("use_tuner", True)
 
+    fixed_domain = None ## Or set location range
     build_graphs_domain(
         m_domain,
         locs_use,
@@ -332,11 +356,13 @@ else:
         mn=mn,
         file_index=day_select,
         date=date,
+        fixed_domain = fixed_domain,
         use_paths=use_paths,
         optimize_station_graphs=optimize_station_graphs,
         optimize_source_graphs=optimize_source_graphs,
         use_domain_approximate=use_approximate_domain,
         use_tuner=use_tuner,
+        n_tuner_steps = n_tuner_steps, 
         device=device,
     )
 
@@ -444,9 +470,11 @@ if device.type in ["cuda", "cpu"]:
     if knn(torch.rand(10, 3, device=device), torch.rand(10, 3, device=device), k=5).numel() != 100:
         raise SystemError("PyTorch Geometric KNN dimension error on device.")
 
-print("--> Computing travel times...")
+print("\n--> Computing travel times...")
 use_only_one_grid = process_config.get("use_only_one_grid", True)
 x_grids_trv = compute_travel_times(trv, locs, x_grids, device=device)
+x_grids_cart_torch = [torch.Tensor(ftrns1(x_grids[i])).to(device) for i in range(len(x_grids))]
+
 
 if use_time_shift:
     print("--> Appending time shifts...")
@@ -456,6 +484,18 @@ if use_time_shift:
 time_shift_range = np.max([ts.max() - ts.min() for ts in time_shifts])
 max_t = float(np.ceil(max(grid.max() for grid in x_grids_trv)))
 min_t = float(np.floor(min(grid.min() for grid in x_grids_trv))) if use_time_shift else 0.0
+
+
+dt_embed_discretize = np.round(pred_params[1] / 15.0, 2)
+assert len(x_grids) == 1
+
+
+x_grid_ind_list = np.sort(np.random.choice(len(x_grids), size = 1, replace = False)) # 15
+x_grid_ind_list_1 = np.sort(np.random.choice(len(x_grids), size = len(x_grids), replace = False)) # 15
+if use_only_one_grid == True: x_grid_ind_list_1 = np.copy(x_grid_ind_list)
+n_scale_x_grid = len(x_grid_ind_list)
+n_scale_x_grid_1 = len(x_grid_ind_list_1)
+
 
 if use_only_one_grid:
     assert len(time_shifts) == 1 and len(x_grids) == 1 and len(x_grids_trv) == 1
@@ -478,7 +518,9 @@ for i in range(len(x_grids)):
     mz_slice.eval()
     mz_list.append(mz_slice)
 
+n_batch = 1 ## Process one time step at a time (fixed)
 day_len = 86400
+assert(n_batch == 1)
 
 if use_adaptive_window:
     frac_time_range = 2.0 / 3.0
@@ -534,6 +576,58 @@ tsteps = np.arange(
     step
 )
 
+## Build sampling grids
+X_query = build_sampling_grid(lat_range, lon_range, lat_range, lon_range, depth_range, t_win/2.0, 1000.0*scale_time, 3*n_query_grid, ftrns1, ftrns2, use_global = use_global, depth_upscale_factor = 2.0, buffer_scale = 2.0)
+X_query_cart = torch.Tensor(ftrns1(X_query)).to(device)
+
+
+## Load topography
+if (use_topography == True)*(os.path.isfile(path_to_file + 'Grids' + seperator + '%s_surface_elevation.npz'%name_of_project) == True):
+	surface_profile = np.load(path_to_file + 'Grids' + seperator + '%s_surface_elevation.npz'%name_of_project)['surface_profile']
+elif use_topography == True: ## If no surface profile saved, then interpolate a regular grid based on saved station elevations
+	n_surface = 100 ## Default resolution of surface
+	x1_surface, x2_surface = np.linspace(lat_range_extend[0], lat_range_extend[1], n_surface), np.linspace(lon_range_extend[0], lon_range_extend[1], n_surface)
+	x11_surface, x12_surface = np.meshgrid(x1_surface, x2_surface)
+	surface_profile = np.concatenate((x11_surface.reshape(-1,1), x12_surface.reshape(-1,1), np.zeros((len(x11_surface.reshape(-1)),1))), axis = 1)
+	tree_sta = cKDTree(ftrns1(locs))
+	surface_profile[:,2] = locs[tree_sta.query(ftrns1(surface_profile))[1],2]
+	edges_surface = knn(torch.Tensor(ftrns1(surface_profile)), torch.Tensor(ftrns1(surface_profile)), k = 15).flip(0).contiguous()
+	surface_profile[:,2] = scatter(torch.Tensor(surface_profile[edges_surface[0].cpu().detach().numpy(),2].reshape(-1,1)), edges_surface[1], dim = 0, reduce = 'mean').cpu().detach().numpy().reshape(-1)
+else:
+	surface_profile = None
+
+
+## Estimate average grid spacing
+xval = np.concatenate((X_query_cart.cpu().detach().numpy(), 1000.0*scale_time*X_query[:,3].reshape(-1,1)), axis = 1)
+tree_grid = cKDTree(xval)
+irand_check = np.sort(np.random.choice(len(X_query_cart), size = int(0.05*len(X_query_cart)), replace = False))
+ind_neighbors = tree_grid.query(xval[irand_check], k = 5)
+dist_spc_grid = np.median(np.linalg.norm(np.expand_dims(xval[irand_check], axis = 1) - xval[ind_neighbors[1][:,1::]], axis = 2).mean(1))
+dist_time_grid = np.median(np.abs(X_query[irand_check,3].reshape(-1,1) - X_query[ind_neighbors[1][:,1::],3]).mean(1))
+print('Median offset in sampling grid: %0.4f m, %0.4f s'%(dist_spc_grid, dist_time_grid))
+
+## Grid parameters
+n_scale_x_grid = len(x_grid_ind_list)
+n_scale_x_grid_1 = len(x_grid_ind_list_1)
+tq = torch.Tensor(np.copy(X_query[:,3])).reshape(-1,1).to(device)
+# date = np.array([yr, mo, dy])
+
+loaded_mag_model = False
+if compute_magnitudes == True:
+	try:
+		n_mag_ver = 1
+		mags_supp = np.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d_supplemental.npz'%n_mag_ver)
+		mag_grid, k_grid = mags_supp['mag_grid'], int(mags_supp['k_grid'])
+		Mag = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
+		Mag.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
+		loaded_mag_model = True
+		print('Will compute magnitudes since a magnitude model was loaded')
+	except:
+		print('Will not compute magnitudes since no magnitude model was loaded')
+		loaded_mag_model = False
+else:
+	print('Will not compute magnitudes since compute_magnitudes = False')	
+
 
 if use_debug:  # Check matched events during processing
     calibration_file = BASE_DIR / "Calibration" / f"{date[0]}" / f"{name_of_project}_reference_{date[0]}_{date[1]}_{date[2]}_ver_1.npz"
@@ -554,11 +648,6 @@ if use_debug:  # Check matched events during processing
         use_debug = False
     else:
         print(f"Using debug mode: checking {len(srcs_known)} reference events")
-
-
-
-dt_embed_discretize = np.round(pred_params[1] / 15.0, 2)
-assert len(x_grids) == 1
 
 
 # -----------------------------------------------------------------------------
@@ -601,15 +690,8 @@ for cnt, strs in enumerate([0]):
 	
 	for i in range(len(x_grids)):
 
-		# x_grids, x_grids_edges, x_grids_trv, x_grids_trv_pointers_p, x_grids_trv_pointers_s, x_grids_trv_refs
 		A_sta_sta, A_src_src, A_prod_sta_sta, A_prod_src_src, A_src_in_prod, A_src_in_sta = extract_inputs_adjacencies_subgraph(locs_use, x_grids[i], ftrns1, ftrns2, max_deg_offset = max_deg_offset, k_nearest_pairs = k_nearest_pairs, k_sta_edges = k_sta_edges, k_spc_edges = k_spc_edges, scale_time = scale_time, Ac = Ac, A_sta_sta = A_sta_sta, A_src_src = A_src_src, A_src_in_sta = A_src_in_sta, device = device)
 		A_edges_time_p, A_edges_time_s, dt_partition = compute_time_embedding_vectors(trv_pairwise, locs_use, x_grids[i], A_src_in_sta, max_t, dt_res = pred_params[1]/5.0, t_win = pred_params[1]*2.0, min_t = min_t, time_shift = time_shifts[i], device = device)
-
-		## Updating spatial vals to use scaled Cartesian offset distances
-		# if use_time_shift == False:
-		# 	spatial_vals = torch.Tensor((x_grids[i][A_src_in_prod[1].cpu().detach().numpy()][:,0:3] - locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()])/scale_x_extend).to(device)
-		# else:
-		# 	spatial_vals = torch.cat((torch.Tensor((x_grids[i][A_src_in_prod[1].cpu().detach().numpy()][:,0:3] - locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()])/scale_x_extend).to(device), torch.Tensor(x_grids[i][A_src_in_prod[1].cpu().detach().numpy(),3]).reshape(-1,1).to(device)/time_shift_range), dim = 1)
 
 		if use_time_shift == False:
 			spatial_vals = torch.Tensor((ftrns1(x_grids[i][A_src_in_prod[1].cpu().detach().numpy()][:,0:3]) - ftrns1(locs_use[A_src_in_sta[0][A_src_in_prod[0]].cpu().detach().numpy()]))/(30*src_x_kernel)).to(device)
@@ -895,7 +977,8 @@ for cnt, strs in enumerate([0]):
 	## Set fixed edges to false
 	if use_fixed_edges == True:
 		assert(len(x_grid_ind_list) == 1)
-		mz_list[x_grid_ind_list[0]].SpaceTimeAttention.use_fixed_edges = False
+		for j in range(len(mz_list)):
+			mz_list[x_grid_ind_list[j]].SpaceTimeAttention.use_fixed_edges = False
 		# x_grid_ind = x_grid_ind_list[0]
 
 
@@ -998,6 +1081,7 @@ for cnt, strs in enumerate([0]):
 
 		print('Begin sources refined')
 		tree_lats = cKDTree(lat_range_events.reshape(-1, 1))
+		n_cnt_srcs = 0
 
 		for n in range(len(srcs)):
 
@@ -1120,6 +1204,8 @@ for cnt, strs in enumerate([0]):
 
 				X_save = np.copy(src_max)
 				X_save_cart = torch.Tensor(ftrns1(X_save)).to(device)
+				print('Located %d event: (%0.4f Offset, %0.4f Vertical, %0.4f Time, %0.4f Value)'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0]), float(src_max[0,2] - srcs[n,2]), float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
+				n_cnt_srcs += 1
 
 				for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 					# Second call required: Re-extract inputs using src_max[[0], 3] origin time for associations
