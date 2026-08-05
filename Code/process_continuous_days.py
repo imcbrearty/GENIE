@@ -604,7 +604,7 @@ irand_check = np.sort(np.random.choice(len(X_query_cart), size = int(0.05*len(X_
 ind_neighbors = tree_grid.query(xval[irand_check], k = 5)
 dist_spc_grid = np.median(np.linalg.norm(np.expand_dims(xval[irand_check], axis = 1) - xval[ind_neighbors[1][:,1::]], axis = 2).mean(1))
 dist_time_grid = np.median(np.abs(X_query[irand_check,3].reshape(-1,1) - X_query[ind_neighbors[1][:,1::],3]).mean(1))
-print('Median offset in sampling grid: %0.4f m, %0.4f s'%(dist_spc_grid, dist_time_grid))
+print('\nMedian offset in sampling grid: %0.4f m, %0.4f s'%(dist_spc_grid, dist_time_grid))
 
 ## Grid parameters
 n_scale_x_grid = len(x_grid_ind_list)
@@ -1007,7 +1007,7 @@ for cnt, strs in enumerate([0]):
 	st_process = time.time()
 
 	target_width = sp_win # /2.0 # /2.0 # 2 * grid_win
-	lat_range_events = np.arange(srcs[:,0].min(), srcs[:,0].max() + np.diff(lat_range_extend)/10.0, np.diff(lat_range_extend)/10.0)
+	lat_range_events = np.arange(srcs[:,0].min(), srcs[:,0].max() + np.diff(lat_range_extend)[0]/10.0, np.diff(lat_range_extend)[0]/10.0)
 	lat_deg_span = target_width / (np.deg2rad(1) * earth_radius)
 
 	X_query_grid = []
@@ -1205,9 +1205,9 @@ for cnt, strs in enumerate([0]):
 
 				X_save = np.copy(src_max)
 				X_save_cart = torch.Tensor(ftrns1(X_save)).to(device)
-				if np.mog(n_cnt_srcs, 10) == 0:
+				if np.mod(n_cnt_srcs, 10) == 0:
 					# print('Located %d event: (%0.4f Offset, %0.4f Vertical, %0.4f Time, %0.4f Value)'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0]), float(src_max[0,2] - srcs[n,2]), float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
-					print('Located %d event: (%0.3f, %0.3f, %0.3f, %0.3f) [Offset (km), Vertical (km), Time (s), Value]'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0])/1000.0, float(src_max[0,2] - srcs[n,2])/1000.0, float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
+					print('Located %d event: (%0.3f, %0.3f, %0.3f, %0.3f) [Offset (km), Vert. (km), Time (s), Val]'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0])/1000.0, float(src_max[0,2] - srcs[n,2])/1000.0, float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
 
 				n_cnt_srcs += 1
 
