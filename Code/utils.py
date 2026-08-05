@@ -1467,14 +1467,30 @@ def load_files_with_travel_times(path_to_file, name_of_project, template_ver, ve
 
 	return lat_range, lon_range, depth_range, deg_pad, x_grids, locs, stas, mn, rbest, write_training_file, depths, vp, vs, Tp, Ts, locs_ref, X
 
+
+
 def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs', corrs = None, locs_corr = None, return_model = False, use_physics_informed = False):
 
 	if use_physics_informed == False:
 	
 		from module import TravelTimes
-		seperator = '\\' if '\\' in path_to_file else '/'
-		
-		z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+		# seperator = '\\' if '\\' in path_to_file else '/'
+
+		# Handle both str and pathlib.Path seamlessly
+		if isinstance(path_to_file, pathlib.PurePath):
+			# Modern pathlib approach
+			file_path = path_to_file / '1D_Velocity_Models_Regional' / f'travel_time_neural_network_physics_informed_{phase}_losses_ver_{n_ver_load}.npz'
+		else:
+			# Legacy string path approach
+			path_str = str(path_to_file)
+			seperator = '\\' if '\\' in path_str else '/'
+			if not path_str.endswith(seperator):
+				path_str += seperator
+			file_path = path_str + '1D_Velocity_Models_Regional' + seperator + f'travel_time_neural_network_physics_informed_{phase}_losses_ver_{n_ver_load}.npz'
+				
+		# z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+		z = np.load(file_path)
+
 		n_phases = len(z['v_mean'])
 		scale_val = float(z['scale_val'])
 		trav_val = float(z['trav_val'])
@@ -1505,9 +1521,23 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 	else:
 
 		from module import VModel, TravelTimesPN
-		seperator = '\\' if '\\' in path_to_file else '/'
+		# seperator = '\\' if '\\' in path_to_file else '/'
+
+		# Handle both str and pathlib.Path seamlessly
+		if isinstance(path_to_file, pathlib.PurePath):
+			# Modern pathlib approach
+			file_path = path_to_file / '1D_Velocity_Models_Regional' / f'travel_time_neural_network_physics_informed_{phase}_losses_ver_{n_ver_load}.npz'
+		else:
+			# Legacy string path approach
+			path_str = str(path_to_file)
+			seperator = '\\' if '\\' in path_str else '/'
+			if not path_str.endswith(seperator):
+				path_str += seperator
+			file_path = path_str + '1D_Velocity_Models_Regional' + seperator + f'travel_time_neural_network_physics_informed_{phase}_losses_ver_{n_ver_load}.npz'
 		
-		z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+		# z = np.load(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'travel_time_neural_network_physics_informed_%s_losses_ver_%d.npz'%(phase, n_ver_load))
+		z = np.load(file_path)
+		
 		n_phases = len(z['v_mean'])
 		v_mean, scale_params = z['v_mean'], z['scale_params']
 		# scale_val = float(z['scale_val'])
@@ -1544,6 +1574,17 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 		else:
 		
 			return trv		
+
+
+
+
+
+
+
+
+
+
+
 
 # def load_travel_time_neural_network_physics_informed(path_to_file, ftrns1, ftrns2, n_ver_load, phase = 'p_s', device = 'cuda', method = 'relative pairs'):
 
