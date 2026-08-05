@@ -103,6 +103,8 @@ use_topography = process_config["use_topography"]
 process_known_events = process_config["process_known_events"]
 min_spc_allowed = process_config.get("min_spc_allowed", None)
 use_path_sigma = process_config.get("use_path_sigma", False)
+scale_depth_clustering = process_config.get("scale_depth_clustering", 0.5) 
+## Set as 1.0 for isotropic depth scaling in Local Marching
 
 use_offset_quality_control = process_config.get("use_offset_quality_control", True)
 offset_ratio_quality_control = process_config.get("offset_ratio_quality_control", 2.0)
@@ -623,12 +625,12 @@ if compute_magnitudes == True:
 		Mag = Magnitude(torch.Tensor(locs).to(device), torch.Tensor(mag_grid).to(device), ftrns1_diff, ftrns2_diff, k = k_grid, device = device).to(device)
 		Mag.load_state_dict(torch.load(path_to_file + 'Grids' + seperator + 'trained_magnitude_model_ver_%d.h5'%n_mag_ver, map_location = device))
 		loaded_mag_model = True
-		print('Will compute magnitudes since a magnitude model was loaded')
+		print('Will compute magnitudes since a magnitude model was loaded \n')
 	except:
-		print('Will not compute magnitudes since no magnitude model was loaded')
+		print('Will not compute magnitudes since no magnitude model was loaded \n')
 		loaded_mag_model = False
 else:
-	print('Will not compute magnitudes since compute_magnitudes = False')	
+	print('Will not compute magnitudes since compute_magnitudes = False \n')	
 
 
 if use_debug:  # Check matched events during processing
@@ -879,7 +881,7 @@ for cnt, strs in enumerate([0]):
 
 				# out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
 				if (np.mod(i0, 50) == 0) + ((np.mod(i0, 5) == 0)*(out[1].max().item() > 0.075)):
-					print('%d %d %0.2f'%(n, i0, out[1].max().item()))
+					print('%d %d %0.2f'%(n, i0, out[1].max().item())) if i0 > 0 else print('\n%d %d %0.2f (Max value per window)'%(n, i0, out[1].max().item()))
 	
 	print('Continuous processing time %0.4f'%(time.time() - st_process))
 
@@ -895,7 +897,7 @@ for cnt, strs in enumerate([0]):
 	Out_2_sparse = Out_2_sparse[isort]
 
 	# Depth scaling setup
-	scale_depth_clustering = 0.5 ## Decrease this some for teleseismic applications (or large depth uncertainity)
+	# scale_depth_clustering = 0.5 ## Decrease this some for teleseismic applications (or large depth uncertainity)
 	# Equivalent, slightly cleaner lambda definition
 	ftrns1_use = ftrns1 if scale_depth_clustering == 1.0 else (lambda x: ftrns1_scaled(x, scale_depth_clustering))
 
@@ -969,7 +971,7 @@ for cnt, strs in enumerate([0]):
 		continue
 
 	srcs = np.vstack(srcs_l)
-	print('Detected %d initial local maxima (%d distinct Local Marchings)' % (srcs.shape[0], cnt_marching))
+	print('Detected %d initial local maxima (%d distinct Local Marchings) \n' % (srcs.shape[0], cnt_marching))
 	srcs = srcs[np.argsort(srcs[:, 3])]
 	if use_debug == True:
 		matches = maximize_bipartite_assignment_wrapper(srcs_known, srcs, ftrns1, ftrns2, temporal_win = 5.0*src_t_kernel, spatial_win = 5.0*src_x_kernel)[0]
@@ -1215,7 +1217,18 @@ for cnt, strs in enumerate([0]):
 				X_save_cart = torch.Tensor(ftrns1(X_save)).to(device)
 				if np.mod(n_cnt_srcs, 10) == 0:
 					# print('Located %d event: (%0.4f Offset, %0.4f Vertical, %0.4f Time, %0.4f Value)'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0]), float(src_max[0,2] - srcs[n,2]), float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
-					print('Located %d event: (%0.3f, %0.3f, %0.3f, %0.3f) [Offset (km), Vert. (km), Time (s), Val]'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0])/1000.0, float(src_max[0,2] - srcs[n,2])/1000.0, float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
+					# print('Located %d event: (%0.3f, %0.3f, %0.3f, %0.3f) [Offset (km), Vert. (km), Time (s), Val]'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0])/1000.0, float(src_max[0,2] - srcs[n,2])/1000.0, float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
+					print(
+						'Located %3d event: (% 7.3f, % 7.3f, % 7.3f, % 7.3f) [Offset (km), Vert. (km), Time (s), Val]' if np.mod(n_cnt_srcs, 100) == 0 else 'Located %3d event: (% 7.3f, % 7.3f, % 7.3f, % 7.3f)'
+						% (
+							n_cnt_srcs,
+							float(np.linalg.norm(ftrns1(src_max[0, 0:3].reshape(1, -1)) - ftrns1(srcs[n, 0:3].reshape(1, -1)), axis=1)[0]) / 1000.0,
+							float(src_max[0, 2] - srcs[n, 2]) / 1000.0,
+							float(src_max[0, 3] - srcs[n, 3]),
+							float(max_val - srcs[n, 4]),
+						)
+					)
+
 
 				n_cnt_srcs += 1
 
@@ -1473,7 +1486,7 @@ for cnt, strs in enumerate([0]):
 			discon_components = [np.sort(np.array(list(discon_components[i])).astype('int')) for i in range(len(discon_components))]
 
 			finish_splits = False
-			max_sources = 15 ## per competitive assignment run
+			max_sources = 20 # 15 ## per competitive assignment run
 			max_splits = 30
 			num_splits = 0
 			while finish_splits == False:
