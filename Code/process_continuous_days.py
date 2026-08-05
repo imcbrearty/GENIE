@@ -1032,8 +1032,9 @@ for cnt, strs in enumerate([0]):
 		# WGS84-SAFE COARSE-TO-FINE GRID GENERATION
 		# ==============================================================================
 
-		N_QUERY_COARSE = 2000
-		N_QUERY_FINE = 1000
+		N_QUERY_COARSE = 10000
+		N_QUERY_FINE = 10000
+		## Recall, can potentially batch the application over srcs refined
 
 		X_query_grid_coarse = []
 		X_query_grid_fine = []
@@ -1204,7 +1205,10 @@ for cnt, strs in enumerate([0]):
 
 				X_save = np.copy(src_max)
 				X_save_cart = torch.Tensor(ftrns1(X_save)).to(device)
-				print('Located %d event: (%0.4f Offset, %0.4f Vertical, %0.4f Time, %0.4f Value)'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0]), float(src_max[0,2] - srcs[n,2]), float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
+				if np.mog(n_cnt_srcs, 10) == 0:
+					# print('Located %d event: (%0.4f Offset, %0.4f Vertical, %0.4f Time, %0.4f Value)'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0]), float(src_max[0,2] - srcs[n,2]), float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
+					print('Located %d event: (%0.3f, %0.3f, %0.3f, %0.3f) [Offset (km), Vertical (km), Time (s), Value]'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0])/1000.0, float(src_max[0,2] - srcs[n,2])/1000.0, float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
+
 				n_cnt_srcs += 1
 
 				for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
