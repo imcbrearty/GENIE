@@ -323,6 +323,8 @@ else:
             )
             locs = np.copy(locs_shifted)
             locs_use = np.copy(locs_shifted)
+        else:
+            apply_location_shift = False
 
     deg_padding = np.nan
     # n_trgt_nodes = process_config.get("n_trgt_nodes", int(200e3))
@@ -1001,6 +1003,12 @@ for cnt, strs in enumerate([0]):
 	     ########### ########## ########### ###########
 
 
+	## Note: using query samples, could concievably merge the srcs refiend directly with the continuous processing script
+	## E.g., using same internal latent state, "on the fly" compute local maxima and srcs_refined whenever max value > threshold
+
+	## Also note, should run local marching (with ind retain) one more time after first location step
+
+	## Can consider using location uncertainities as a quality control during the repeated loop
 
 
 	## Find latitude range of events
@@ -1080,7 +1088,7 @@ for cnt, strs in enumerate([0]):
 		# SOURCES REFINED QUERY LOOP
 		# ==============================================================================
 
-		print('Begin sources refined')
+		print('Begin sources refined (%d events)'%len(srcs))
 		tree_lats = cKDTree(lat_range_events.reshape(-1, 1))
 		n_cnt_srcs = 0
 
@@ -1329,7 +1337,7 @@ for cnt, strs in enumerate([0]):
 	ikeep = None
 
 	st_process = time.time()
-	repeat_iters = 2 ## Repeat competitive assignment to allow recovering picks assigned to removed events
+	repeat_iters = 1 ## Repeat competitive assignment to allow recovering picks assigned to removed events
 
 	## Setup global arrays
 	srcs_refined_init_global = np.copy(srcs_refined)
@@ -1758,7 +1766,7 @@ for cnt, strs in enumerate([0]):
 						Picks_S.append(s_assign)
 						Picks_P_perm.append(p_assign_perm)
 						Picks_S_perm.append(s_assign_perm)
-						ind_srcs_retain.append(arv_src_slice[srcs_active[j]])
+						# ind_srcs_retain.append(arv_src_slice[srcs_active[j]])
 
 						cnt_src += 1
 
@@ -1769,7 +1777,7 @@ for cnt, strs in enumerate([0]):
 				continue
 			
 			srcs_refined = np.vstack(srcs_retained)
-			ind_srcs_retain = np.hstack(ind_srcs_retain)
+			# ind_srcs_retain = np.hstack(ind_srcs_retain)
 
 			## Find unique set of arrival indices, write to subset of matrix weights
 			## for wp and ws.
@@ -2238,7 +2246,8 @@ for cnt, strs in enumerate([0]):
 
 		if inc_repeat == (repeat_iters - 1):
 
-			## Now compute empirical uncertainties
+			use_4d = True  # True for 4D (x,y,z,T0), False for 3D (x,y,z)
+
 			results_list = []
 			torch.set_grad_enabled(True)
 
@@ -2248,13 +2257,13 @@ for cnt, strs in enumerate([0]):
 			# Vectorized RMS calculation per source
 			res_p = [trv_out[j, Picks_P_perm[j][:, 1].astype(int), 0] - Picks_P_perm[j][:, 0] for j in range(len(srcs_trv))]
 			res_s = [trv_out[j, Picks_S_perm[j][:, 1].astype(int), 1] - Picks_S_perm[j][:, 0] for j in range(len(srcs_trv))]
-			
+
 			rms = np.array([
 				np.linalg.norm(np.concatenate((res_p[j], res_s[j]))) / np.sqrt(len(res_p[j]) + len(res_s[j])) 
 				for j in range(len(srcs_trv))
 			])
 
-			# Pre-compute chi2 scaling factor for 95% confidence region (df=3)
+			# Pre-compute chi2 scaling factor for 95% confidence region (df=3 spatial)
 			chi2_val = chi2(df=3).ppf(0.95)
 			sig_d = 0.15  ## Assumed a priori pick uncertainty (seconds)
 
@@ -2275,26 +2284,25 @@ for cnt, strs in enumerate([0]):
 
 				xmle, origin = srcs_trv[i, 0:3].reshape(1, -1), srcs_trv[i, 3]
 
-				# Compute local spatial scaling factors
+				# Local conversion factors (m per degree)
 				scale_val1 = 100.0 * np.linalg.norm(ftrns1(xmle[0, 0:3].reshape(1, -1)) - ftrns1(xmle[0, 0:3].reshape(1, -1) + np.array([0.01, 0, 0]).reshape(1, -1)), axis=1)[0]
 				scale_val2 = 100.0 * np.linalg.norm(ftrns1(xmle[0, 0:3].reshape(1, -1)) - ftrns1(xmle[0, 0:3].reshape(1, -1) + np.array([0, 0.01, 0]).reshape(1, -1)), axis=1)[0]
-				scale_val = 0.5 * (scale_val1 + scale_val2)
-				scale_partials = (1 / 60.0) * np.array([1.0, 1.0, scale_val]).reshape(1, -1)
 
-				# Set up autograd tensors
+				# Set up autograd tensors (lat, lon, depth_m)
 				src_input_p = Variable(torch.Tensor(xmle[0, 0:3].reshape(1, -1)).repeat(len(ind_p_perm_slice), 1).to(device), requires_grad=True)
 				src_input_s = Variable(torch.Tensor(xmle[0, 0:3].reshape(1, -1)).repeat(len(ind_s_perm_slice), 1).to(device), requires_grad=True)
 
 				trv_out_p = trv_pairwise1(torch.Tensor(locs_use_slice[ind_p_perm_slice]).to(device), src_input_p, method='direct')[:, 0]
 				trv_out_s = trv_pairwise1(torch.Tensor(locs_use_slice[ind_s_perm_slice]).to(device), src_input_s, method='direct')[:, 1]
 
-				d_p = scale_partials * torch.autograd.grad(
+				# Gradients in (s/deg, s/deg, s/m)
+				d_p = torch.autograd.grad(
 					inputs=src_input_p, outputs=trv_out_p,
 					grad_outputs=torch.ones_like(trv_out_p).to(device),
 					retain_graph=True, create_graph=True, allow_unused=True
 				)[0].cpu().detach().numpy()
 
-				d_s = scale_partials * torch.autograd.grad(
+				d_s = torch.autograd.grad(
 					inputs=src_input_s, outputs=trv_out_s,
 					grad_outputs=torch.ones_like(trv_out_s).to(device),
 					retain_graph=True, create_graph=True, allow_unused=True
@@ -2302,28 +2310,40 @@ for cnt, strs in enumerate([0]):
 
 				d_grad = np.concatenate((d_p, d_s), axis=0)
 
-				# Covariance matrix calculation
-				var_cart = (d_grad / scale_partials) / np.array([scale_val1, scale_val2, 1.0]).reshape(1, -1)
-				cov_cart = np.linalg.pinv(var_cart.T @ var_cart) * (sig_d**2) * chi2_val
-				
-				# Call helper function
+				if use_4d:
+					# 4D Mode: Append column of 1s for origin-time derivative dT0 -> G is (N_picks, 4)
+					G = np.hstack([d_grad, np.ones((d_grad.shape[0], 1))])
+					cov_full = np.linalg.pinv(G.T @ G) * (sig_d**2) * chi2_val
+					
+					cov_spatial = cov_full[0:3, 0:3]  # Units: [deg^2, deg^2, m^2]
+					dt0 = np.sqrt(np.maximum(0, cov_full[3, 3]))
+				else:
+					# 3D Mode: Spatial only -> G is (N_picks, 3)
+					G = d_grad
+					cov_spatial = np.linalg.pinv(G.T @ G) * (sig_d**2) * chi2_val
+					dt0 = np.nan
+
 				scale_factor = rms[i] / sig_d
-				res = decompose_error_ellipsoid(cov_cart, scale_val1, scale_val2, scale_factor)
+				res = decompose_error_ellipsoid(cov_spatial, scale_val1, scale_val2, scale_factor, dt0)
 				results_list.append(res)
 
 			# Pack into final structured NumPy arrays
-			srcs_sigma            = np.array([r['sigma'] for r in results_list])
-			srcs_sigma_scaled     = np.array([r['sigma_scaled'] for r in results_list])
-			srcs_dxyz             = np.array([r['dxyz'] for r in results_list])             # (N, 3)
-			srcs_dxyz_scaled      = np.array([r['dxyz_scaled'] for r in results_list])      # (N, 3)
-			srcs_dgeo             = np.array([r['dgeo'] for r in results_list])             # (N, 3)
-			srcs_dgeo_scaled      = np.array([r['dgeo_scaled'] for r in results_list])      # (N, 3)
-			srcs_ellip_axes       = np.array([r['ellip_axes'] for r in results_list])       # (N, 3)
-			srcs_ellip_axes_scaled= np.array([r['ellip_axes_scaled'] for r in results_list])# (N, 3)
-			srcs_ellip_vectors   = np.array([r['ellip_vectors'] for r in results_list])   # (N, 3, 3)
+			srcs_sigma             = np.array([r['sigma'] for r in results_list])             # (N,)   [meters]
+			srcs_sigma_scaled      = np.array([r['sigma_scaled'] for r in results_list])      # (N,)   [meters]
+			srcs_dxyz             = np.array([r['dxyz'] for r in results_list])             # (N, 3) [meters]
+			srcs_dxyz_scaled      = np.array([r['dxyz_scaled'] for r in results_list])      # (N, 3) [meters]
+			srcs_dgeo             = np.array([r['dgeo'] for r in results_list])             # (N, 3) [deg, deg, meters]
+			srcs_dgeo_scaled      = np.array([r['dgeo_scaled'] for r in results_list])      # (N, 3) [deg, deg, meters]
+			srcs_dt0              = np.array([r['dt0'] for r in results_list])              # (N,)   [seconds]
+			srcs_dt0_scaled       = np.array([r['dt0_scaled'] for r in results_list])       # (N,)   [seconds]
+			srcs_ellip_axes       = np.array([r['ellip_axes'] for r in results_list])       # (N, 3) [meters]
+			srcs_ellip_axes_scaled= np.array([r['ellip_axes_scaled'] for r in results_list])# (N, 3) [meters]
+			srcs_ellip_vectors    = np.array([r['ellip_vectors'] for r in results_list])   # (N, 3, 3)
 
 			assert len(srcs_trv) == len(srcs_sigma)
 			torch.set_grad_enabled(False)
+
+
 
 
 		####################################################################################
@@ -2333,7 +2353,7 @@ for cnt, strs in enumerate([0]):
 	     ############### Compute Magnitude ###############
 	############### ############### ############### ###############
 
-	## Compute magnitudes.
+	## Compute magnitudes. ## Could try doing very light weight online calibration by fitting to GR curve or the largest magnitude event
 	# min_log_amplitude_val = -2.0 ## Choose this value to ignore very small amplitudes
 	if (compute_magnitudes == True)*(loaded_mag_model == True):
 		mag_r = []
@@ -2365,6 +2385,7 @@ for cnt, strs in enumerate([0]):
 	# use_additional_quality_control = True
 	if use_additional_quality_control == True:
 
+		assert(use_additional_quality_control == False) ## Somewhat outdated
 		## Need to adjust these parameters for the updated srcs_sigma
 		max_sigma = 1250.0 # 10e3 ## Remove events with uncertainity higher than this
 		mag_thresh_check = 4.0
@@ -2437,28 +2458,24 @@ for cnt, strs in enumerate([0]):
 
 		try:
 		
-			t0 = UTCDateTime(date[0], date[1], date[2])
-			min_magnitude = 0.1
-
-			calibration_file = path_to_file + 'Calibration' + seperator + '%d'%date[0] + seperator + '%s_reference_%d_%d_%d_ver_1.npz'%(name_of_project, date[0], date[1], date[2])
-			if os.path.isfile(calibration_file) == True:
-				z = np.load(calibration_file)
-				srcs_known = z['srcs_ref']
-				z.close()
-
+			calibration_file = BASE_DIR / "Calibration" / f"{date[0]}" / f"{name_of_project}_reference_{date[0]}_{date[1]}_{date[2]}_ver_1.npz"
+			if calibration_file.exists():
+				with np.load(calibration_file) as z:
+					srcs_known = z["srcs_ref"]
 			else:
-				srcs_known = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24, t0 = t0, client = 'USGS')[0] # Choose client
-				print('Processing %d known events'%len(srcs_known))
-	
+				try:
+					t0 = UTCDateTime(date[0], date[1], date[2])
+					min_magnitude = process_config.get("min_magnitude", 0.01)
+					srcs_known = download_catalog(lat_range, lon_range, min_magnitude, t0, t0 + 3600*24, t0=t0, client="USGS")[0]
+					print(f"Processing {len(srcs_known)} known events")
+				except Exception as e:
+					print(f"Failed to fetch reference catalog: {e}")
+					srcs_known = np.zeros((0, 4))
 	
 			temporal_win_match = 5.0*src_t_kernel
 			spatial_win_match = 5.0*src_x_kernel
 			matches1 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_refined, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
-			if len(ifind_not_nan) > 0:
-				matches2 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv[ifind_not_nan], ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
-				matches2[:,1] = ifind_not_nan[matches2[:,1]]
-			else:
-				matches2 = np.nan*np.zeros((0,2))
+			matches2 = maximize_bipartite_assignment_wrapper(srcs_known, srcs_trv, ftrns1, ftrns2, temporal_win = temporal_win_match, spatial_win = spatial_win_match)[0]
 
 			if len(matches2) > 0:
 				res = srcs_known[matches2[:,0],0:4] - srcs_trv[matches2[:,1],0:4]
@@ -2467,7 +2484,6 @@ for cnt, strs in enumerate([0]):
 				print('Res [mean]: '); print(list(res.mean(0)))
 				print('\nRes [std]: '); print(list(res.std(0)))			
 				
-		
 		except:
 			print('Failed on finding matched events')
 			find_matched_events = False
@@ -2497,8 +2513,8 @@ for cnt, strs in enumerate([0]):
 		file_save['srcs_trv'] = srcs_trv ## These are the travel time located sources using associated picks (usually the most accurate!)
 		file_save['srcs_w'] = srcs_refined[:,4] ## The detection likelihood value for each source (e.g., > thresh, and usually < 1).
 		file_save['srcs_rms'] = rms
-		file_save['res_p'] = np.array(res_p)
-		file_save['res_s'] = np.array(res_s)
+		file_save['res_p'] = np.hstack(res_p)
+		file_save['res_s'] = np.hstack(res_s)
 
 		file_save['locs'] = locs
 		file_save['locs_use'] = locs_use
@@ -2539,6 +2555,8 @@ for cnt, strs in enumerate([0]):
 		file_save['srcs_dxyz_scaled'] = srcs_dxyz_scaled
 		file_save['srcs_dgeo'] = srcs_dgeo
 		file_save['srcs_dgeo_scaled'] = srcs_dgeo_scaled
+		file_save['srcs_dt0'] = srcs_dt0 
+		file_save['srcs_dt0_scaled'] = srcs_dt0_scaled
 		file_save['srcs_ellip_axes'] = srcs_ellip_axes
 		file_save['srcs_ellip_axes_scaled'] = srcs_ellip_axes_scaled
 		file_save['srcs_ellip_vectors'] = srcs_ellip_vectors
