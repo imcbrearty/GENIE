@@ -272,7 +272,7 @@ def check_matched_events(srcs_known, srcs, matches):
 		print('Precision: %0.4f \n'%(len(matches)/(len(matches) + (len(srcs) - len(matches)))))
 		print('Total events %d'%(len(srcs)))
 		print('\nRes [mean]: '); print(list(res.mean(0)))
-		print('\nRes [std]: '); print(list(res.std(0)))
+		print('Res [std]: '); print(list(res.std(0)))
 
 ### K-means scripts
 
