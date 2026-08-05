@@ -269,8 +269,8 @@ def check_matched_events(srcs_known, srcs, matches):
 		res = srcs_known[matches[:,0],0:4] - srcs[matches[:,1],0:4]
 		print('\nMatched events:')
 		print('Recall: %d/%d (%0.4f)'%(len(matches), len(srcs_known), len(matches)/len(srcs_known)))
-		print('Precision: %0.4f \n'%(len(matches)/(len(matches) + (len(srcs) - len(matches)))))
-		print('Total events %d'%(len(srcs)))
+		print('Precision: %0.4f'%(len(matches)/(len(matches) + (len(srcs) - len(matches)))))
+		print('Total events %d (%0.3f Ratio)'%(len(srcs), len(srcs)/len(srcs_known)))
 		print('\nRes [mean]: '); print(list(res.mean(0)))
 		print('Res [std]: '); print(list(res.std(0)))
 
