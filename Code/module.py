@@ -1489,7 +1489,7 @@ class DataAggregationAssociationPhaseExpanded(MessagePassing): # make equivelent
 ## Can also maybe reduce the scaling of eps
 
 class ArrivalEmbedding(MessagePassing):
-	def __init__(self, ndim_arv_in, ndim_out, n_hidden = 20, n_dim_embed = 30, n_phase_embed = 5, ndim_out_src = 1, scale_rel = scale_rel, k_spc_edges = k_spc_edges, kernel_sig_t = kernel_sig_t, use_phase_types = use_phase_types, scale_time = scale_time, min_thresh = 0.01, trv = None, ftrns2 = None, device = 'cuda'):
+	def __init__(self, ndim_arv_in, ndim_out, n_hidden = 20, n_dim_embed = 30, n_phase_embed = 5, embed_vector_dim = 10, ndim_out_src = 1, scale_rel = scale_rel, k_spc_edges = k_spc_edges, kernel_sig_t = kernel_sig_t, use_phase_types = use_phase_types, scale_time = scale_time, min_thresh = 0.01, trv = None, ftrns2 = None, device = 'cuda'):
 		# super(SourceArrivalEmbedding, self).__init__(node_dim = 0, aggr = 'add') # check node dim. ## Use sum or mean
 		super(ArrivalEmbedding, self).__init__(node_dim = 0, aggr = 'add') # check node dim. ## Use sum or mean
 
@@ -1519,13 +1519,33 @@ class ArrivalEmbedding(MessagePassing):
 		self.fc3 = nn.Sequential(nn.Linear(ndim_arv_in + 6 + 3 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
 		self.ioffset = torch.tensor([-1, 0], dtype=torch.long, device=self.device)
 
-		self.w_gamma1 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-		self.w_gamma2 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-		self.w_gamma3 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-		self.w_gamma4 = nn.Parameter(torch.tensor([0.1, 0.5, 2.0]).reshape(1, -1))
+		# self.w_gamma1 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
+		# self.w_gamma2 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
+		# self.w_gamma3 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
+		# self.w_gamma4 = nn.Parameter(torch.tensor([0.1, 0.5, 2.0]).reshape(1, -1))
 
 		self.w_gamma1_time = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
 		self.w_gamma2_time = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
+
+
+
+		# Predict scale-conditioned gamma offsets from domain context
+		self.f_gamma1 = nn.Linear(embed_vector_dim, 4)
+		self.f_gamma2 = nn.Linear(embed_vector_dim, 4)
+		self.f_gamma3 = nn.Linear(embed_vector_dim, 4)
+		self.f_gamma4 = nn.Linear(embed_vector_dim, 4)
+		self.log_gamma_base1 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
+		self.log_gamma_base2 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
+		self.log_gamma_base3 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
+		self.log_gamma_base4 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
+
+		self.f_gamma_time1 = nn.Linear(embed_vector_dim, 3)
+		self.f_gamma_time2 = nn.Linear(embed_vector_dim, 3)
+		self.f_gamma_time3 = nn.Linear(embed_vector_dim, 3)
+		self.log_gamma_base_time1 = nn.Parameter(torch.log(torch.tensor([0.1, 0.5, 2.0]).reshape(1, -1)))
+		self.log_gamma_base_time2 = nn.Parameter(torch.log(torch.tensor([0.1, 0.5, 2.0]).reshape(1, -1)))
+		self.log_gamma_base_time3 = nn.Parameter(torch.log(torch.tensor([0.1, 0.5, 2.0]).reshape(1, -1)))
+
 		# self.w_gamma3_time = nn.Parameter(torch.tensor([[0.1, 0.5, 2.0]).reshape(1, -1))
 		# self.w_gamma4_time = nn.Parameter(torch.tensor([[0.1, 0.5, 2.0]).reshape(1, -1))
 		
@@ -1538,7 +1558,7 @@ class ArrivalEmbedding(MessagePassing):
 		self.fc_merge = nn.Sequential(nn.Linear(3*n_hidden, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, ndim_out))
 		# self.fc_merge_src = nn.Sequential(nn.Linear(3*n_hidden, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, ndim_out_src))
 
-	def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, trv_out = None): # reference k nearest spatial points
+	def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out = None): # reference k nearest spatial points
 
 		if trv_out is None:
 			trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart)) + x_query_t.reshape(-1, 1, 1) ## Use full travel times, as we check for stations from the full product
@@ -1636,26 +1656,45 @@ class ArrivalEmbedding(MessagePassing):
 		# offset_ref_src_t = (x_query_t[query_vals[iwhere_query,1]].reshape(-1,1) - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]].reshape(-1,1))/(1.0*self.scale_time)
 		offset_ref_src_t = 1000.0*self.scale_time*(x_query_t[query_vals[iwhere_query,1]].reshape(-1,1) - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]].reshape(-1,1))/(3.0*self.scale_rel)
 
-		offset_src_sta_norm = torch.norm(offset_src_sta, dim = 1, keepdim = True)
-		offset_ref_sta_norm = torch.norm(offset_ref_sta, dim = 1, keepdim = True)
-		offset_ref_src_norm = torch.norm(offset_ref_src, dim = 1, keepdim = True)
+		eps_time = 1e-8
+		offset_src_sta_norm = torch.norm(offset_src_sta, dim = 1, keepdim = True).clamp(min=eps_time)
+		offset_ref_sta_norm = torch.norm(offset_ref_sta, dim = 1, keepdim = True).clamp(min=eps_time)
+		offset_ref_src_norm = torch.norm(offset_ref_src, dim = 1, keepdim = True).clamp(min=eps_time)
 
 		## Src to ref are not usually large distances so use one kernel radius
 		# offset_src_sta_norm_kernel = torch.exp(-1.0*torch.abs(offset_src_sta_norm)/(3.0))
 		# offset_ref_src_norm_kernel = torch.exp(-1.0*torch.abs(offset_ref_src_norm)/(1.0))
 		# offset_ref_sta_norm_kernel = torch.exp(-1.0*torch.abs(offset_ref_sta_norm)/(3.0))
 
-		offset_src_sta_norm_kernel = torch.cat((offset_src_sta/offset_src_sta_norm, torch.exp(-1.0*offset_src_sta_norm*F.softplus(self.w_gamma1))), dim = 1)
-		offset_ref_sta_norm_kernel = torch.cat((offset_ref_sta/offset_ref_sta_norm, torch.exp(-1.0*offset_ref_sta_norm*F.softplus(self.w_gamma2))), dim = 1)
-		offset_ref_src_norm_kernel = torch.cat((offset_ref_src/offset_ref_src_norm, torch.exp(-1.0*offset_ref_src_norm*F.softplus(self.w_gamma3))), dim = 1)
-		
+		# offset_src_sta_norm_kernel = torch.cat((offset_src_sta/offset_src_sta_norm, torch.tanh(-1.0*offset_src_sta_norm*F.softplus(self.w_gamma1))), dim = 1)
+		# offset_ref_sta_norm_kernel = torch.cat((offset_ref_sta/offset_ref_sta_norm, torch.tanh(-1.0*offset_ref_sta_norm*F.softplus(self.w_gamma2))), dim = 1)
+		# offset_ref_src_norm_kernel = torch.cat((offset_ref_src/offset_ref_src_norm, torch.tanh(-1.0*offset_ref_src_norm*F.softplus(self.w_gamma3))), dim = 1)
+	
+		gammas1 = torch.exp(self.log_gamma_base1 + 1.6 * torch.tanh(self.f_gamma1(embed_context)))	
+		gammas2 = torch.exp(self.log_gamma_base2 + 1.6 * torch.tanh(self.f_gamma2(embed_context)))	
+		gammas3 = torch.exp(self.log_gamma_base3 + 1.6 * torch.tanh(self.f_gamma3(embed_context)))	
+
+		# 3. Compute RBF distance decay banks
+		rbf_src_sta = torch.exp(-1.0 * offset_src_sta_norm * gammas1)
+		rbf_ref_sta = torch.exp(-1.0 * offset_ref_sta_norm * gammas2)
+		rbf_ref_src = torch.exp(-1.0 * offset_ref_src_norm * gammas3)
+
+		# 4. Construct rich 8D spatio-temporal features: [unit_dir (3D), RBF bank (4D), dt (1D)]
+		feat_src_sta = torch.cat((offset_src_sta/offset_src_sta_norm, rbf_src_sta), dim=-1)
+		feat_ref_sta = torch.cat((offset_ref_sta/offset_ref_sta_norm, rbf_ref_sta), dim=-1)
+		feat_ref_src = torch.cat((offset_ref_src/offset_ref_src_norm, rbf_ref_src), dim=-1)
+
 
 		# offset_ref_src_norm_kernel_t = torch.cat((torch.exp(-1.0*torch.abs(offset_ref_src_t)/(1.0)).reshape(-1,1), torch.sign(offset_ref_src_t).reshape(-1,1)), dim = 1)
 		# offset_ref_src_norm_kernel_t = torch.cat((torch.exp(-1.0*torch.abs(offset_ref_src_t)/(1.0)).reshape(-1,1), torch.sign(offset_ref_src_t).reshape(-1,1)), dim = 1)
-		offset_ref_src_norm_kernel_t = torch.cat((offset_ref_src_t, torch.exp(-1.0*torch.abs(offset_ref_src_t).reshape(-1,1)*F.softplus(self.w_gamma4))), dim = 1)
+	
+		# offset_ref_src_norm_kernel_t = torch.cat((offset_ref_src_t, torch.exp(-1.0*torch.abs(offset_ref_src_t).reshape(-1,1)*F.softplus(self.w_gamma4))), dim = 1)
+		gammas1_time = torch.exp(self.log_gamma_base_time1 + 1.6 * torch.tanh(self.f_gamma_time1(embed_context)))	
+		rbf_time = torch.exp(-1.0 * offset_ref_src_t * gammas1_time)
+		feat_time = torch.cat((offset_ref_src_t, rbf_time), dim=-1)
 
 		# inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, offset_src_sta, offset_ref_sta, offset_ref_src, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel, offset_ref_sta_norm_kernel, offset_ref_src_norm_kernel_t, self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())), dim = 1)
-		inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, offset_src_sta_norm_kernel, offset_ref_sta_norm_kernel, offset_ref_src_norm_kernel, offset_ref_src_norm_kernel_t, self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())), dim = 1)
+		inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, feat_src_sta, feat_ref_sta, feat_ref_src, feat_time, self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())), dim = 1)
 		
 		aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim = 0, dim_size = len(iarv), reduce = 'mean') ## Can consider
 		# print('T2 %0.4f'%(time.time() - t1))
@@ -1750,11 +1789,17 @@ class ArrivalEmbedding(MessagePassing):
 			offset_ref_sta_p = (locs_use_cart[ipick[inds_queries_to_picks_p]] - x_context_cart[A_src_in_sta[1,nodes_of_product_p[iwhere_query_p]],:])/(10.0*self.scale_rel)
 			offset_ref_sta_s = (locs_use_cart[ipick[inds_queries_to_picks_s]] - x_context_cart[A_src_in_sta[1,nodes_of_product_s[iwhere_query_s]],:])/(10.0*self.scale_rel)
 
-			offset_ref_sta_norm_p = torch.norm(offset_ref_sta_p, dim = 1, keepdim = True)
-			offset_ref_sta_norm_s = torch.norm(offset_ref_sta_s, dim = 1, keepdim = True)
+			offset_ref_sta_norm_p = torch.norm(offset_ref_sta_p, dim = 1, keepdim = True).clamp(min = eps_time)
+			offset_ref_sta_norm_s = torch.norm(offset_ref_sta_s, dim = 1, keepdim = True).clamp(min = eps_time)
 
-			offset_ref_sta_norm_kernel_p = torch.cat((offset_ref_sta_p/offset_ref_sta_norm_p, torch.exp(-1.0*offset_ref_sta_norm_p*F.softplus(self.w_gamma1_time))), dim = 1)
-			offset_ref_sta_norm_kernel_s = torch.cat((offset_ref_sta_s/offset_ref_sta_norm_s, torch.exp(-1.0*offset_ref_sta_norm_s*F.softplus(self.w_gamma2_time))), dim = 1)
+			gammas_time2 = torch.exp(self.log_gamma_base_time2 + 1.6 * torch.tanh(self.f_gamma_time2(embed_context)))	
+			gammas_time3 = torch.exp(self.log_gamma_base_time3 + 1.6 * torch.tanh(self.f_gamma_time3(embed_context)))	
+
+			rbf_ref_sta_p = torch.exp(-1.0 * offset_ref_sta_norm_p * gammas_time2)
+			rbf_ref_sta_s = torch.exp(-1.0 * offset_ref_sta_norm_s * gammas_time3)
+
+			offset_ref_sta_norm_kernel_p = torch.cat((offset_ref_sta_p/offset_ref_sta_norm_p, rbf_ref_sta_p), dim = 1)
+			offset_ref_sta_norm_kernel_s = torch.cat((offset_ref_sta_s/offset_ref_sta_norm_s, rbf_ref_sta_s), dim = 1)
 			
 			# offset_ref_sta_norm_kernel_p = torch.exp(-1.0*torch.abs(offset_ref_sta_norm_p)/(3.0))
 			# offset_ref_sta_norm_kernel_s = torch.exp(-1.0*torch.abs(offset_ref_sta_norm_s)/(3.0))
@@ -2974,5 +3019,4 @@ class Magnitude(nn.Module):
 
 		## Can directly use torch_scatter to coalesce the data?
 		# mag = (log_amp - self.epicenter_spatial_coef[phase]*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device))
-
 
