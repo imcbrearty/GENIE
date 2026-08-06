@@ -1350,41 +1350,45 @@ for cnt, strs in enumerate([0]):
 	ikeep = None
 
 	st_process = time.time()
-	repeat_iters = 1 ## Repeat competitive assignment to allow recovering picks assigned to removed events
+	repeat_iters = 2 ## Repeat competitive assignment to allow recovering picks assigned to removed events
 
 	## Setup global arrays
-	srcs_refined_init_global = np.copy(srcs_refined)
-	Out_p_save_global = [Out_p_save[j] for j in range(len(Out_p_save))]
-	Out_s_save_global = [Out_s_save[j] for j in range(len(Out_s_save))]
-	Save_picks_global = [Save_picks[j] for j in range(len(Save_picks))]
-	lp_meta_global = [lp_meta[j] for j in range(len(lp_meta))]
-	trv_out_srcs_init_full = [trv_out_srcs_l[j] for j in range(len(trv_out_srcs_l))]
+	# srcs_refined_init_global = np.copy(srcs_refined)
+	Out_p_save_global = [np.copy(Out_p_save[j]) for j in range(len(Out_p_save))]
+	Out_s_save_global = [np.copy(Out_s_save[j]) for j in range(len(Out_s_save))]
+	ind_srcs_retained = np.arange(len(srcs_refined))
 
+	# Save_picks_global = [np.copy(Save_picks[j]) for j in range(len(Save_picks))]
+	# lp_meta_global = [np.copy(lp_meta[j]) for j in range(len(lp_meta))]
+	# trv_out_srcs_init_full = [np.copy(trv_out_srcs_l[j]) for j in range(len(trv_out_srcs_l))]
 
 	for inc_repeat in range(repeat_iters):
 
-		if inc_repeat == 0:
-			# Track persistent active mask/indices
-			active_indices = np.arange(len(srcs_refined))
+		print("Begin competitive assignment (iteration %d)" % (inc_repeat + 1))
+		
+		# if inc_repeat == 0:
+		# 	# Track persistent active mask/indices
+		# 	# active_indices = np.arange(len(srcs_refined))
+		# 	pass
 
-		else:
+		# else:
 
-
-			# Guard against empty active indices from pass 0
-			if ikeep is None or len(ikeep) == 0 or len(active_indices) == 0:
-				print("No active events remaining from Pass 1 to re-process. Terminating competitive loop.")
-				break
+			# # Guard against empty active indices from pass 0
+			# if ikeep is None or len(ikeep) == 0 or len(active_indices) == 0:
+			# 	print("No active events remaining from Pass 1 to re-process. Terminating competitive loop.")
+			# 	break
 
 			# `ikeep` contains indices relative to the active array at the end of Pass 1
-			active_indices = active_indices[ikeep]
-			print("Begin competitive assignment (iteration %d)" % (inc_repeat + 1))
-			srcs_refined = np.copy(srcs_refined_init_global[active_indices])
-			trv_out_srcs = [trv_out_srcs_init_full[i] for i in active_indices]  # Keep a clean global travel time array
-			Out_p_save = [Out_p_save_global[i] for i in active_indices]
-			Out_s_save = [Out_s_save_global[i] for i in active_indices]
-			Save_picks = [Save_picks_global[i] for i in active_indices]
-			lp_meta = [lp_meta_global[i] for i in active_indices]
+			# active_indices = active_indices[ikeep]
+			# srcs_refined = np.copy(srcs_refined_init_global[active_indices])
+			# trv_out_srcs = [np.copy(trv_out_srcs_init_full[i]) for i in active_indices]  # Keep a clean global travel time array
+			# Save_picks = [np.copy(Save_picks_global[i]) for i in active_indices]
+			# lp_meta = [np.copy(lp_meta_global[i]) for i in active_indices]
 			# DO NOT re-assign or copy into srcs_refined_init inside the loop!
+
+			# Out_p_save = [np.copy(Out_p_save_global[i]) for i in active_indices]
+			# Out_s_save = [np.copy(Out_s_save_global[i]) for i in active_indices]
+
 
 
 		use_expanded_competitive_assignment = True
@@ -1660,6 +1664,7 @@ for cnt, strs in enumerate([0]):
 				num_splits = num_splits + 1
 
 			srcs_retained = []
+			ind_srcs_retained = []
 			cnt_src = 0
 
 			for i in range(len(discon_components)):
@@ -1765,6 +1770,7 @@ for cnt, strs in enumerate([0]):
 				if len(srcs_active) > 0:
 					for j in range(len(srcs_active)):
 						srcs_retained.append(srcs_refined[arv_src_slice[srcs_active[j]]].reshape(1,-1))
+						ind_srcs_retained.append(arv_src_slice[srcs_active[j]])
 
 						wp_val = wp_slice_init[srcs_active[j], assignments[j][0]]
 						ws_val = ws_slice_init[srcs_active[j], assignments[j][1]]
@@ -1790,6 +1796,7 @@ for cnt, strs in enumerate([0]):
 				continue
 			
 			srcs_refined = np.vstack(srcs_retained)
+			ind_srcs_retained = np.hstack(ind_srcs_retained)
 			# ind_srcs_retain = np.hstack(ind_srcs_retain)
 
 			## Find unique set of arrival indices, write to subset of matrix weights
@@ -1846,7 +1853,7 @@ for cnt, strs in enumerate([0]):
 		# 	# iwhere_cnts = np.zeros(0)
 
 
-		use_overwrite_locations = True
+		use_overwrite_locations = False
 		if (inc_repeat == (repeat_iters - 1)) and (inc_repeat > 0):
 
 			## Check if any current pick sets are same as a previously located event
@@ -2173,6 +2180,7 @@ for cnt, strs in enumerate([0]):
 		assert(len(srcs_trv) == len(Picks_P_perm))
 		assert(len(srcs_trv) == len(Picks_S_perm))
 		assert(len(srcs_trv) == len(srcs_refined))
+		assert(len(srcs_trv) == len(ind_srcs_retained))
 
 		print('Number sources (after travel time locations and quality control): %d (Time %0.4f)' % 
 			  (len(np.where(np.isfinite(srcs_trv[:, 0]))[0]), time.time() - st_process))
@@ -2217,7 +2225,6 @@ for cnt, strs in enumerate([0]):
 				continue
 
 			# Slice everything consistently using ikeep
-			srcs_refined = srcs_refined[ikeep]
 			srcs_trv = srcs_trv[ikeep]
 			del_arv_p = del_arv_p[ikeep]
 			del_arv_s = del_arv_s[ikeep]
@@ -2228,6 +2235,16 @@ for cnt, strs in enumerate([0]):
 			Picks_S = [Picks_S[j] for j in ikeep]
 			Picks_P_perm = [Picks_P_perm[j] for j in ikeep]
 			Picks_S_perm = [Picks_S_perm[j] for j in ikeep]
+
+			srcs_refined = srcs_refined[ikeep]
+			ind_srcs_retained = ind_srcs_retained[ikeep]
+			lp_meta = [lp_meta[j] for j in ikeep]
+			trv_out_srcs = [trv_out_srcs[j] for j in ikeep]
+			Save_picks = [Save_picks[j] for j in ikeep]
+
+			Out_p_save = [np.copy(Out_p_save_global[i]) for i in ind_srcs_retained]
+			Out_s_save = [np.copy(Out_s_save_global[i]) for i in ind_srcs_retained]
+
 
 		print('Number sources (after minimum number of picks and stations): %d' % len(srcs_trv))
 		
