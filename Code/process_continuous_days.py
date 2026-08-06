@@ -881,7 +881,7 @@ for cnt, strs in enumerate([0]):
 
 				# out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
 				if (np.mod(i0, 50) == 0) + ((np.mod(i0, 5) == 0)*(out[1].max().item() > 0.075)):
-					print('%d %d %0.2f'%(n, i0, out[1].max().item())) if n > 0 else print('\n%d %d %0.2f (Max value per window)'%(n, i0, out[1].max().item()))
+					print('%d %d %0.2f'%(n, i0, out[1].max().item())) if n > 0 else print('%d %d %0.2f (Max value per window)'%(n, i0, out[1].max().item()))
 	
 	print('Continuous processing time %0.4f'%(time.time() - st_process))
 
@@ -1226,7 +1226,7 @@ for cnt, strs in enumerate([0]):
 							float(src_max[0, 2] - srcs[n, 2]) / 1000.0,
 							float(src_max[0, 3] - srcs[n, 3]),
 							float(max_val - srcs[n, 4]),
-							'[Offset (km), Vert. (km), Time (s), Val]' if np.mod(n_cnt_srcs, 100) == 0 else ''
+							'[Offset (km), Vert. (km), Time (s), Val]' if np.mod(n_cnt_srcs, 500) == 0 else ''
 						)
 					)
 
@@ -1330,7 +1330,7 @@ for cnt, strs in enumerate([0]):
 	Out_s_save = [Out_s_save[i] for i in iargsort]
 	Save_picks = [Save_picks[i] for i in iargsort]
 	lp_meta = [lp_meta_l[i] for i in iargsort]
-	trv_out_srcs_l = [trv_out_srcs_l[i] for i in iargsort] 
+	trv_out_srcs_l = [trv_out_srcs_l[i] for i in iargsort]
 	
 	trv_out_srcs = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach()
 	trv_out_srcs_init2 = trv(torch.Tensor(locs_use).to(device), torch.Tensor(srcs_refined[:,0:3]).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1)
@@ -1355,13 +1355,13 @@ for cnt, strs in enumerate([0]):
 
 	## Setup global arrays
 	# srcs_refined_init_global = np.copy(srcs_refined)
-	Out_p_save_global = [np.copy(Out_p_save[j]) for j in range(len(Out_p_save))]
-	Out_s_save_global = [np.copy(Out_s_save[j]) for j in range(len(Out_s_save))]
-	ind_srcs_retained = np.arange(len(srcs_refined))
+	# Out_p_save_global = [np.copy(Out_p_save[j]) for j in range(len(Out_p_save))]
+	# Out_s_save_global = [np.copy(Out_s_save[j]) for j in range(len(Out_s_save))]
+	# Save_picks_global = [np.copy(Save_picks[j]) for j in range(len(Save_picks))]
+	# lp_meta_global = [np.copy(lp_meta[j]) for j in range(len(lp_meta))]
+	# trv_out_srcs_global = [np.copy(trv_out_srcs_l[j]) for j in range(len(trv_out_srcs_l))]
+	# ind_srcs_retained = np.arange(len(srcs_refined))
 
-	Save_picks_global = [np.copy(Save_picks[j]) for j in range(len(Save_picks))]
-	lp_meta_global = [np.copy(lp_meta[j]) for j in range(len(lp_meta))]
-	trv_out_srcs_global = [np.copy(trv_out_srcs_l[j]) for j in range(len(trv_out_srcs_l))]
 
 	for inc_repeat in range(repeat_iters):
 
@@ -1426,6 +1426,9 @@ for cnt, strs in enumerate([0]):
 
 				if len(lp_meta[i]) == 0:
 					continue
+
+				## Does this reference absolute source indices?
+				## If so need to map to the subset of sliced sources
 
 				matched_arv_indices_val = tree_picks_unique_select.query(lp_meta[i][:,0:2])
 				assert(matched_arv_indices_val[0].max() == 0)
@@ -1835,6 +1838,13 @@ for cnt, strs in enumerate([0]):
 		torch.set_grad_enabled(False)
 
 
+		Out_p_save = [Out_p_save[i] for i in ind_srcs_retained]
+		Out_s_save = [Out_s_save[i] for i in ind_srcs_retained]
+		Save_picks = [Save_picks[i] for i in ind_srcs_retained]
+		lp_meta = [lp_meta[i] for i in ind_srcs_retained]
+		trv_out_srcs_l = [trv_out_srcs_l[i] for i in ind_srcs_retained]
+
+
 		# use_overwrite_locations = True
 		# if (inc_repeat == (repeat_iters - 1))*(inc_repeat > 0):
 
@@ -1951,8 +1961,8 @@ for cnt, strs in enumerate([0]):
 					event_map_pass1.append({'valid': False, 'orig_idx': i})
 					continue
 
-				perm_vec = -1 * np.ones(locs_use.shape[0], dtype=int)
-				perm_vec[ind_unique] = np.arange(len(ind_unique))
+				perm_vec_ = -1 * np.ones(locs_use.shape[0], dtype=int)
+				perm_vec_[ind_unique] = np.arange(len(ind_unique))
 				locs_slice = locs_use[ind_unique]
 
 				overwrite_val = ((inc_repeat == (repeat_iters - 1)) and (inc_repeat > 0) and 
@@ -1968,15 +1978,15 @@ for cnt, strs in enumerate([0]):
 				else:
 					t0_ref = srcs_refined[i, 3]
 					event_data_pass1.append({
-						'arv_p': arv_p - t0_ref, 'ind_p': perm_vec[ind_p],
-						'arv_s': arv_s - t0_ref, 'ind_s': perm_vec[ind_s],
+						'arv_p': arv_p - t0_ref, 'ind_p': perm_vec_[ind_p],
+						'arv_s': arv_s - t0_ref, 'ind_s': perm_vec_[ind_s],
 						'locs': locs_slice
 					})
 					event_map_pass1.append({
 						'valid': True, 'overwrite': False, 'orig_idx': i, 't0_ref': t0_ref,
 						'batch_de_idx': len(event_data_pass1) - 1,
-						'arv_p': arv_p, 'ind_p': ind_p, 'ind_p_slice': perm_vec[ind_p],
-						'arv_s': arv_s, 'ind_s': ind_s, 'ind_s_slice': perm_vec[ind_s],
+						'arv_p': arv_p, 'ind_p': ind_p, 'ind_p_slice': perm_vec_[ind_p],
+						'arv_s': arv_s, 'ind_s': ind_s, 'ind_s_slice': perm_vec_[ind_s],
 						'locs_slice': locs_slice
 					})
 
@@ -2078,6 +2088,10 @@ for cnt, strs in enumerate([0]):
 				qc_dropped_active_s = not set(qc_s_ind).issubset(skipped_s_arr) if len(qc_s_ind) > 0 else False
 
 				if qc_dropped_active_p or qc_dropped_active_s:
+
+					# print('Adding this')
+					final_locations[i] = (xmle, origin, skipped_p, skipped_s)
+
 					perm_vec_new = -1 * np.ones(locs_use.shape[0], dtype=int)
 					perm_vec_new[surviving_sta] = np.arange(len(surviving_sta))
 					
@@ -2106,6 +2120,9 @@ for cnt, strs in enumerate([0]):
 					event_data_pass2, bounds_min, bounds_max, 
 					use_path_sigma=use_path_sigma, chunk_size=MAX_BATCH_SIZE
 				)
+
+
+				# Why len(Picks_P[i]) doesn't equal len(item['arv_p']):
 
 				for item in event_map_pass2:
 					i = item['orig_idx']
@@ -2139,6 +2156,19 @@ for cnt, strs in enumerate([0]):
 
 					combined_del_p = np.unique(combined_del_p).astype(int) if len(combined_del_p) > 0 else np.array([], dtype=int)
 					combined_del_s = np.unique(combined_del_s).astype(int) if len(combined_del_s) > 0 else np.array([], dtype=int)
+
+
+					# Check if Pass 2 destroyed minimum required picks/stations
+					rem_p_cnt = len(Picks_P[i]) - len(combined_del_p)
+					rem_s_cnt = len(Picks_S[i]) - len(combined_del_s)
+					# surviving_sta_rem = np.array([len(np.unique(np.concatenate((Picks_P[i][:,1], Picks_S[i][:,1]), axis = 0))) for i in range(len(Picks_P))])
+					# surviving_sta_rem = len(np.unique(np.concatenate((Picks_P[i][:,1], Picks_S[i][:,1]), axis = 0))) # for i in range(len(Picks_P))])
+
+
+					if ((min_required_picks is not False) and ((rem_p_cnt + rem_s_cnt) < min_required_picks)):  # or ((min_required_sta is not False) and (surviving_sta_rem < min_required_sta)):
+						final_locations[i] = (np.nan * np.ones(3), np.nan, [], [])
+						continue
+
 
 					if len(combined_del_p) > 0:
 						Picks_P[i] = np.delete(Picks_P[i], combined_del_p, axis=0)
@@ -2238,16 +2268,18 @@ for cnt, strs in enumerate([0]):
 			Picks_S_perm = [Picks_S_perm[j] for j in ikeep]
 
 			srcs_refined = srcs_refined[ikeep]
-			ind_srcs_retained = ind_srcs_retained[ikeep]
+			# ind_srcs_retained = ind_srcs_retained[ikeep]
 			# lp_meta = [lp_meta[j] for j in ikeep]
 			# trv_out_srcs = [trv_out_srcs[j] for j in ikeep]
 			# Save_picks = [Save_picks[j] for j in ikeep]
 
-			Out_p_save = [np.copy(Out_p_save_global[i]) for i in ind_srcs_retained]
-			Out_s_save = [np.copy(Out_s_save_global[i]) for i in ind_srcs_retained]
-			lp_meta = [lp_meta_global[i] for i in ind_srcs_retained]
-			trv_out_srcs = [trv_out_srcs_global[i] for i in ind_srcs_retained]
-			Save_picks = [Save_picks_global[i] for i in ind_srcs_retained]
+            ## Note: ind_srcs_retained needs to be adjusted for iteration 1 (since its now local indices - essentially need the previous loops ind_srcs_retained)
+
+			Out_p_save = [np.copy(Out_p_save[i]) for i in ikeep]
+			Out_s_save = [np.copy(Out_s_save[i]) for i in ikeep]
+			lp_meta = [np.copy(lp_meta[i]) for i in ikeep]
+			trv_out_srcs = [np.copy(trv_out_srcs[i]) for i in ikeep]
+			Save_picks = [np.copy(Save_picks[i]) for i in ikeep]
 
 
 		print('Number sources (after minimum number of picks and stations): %d' % len(srcs_trv))
