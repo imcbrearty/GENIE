@@ -1359,9 +1359,9 @@ for cnt, strs in enumerate([0]):
 	Out_s_save_global = [np.copy(Out_s_save[j]) for j in range(len(Out_s_save))]
 	ind_srcs_retained = np.arange(len(srcs_refined))
 
-	# Save_picks_global = [np.copy(Save_picks[j]) for j in range(len(Save_picks))]
-	# lp_meta_global = [np.copy(lp_meta[j]) for j in range(len(lp_meta))]
-	# trv_out_srcs_init_full = [np.copy(trv_out_srcs_l[j]) for j in range(len(trv_out_srcs_l))]
+	Save_picks_global = [np.copy(Save_picks[j]) for j in range(len(Save_picks))]
+	lp_meta_global = [np.copy(lp_meta[j]) for j in range(len(lp_meta))]
+	trv_out_srcs_global = [np.copy(trv_out_srcs_l[j]) for j in range(len(trv_out_srcs_l))]
 
 	for inc_repeat in range(repeat_iters):
 
@@ -2239,12 +2239,15 @@ for cnt, strs in enumerate([0]):
 
 			srcs_refined = srcs_refined[ikeep]
 			ind_srcs_retained = ind_srcs_retained[ikeep]
-			lp_meta = [lp_meta[j] for j in ikeep]
-			trv_out_srcs = [trv_out_srcs[j] for j in ikeep]
-			Save_picks = [Save_picks[j] for j in ikeep]
+			# lp_meta = [lp_meta[j] for j in ikeep]
+			# trv_out_srcs = [trv_out_srcs[j] for j in ikeep]
+			# Save_picks = [Save_picks[j] for j in ikeep]
 
 			Out_p_save = [np.copy(Out_p_save_global[i]) for i in ind_srcs_retained]
 			Out_s_save = [np.copy(Out_s_save_global[i]) for i in ind_srcs_retained]
+			lp_meta = [lp_meta_global[i] for i in ind_srcs_retained]
+			trv_out_srcs = [trv_out_srcs_global[i] for i in ind_srcs_retained]
+			Save_picks = [Save_picks_global[i] for i in ind_srcs_retained]
 
 
 		print('Number sources (after minimum number of picks and stations): %d' % len(srcs_trv))
