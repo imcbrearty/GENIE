@@ -1226,7 +1226,7 @@ for cnt, strs in enumerate([0]):
 							float(src_max[0, 2] - srcs[n, 2]) / 1000.0,
 							float(src_max[0, 3] - srcs[n, 3]),
 							float(max_val - srcs[n, 4]),
-							'[Offset (km), Vert. (km), Time (s), Val]' if np.mod(n_cnt_src, 100) == 0 else ''
+							'[Offset (km), Vert. (km), Time (s), Val]' if np.mod(n_cnt_srcs, 100) == 0 else ''
 						)
 					)
 
