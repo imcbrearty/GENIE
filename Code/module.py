@@ -1540,11 +1540,11 @@ class ArrivalEmbedding(MessagePassing):
 		self.log_gamma_base4 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
 
 		self.f_gamma_time1 = nn.Linear(embed_vector_dim, 3)
-		self.f_gamma_time2 = nn.Linear(embed_vector_dim, 3)
-		self.f_gamma_time3 = nn.Linear(embed_vector_dim, 3)
+		self.f_gamma_time2 = nn.Linear(embed_vector_dim, 4)
+		self.f_gamma_time3 = nn.Linear(embed_vector_dim, 4)
 		self.log_gamma_base_time1 = nn.Parameter(torch.log(torch.tensor([0.1, 0.5, 2.0]).reshape(1, -1)))
-		self.log_gamma_base_time2 = nn.Parameter(torch.log(torch.tensor([0.1, 0.5, 2.0]).reshape(1, -1)))
-		self.log_gamma_base_time3 = nn.Parameter(torch.log(torch.tensor([0.1, 0.5, 2.0]).reshape(1, -1)))
+		self.log_gamma_base_time2 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
+		self.log_gamma_base_time3 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
 
 		# self.w_gamma3_time = nn.Parameter(torch.tensor([[0.1, 0.5, 2.0]).reshape(1, -1))
 		# self.w_gamma4_time = nn.Parameter(torch.tensor([[0.1, 0.5, 2.0]).reshape(1, -1))
@@ -2304,7 +2304,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		else: ## This assumes that DataAggregationAssociationPhase does not use expanded version
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, A_in_sta, A_in_src[0], embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
 
-		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, trv_out = trv_out_q)
+		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out = trv_out_q)
 
 		if self.use_src_pred == True:
 			arv, src = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
@@ -2486,7 +2486,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			s = self.DataAggregationAssociationPhase(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src[0], self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
 
 		## Arrival embedding
-		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, self.tlatent, trv_out = trv_out_q)
+		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, self.tlatent, self.embed_context, trv_out = trv_out_q)
 		
 		## x_query_src_cart
 		if self.use_src_pred == True:
