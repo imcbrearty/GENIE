@@ -881,7 +881,7 @@ for cnt, strs in enumerate([0]):
 
 				# out_cumulative_max += out[1].max().item() if (out[1].max().item() > 0.075) else 0
 				if (np.mod(i0, 50) == 0) + ((np.mod(i0, 5) == 0)*(out[1].max().item() > 0.075)):
-					print('%d %d %0.2f'%(n, i0, out[1].max().item())) if i0 > 0 else print('\n%d %d %0.2f (Max value per window)'%(n, i0, out[1].max().item()))
+					print('%d %d %0.2f'%(n, i0, out[1].max().item())) if n > 0 else print('\n%d %d %0.2f (Max value per window)'%(n, i0, out[1].max().item()))
 	
 	print('Continuous processing time %0.4f'%(time.time() - st_process))
 
@@ -1219,13 +1219,14 @@ for cnt, strs in enumerate([0]):
 					# print('Located %d event: (%0.4f Offset, %0.4f Vertical, %0.4f Time, %0.4f Value)'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0]), float(src_max[0,2] - srcs[n,2]), float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
 					# print('Located %d event: (%0.3f, %0.3f, %0.3f, %0.3f) [Offset (km), Vert. (km), Time (s), Val]'%(n_cnt_srcs, float(np.linalg.norm(ftrns1(src_max[0,0:3].reshape(1,-1)) - ftrns1(srcs[n,0:3].reshape(1,-1)), axis = 1)[0])/1000.0, float(src_max[0,2] - srcs[n,2])/1000.0, float(src_max[0,3] - srcs[n,3]), float(max_val - srcs[n,4])))
 					print(
-						'Located %3d event: (% 7.3f, % 7.3f, % 7.3f, % 7.3f) [Offset (km), Vert. (km), Time (s), Val]' if np.mod(n_cnt_srcs, 100) == 0 else 'Located %3d event: (% 7.3f, % 7.3f, % 7.3f, % 7.3f)'
+						'Located %3d event: (% 7.3f, % 7.3f, % 7.3f, % 7.3f) %s' # if np.mod(n_cnt_srcs, 100) == 0 else 'Located %3d event: (% 7.3f, % 7.3f, % 7.3f, % 7.3f)'
 						% (
 							n_cnt_srcs,
 							float(np.linalg.norm(ftrns1(src_max[0, 0:3].reshape(1, -1)) - ftrns1(srcs[n, 0:3].reshape(1, -1)), axis=1)[0]) / 1000.0,
 							float(src_max[0, 2] - srcs[n, 2]) / 1000.0,
 							float(src_max[0, 3] - srcs[n, 3]),
 							float(max_val - srcs[n, 4]),
+							'[Offset (km), Vert. (km), Time (s), Val]' if np.mod(n_cnt_src, 100) == 0 else ''
 						)
 					)
 
