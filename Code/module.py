@@ -2425,12 +2425,13 @@ class GCN_Detection_Network_extended(nn.Module):
 		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
 		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
 		pos_rel_sta, pos_rel_src = None, None
+		# embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
 		assert(x_temp_cuda_cart.shape[1] == 3)
 
 		
 		if self.use_absolute_offset == True:
 			norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-			gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
+			gamma_offset = 1.6 * torch.tanh(self.f_gamma(self.embed_context))
 			gammas = torch.exp(self.log_gamma_base + gamma_offset)
 			spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
 			rel_pos_feat = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, self.A_src_in_edges.x[:,3:4]), dim=-1)
@@ -2519,7 +2520,7 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		if self.use_absolute_offset == True:
 			norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-			gamma_offset = 1.6 * torch.tanh(self.f_gamma(embed_context))
+			gamma_offset = 1.6 * torch.tanh(self.f_gamma(self.embed_context))
 			gammas = torch.exp(self.log_gamma_base + gamma_offset)
 			spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
 			rel_pos_feat = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, self.A_src_in_edges.x[:,3:4]), dim=-1)
