@@ -4672,6 +4672,47 @@ for batch_idx, inputs in enumerate(loader):
 				loss_reg_base, loss_reg_query = l_base_u, l_query_u
 				loss_reg_assoc_P, loss_reg_assoc_S = l_p_u, l_s_u
 
+		# # ==================== 3. NEGATIVE SAMPLING LOSS ====================
+		# computed_negative_loss = False
+		# rand_use_negative = (use_real_data_sample_v[inc] == False) or (np.random.rand() < rand_mask_ratio)
+
+		# if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
+
+		# 	min_up_sample = 0.1
+		# 	prob_up_sample = np.maximum((out[1][:, 0].cpu().detach()
+		# 			* (out[1][:, 0].cpu().detach() > min_up_sample)
+		# 			* (Lbls_query[i0][:, 0].detach() < min_up_sample)).cpu().detach().numpy(), 0.0)
+
+		# 	if prob_up_sample.sum() == 0:
+		# 		prob_up_sample = np.ones(len(prob_up_sample))
+		# 	prob_up_sample = prob_up_sample / prob_up_sample.sum()
+
+		# 	is_global_lon = (lon_range_extend[1] - lon_range_extend[0]) >= 359.0
+
+		# 	# Calling sample_dense_queries with standardized parameter names
+		# 	x_query_sample, x_query_sample_t = sample_dense_queries(
+		# 		x_query=X_query[i0][:, 0:3].cpu().detach().numpy(),
+		# 		x_query_t=X_query[i0][:, 3].cpu().detach().numpy(),
+		# 		prob=prob_up_sample,
+		# 		lat_range=lat_range_extend,
+		# 		lon_range=lon_range_extend,
+		# 		depth_range=depth_range,
+		# 		src_x_kernel_m=src_x_kernel,
+		# 		src_depth_kernel_m=src_depth_kernel,
+		# 		src_t_kernel=src_t_kernel,
+		# 		time_shift_range=time_shift_range,
+		# 		replace=False,
+		# 		randomize=False,
+		# 		is_global_lon=is_global_lon,
+		# 	)
+
+		# 	out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device), train=True)
+		# 	lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:, 0:3].cpu().detach().numpy(), lp_srcs[i0][:, 3].cpu().detach().numpy(), src_spatial_kernel, src_t_kernel, ftrns1)
+
+		# 	raw_loss_negative = gaussian_heatmap_loss(out_query, torch.Tensor(lbls_query).to(device))
+		# 	loss_negative_val += raw_loss_negative.item()
+		# 	computed_negative_loss = True
+
 		# ==================== 3. NEGATIVE SAMPLING LOSS ====================
 		computed_negative_loss = False
 		rand_use_negative = (use_real_data_sample_v[inc] == False) or (np.random.rand() < rand_mask_ratio)
@@ -4679,20 +4720,45 @@ for batch_idx, inputs in enumerate(loader):
 		if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
 
 			min_up_sample = 0.1
-			prob_up_sample = np.maximum((out[1][:, 0].cpu().detach()
-					* (out[1][:, 0].cpu().detach() > min_up_sample)
-					* (Lbls_query[i0][:, 0].detach() < min_up_sample)).cpu().detach().numpy(), 0.0)
+			min_safe_dist_m = 3.0 * src_spatial_kernel
+			min_safe_t_s = 3.0 * src_t_kernel
 
+			queries_np = X_query[i0].cpu().detach().numpy() # [N, 4]
+			sources_np = lp_srcs[i0].cpu().detach().numpy() # [M, 4]
+
+			# Inlined 4D spacetime distance check to keep code compact
+			if len(sources_np) > 0 and len(queries_np) > 0:
+				ecef_q = lla2ecef(queries_np[:, 0:3])
+				ecef_s = lla2ecef(sources_np[:, 0:3])
+				dist_3d = np.linalg.norm(ecef_q[:, None, :] - ecef_s[None, :, :], axis=-1)
+				dist_t = np.abs(queries_np[:, 3:4] - sources_np[:, 3:4].T)
+				
+				# Point is unsafe ONLY if it is close in space AND time simultaneously
+				is_close = (dist_3d < min_safe_dist_m) & (dist_t < min_safe_t_s)
+				is_far_enough = ~np.any(is_close, axis=1)
+			else:
+				is_far_enough = np.ones(len(queries_np), dtype=bool)
+
+			# Hard Negative Mask: False Positives AND outside safety buffer
+			pred_val = out[1][:, 0].cpu().detach().numpy()
+			true_val = Lbls_query[i0][:, 0].cpu().detach().numpy()
+
+			valid_neg_mask = (pred_val > min_up_sample) & (true_val < 0.01) & is_far_enough
+			prob_up_sample = np.where(valid_neg_mask, pred_val, 0.0)
+
+			# Fallback: Sample from any point passing the safety buffer if no hard negatives exist
 			if prob_up_sample.sum() == 0:
-				prob_up_sample = np.ones(len(prob_up_sample))
-			prob_up_sample = prob_up_sample / prob_up_sample.sum()
+				prob_up_sample = np.where(is_far_enough, 1.0, 0.0)
+			if prob_up_sample.sum() == 0:
+				prob_up_sample = np.ones(len(queries_np))
 
+			prob_up_sample = prob_up_sample / prob_up_sample.sum()
 			is_global_lon = (lon_range_extend[1] - lon_range_extend[0]) >= 359.0
 
-			# Calling sample_dense_queries with standardized parameter names
+			# Resample queries around identified hard negatives
 			x_query_sample, x_query_sample_t = sample_dense_queries(
-				x_query=X_query[i0][:, 0:3].cpu().detach().numpy(),
-				x_query_t=X_query[i0][:, 3].cpu().detach().numpy(),
+				x_query=queries_np[:, 0:3],
+				x_query_t=queries_np[:, 3],
 				prob=prob_up_sample,
 				lat_range=lat_range_extend,
 				lon_range=lon_range_extend,
@@ -4706,13 +4772,19 @@ for batch_idx, inputs in enumerate(loader):
 				is_global_lon=is_global_lon,
 			)
 
+			# Forward pass on perturbed negatives & re-evaluate labels
 			out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device), train=True)
-			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:, 0:3].cpu().detach().numpy(), lp_srcs[i0][:, 3].cpu().detach().numpy(), src_spatial_kernel, src_t_kernel, ftrns1)
+			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, sources_np[:, 0:3], sources_np[:, 3], src_spatial_kernel, src_t_kernel, ftrns1)
 
-			raw_loss_negative = gaussian_heatmap_loss(out_query, torch.Tensor(lbls_query).to(device))
-			loss_negative_val += raw_loss_negative.item()
-			computed_negative_loss = True
+			# Final Safety Gate: Strip any perturbed point that bounced back onto a non-zero label
+			lbls_query_tensor = torch.Tensor(lbls_query).to(device)
+			neg_mask_final = (lbls_query_tensor[:, 0] < 0.01)
 
+			if neg_mask_final.any():
+				raw_loss_negative = gaussian_heatmap_loss(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final])
+				loss_negative_val += raw_loss_negative.item()
+				computed_negative_loss = True
+		
 		# ==================== 4. CONSISTENCY LOSS ====================
 		loss_consistency_flag = False
 		if use_consistency_loss and (ramp_aux > 0.0) and (out_save is not None):
