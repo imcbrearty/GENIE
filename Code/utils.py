@@ -1036,7 +1036,96 @@ def generate_travel_time_noise(
     return total_noise, is_excess
 
 
+def reflect_bounds(val, low, high):
+    span = high - low
+    if span <= 0:
+        return np.full_like(np.asarray(val), low)
+    val_arr = np.asarray(val)
+    v = (val_arr - low) % (2 * span)
+    v = np.where(v > span, 2 * span - v, v)
+    return (v + low).item() if np.ndim(val) == 0 else (v + low)
 
+
+
+def perturb_wgs84(
+    base_lat_deg,
+    base_lon_deg,
+    base_depth_m,
+    base_t_s,
+    src_x_kernel_m,
+    src_depth_kernel_m,
+    src_t_kernel,
+    lat_range,
+    lon_range,
+    depth_range,
+    time_shift_range,
+    is_global_lon=True,
+    a=6378137.0,
+    e=8.18191908426215e-2,
+):
+    """Refactored WGS84 perturbation using exact 3D ECEF tangent rotation.
+    
+    Prevents division-by-zero division at poles and seamlessly handles
+    cross-polar meridian crossings.
+    """
+    n_pts = len(base_lat_deg)
+    if n_pts == 0:
+        return np.empty(0), np.empty(0), np.empty(0), np.empty(0)
+
+    half_t_window = time_shift_range / 2.0
+
+    # 1. Convert Base points to ECEF (depth_m acts directly as height in lla2ecef)
+    lla_base = np.column_stack((base_lat_deg, base_lon_deg, base_depth_m))
+    ecef_base = lla2ecef(lla_base, a=a, e=e)
+
+    # 2. Local ENU 2D spatial perturbations
+    dE = np.random.normal(0, src_x_kernel_m, size=n_pts)
+    dN = np.random.normal(0, src_x_kernel_m, size=n_pts)
+
+    # 3. Compute local ENU unit basis vectors in ECEF frame
+    phi = np.radians(base_lat_deg)
+    lam = np.radians(base_lon_deg)
+
+    sin_phi, cos_phi = np.sin(phi), np.cos(phi)
+    sin_lam, cos_lam = np.sin(lam), np.cos(lam)
+
+    # East unit vector (dE)
+    e_x = -sin_lam
+    e_y = cos_lam
+    e_z = np.zeros(n_pts)
+
+    # North unit vector (dN)
+    n_x = -sin_phi * cos_lam
+    n_y = -sin_phi * sin_lam
+    n_z = cos_phi
+
+    # 4. Apply metric displacements in 3D ECEF space
+    ecef_pert = np.empty_like(ecef_base)
+    ecef_pert[:, 0] = ecef_base[:, 0] + dE * e_x + dN * n_x
+    ecef_pert[:, 1] = ecef_base[:, 1] + dE * e_y + dN * n_y
+    ecef_pert[:, 2] = ecef_base[:, 2] + dE * e_z + dN * n_z
+
+    # 5. Convert back to LLA (handles polar singularities & 180 wrapping automatically)
+    lla_pert = ecef2lla(ecef_pert, a=a, e=e)
+    new_lat = lla_pert[:, 0]
+    new_lon = lla_pert[:, 1]
+
+    # 6. Apply Boundary Conditions
+    if is_global_lon:
+        new_lon = (new_lon + 180.0) % 360.0 - 180.0
+    else:
+        new_lon = reflect_bounds(new_lon, lon_range[0], lon_range[1])
+
+    new_lat = reflect_bounds(new_lat, lat_range[0], lat_range[1])
+
+    # Depth & Time Perturbations
+    dz = np.random.normal(0, src_depth_kernel_m, size=n_pts)
+    new_depth = reflect_bounds(base_depth_m + dz, depth_range[0], depth_range[1])
+
+    dt = np.random.normal(0, src_t_kernel, size=n_pts)
+    new_t = reflect_bounds(base_t_s + dt, -half_t_window, half_t_window)
+
+    return new_lat, new_lon, new_depth, new_t
 
 
 def decompose_error_ellipsoid(cov_raw, scale_val1, scale_val2, scale_factor, dt0=np.nan):
