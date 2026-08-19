@@ -485,18 +485,86 @@ def WGS84_radii_of_curvature(lat_rad, a=6378137.0, f=1.0 / 298.257223563):
     N = a / denom
     return M, N
 
+# def reflect_bounds_backup(val, low, high):
+#     """Reflects values seamlessly back into [low, high] bounds."""
+#     span = high - low
+#     if span <= 0:
+#         return np.full_like(np.asarray(val), low)
+    
+#     val_arr = np.asarray(val)
+#     v = (val_arr - low) % (2 * span)
+#     v = np.where(v > span, 2 * span - v, v)
+    
+#     # Return scalar if input was scalar, otherwise return array
+#     return (v + low).item() if np.ndim(val) == 0 else (v + low)
+
 def reflect_bounds(val, low, high):
-    """Reflects values seamlessly back into [low, high] bounds."""
     span = high - low
     if span <= 0:
         return np.full_like(np.asarray(val), low)
-    
     val_arr = np.asarray(val)
     v = (val_arr - low) % (2 * span)
     v = np.where(v > span, 2 * span - v, v)
-    
-    # Return scalar if input was scalar, otherwise return array
     return (v + low).item() if np.ndim(val) == 0 else (v + low)
+
+# def perturb_wgs84_backup(
+#     base_lat_deg,
+#     base_lon_deg,
+#     base_depth_m,
+#     base_t_s,
+#     src_x_kernel_m,
+#     src_depth_kernel_m,
+#     src_t_kernel,
+#     lat_range,
+#     lon_range,
+#     depth_range,
+#     time_shift_range,
+#     is_global_lon=True,
+# ):
+#   """Core WGS84 ellipsoidal perturbation and boundary reflection logic."""
+#   n_pts = len(base_lat_deg)
+#   if n_pts == 0:
+#     return np.empty(0), np.empty(0), np.empty(0), np.empty(0)
+
+#   half_t_window = time_shift_range / 2.0
+#   base_lat_rad = np.radians(base_lat_deg)
+
+#   # Local ENU 2D spatial perturbations
+#   dE = np.random.normal(0, src_x_kernel_m, size=n_pts)
+#   dN = np.random.normal(0, src_x_kernel_m, size=n_pts)
+
+#   # WGS84 Radii of Curvature
+#   M, N = WGS84_radii_of_curvature(base_lat_rad)
+#   R_lat = M + base_depth_m
+#   R_lon = N + base_depth_m
+
+#   # Ellipsoidal differential displacements
+#   d_lat_rad = dN / R_lat
+#   new_lat_rad = base_lat_rad + d_lat_rad
+
+#   d_lon_rad = dE / (R_lon * np.cos(new_lat_rad))
+#   new_lon_rad = np.radians(base_lon_deg) + d_lon_rad
+
+#   new_lat = np.degrees(new_lat_rad)
+#   new_lon = np.degrees(new_lon_rad)
+
+#   # Boundary handling (Longitude)
+#   if is_global_lon:
+#     new_lon = (new_lon + 180.0) % 360.0 - 180.0
+#   else:
+#     new_lon = reflect_bounds(new_lon, lon_range[0], lon_range[1])
+
+#   # Boundary reflection (Latitude, Depth, Time)
+#   new_lat = reflect_bounds(new_lat, lat_range[0], lat_range[1])
+
+#   dz = np.random.normal(0, src_depth_kernel_m, size=n_pts)
+#   new_depth = reflect_bounds(base_depth_m + dz, depth_range[0], depth_range[1])
+
+#   dt = 2.0 * np.random.randn(n_pts) * src_t_kernel
+#   new_t = reflect_bounds(base_t_s + dt, -half_t_window, half_t_window)
+
+#   return new_lat, new_lon, new_depth, new_t
+
 
 def perturb_wgs84(
     base_lat_deg,
@@ -511,51 +579,72 @@ def perturb_wgs84(
     depth_range,
     time_shift_range,
     is_global_lon=True,
+    a=6378137.0,
+    e=8.18191908426215e-2,
 ):
-  """Core WGS84 ellipsoidal perturbation and boundary reflection logic."""
-  n_pts = len(base_lat_deg)
-  if n_pts == 0:
-    return np.empty(0), np.empty(0), np.empty(0), np.empty(0)
+    """Refactored WGS84 perturbation using exact 3D ECEF tangent rotation.
+    
+    Prevents division-by-zero division at poles and seamlessly handles
+    cross-polar meridian crossings.
+    """
+    n_pts = len(base_lat_deg)
+    if n_pts == 0:
+        return np.empty(0), np.empty(0), np.empty(0), np.empty(0)
 
-  half_t_window = time_shift_range / 2.0
-  base_lat_rad = np.radians(base_lat_deg)
+    half_t_window = time_shift_range / 2.0
 
-  # Local ENU 2D spatial perturbations
-  dE = np.random.normal(0, src_x_kernel_m, size=n_pts)
-  dN = np.random.normal(0, src_x_kernel_m, size=n_pts)
+    # 1. Convert Base points to ECEF (depth_m acts directly as height in lla2ecef)
+    lla_base = np.column_stack((base_lat_deg, base_lon_deg, base_depth_m))
+    ecef_base = lla2ecef(lla_base, a=a, e=e)
 
-  # WGS84 Radii of Curvature
-  M, N = WGS84_radii_of_curvature(base_lat_rad)
-  R_lat = M + base_depth_m
-  R_lon = N + base_depth_m
+    # 2. Local ENU 2D spatial perturbations
+    dE = np.random.normal(0, src_x_kernel_m, size=n_pts)
+    dN = np.random.normal(0, src_x_kernel_m, size=n_pts)
 
-  # Ellipsoidal differential displacements
-  d_lat_rad = dN / R_lat
-  new_lat_rad = base_lat_rad + d_lat_rad
+    # 3. Compute local ENU unit basis vectors in ECEF frame
+    phi = np.radians(base_lat_deg)
+    lam = np.radians(base_lon_deg)
 
-  d_lon_rad = dE / (R_lon * np.cos(new_lat_rad))
-  new_lon_rad = np.radians(base_lon_deg) + d_lon_rad
+    sin_phi, cos_phi = np.sin(phi), np.cos(phi)
+    sin_lam, cos_lam = np.sin(lam), np.cos(lam)
 
-  new_lat = np.degrees(new_lat_rad)
-  new_lon = np.degrees(new_lon_rad)
+    # East unit vector (dE)
+    e_x = -sin_lam
+    e_y = cos_lam
+    e_z = np.zeros(n_pts)
 
-  # Boundary handling (Longitude)
-  if is_global_lon:
-    new_lon = (new_lon + 180.0) % 360.0 - 180.0
-  else:
-    new_lon = reflect_bounds(new_lon, lon_range[0], lon_range[1])
+    # North unit vector (dN)
+    n_x = -sin_phi * cos_lam
+    n_y = -sin_phi * sin_lam
+    n_z = cos_phi
 
-  # Boundary reflection (Latitude, Depth, Time)
-  new_lat = reflect_bounds(new_lat, lat_range[0], lat_range[1])
+    # 4. Apply metric displacements in 3D ECEF space
+    ecef_pert = np.empty_like(ecef_base)
+    ecef_pert[:, 0] = ecef_base[:, 0] + dE * e_x + dN * n_x
+    ecef_pert[:, 1] = ecef_base[:, 1] + dE * e_y + dN * n_y
+    ecef_pert[:, 2] = ecef_base[:, 2] + dE * e_z + dN * n_z
 
-  dz = np.random.normal(0, src_depth_kernel_m, size=n_pts)
-  new_depth = reflect_bounds(base_depth_m + dz, depth_range[0], depth_range[1])
+    # 5. Convert back to LLA (handles polar singularities & 180 wrapping automatically)
+    lla_pert = ecef2lla(ecef_pert, a=a, e=e)
+    new_lat = lla_pert[:, 0]
+    new_lon = lla_pert[:, 1]
 
-  dt = 2.0 * np.random.randn(n_pts) * src_t_kernel
-  new_t = reflect_bounds(base_t_s + dt, -half_t_window, half_t_window)
+    # 6. Apply Boundary Conditions
+    if is_global_lon:
+        new_lon = (new_lon + 180.0) % 360.0 - 180.0
+    else:
+        new_lon = reflect_bounds(new_lon, lon_range[0], lon_range[1])
 
-  return new_lat, new_lon, new_depth, new_t
+    new_lat = reflect_bounds(new_lat, lat_range[0], lat_range[1])
 
+    # Depth & Time Perturbations
+    dz = np.random.normal(0, src_depth_kernel_m, size=n_pts)
+    new_depth = reflect_bounds(base_depth_m + dz, depth_range[0], depth_range[1])
+
+    dt = np.random.normal(0, src_t_kernel, size=n_pts)
+    new_t = reflect_bounds(base_t_s + dt, -half_t_window, half_t_window)
+
+    return new_lat, new_lon, new_depth, new_t
 
 # def sample_random_queries(
 #     lp_srcs,
@@ -619,11 +708,133 @@ def perturb_wgs84(
 
 #   return x_src_query, tq_sample
 
+# def sample_random_queries(
+#     lp_srcs,
+#     n_src_query,
+#     n_frac_focused=0.2,
+#     n_frac_random_focused=0.0,  # <-- NEW: Fraction centered on random points
+#     src_x_kernel_m=5000.0,
+#     src_depth_kernel_m=5000.0,
+#     src_t_kernel=1.0,
+#     lat_range=(-90.0, 90.0),
+#     lon_range=(-180.0, 180.0),
+#     depth_range=(-700000.0, 0.0),
+#     time_shift_range=10.0,
+#     is_global_lon=True,
+# ):
+#   """Generates spatial-temporal queries via uniform equal-area sampling and target perturbations."""
+#   half_t_window = time_shift_range / 2.0
+
+#   # If no true catalog sources exist, shift true-focused allocation to random-focused
+#   if len(lp_srcs) == 0 and n_frac_focused > 0:
+#     n_frac_random_focused += n_frac_focused
+#     n_frac_focused = 0.0
+	
+#   # 1. Background Equal-Area Sampling (Full Set)
+#   sin_min = np.sin(np.radians(lat_range[0]))
+#   sin_max = np.sin(np.radians(lat_range[1]))
+#   u_lat = np.random.uniform(sin_min, sin_max, size=n_src_query)
+#   bg_lats = np.degrees(np.arcsin(u_lat))
+
+#   bg_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_src_query)
+#   bg_depths = np.random.uniform(
+#       depth_range[0], depth_range[1], size=n_src_query
+#   )
+#   bg_times = np.random.uniform(
+#       -half_t_window, half_t_window, size=n_src_query
+#   )
+
+#   x_src_query = np.column_stack((bg_lats, bg_lons, bg_depths))
+#   tq_sample = bg_times
+
+#   # Calculate number of query slots for each focused type
+#   n_focused_true = int(n_frac_focused * n_src_query)
+#   n_focused_rand = int(n_frac_random_focused * n_src_query)
+#   n_total_focused = n_focused_true + n_focused_rand
+
+#   if n_total_focused > 0:
+#     # Pick all indices that will be overwritten at once (without replacement)
+#     ind_overwrite_all = np.random.choice(
+#         n_src_query, size=n_total_focused, replace=False
+#     )
+    
+#     # Split overwrite indices between True and Random-centered
+#     ind_overwrite_true = ind_overwrite_all[:n_focused_true]
+#     ind_overwrite_rand = ind_overwrite_all[n_focused_true:]
+
+#     # -------------------------------------------------------------------------
+#     # 2a. Focused Perturbation around True Sources
+#     # -------------------------------------------------------------------------
+#     if n_focused_true > 0 and len(lp_srcs) > 0:
+#       ind_sources = np.random.choice(len(lp_srcs), size=n_focused_true)
+
+#       new_lat, new_lon, new_depth, new_t = perturb_wgs84(
+#           base_lat_deg=lp_srcs[ind_sources, 0],
+#           base_lon_deg=lp_srcs[ind_sources, 1],
+#           base_depth_m=lp_srcs[ind_sources, 2],
+#           base_t_s=lp_srcs[ind_sources, 3],
+#           src_x_kernel_m=src_x_kernel_m,
+#           src_depth_kernel_m=src_depth_kernel_m,
+#           src_t_kernel=src_t_kernel,
+#           lat_range=lat_range,
+#           lon_range=lon_range,
+#           depth_range=depth_range,
+#           time_shift_range=time_shift_range,
+#           is_global_lon=is_global_lon,
+#       )
+
+#       x_src_query[ind_overwrite_true] = np.column_stack(
+#           (new_lat, new_lon, new_depth)
+#       )
+#       tq_sample[ind_overwrite_true] = new_t
+
+#     # -------------------------------------------------------------------------
+#     # 2b. Focused Perturbation around Random Background Points
+#     # -------------------------------------------------------------------------
+#     if n_focused_rand > 0:
+#       # Generate random center points (equal-area)
+#       rand_u_lat = np.random.uniform(sin_min, sin_max, size=n_focused_rand)
+#       rand_center_lats = np.degrees(np.arcsin(rand_u_lat))
+#       rand_center_lons = np.random.uniform(
+#           lon_range[0], lon_range[1], size=n_focused_rand
+#       )
+#       rand_center_depths = np.random.uniform(
+#           depth_range[0], depth_range[1], size=n_focused_rand
+#       )
+#       rand_center_times = np.random.uniform(
+#           -half_t_window, half_t_window, size=n_focused_rand
+#       )
+
+#       # Perturb around these random centers using the exact same WGS84 kernel
+#       new_lat_r, new_lon_r, new_depth_r, new_t_r = perturb_wgs84(
+#           base_lat_deg=rand_center_lats,
+#           base_lon_deg=rand_center_lons,
+#           base_depth_m=rand_center_depths,
+#           base_t_s=rand_center_times,
+#           src_x_kernel_m=src_x_kernel_m,
+#           src_depth_kernel_m=src_depth_kernel_m,
+#           src_t_kernel=src_t_kernel,
+#           lat_range=lat_range,
+#           lon_range=lon_range,
+#           depth_range=depth_range,
+#           time_shift_range=time_shift_range,
+#           is_global_lon=is_global_lon,
+#       )
+
+#       x_src_query[ind_overwrite_rand] = np.column_stack(
+#           (new_lat_r, new_lon_r, new_depth_r)
+#       )
+#       tq_sample[ind_overwrite_rand] = new_t_r
+
+#   return x_src_query, tq_sample
+
+
+
 def sample_random_queries(
     lp_srcs,
     n_src_query,
     n_frac_focused=0.2,
-    n_frac_random_focused=0.0,  # <-- NEW: Fraction centered on random points
+    n_frac_random_focused=0.0,
     src_x_kernel_m=5000.0,
     src_depth_kernel_m=5000.0,
     src_t_kernel=1.0,
@@ -633,111 +844,193 @@ def sample_random_queries(
     time_shift_range=10.0,
     is_global_lon=True,
 ):
-  """Generates spatial-temporal queries via uniform equal-area sampling and target perturbations."""
-  half_t_window = time_shift_range / 2.0
+    """Generates spatial-temporal queries via uniform equal-area sampling and target perturbations."""
+    half_t_window = time_shift_range / 2.0
 
-  # If no true catalog sources exist, shift true-focused allocation to random-focused
-  if len(lp_srcs) == 0 and n_frac_focused > 0:
-    n_frac_random_focused += n_frac_focused
-    n_frac_focused = 0.0
-	
-  # 1. Background Equal-Area Sampling (Full Set)
-  sin_min = np.sin(np.radians(lat_range[0]))
-  sin_max = np.sin(np.radians(lat_range[1]))
-  u_lat = np.random.uniform(sin_min, sin_max, size=n_src_query)
-  bg_lats = np.degrees(np.arcsin(u_lat))
+    # 1. Fallback: If no true sources exist, reallocate true-focused to random-focused
+    if len(lp_srcs) == 0 and n_frac_focused > 0:
+        n_frac_random_focused += n_frac_focused
+        n_frac_focused = 0.0
 
-  bg_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_src_query)
-  bg_depths = np.random.uniform(
-      depth_range[0], depth_range[1], size=n_src_query
-  )
-  bg_times = np.random.uniform(
-      -half_t_window, half_t_window, size=n_src_query
-  )
+    # Calculate exact allocation counts AFTER updating fractions
+    n_focused_true = int(n_frac_focused * n_src_query)
+    n_focused_rand = int(n_frac_random_focused * n_src_query)
+    n_total_focused = n_focused_true + n_focused_rand
 
-  x_src_query = np.column_stack((bg_lats, bg_lons, bg_depths))
-  tq_sample = bg_times
-
-  # Calculate number of query slots for each focused type
-  n_focused_true = int(n_frac_focused * n_src_query)
-  n_focused_rand = int(n_frac_random_focused * n_src_query)
-  n_total_focused = n_focused_true + n_focused_rand
-
-  if n_total_focused > 0:
-    # Pick all indices that will be overwritten at once (without replacement)
-    ind_overwrite_all = np.random.choice(
-        n_src_query, size=n_total_focused, replace=False
-    )
+    # 2. Background Equal-Area Sampling (Full Set)
+    sin_min = np.sin(np.radians(lat_range[0]))
+    sin_max = np.sin(np.radians(lat_range[1]))
     
-    # Split overwrite indices between True and Random-centered
-    ind_overwrite_true = ind_overwrite_all[:n_focused_true]
-    ind_overwrite_rand = ind_overwrite_all[n_focused_true:]
+    u_lat = np.random.uniform(sin_min, sin_max, size=n_src_query)
+    bg_lats = np.degrees(np.arcsin(np.clip(u_lat, -1.0, 1.0)))  # Safety clip
 
-    # -------------------------------------------------------------------------
-    # 2a. Focused Perturbation around True Sources
-    # -------------------------------------------------------------------------
-    if n_focused_true > 0 and len(lp_srcs) > 0:
-      ind_sources = np.random.choice(len(lp_srcs), size=n_focused_true)
+    bg_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_src_query)
+    bg_depths = np.random.uniform(depth_range[0], depth_range[1], size=n_src_query)
+    bg_times = np.random.uniform(-half_t_window, half_t_window, size=n_src_query)
 
-      new_lat, new_lon, new_depth, new_t = perturb_wgs84(
-          base_lat_deg=lp_srcs[ind_sources, 0],
-          base_lon_deg=lp_srcs[ind_sources, 1],
-          base_depth_m=lp_srcs[ind_sources, 2],
-          base_t_s=lp_srcs[ind_sources, 3],
-          src_x_kernel_m=src_x_kernel_m,
-          src_depth_kernel_m=src_depth_kernel_m,
-          src_t_kernel=src_t_kernel,
-          lat_range=lat_range,
-          lon_range=lon_range,
-          depth_range=depth_range,
-          time_shift_range=time_shift_range,
-          is_global_lon=is_global_lon,
-      )
+    x_src_query = np.column_stack((bg_lats, bg_lons, bg_depths))
+    tq_sample = bg_times
 
-      x_src_query[ind_overwrite_true] = np.column_stack(
-          (new_lat, new_lon, new_depth)
-      )
-      tq_sample[ind_overwrite_true] = new_t
+    if n_total_focused > 0:
+        # Pick indices to overwrite without replacement
+        ind_overwrite_all = np.random.choice(
+            n_src_query, size=n_total_focused, replace=False
+        )
+        
+        ind_overwrite_true = ind_overwrite_all[:n_focused_true]
+        ind_overwrite_rand = ind_overwrite_all[n_focused_true:]
 
-    # -------------------------------------------------------------------------
-    # 2b. Focused Perturbation around Random Background Points
-    # -------------------------------------------------------------------------
-    if n_focused_rand > 0:
-      # Generate random center points (equal-area)
-      rand_u_lat = np.random.uniform(sin_min, sin_max, size=n_focused_rand)
-      rand_center_lats = np.degrees(np.arcsin(rand_u_lat))
-      rand_center_lons = np.random.uniform(
-          lon_range[0], lon_range[1], size=n_focused_rand
-      )
-      rand_center_depths = np.random.uniform(
-          depth_range[0], depth_range[1], size=n_focused_rand
-      )
-      rand_center_times = np.random.uniform(
-          -half_t_window, half_t_window, size=n_focused_rand
-      )
+        # -------------------------------------------------------------------------
+        # 3a. Focused Perturbation around True Sources
+        # -------------------------------------------------------------------------
+        if n_focused_true > 0 and len(lp_srcs) > 0:
+            ind_sources = np.random.choice(len(lp_srcs), size=n_focused_true)
 
-      # Perturb around these random centers using the exact same WGS84 kernel
-      new_lat_r, new_lon_r, new_depth_r, new_t_r = perturb_wgs84(
-          base_lat_deg=rand_center_lats,
-          base_lon_deg=rand_center_lons,
-          base_depth_m=rand_center_depths,
-          base_t_s=rand_center_times,
-          src_x_kernel_m=src_x_kernel_m,
-          src_depth_kernel_m=src_depth_kernel_m,
-          src_t_kernel=src_t_kernel,
-          lat_range=lat_range,
-          lon_range=lon_range,
-          depth_range=depth_range,
-          time_shift_range=time_shift_range,
-          is_global_lon=is_global_lon,
-      )
+            new_lat, new_lon, new_depth, new_t = perturb_wgs84(
+                base_lat_deg=lp_srcs[ind_sources, 0],
+                base_lon_deg=lp_srcs[ind_sources, 1],
+                base_depth_m=lp_srcs[ind_sources, 2],
+                base_t_s=lp_srcs[ind_sources, 3],
+                src_x_kernel_m=src_x_kernel_m,
+                src_depth_kernel_m=src_depth_kernel_m,
+                src_t_kernel=src_t_kernel,
+                lat_range=lat_range,
+                lon_range=lon_range,
+                depth_range=depth_range,
+                time_shift_range=time_shift_range,
+                is_global_lon=is_global_lon,
+            )
 
-      x_src_query[ind_overwrite_rand] = np.column_stack(
-          (new_lat_r, new_lon_r, new_depth_r)
-      )
-      tq_sample[ind_overwrite_rand] = new_t_r
+            x_src_query[ind_overwrite_true] = np.column_stack((new_lat, new_lon, new_depth))
+            tq_sample[ind_overwrite_true] = new_t
 
-  return x_src_query, tq_sample
+        # -------------------------------------------------------------------------
+        # 3b. Focused Perturbation around Random Background Points
+        # -------------------------------------------------------------------------
+        if n_focused_rand > 0:
+            rand_u_lat = np.random.uniform(sin_min, sin_max, size=n_focused_rand)
+            rand_center_lats = np.degrees(np.arcsin(np.clip(rand_u_lat, -1.0, 1.0)))
+            rand_center_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_focused_rand)
+            rand_center_depths = np.random.uniform(depth_range[0], depth_range[1], size=n_focused_rand)
+            rand_center_times = np.random.uniform(-half_t_window, half_t_window, size=n_focused_rand)
+
+            new_lat_r, new_lon_r, new_depth_r, new_t_r = perturb_wgs84(
+                base_lat_deg=rand_center_lats,
+                base_lon_deg=rand_center_lons,
+                base_depth_m=rand_center_depths,
+                base_t_s=rand_center_times,
+                src_x_kernel_m=src_x_kernel_m,
+                src_depth_kernel_m=src_depth_kernel_m,
+                src_t_kernel=src_t_kernel,
+                lat_range=lat_range,
+                lon_range=lon_range,
+                depth_range=depth_range,
+                time_shift_range=time_shift_range,
+                is_global_lon=is_global_lon,
+            )
+
+            x_src_query[ind_overwrite_rand] = np.column_stack((new_lat_r, new_lon_r, new_depth_r))
+            tq_sample[ind_overwrite_rand] = new_t_r
+
+    return x_src_query, tq_sample
+
+
+
+# def sample_dense_queries(
+#     x_query,
+#     x_query_t,
+#     prob,
+#     lat_range=(-90.0, 90.0),
+#     lon_range=(-180.0, 180.0),
+#     depth_range=(-700000.0, 0.0),
+#     src_x_kernel_m=5000.0,
+#     src_depth_kernel_m=5000.0,
+#     src_t_kernel=1.0,
+#     time_shift_range=10.0,
+#     ftrns1=None,
+#     ftrns2=None,
+#     n_frac_focused_queries=0.2,
+#     replace=False,
+#     randomize=False,
+#     baseline=0.2,
+#     is_global_lon=None,
+# ):
+#   """Hard-negative error feedback sampler using WGS84 perturbations weighted by error array 'prob'."""
+#   half_t_window = time_shift_range / 2.0
+#   x_query_sample = np.copy(x_query)
+#   x_query_sample_t = np.copy(x_query_t)
+#   n_spc_query = len(x_query)
+#   ind_overwrite = np.empty(0, dtype=int)
+
+#   if is_global_lon is None:
+#     is_global_lon = (lon_range[1] - lon_range[0]) >= 359.0
+
+#   if (baseline is not None) and (prob.sum() > 0):
+#     prob1 = np.copy(prob)
+#     valid_mask = prob > 0
+#     if np.any(valid_mask):
+#       q_low = np.quantile(prob[valid_mask], baseline)
+#       q_high = np.quantile(prob[valid_mask], 1.0 - baseline)
+#       prob1[(prob <= q_low) & valid_mask] = q_low
+#       prob1[(prob >= q_high) & valid_mask] = q_high
+#       prob = prob1 / prob1.sum()
+
+#   n_focused = int(n_frac_focused_queries * n_spc_query)
+
+#   if (len(prob) > 0) and (n_focused > 0) and (prob.sum() > 0):
+#     ind_overwrite = np.sort(
+#         np.random.choice(n_spc_query, size=n_focused, replace=False)
+#     )
+#     ind_source_focused = np.random.choice(
+#         n_spc_query, p=prob, size=n_focused, replace=True
+#     )
+
+#     new_lat, new_lon, new_depth, new_t = perturb_wgs84(
+#         base_lat_deg=x_query[ind_source_focused, 0],
+#         base_lon_deg=x_query[ind_source_focused, 1],
+#         base_depth_m=x_query[ind_source_focused, 2],
+#         base_t_s=x_query_t[ind_source_focused],
+#         src_x_kernel_m=src_x_kernel_m,
+#         src_depth_kernel_m=src_depth_kernel_m,
+#         src_t_kernel=src_t_kernel,
+#         lat_range=lat_range,
+#         lon_range=lon_range,
+#         depth_range=depth_range,
+#         time_shift_range=time_shift_range,
+#         is_global_lon=is_global_lon,
+#     )
+
+#     x_query_sample[ind_overwrite] = np.column_stack(
+#         (new_lat, new_lon, new_depth)
+#     )
+#     x_query_sample_t[ind_overwrite] = new_t
+
+#     if randomize:
+#       ind_fixed = np.delete(np.arange(n_spc_query), ind_overwrite, axis=0)
+#       sin_min = np.sin(np.radians(lat_range[0]))
+#       sin_max = np.sin(np.radians(lat_range[1]))
+#       u_lat = np.random.uniform(sin_min, sin_max, size=len(ind_fixed))
+#       rand_lats = np.degrees(np.arcsin(u_lat))
+
+#       rand_lons = np.random.uniform(
+#           lon_range[0], lon_range[1], size=len(ind_fixed)
+#       )
+#       rand_depths = np.random.uniform(
+#           depth_range[0], depth_range[1], size=len(ind_fixed)
+#       )
+#       rand_times = np.random.uniform(
+#           -half_t_window, half_t_window, size=len(ind_fixed)
+#       )
+
+#       x_query_sample[ind_fixed] = np.column_stack(
+#           (rand_lats, rand_lons, rand_depths)
+#       )
+#       x_query_sample_t[ind_fixed] = rand_times
+
+#   if replace:
+#     return x_query_sample, x_query_sample_t
+#   else:
+#     return x_query_sample[ind_overwrite], x_query_sample_t[ind_overwrite]
 
 
 def sample_dense_queries(
@@ -759,82 +1052,92 @@ def sample_dense_queries(
     baseline=0.2,
     is_global_lon=None,
 ):
-  """Hard-negative error feedback sampler using WGS84 perturbations weighted by error array 'prob'."""
-  half_t_window = time_shift_range / 2.0
-  x_query_sample = np.copy(x_query)
-  x_query_sample_t = np.copy(x_query_t)
-  n_spc_query = len(x_query)
-  ind_overwrite = np.empty(0, dtype=int)
+    """Hard-negative error feedback sampler using WGS84 perturbations weighted by error array 'prob'."""
+    half_t_window = time_shift_range / 2.0
+    x_query_sample = np.copy(x_query)
+    x_query_sample_t = np.copy(x_query_t)
+    n_spc_query = len(x_query)
+    ind_overwrite = np.empty(0, dtype=int)
 
-  if is_global_lon is None:
-    is_global_lon = (lon_range[1] - lon_range[0]) >= 359.0
+    if is_global_lon is None:
+        is_global_lon = (lon_range[1] - lon_range[0]) >= 359.0
 
-  if (baseline is not None) and (prob.sum() > 0):
-    prob1 = np.copy(prob)
-    valid_mask = prob > 0
-    if np.any(valid_mask):
-      q_low = np.quantile(prob[valid_mask], baseline)
-      q_high = np.quantile(prob[valid_mask], 1.0 - baseline)
-      prob1[(prob <= q_low) & valid_mask] = q_low
-      prob1[(prob >= q_high) & valid_mask] = q_high
-      prob = prob1 / prob1.sum()
+    # 1. Safe Probability Normalization & Winsorization
+    prob_sum = prob.sum()
+    if prob_sum > 0:
+        prob1 = np.copy(prob)
+        valid_mask = prob > 0
+        
+        if (baseline is not None) and np.any(valid_mask):
+            q_low = np.quantile(prob[valid_mask], baseline)
+            q_high = np.quantile(prob[valid_mask], 1.0 - baseline)
+            prob1[(prob <= q_low) & valid_mask] = q_low
+            prob1[(prob >= q_high) & valid_mask] = q_high
+            
+        # Ensure prob ALWAYS sums to 1.0 regardless of baseline setting
+        prob_norm = prob1 / prob1.sum()
+    else:
+        prob_norm = np.zeros_like(prob)
 
-  n_focused = int(n_frac_focused_queries * n_spc_query)
+    n_focused = int(n_frac_focused_queries * n_spc_query)
 
-  if (len(prob) > 0) and (n_focused > 0) and (prob.sum() > 0):
-    ind_overwrite = np.sort(
-        np.random.choice(n_spc_query, size=n_focused, replace=False)
-    )
-    ind_source_focused = np.random.choice(
-        n_spc_query, p=prob, size=n_focused, replace=True
-    )
+    # 2. Hard-Negative Sampling & Perturbation
+    if (n_spc_query > 0) and (n_focused > 0) and (prob_sum > 0):
+        ind_overwrite = np.sort(
+            np.random.choice(n_spc_query, size=n_focused, replace=False)
+        )
+        ind_source_focused = np.random.choice(
+            n_spc_query, p=prob_norm, size=n_focused, replace=True
+        )
 
-    new_lat, new_lon, new_depth, new_t = perturb_wgs84(
-        base_lat_deg=x_query[ind_source_focused, 0],
-        base_lon_deg=x_query[ind_source_focused, 1],
-        base_depth_m=x_query[ind_source_focused, 2],
-        base_t_s=x_query_t[ind_source_focused],
-        src_x_kernel_m=src_x_kernel_m,
-        src_depth_kernel_m=src_depth_kernel_m,
-        src_t_kernel=src_t_kernel,
-        lat_range=lat_range,
-        lon_range=lon_range,
-        depth_range=depth_range,
-        time_shift_range=time_shift_range,
-        is_global_lon=is_global_lon,
-    )
+        new_lat, new_lon, new_depth, new_t = perturb_wgs84(
+            base_lat_deg=x_query[ind_source_focused, 0],
+            base_lon_deg=x_query[ind_source_focused, 1],
+            base_depth_m=x_query[ind_source_focused, 2],
+            base_t_s=x_query_t[ind_source_focused],
+            src_x_kernel_m=src_x_kernel_m,
+            src_depth_kernel_m=src_depth_kernel_m,
+            src_t_kernel=src_t_kernel,
+            lat_range=lat_range,
+            lon_range=lon_range,
+            depth_range=depth_range,
+            time_shift_range=time_shift_range,
+            is_global_lon=is_global_lon,
+        )
 
-    x_query_sample[ind_overwrite] = np.column_stack(
-        (new_lat, new_lon, new_depth)
-    )
-    x_query_sample_t[ind_overwrite] = new_t
+        x_query_sample[ind_overwrite] = np.column_stack(
+            (new_lat, new_lon, new_depth)
+        )
+        x_query_sample_t[ind_overwrite] = new_t
 
-    if randomize:
-      ind_fixed = np.delete(np.arange(n_spc_query), ind_overwrite, axis=0)
-      sin_min = np.sin(np.radians(lat_range[0]))
-      sin_max = np.sin(np.radians(lat_range[1]))
-      u_lat = np.random.uniform(sin_min, sin_max, size=len(ind_fixed))
-      rand_lats = np.degrees(np.arcsin(u_lat))
+        # 3. Optional Uniform Resampling for Remaining Non-Focused Points
+        if randomize:
+            ind_fixed = np.delete(np.arange(n_spc_query), ind_overwrite, axis=0)
+            sin_min = np.sin(np.radians(lat_range[0]))
+            sin_max = np.sin(np.radians(lat_range[1]))
+            
+            u_lat = np.random.uniform(sin_min, sin_max, size=len(ind_fixed))
+            rand_lats = np.degrees(np.arcsin(np.clip(u_lat, -1.0, 1.0)))
 
-      rand_lons = np.random.uniform(
-          lon_range[0], lon_range[1], size=len(ind_fixed)
-      )
-      rand_depths = np.random.uniform(
-          depth_range[0], depth_range[1], size=len(ind_fixed)
-      )
-      rand_times = np.random.uniform(
-          -half_t_window, half_t_window, size=len(ind_fixed)
-      )
+            rand_lons = np.random.uniform(
+                lon_range[0], lon_range[1], size=len(ind_fixed)
+            )
+            rand_depths = np.random.uniform(
+                depth_range[0], depth_range[1], size=len(ind_fixed)
+            )
+            rand_times = np.random.uniform(
+                -half_t_window, half_t_window, size=len(ind_fixed)
+            )
 
-      x_query_sample[ind_fixed] = np.column_stack(
-          (rand_lats, rand_lons, rand_depths)
-      )
-      x_query_sample_t[ind_fixed] = rand_times
+            x_query_sample[ind_fixed] = np.column_stack(
+                (rand_lats, rand_lons, rand_depths)
+            )
+            x_query_sample_t[ind_fixed] = rand_times
 
-  if replace:
-    return x_query_sample, x_query_sample_t
-  else:
-    return x_query_sample[ind_overwrite], x_query_sample_t[ind_overwrite]
+    if replace:
+        return x_query_sample, x_query_sample_t
+    else:
+        return x_query_sample[ind_overwrite], x_query_sample_t[ind_overwrite]
 
 
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, use_time_shift = use_time_shift, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, Ac = Ac, return_only_data = False):
