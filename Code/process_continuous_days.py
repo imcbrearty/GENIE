@@ -581,7 +581,7 @@ tsteps = np.arange(
 )
 
 ## Build sampling grids
-X_query = build_sampling_grid(lat_range, lon_range, lat_range, lon_range, depth_range, t_win/2.0, 1000.0*scale_time, 3*n_query_grid, ftrns1, ftrns2, use_global = use_global, depth_upscale_factor = 2.0, buffer_scale = 2.0)
+X_query = build_sampling_grid(lat_range, lon_range, lat_range, lon_range, depth_range, t_win/2.0, 1000.0*scale_time, max(3*n_query_grid, 2*x_grids.shape[1]), ftrns1, ftrns2, use_global = use_global, depth_upscale_factor = 2.0, buffer_scale = 2.0)
 X_query_cart = torch.Tensor(ftrns1(X_query)).to(device)
 
 
@@ -1042,8 +1042,8 @@ for cnt, strs in enumerate([0]):
 		# WGS84-SAFE COARSE-TO-FINE GRID GENERATION
 		# ==============================================================================
 
-		N_QUERY_COARSE = 10000
-		N_QUERY_FINE = 10000
+		N_QUERY_COARSE = max(10000, 2*x_grids.shape[1])
+		N_QUERY_FINE = max(10000, 2*x_grids.shape[1])
 		## Recall, can potentially batch the application over srcs refined
 
 		X_query_grid_coarse = []
