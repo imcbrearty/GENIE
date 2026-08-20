@@ -4720,7 +4720,7 @@ for batch_idx, inputs in enumerate(loader):
 		if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
 
 			min_up_sample = 0.1
-			min_safe_dist_m = 3.0 * src_spatial_kernel
+			min_safe_dist_m = 3.0 * src_x_kernel
 			min_safe_t_s = 3.0 * src_t_kernel
 
 			queries_np = X_query[i0].cpu().detach().numpy() # [N, 4]
