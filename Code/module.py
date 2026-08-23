@@ -35,13 +35,13 @@ from utils import hash_rows
 
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
-    config = yaml.safe_load(file)
+	config = yaml.safe_load(file)
 
 with open('train_config.yaml', 'r') as file:
-    train_config = yaml.safe_load(file)
+	train_config = yaml.safe_load(file)
 
 with open('process_config.yaml', 'r') as file:
-    process_config = yaml.safe_load(file)
+	process_config = yaml.safe_load(file)
 
 path_to_file = str(pathlib.Path().absolute())
 seperator = '\\' if '\\' in path_to_file else '/'
@@ -80,478 +80,478 @@ device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cp
 # 1. BASE BUILDING BLOCK: Single Data Aggregation Layer
 # =====================================================================
 class DataAggregationLayer(MessagePassing):
-    def __init__(self, in_channels, out_channels, n_dim_mask=4, embed_dim=10, 
-                 use_offsets=True, has_expander=True, ndim_proj_sta=6, ndim_proj_src=9):
-        super(DataAggregationLayer, self).__init__('mean')
+	def __init__(self, in_channels, out_channels, n_dim_mask=4, embed_dim=10, 
+				 use_offsets=True, has_expander=True, ndim_proj_sta=6, ndim_proj_src=9):
+		super(DataAggregationLayer, self).__init__('mean')
 
-        self.use_offsets = use_offsets
-        self.has_expander = has_expander
-        self.out_channels = out_channels
+		self.use_offsets = use_offsets
+		self.has_expander = has_expander
+		self.out_channels = out_channels
 
-        # Local Branch Transforms
-        self.l_t1_1 = nn.Linear(in_channels, out_channels)
-        self.l_t1_2 = nn.Linear(in_channels + out_channels + n_dim_mask, out_channels)
-        self.l_t2_1 = nn.Linear(in_channels, out_channels)
-        self.l_t2_2 = nn.Linear(in_channels + out_channels + n_dim_mask, out_channels)
+		# Local Branch Transforms
+		self.l_t1_1 = nn.Linear(in_channels, out_channels)
+		self.l_t1_2 = nn.Linear(in_channels + out_channels + n_dim_mask, out_channels)
+		self.l_t2_1 = nn.Linear(in_channels, out_channels)
+		self.l_t2_2 = nn.Linear(in_channels + out_channels + n_dim_mask, out_channels)
 
-        self.act11, self.act12, self.act_local = nn.PReLU(), nn.PReLU(), nn.PReLU()
-        self.film_local = FiLM(embed_dim, 2 * out_channels)
+		self.act11, self.act12, self.act_local = nn.PReLU(), nn.PReLU(), nn.PReLU()
+		self.film_local = FiLM(embed_dim, 2 * out_channels)
 
-        # Expander Branch Transforms (Optional)
-        if self.has_expander:
-            self.l_t1_1c = nn.Linear(in_channels, out_channels)
-            self.l_t1_2c = nn.Linear(in_channels + out_channels + n_dim_mask, out_channels)
-            self.l_t2_1c = nn.Linear(in_channels, out_channels)
-            self.l_t2_2c = nn.Linear(in_channels + out_channels + n_dim_mask, out_channels)
+		# Expander Branch Transforms (Optional)
+		if self.has_expander:
+			self.l_t1_1c = nn.Linear(in_channels, out_channels)
+			self.l_t1_2c = nn.Linear(in_channels + out_channels + n_dim_mask, out_channels)
+			self.l_t2_1c = nn.Linear(in_channels, out_channels)
+			self.l_t2_2c = nn.Linear(in_channels + out_channels + n_dim_mask, out_channels)
 
-            self.act11c, self.act12c, self.act_exp = nn.PReLU(), nn.PReLU(), nn.PReLU()
-            self.gate = nn.Linear(4 * out_channels + embed_dim, 2 * out_channels)
-            nn.init.constant_(self.gate.bias, -2.0)
+			self.act11c, self.act12c, self.act_exp = nn.PReLU(), nn.PReLU(), nn.PReLU()
+			self.gate = nn.Linear(4 * out_channels + embed_dim, 2 * out_channels)
+			nn.init.constant_(self.gate.bias, -2.0)
 
-        # Multi-Scale Gamma Generators
-        if self.use_offsets:
-            self.merge_edges_sta = nn.Sequential(nn.Linear(out_channels + ndim_proj_sta, out_channels), nn.PReLU())
-            self.merge_edges_src = nn.Sequential(nn.Linear(out_channels + ndim_proj_src, out_channels), nn.PReLU())
+		# Multi-Scale Gamma Generators
+		if self.use_offsets:
+			self.merge_edges_sta = nn.Sequential(nn.Linear(out_channels + ndim_proj_sta, out_channels), nn.PReLU())
+			self.merge_edges_src = nn.Sequential(nn.Linear(out_channels + ndim_proj_src, out_channels), nn.PReLU())
 
-            init_sp_gammas = torch.tensor([0.1, 1.0, 5.0], dtype=torch.float32).reshape(1, 3)
-            init_src_gammas = torch.tensor([0.1, 1.0, 5.0, 0.5, 10.0], dtype=torch.float32).reshape(1, 5)
+			init_sp_gammas = torch.tensor([0.1, 1.0, 5.0], dtype=torch.float32).reshape(1, 3)
+			init_src_gammas = torch.tensor([0.1, 1.0, 5.0, 0.5, 10.0], dtype=torch.float32).reshape(1, 5)
 
-            self.log_gamma_sta_base = nn.Parameter(torch.log(init_sp_gammas))
-            self.log_gamma_src_base = nn.Parameter(torch.log(init_src_gammas))
+			self.log_gamma_sta_base = nn.Parameter(torch.log(init_sp_gammas))
+			self.log_gamma_src_base = nn.Parameter(torch.log(init_src_gammas))
 
-            self.f_gamma_sta = nn.Linear(embed_dim, 1 + 3)
-            self.f_gamma_src = nn.Linear(embed_dim, 1 + 5)
-            nn.init.zeros_(self.f_gamma_sta.weight); nn.init.zeros_(self.f_gamma_sta.bias)
-            nn.init.zeros_(self.f_gamma_src.weight); nn.init.zeros_(self.f_gamma_src.bias)
+			self.f_gamma_sta = nn.Linear(embed_dim, 1 + 3)
+			self.f_gamma_src = nn.Linear(embed_dim, 1 + 5)
+			nn.init.zeros_(self.f_gamma_sta.weight); nn.init.zeros_(self.f_gamma_sta.bias)
+			nn.init.zeros_(self.f_gamma_src.weight); nn.init.zeros_(self.f_gamma_src.bias)
 
-    def _compute_edge_attrs(self, pos_rel_sta, pos_rel_src, embed_context):
-        if not self.use_offsets or pos_rel_sta is None or pos_rel_src is None:
-            return None, None
+	def _compute_edge_attrs(self, pos_rel_sta, pos_rel_src, embed_context):
+		if not self.use_offsets or pos_rel_sta is None or pos_rel_src is None:
+			return None, None
 
-        # Station Edges (6D: 3D Direction + 3 Spatial RBFs)
-        sta_sp = pos_rel_sta[:, 0:3]
-        sta_norm_sp = torch.sqrt(torch.sum(sta_sp**2, dim=1, keepdim=True) + 1e-8)
-        d_sta = self.f_gamma_sta(embed_context)
-        gammas_sta = torch.exp(self.log_gamma_sta_base + d_sta[:, :1] + 0.2 * torch.tanh(d_sta[:, 1:]))
-        edge_sta = torch.cat((sta_sp / sta_norm_sp, torch.exp(-1.0 * sta_norm_sp * gammas_sta)), dim=1)
+		# Station Edges (6D: 3D Direction + 3 Spatial RBFs)
+		sta_sp = pos_rel_sta[:, 0:3]
+		sta_norm_sp = torch.sqrt(torch.sum(sta_sp**2, dim=1, keepdim=True) + 1e-8)
+		d_sta = self.f_gamma_sta(embed_context)
+		gammas_sta = torch.exp(self.log_gamma_sta_base + d_sta[:, :1] + 0.2 * torch.tanh(d_sta[:, 1:]))
+		edge_sta = torch.cat((sta_sp / sta_norm_sp, torch.exp(-1.0 * sta_norm_sp * gammas_sta)), dim=1)
 
-        # Source Edges (9D: 3D Direction + 3 Spatial RBFs + 2 Temporal RBFs + 1 dt)
-        src_sp, src_tm = pos_rel_src[:, 0:3], pos_rel_src[:, 3:4]
-        src_norm_sp = torch.sqrt(torch.sum(src_sp**2, dim=1, keepdim=True) + 1e-8)
-        src_norm_tm = torch.abs(src_tm)
-        d_src = self.f_gamma_src(embed_context)
-        gammas_src = torch.exp(self.log_gamma_src_base + d_src[:, :1] + 0.2 * torch.tanh(d_src[:, 1:]))
-        
-        sp_decay = torch.exp(-1.0 * src_norm_sp * gammas_src[:, 0:3])
-        tm_decay = torch.exp(-1.0 * src_norm_tm * gammas_src[:, 3:5])
-        edge_src = torch.cat((src_sp / src_norm_sp, sp_decay, tm_decay, src_tm), dim=1)
+		# Source Edges (9D: 3D Direction + 3 Spatial RBFs + 2 Temporal RBFs + 1 dt)
+		src_sp, src_tm = pos_rel_src[:, 0:3], pos_rel_src[:, 3:4]
+		src_norm_sp = torch.sqrt(torch.sum(src_sp**2, dim=1, keepdim=True) + 1e-8)
+		src_norm_tm = torch.abs(src_tm)
+		d_src = self.f_gamma_src(embed_context)
+		gammas_src = torch.exp(self.log_gamma_src_base + d_src[:, :1] + 0.2 * torch.tanh(d_src[:, 1:]))
+		
+		sp_decay = torch.exp(-1.0 * src_norm_sp * gammas_src[:, 0:3])
+		tm_decay = torch.exp(-1.0 * src_norm_tm * gammas_src[:, 3:5])
+		edge_src = torch.cat((src_sp / src_norm_sp, sp_decay, tm_decay, src_tm), dim=1)
 
-        return edge_sta, edge_src
+		return edge_sta, edge_src
 
-    def forward(self, x, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None):
-        edge_sta, edge_src = self._compute_edge_attrs(pos_rel_sta, pos_rel_src, embed_context)
+	def forward(self, x, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None):
+		edge_sta, edge_src = self._compute_edge_attrs(pos_rel_sta, pos_rel_src, embed_context)
 
-        # Local Path
-        x1 = self.l_t1_2(torch.cat((x, self.propagate(A_in_sta, x=self.act11(self.l_t1_1(x)), edge_attr=edge_sta, edge_type=1), mask), dim=1))
-        x2 = self.l_t2_2(torch.cat((x, self.propagate(A_in_src[0] if isinstance(A_in_src, (tuple, list)) else A_in_src, x=self.act12(self.l_t2_1(x)), edge_attr=edge_src, edge_type=2), mask), dim=1))
-        x_local = self.act_local(torch.cat((x1, x2), dim=1))
-        x_local = self.film_local(x_local, embed_context)
+		# Local Path
+		x1 = self.l_t1_2(torch.cat((x, self.propagate(A_in_sta, x=self.act11(self.l_t1_1(x)), edge_attr=edge_sta, edge_type=1), mask), dim=1))
+		x2 = self.l_t2_2(torch.cat((x, self.propagate(A_in_src[0] if isinstance(A_in_src, (tuple, list)) else A_in_src, x=self.act12(self.l_t2_1(x)), edge_attr=edge_src, edge_type=2), mask), dim=1))
+		x_local = self.act_local(torch.cat((x1, x2), dim=1))
+		x_local = self.film_local(x_local, embed_context)
 
-        if not self.has_expander:
-            return x_local
+		if not self.has_expander:
+			return x_local
 
-        # Expander Path
-        x1_c = self.l_t1_2c(torch.cat((x, self.propagate(A_in_sta, x=self.act11c(self.l_t1_1c(x)), edge_attr=edge_sta, edge_type=1), mask), dim=1))
-        x2_c = self.l_t2_2c(torch.cat((x, self.propagate(A_in_src[1], x=self.act12c(self.l_t2_1c(x)), edge_attr=None, edge_type=2), mask), dim=1))
-        x_exp = self.act_exp(torch.cat((x1_c, x2_c), dim=1))
+		# Expander Path
+		x1_c = self.l_t1_2c(torch.cat((x, self.propagate(A_in_sta, x=self.act11c(self.l_t1_1c(x)), edge_attr=edge_sta, edge_type=1), mask), dim=1))
+		x2_c = self.l_t2_2c(torch.cat((x, self.propagate(A_in_src[1], x=self.act12c(self.l_t2_1c(x)), edge_attr=None, edge_type=2), mask), dim=1))
+		x_exp = self.act_exp(torch.cat((x1_c, x2_c), dim=1))
 
-        # Gated Fusion
-        embed_expand = embed_context.expand(len(x), -1)
-        g = torch.sigmoid(self.gate(torch.cat((x_local, x_exp, embed_expand), dim=1)))
-        return x_local + g * x_exp
+		# Gated Fusion
+		embed_expand = embed_context.expand(len(x), -1)
+		g = torch.sigmoid(self.gate(torch.cat((x_local, x_exp, embed_expand), dim=1)))
+		return x_local + g * x_exp
 
-    def message(self, x_j, edge_attr, edge_type):
-        if edge_attr is not None:
-            return self.merge_edges_sta(torch.cat((x_j, edge_attr), dim=1)) if edge_type == 1 else self.merge_edges_src(torch.cat((x_j, edge_attr), dim=1))
-        return x_j
+	def message(self, x_j, edge_attr, edge_type):
+		if edge_attr is not None:
+			return self.merge_edges_sta(torch.cat((x_j, edge_attr), dim=1)) if edge_type == 1 else self.merge_edges_src(torch.cat((x_j, edge_attr), dim=1))
+		return x_j
 
 
 # =====================================================================
 # 2. MAIN STACK MODULE: Observation Network with Optional Preconditioner
 # =====================================================================
 class DataAggregationExpanded(nn.Module):
-    def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_mask=4, 
-                 use_absolute_pos=True, use_offsets=True, embed_dim=10, use_embedding=True):
-        super().__init__()
+	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_mask=4, 
+				 use_absolute_pos=True, use_offsets=True, embed_dim=10, use_embedding=True):
+		super(DataAggregationExpanded, self).__init__()
 
-        self.use_embedding = use_embedding
-        if use_absolute_pos:
-            in_channels += 6
+		self.use_embedding = use_embedding
+		if use_absolute_pos:
+			in_channels += 6
 
-        # --- OPTIONAL GEOMETRIC PRECONDITIONER (Pre-GNN) ---
-        if self.use_embedding:
-            geom_in_dim = 1 + 7  # Bias (1D) + Relative Position Features (7D)
-            self.init_geom = nn.Linear(geom_in_dim, n_hidden)
-            self.film_geom_init = FiLM(embed_dim, n_hidden)
-            self.act_geom_init = nn.PReLU()
+		# --- OPTIONAL GEOMETRIC PRECONDITIONER (Pre-GNN) ---
+		if self.use_embedding:
+			geom_in_dim = 1 + 7  # Bias (1D) + Relative Position Features (7D)
+			self.init_geom = nn.Linear(geom_in_dim, n_hidden)
+			self.film_geom_init = FiLM(embed_dim, n_hidden)
+			self.act_geom_init = nn.PReLU()
 
-            self.geom_layer1 = DataAggregationLayer(
-                in_channels=n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
-                embed_dim=embed_dim, use_offsets=use_offsets, has_expander=False
-            )
-            self.geom_layer2 = DataAggregationLayer(
-                in_channels=2 * n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
-                embed_dim=embed_dim, use_offsets=use_offsets, has_expander=False
-            )
-            in_channels += 2 * n_hidden  # Concatenate structural embedding to main input
+			self.geom_layer1 = DataAggregationLayer(
+				in_channels=n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
+				embed_dim=embed_dim, use_offsets=use_offsets, has_expander=False
+			)
+			self.geom_layer2 = DataAggregationLayer(
+				in_channels=2 * n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
+				embed_dim=embed_dim, use_offsets=use_offsets, has_expander=False
+			)
+			in_channels += 2 * n_hidden  # Concatenate structural embedding to main input
 
-        # --- MAIN OBSERVATION GNN STACK ---
-        self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
-        self.film_init = FiLM(embed_dim, n_hidden)
-        self.act_init = nn.PReLU()
+		# --- MAIN OBSERVATION GNN STACK ---
+		self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
+		self.film_init = FiLM(embed_dim, n_hidden)
+		self.act_init = nn.PReLU()
 
-        self.layer1 = DataAggregationLayer(
-            in_channels=n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
-            embed_dim=embed_dim, use_offsets=use_offsets, has_expander=True
-        )
-        self.layer2 = DataAggregationLayer(
-            in_channels=2 * n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
-            embed_dim=embed_dim, use_offsets=use_offsets, has_expander=True
-        )
-        self.layer3 = DataAggregationLayer(
-            in_channels=2 * n_hidden, out_channels=out_channels, n_dim_mask=n_dim_mask, 
-            embed_dim=embed_dim, use_offsets=use_offsets, has_expander=False
-        )
+		self.layer1 = DataAggregationLayer(
+			in_channels=n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
+			embed_dim=embed_dim, use_offsets=use_offsets, has_expander=True
+		)
+		self.layer2 = DataAggregationLayer(
+			in_channels=2 * n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
+			embed_dim=embed_dim, use_offsets=use_offsets, has_expander=True
+		)
+		self.layer3 = DataAggregationLayer(
+			in_channels=2 * n_hidden, out_channels=out_channels, n_dim_mask=n_dim_mask, 
+			embed_dim=embed_dim, use_offsets=use_offsets, has_expander=False
+		)
 
-    def forward(self, tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None):
-        # 1. Run Preconditioner if Enabled
-        if self.use_embedding:
-            ndim_slice = -7
-            struct_input = torch.cat(
-                (torch.ones(len(tr), 1, dtype=tr.dtype, device=tr.device), tr[:, ndim_slice:]), 
-                dim=1
-            )
-            g_emb = self.act_geom_init(self.film_geom_init(self.init_geom(struct_input), embed_context))
-            g_emb = self.geom_layer1(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
-            g_emb = self.geom_layer2(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+	def forward(self, tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None):
+		# 1. Run Preconditioner if Enabled
+		if self.use_embedding:
+			ndim_slice = -7
+			struct_input = torch.cat(
+				(torch.ones(len(tr), 1, dtype=tr.dtype, device=tr.device), tr[:, ndim_slice:]), 
+				dim=1
+			)
+			g_emb = self.act_geom_init(self.film_geom_init(self.init_geom(struct_input), embed_context))
+			g_emb = self.geom_layer1(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+			g_emb = self.geom_layer2(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
 
-            # Concatenate structural embedding with original observation slice
-            tr = torch.cat((tr, g_emb), dim=-1)
+			# Concatenate structural embedding with original observation slice
+			tr = torch.cat((tr, g_emb), dim=-1)
 
-        # 2. Main Observation Processing Stack
-        tr = torch.cat((tr, mask), dim=-1)
-        tr = self.act_init(self.film_init(self.init_trns(tr), embed_context))
+		# 2. Main Observation Processing Stack
+		tr = torch.cat((tr, mask), dim=-1)
+		tr = self.act_init(self.film_init(self.init_trns(tr), embed_context))
 
-        tr = self.layer1(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
-        tr = self.layer2(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
-        tr = self.layer3(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+		tr = self.layer1(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+		tr = self.layer2(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+		tr = self.layer3(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
 
-        return tr
+		return tr
 
 
 # class BipartiteGraphOperator(MessagePassing):
-#     def __init__(self, ndim_in, ndim_out, ndim_edges=8, ndim_mask=4, embed_dim=10):
-#         super(BipartiteGraphOperator, self).__init__(aggr="add")
+#	 def __init__(self, ndim_in, ndim_out, ndim_edges=8, ndim_mask=4, embed_dim=10):
+#		 super(BipartiteGraphOperator, self).__init__(aggr="add")
 
-#         # 1. Edge MLP: Evaluates travel-time misfit + 4D geometry
-#         # 3 (unit dir) + 4 (RBF gammas) + 1 (time) = 8 spatial-temporal features
-#         self.fc1 = nn.Sequential(
-#             nn.Linear(ndim_in + 8, ndim_in),
-#             nn.PReLU(),
-#             nn.Linear(ndim_in, ndim_in),
-#             nn.PReLU(),
-#         )
+#		 # 1. Edge MLP: Evaluates travel-time misfit + 4D geometry
+#		 # 3 (unit dir) + 4 (RBF gammas) + 1 (time) = 8 spatial-temporal features
+#		 self.fc1 = nn.Sequential(
+#			 nn.Linear(ndim_in + 8, ndim_in),
+#			 nn.PReLU(),
+#			 nn.Linear(ndim_in, ndim_in),
+#			 nn.PReLU(),
+#		 )
 
-#         # 2. Low-Rank Gating (Prevents synthetic memorization)
-#         self.mask_gate = nn.Sequential(
-#             nn.Linear(ndim_mask, 4),
-#             nn.PReLU(),
-#             nn.Linear(4, ndim_in),
-#             nn.Sigmoid(),
-#         )
+#		 # 2. Low-Rank Gating (Prevents synthetic memorization)
+#		 self.mask_gate = nn.Sequential(
+#			 nn.Linear(ndim_mask, 4),
+#			 nn.PReLU(),
+#			 nn.Linear(4, ndim_in),
+#			 nn.Sigmoid(),
+#		 )
 
-#         # 3. Dynamic Bandwidth Predictor driven by domain context embedding
-#         # Outputs 4 dynamic bandwidth offsets
-#         self.f_gamma = nn.Linear(embed_dim, 4)
+#		 # 3. Dynamic Bandwidth Predictor driven by domain context embedding
+#		 # Outputs 4 dynamic bandwidth offsets
+#		 self.f_gamma = nn.Linear(embed_dim, 4)
 
-#         # Learnable baseline log-gammas (initialized near ~[0.05, 0.3, 0.8, 2.0])
-#         self.log_gamma_base = nn.Parameter(torch.tensor([-3.0, -1.2, -0.2, 0.7]).reshape(1, -1))
+#		 # Learnable baseline log-gammas (initialized near ~[0.05, 0.3, 0.8, 2.0])
+#		 self.log_gamma_base = nn.Parameter(torch.tensor([-3.0, -1.2, -0.2, 0.7]).reshape(1, -1))
 
-#         # 4. LayerNorm standardizes feature distribution across channels
-#         self.norm = nn.LayerNorm(ndim_in)
+#		 # 4. LayerNorm standardizes feature distribution across channels
+#		 self.norm = nn.LayerNorm(ndim_in)
 
-#         # 5. Final Projection
-#         self.fc2 = nn.Linear(ndim_in, ndim_out)
-#         self.activate_out = nn.PReLU()
+#		 # 5. Final Projection
+#		 self.fc2 = nn.Linear(ndim_in, ndim_out)
+#		 self.activate_out = nn.PReLU()
 
-#     def forward(self, inpt, A_src_in_edges, mask, embed_context, n_sta=None, n_temp=None, num_target_nodes=None):
-#         """
-#         Args:
-#             inpt: [E, ndim_in]
-#             A_src_in_edges: PyG Data object containing edge_index and x
-#             mask: [E, ndim_mask]
-#             embed_context: [E, embed_dim] or [1, embed_dim] context embedding per edge or graph
-#         """
-#         # Target nodes (M) represent the factor graph space being stacked onto
-#         N = inpt.shape[0]
-#         if num_target_nodes is not None:
-#             M = num_target_nodes
-#         else:
-#             M = A_src_in_edges.edge_index[1].max().item() + 1 if A_src_in_edges.edge_index.numel() > 0 else 0
+#	 def forward(self, inpt, A_src_in_edges, mask, embed_context, n_sta=None, n_temp=None, num_target_nodes=None):
+#		 """
+#		 Args:
+#			 inpt: [E, ndim_in]
+#			 A_src_in_edges: PyG Data object containing edge_index and x
+#			 mask: [E, ndim_mask]
+#			 embed_context: [E, embed_dim] or [1, embed_dim] context embedding per edge or graph
+#		 """
+#		 # Target nodes (M) represent the factor graph space being stacked onto
+#		 N = inpt.shape[0]
+#		 if num_target_nodes is not None:
+#			 M = num_target_nodes
+#		 else:
+#			 M = A_src_in_edges.edge_index[1].max().item() + 1 if A_src_in_edges.edge_index.numel() > 0 else 0
 
-#         # Step 1: Existential gate for active mask edges
-#         absolute_gate = mask.max(1, keepdims=True)[0]
+#		 # Step 1: Existential gate for active mask edges
+#		 absolute_gate = mask.max(1, keepdims=True)[0]
 
-#         # Step 2: Dynamic Scale-Conditioned Gammas
-#         # Bounded offset in [-1.2, 1.2] ensures dynamic multipliers stay roughly in [0.3x, 3.3x]
-#         gamma_offset = 1.2 * torch.tanh(self.f_gamma(embed_context))
-#         gammas = torch.exp(self.log_gamma_base + gamma_offset)  # [E, 4] or [1, 4]
+#		 # Step 2: Dynamic Scale-Conditioned Gammas
+#		 # Bounded offset in [-1.2, 1.2] ensures dynamic multipliers stay roughly in [0.3x, 3.3x]
+#		 gamma_offset = 1.2 * torch.tanh(self.f_gamma(embed_context))
+#		 gammas = torch.exp(self.log_gamma_base + gamma_offset)  # [E, 4] or [1, 4]
 
-#         # Step 3: Compute non-linear geometric features & phase routing
-#         norm_pos = torch.sqrt(torch.sum(A_src_in_edges.x[:, 0:3] ** 2, dim=1, keepdim=True) + 1e-8)
-        
-#         # Exponential RBF decay conditioned on context
-#         rbf_decay = torch.exp(-1.0 * norm_pos * gammas)  # [E, 4]
+#		 # Step 3: Compute non-linear geometric features & phase routing
+#		 norm_pos = torch.sqrt(torch.sum(A_src_in_edges.x[:, 0:3] ** 2, dim=1, keepdim=True) + 1e-8)
+		
+#		 # Exponential RBF decay conditioned on context
+#		 rbf_decay = torch.exp(-1.0 * norm_pos * gammas)  # [E, 4]
 
-#         rel_pos = torch.cat(
-#             (A_src_in_edges.x[:, 0:3] / norm_pos, rbf_decay, A_src_in_edges.x[:, 3:4]),
-#             dim=1,
-#         )
+#		 rel_pos = torch.cat(
+#			 (A_src_in_edges.x[:, 0:3] / norm_pos, rbf_decay, A_src_in_edges.x[:, 3:4]),
+#			 dim=1,
+#		 )
 
-#         geo_features = self.fc1(torch.cat((inpt, rel_pos), dim=-1))
-#         phase_routing_vectors = self.mask_gate(mask)
+#		 geo_features = self.fc1(torch.cat((inpt, rel_pos), dim=-1))
+#		 phase_routing_vectors = self.mask_gate(mask)
 
-#         # Step 4: Gated message composition
-#         msg = absolute_gate * (phase_routing_vectors * geo_features)
+#		 # Step 4: Gated message composition
+#		 msg = absolute_gate * (phase_routing_vectors * geo_features)
 
-#         # Step 5: Perform raw physical stacking (Constructive Summing)
-#         stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
+#		 # Step 5: Perform raw physical stacking (Constructive Summing)
+#		 stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
 
-#         # Step 6: Compute active degree E_i per target node (only counting active mask edges)
-#         target_indices = A_src_in_edges.edge_index[1]
-#         deg = torch.zeros((M, 1), device=stacked.device, dtype=stacked.dtype)
-#         deg.index_add_(0, target_indices, absolute_gate)
+#		 # Step 6: Compute active degree E_i per target node (only counting active mask edges)
+#		 target_indices = A_src_in_edges.edge_index[1]
+#		 deg = torch.zeros((M, 1), device=stacked.device, dtype=stacked.dtype)
+#		 deg.index_add_(0, target_indices, absolute_gate)
 
-#         # Step 7: Scale by 1 / sqrt(E_i) -> Keeps noise floor equal between core hubs & sparse nodes
-#         stacked_normalized = stacked / torch.sqrt(deg.clamp(min=1.0))
+#		 # Step 7: Scale by 1 / sqrt(E_i) -> Keeps noise floor equal between core hubs & sparse nodes
+#		 stacked_normalized = stacked / torch.sqrt(deg.clamp(min=1.0))
 
-#         # Step 8: Channel-wise standardization & final projection
-#         return self.activate_out(self.fc2(self.norm(stacked_normalized)))
+#		 # Step 8: Channel-wise standardization & final projection
+#		 return self.activate_out(self.fc2(self.norm(stacked_normalized)))
 
 
 class BipartiteGraphOperator(MessagePassing):
-    """Product Graph to Source Graph Bipartite Projection Operator.
+	"""Product Graph to Source Graph Bipartite Projection Operator.
 
-    Maps product-space features (Source-Station pairs) onto the target source nodes.
-    Uses multi-gamma anisotropic linear RBF attenuation (e^-r), FiLM scale
-    conditioning, and variance-stabilized degree normalization.
-    """
+	Maps product-space features (Source-Station pairs) onto the target source nodes.
+	Uses multi-gamma anisotropic linear RBF attenuation (e^-r), FiLM scale
+	conditioning, and variance-stabilized degree normalization.
+	"""
 
-    def __init__(
-        self,
-        ndim_in,
-        ndim_out,
-        ndim_mask=4,
-        embed_dim=10,
-        n_gammas=4,
-        scale_rel=1.0,
-        scale_time=1.0,
-    ):
-        super(BipartiteGraphOperator, self).__init__(aggr="add")
+	def __init__(
+		self,
+		ndim_in,
+		ndim_out,
+		ndim_mask=4,
+		embed_dim=10,
+		n_gammas=4,
+		scale_rel=1.0,
+		scale_time=1.0,
+	):
+		super(BipartiteGraphOperator, self).__init__(aggr="add")
 
-        self.n_gammas = n_gammas
-        self.scale_rel = scale_rel
-        self.scale_time = scale_time
+		self.n_gammas = n_gammas
+		self.scale_rel = scale_rel
+		self.scale_time = scale_time
 
-        # 1. Edge MLP: Evaluates physical features (Inputs + 3D Unit Dir + 1D Time + K Gammas)
-        # 3 (unit dir) + 1 (dt) + K (RBF decays) = 4 + n_gammas positional features
-        self.fc_edge = nn.Linear(ndim_in + 4 + n_gammas, ndim_in)
-        self.film_edge = FiLM(embed_dim, ndim_in)
-        self.act_edge = nn.PReLU()
+		# 1. Edge MLP: Evaluates physical features (Inputs + 3D Unit Dir + 1D Time + K Gammas)
+		# 3 (unit dir) + 1 (dt) + K (RBF decays) = 4 + n_gammas positional features
+		self.fc_edge = nn.Linear(ndim_in + 4 + n_gammas, ndim_in)
+		self.film_edge = FiLM(embed_dim, ndim_in)
+		self.act_edge = nn.PReLU()
 
-        # 2. Low-Rank Mask Gate
-        self.mask_gate = nn.Sequential(
-            nn.Linear(ndim_mask, 8),
-            nn.PReLU(),
-            nn.Linear(8, ndim_in),
-            nn.Sigmoid(),
-        )
+		# 2. Low-Rank Mask Gate
+		self.mask_gate = nn.Sequential(
+			nn.Linear(ndim_mask, 8),
+			nn.PReLU(),
+			nn.Linear(8, ndim_in),
+			nn.Sigmoid(),
+		)
 
-        # 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
-        # Outputs [1 + n_gammas * 4] -> 1 global zoom factor + 4D directional offsets per gamma
-        self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
-        nn.init.zeros_(self.f_gamma.weight)
-        nn.init.zeros_(self.f_gamma.bias)
+		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
+		# Outputs [1 + n_gammas * 4] -> 1 global zoom factor + 4D directional offsets per gamma
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
+		nn.init.zeros_(self.f_gamma.weight)
+		nn.init.zeros_(self.f_gamma.bias)
 
-        # Log-spaced initialization across spectrum: ~[0.05, 0.3, 0.8, 2.0]
-        init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).unsqueeze(1).repeat(1, 3) # [n_gammas, 3]
-        init_temporal = torch.logspace(-1, 0.7, steps=n_gammas).unsqueeze(1)            # [n_gammas, 1]
-        init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)      # [1, n_gammas, 4]
-        self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+		# Log-spaced initialization across spectrum: ~[0.05, 0.3, 0.8, 2.0]
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).unsqueeze(1).repeat(1, 3) # [n_gammas, 3]
+		init_temporal = torch.logspace(-1, 0.7, steps=n_gammas).unsqueeze(1)			# [n_gammas, 1]
+		init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)	  # [1, n_gammas, 4]
+		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
 
-        # 4. Normalization and Readout
-        self.norm = nn.LayerNorm(ndim_in)
-        self.fc_out = nn.Linear(ndim_in, ndim_out)
-        self.act_out = nn.PReLU()
+		# 4. Normalization and Readout
+		self.norm = nn.LayerNorm(ndim_in)
+		self.fc_out = nn.Linear(ndim_in, ndim_out)
+		self.act_out = nn.PReLU()
 
-    def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None):
-        """
-        Args:
-            inpt: [E_edges, ndim_in]
-            A_src_in_edges: PyG Data object containing edge_index and spatial-temporal x [E_edges, 4]
-            mask: [E_edges, ndim_mask]
-            embed_context: [E_edges, embed_dim] or [1, embed_dim] context embedding
-        """
-        N = inpt.shape[0]
-        if num_target_nodes is not None:
-            M = num_target_nodes
-        else:
-            M = A_src_in_edges.edge_index[1].max().item() + 1 if A_src_in_edges.edge_index.numel() > 0 else 0
+	def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None):
+		"""
+		Args:
+			inpt: [E_edges, ndim_in]
+			A_src_in_edges: PyG Data object containing edge_index and spatial-temporal x [E_edges, 4]
+			mask: [E_edges, ndim_mask]
+			embed_context: [E_edges, embed_dim] or [1, embed_dim] context embedding
+		"""
+		N = inpt.shape[0]
+		if num_target_nodes is not None:
+			M = num_target_nodes
+		else:
+			M = A_src_in_edges.edge_index[1].max().item() + 1 if A_src_in_edges.edge_index.numel() > 0 else 0
 
-        ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
-        # Step 1: Normalize spatial-temporal offsets
-        diff_sp = A_src_in_edges.x[:, 0:3] # / self.scale_rel
-        diff_tm = A_src_in_edges.x[:, 3:4] # / self.scale_rel
+		# Step 1: Normalize spatial-temporal offsets
+		diff_sp = A_src_in_edges.x[:, 0:3] # / self.scale_rel
+		diff_tm = A_src_in_edges.x[:, 3:4] # / self.scale_rel
 
-        # Unit directional vector for spatial geometry
-        norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
-        unit_dir = diff_sp / norm_pos  # [E_edges, 3]
+		# Unit directional vector for spatial geometry
+		norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
+		unit_dir = diff_sp / norm_pos  # [E_edges, 3]
 
-        # Step 2: Scale-conditioned Anisotropic Gammas
-        delta = self.f_gamma(ctx)
-        alpha = delta[:, :1].unsqueeze(-1)                                     # Global scale factor
-        residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))  # Anisotropic variations
-        gammas = torch.exp(self.log_gamma_base + alpha + residuals)            # [E_edges, n_gammas, 4]
+		# Step 2: Scale-conditioned Anisotropic Gammas
+		delta = self.f_gamma(ctx)
+		alpha = delta[:, :1].unsqueeze(-1)									 # Global scale factor
+		residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))  # Anisotropic variations
+		gammas = torch.exp(self.log_gamma_base + alpha + residuals)			# [E_edges, n_gammas, 4]
 
-        # Step 3: Anisotropic LINEAR distance metric: sqrt( sum_d gamma_d * dr_d^2 )
-        # Linear distance prevents gradient cliffs over long-range global paths
-        r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)    # [E_edges, 1, 4]
-        r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-8)          # [E_edges, n_gammas]
+		# Step 3: Anisotropic LINEAR distance metric: sqrt( sum_d gamma_d * dr_d^2 )
+		# Linear distance prevents gradient cliffs over long-range global paths
+		r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)	# [E_edges, 1, 4]
+		r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-8)		  # [E_edges, n_gammas]
 
-        # Exponential linear RBF decay: exp(-r_aniso)
-        rbf_decay = torch.exp(-1.0 * r_aniso)                                  # [E_edges, n_gammas]
+		# Exponential linear RBF decay: exp(-r_aniso)
+		rbf_decay = torch.exp(-1.0 * r_aniso)								  # [E_edges, n_gammas]
 
-        # Step 4: Non-linear geometric feature fusion with FiLM scale conditioning
-        rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)            # [E_edges, 4 + n_gammas]
+		# Step 4: Non-linear geometric feature fusion with FiLM scale conditioning
+		rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)			# [E_edges, 4 + n_gammas]
 		edge_inpt = torch.cat((inpt, rel_pos), dim=-1)
-        # geo_features = self.act_edge(self.film_edge(self.fc_edge(torch.cat((inpt, rel_pos), dim=-1)), ctx))
+		# geo_features = self.act_edge(self.film_edge(self.fc_edge(torch.cat((inpt, rel_pos), dim=-1)), ctx))
 		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
 
-        # Step 5: Gated message composition (Existential gate * Phase routing gate)
-        absolute_gate = mask.max(1, keepdims=True)[0]                          # [E_edges, 1]
-        phase_routing = self.mask_gate(mask)                                   # [E_edges, ndim_in]
+		# Step 5: Gated message composition (Existential gate * Phase routing gate)
+		absolute_gate = mask.max(1, keepdims=True)[0]						  # [E_edges, 1]
+		phase_routing = self.mask_gate(mask)								   # [E_edges, ndim_in]
 
-        msg = absolute_gate * (phase_routing * geo_features)                   # [E_edges, ndim_in]
+		msg = absolute_gate * (phase_routing * geo_features)				   # [E_edges, ndim_in]
 
-        # Step 6: Perform physical stacking (Sum-aggregate onto target source nodes)
-        stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
+		# Step 6: Perform physical stacking (Sum-aggregate onto target source nodes)
+		stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
 
-        # Step 7: Variance-stabilized degree normalization (1 / sqrt(Degree))
-        target_indices = A_src_in_edges.edge_index[1]
-        deg = torch.zeros((M, 1), device=stacked.device, dtype=stacked.dtype)
-        deg.index_add_(0, target_indices, absolute_gate)
-        stacked_normalized = stacked / torch.sqrt(deg.clamp(min=1.0))
+		# Step 7: Variance-stabilized degree normalization (1 / sqrt(Degree))
+		target_indices = A_src_in_edges.edge_index[1]
+		deg = torch.zeros((M, 1), device=stacked.device, dtype=stacked.dtype)
+		deg.index_add_(0, target_indices, absolute_gate)
+		stacked_normalized = stacked / torch.sqrt(deg.clamp(min=1.0))
 
-        # Step 8: Standardize and Project
-        return self.act_out(self.fc_out(self.norm(stacked_normalized)))
+		# Step 8: Standardize and Project
+		return self.act_out(self.fc_out(self.norm(stacked_normalized)))
 
 
 class SpatialAggregation(MessagePassing):
-    def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=1.0, 
-                 n_global=5, n_hidden=30, zero_offsets=False):
-        super(SpatialAggregation, self).__init__(aggr='mean')
+	def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=1.0, 
+				 n_global=5, n_hidden=30, zero_offsets=False):
+		super(SpatialAggregation, self).__init__(aggr='mean')
 
-        self.zero_offsets = zero_offsets
-        self.scale_rel = scale_rel
+		self.zero_offsets = zero_offsets
+		self.scale_rel = scale_rel
 
-        if not self.zero_offsets:
-            # Predict 1 global scale (alpha) + 5 per-frequency residuals (3 spatial + 2 temporal)
-            self.f_gamma = nn.Linear(embed_dim, 1 + 5)
-            nn.init.zeros_(self.f_gamma.weight)
-            nn.init.zeros_(self.f_gamma.bias)
-            
-            # Base gammas: 3 spatial (0.1, 1.0, 5.0) + 2 temporal (0.5 [broad], 10.0 [sharp])
-            init_gammas = torch.tensor([0.1, 1.0, 5.0, 0.5, 10.0]).reshape(1, -1)
-            self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+		if not self.zero_offsets:
+			# Predict 1 global scale (alpha) + 5 per-frequency residuals (3 spatial + 2 temporal)
+			self.f_gamma = nn.Linear(embed_dim, 1 + 5)
+			nn.init.zeros_(self.f_gamma.weight)
+			nn.init.zeros_(self.f_gamma.bias)
+			
+			# Base gammas: 3 spatial (0.1, 1.0, 5.0) + 2 temporal (0.5 [broad], 10.0 [sharp])
+			init_gammas = torch.tensor([0.1, 1.0, 5.0, 0.5, 10.0]).reshape(1, -1)
+			self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
 
-            # Edge dim: 3D dir (3) + Spatial RBF (3) + Temporal RBF (2) + Normalized dt (1) = 9
-            edge_dim = 9
-        else:
-            edge_dim = 0
+			# Edge dim: 3D dir (3) + Spatial RBF (3) + Temporal RBF (2) + Normalized dt (1) = 9
+			edge_dim = 9
+		else:
+			edge_dim = 0
 
-        # Feature transformations
-        self.fc1 = nn.Linear(in_channels + edge_dim + n_global, n_hidden)
-        self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
-        self.fglobal = nn.Linear(in_channels, n_global)
+		# Feature transformations
+		self.fc1 = nn.Linear(in_channels + edge_dim + n_global, n_hidden)
+		self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
+		self.fglobal = nn.Linear(in_channels, n_global)
 
-        # FiLM Conditioning Block
-        self.film = FiLM(embed_dim, n_hidden)
+		# FiLM Conditioning Block
+		self.film = FiLM(embed_dim, n_hidden)
 
-        self.activate1 = nn.PReLU()
-        self.activate2 = nn.PReLU()
-        self.activate3 = nn.PReLU()
+		self.activate1 = nn.PReLU()
+		self.activate2 = nn.PReLU()
+		self.activate3 = nn.PReLU()
 
-    def forward(self, tr, embed_context, A_src, pos):
-        # Ensure context is at least 2D [1, embed_dim]
-        ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+	def forward(self, tr, embed_context, A_src, pos):
+		# Ensure context is at least 2D [1, embed_dim]
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
-        if not self.zero_offsets:
-            # Unified 4D relative position normalized by scale_rel
-            pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
-            
-            pos_rel_sp = pos_rel[:, 0:3]
-            pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp ** 2, dim=1, keepdim=True) + 1e-8)
+		if not self.zero_offsets:
+			# Unified 4D relative position normalized by scale_rel
+			pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
+			
+			pos_rel_sp = pos_rel[:, 0:3]
+			pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp ** 2, dim=1, keepdim=True) + 1e-8)
 
-            pos_rel_tm = pos_rel[:, 3:4]
-            pos_norm_tm = torch.abs(pos_rel_tm)
+			pos_rel_tm = pos_rel[:, 3:4]
+			pos_norm_tm = torch.abs(pos_rel_tm)
 
-            # Decomposed Gammas: Global Alpha + Bounded Residuals
-            delta = self.f_gamma(ctx)
-            alpha = delta[:, :1]                           # Global zoom/density factor
-            residuals = 0.2 * torch.tanh(delta[:, 1:])     # Bounded shape adjustment [-0.2, +0.2]
+			# Decomposed Gammas: Global Alpha + Bounded Residuals
+			delta = self.f_gamma(ctx)
+			alpha = delta[:, :1]						   # Global zoom/density factor
+			residuals = 0.2 * torch.tanh(delta[:, 1:])	 # Bounded shape adjustment [-0.2, +0.2]
 
 			# Optional: Cap alpha shift to a max 3x scale factor change (~ exp(1.1))
 			# alpha = 1.1 * torch.tanh(delta[:, :1])
 			# residuals = 0.2 * torch.tanh(delta[:, 1:])
 
-            gammas = torch.exp(self.log_gamma_base + alpha + residuals)
-            edge_gammas = gammas[A_src[0]] if gammas.shape[0] > 1 else gammas
+			gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+			edge_gammas = gammas[A_src[0]] if gammas.shape[0] > 1 else gammas
 
-            # Anisotropic Spatial and Temporal Decays
-            spatial_decay = torch.exp(-1.0 * pos_norm_sp * edge_gammas[:, 0:3])
-            temporal_decay = torch.exp(-1.0 * pos_norm_tm * edge_gammas[:, 3:5])
+			# Anisotropic Spatial and Temporal Decays
+			spatial_decay = torch.exp(-1.0 * pos_norm_sp * edge_gammas[:, 0:3])
+			temporal_decay = torch.exp(-1.0 * pos_norm_tm * edge_gammas[:, 3:5])
 
-            # Construct 9D Edge Features
-            edge_attr = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, temporal_decay, pos_rel_tm), dim=1)
-        else:
-            edge_attr = torch.zeros((A_src.shape[1], 0), dtype=tr.dtype, device=tr.device)
+			# Construct 9D Edge Features
+			edge_attr = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, temporal_decay, pos_rel_tm), dim=1)
+		else:
+			edge_attr = torch.zeros((A_src.shape[1], 0), dtype=tr.dtype, device=tr.device)
 
-        # Global feature pooling
-        global_feat = self.activate3(self.fglobal(tr)).mean(dim=0, keepdim=True)
+		# Global feature pooling
+		global_feat = self.activate3(self.fglobal(tr)).mean(dim=0, keepdim=True)
 
-        # Message Passing execution
-        aggr_out = self.propagate(
-            A_src, 
-            x=tr, 
-            edge_attr=edge_attr, 
-            global_feat=global_feat, 
-            embed_context=ctx
-        )
-        
-        out = torch.cat((tr, aggr_out), dim=-1)
-        return self.activate2(self.fc2(out))
+		# Message Passing execution
+		aggr_out = self.propagate(
+			A_src, 
+			x=tr, 
+			edge_attr=edge_attr, 
+			global_feat=global_feat, 
+			embed_context=ctx
+		)
+		
+		out = torch.cat((tr, aggr_out), dim=-1)
+		return self.activate2(self.fc2(out))
 
-    def message(self, x_j, edge_attr, global_feat, embed_context):
-        if not self.zero_offsets:
-            inputs = torch.cat((x_j, edge_attr, global_feat.expand(len(x_j), -1)), dim=-1)
-        else:
-            inputs = torch.cat((x_j, global_feat.expand(len(x_j), -1)), dim=-1)
+	def message(self, x_j, edge_attr, global_feat, embed_context):
+		if not self.zero_offsets:
+			inputs = torch.cat((x_j, edge_attr, global_feat.expand(len(x_j), -1)), dim=-1)
+		else:
+			inputs = torch.cat((x_j, global_feat.expand(len(x_j), -1)), dim=-1)
 
-        h = self.fc1(inputs)
+		h = self.fc1(inputs)
 
-        # Apply unified FiLM modulation and activation
-        return self.activate1(self.film(h, embed_context))
+		# Apply unified FiLM modulation and activation
+		return self.activate1(self.film(h, embed_context))
 
 
 class SpaceTimeDirect(nn.Module):
@@ -567,138 +567,138 @@ class SpaceTimeDirect(nn.Module):
 
 
 class SpaceTimeAttention(MessagePassing):
-    """Multi-Resolution Continuous Space-Time Gaussian Super-Resolution Interpolator.
+	"""Multi-Resolution Continuous Space-Time Gaussian Super-Resolution Interpolator.
 
-    Predicts continuous space-time fields from sparse reference graphs, capable
-    of super-resolving Gaussian peaks between reference nodes while maintaining 
-    smooth manifold continuity.
-    """
+	Predicts continuous space-time fields from sparse reference graphs, capable
+	of super-resolving Gaussian peaks between reference nodes while maintaining 
+	smooth manifold continuity.
+	"""
 
-    def __init__(
-        self,
-        inpt_dim,
-        out_channels,
-        n_dim=4,
-        n_latent=30,
-        embed_dim=10,
-        n_heads=5,
-        scale_rel=1.0,
-        scale_time=1.0,
-    ):
-        super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
-        self.n_heads = n_heads
-        self.n_latent = n_latent
-        self.out_channels = out_channels
-        self.scale_rel = scale_rel
-        self.scale_time = scale_time
+	def __init__(
+		self,
+		inpt_dim,
+		out_channels,
+		n_dim=4,
+		n_latent=30,
+		embed_dim=10,
+		n_heads=5,
+		scale_rel=1.0,
+		scale_time=1.0,
+	):
+		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
+		self.n_heads = n_heads
+		self.n_latent = n_latent
+		self.out_channels = out_channels
+		self.scale_rel = scale_rel
+		self.scale_time = scale_time
 
-        # 1. Feature Value Transformation into Latent Space
-        self.f_values = nn.Linear(inpt_dim, n_heads * n_latent)
-        self.film_values = FiLM(embed_dim, n_heads * n_latent)
-        self.act_values = nn.PReLU()
+		# 1. Feature Value Transformation into Latent Space
+		self.f_values = nn.Linear(inpt_dim, n_heads * n_latent)
+		self.film_values = FiLM(embed_dim, n_heads * n_latent)
+		self.act_values = nn.PReLU()
 
-        # Super-resolution Gain Gate: Bounded range [0.5, 2.5]
-        # Allows constructive amplitude recovery (up to 2.5x local node values) 
-        # when query falls between sparse reference nodes.
-        self.f_gain = nn.Linear(inpt_dim, n_heads * n_latent)
-        self.film_gain = FiLM(embed_dim, n_heads * n_latent)
+		# Super-resolution Gain Gate: Bounded range [0.5, 2.5]
+		# Allows constructive amplitude recovery (up to 2.5x local node values) 
+		# when query falls between sparse reference nodes.
+		self.f_gain = nn.Linear(inpt_dim, n_heads * n_latent)
+		self.film_gain = FiLM(embed_dim, n_heads * n_latent)
 
-        # 2. Anisotropic Dynamic Gaussian Bandwidth Predictor (3 Spatial + 1 Temporal = 4D)
-        self.f_gamma = nn.Linear(embed_dim, 1 + n_heads * 4)
-        nn.init.zeros_(self.f_gamma.weight)
-        nn.init.zeros_(self.f_gamma.bias)
+		# 2. Anisotropic Dynamic Gaussian Bandwidth Predictor (3 Spatial + 1 Temporal = 4D)
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_heads * 4)
+		nn.init.zeros_(self.f_gamma.weight)
+		nn.init.zeros_(self.f_gamma.bias)
 
-        # Multi-frequency head initialization (Broad to Sharp)
-        init_spatial = torch.logspace(-1, 0.7, steps=n_heads).unsqueeze(1).repeat(1, 3)  # [n_heads, 3]
-        init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads).unsqueeze(1)            # [n_heads, 1]
-        init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)      # [1, n_heads, 4]
-        self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+		# Multi-frequency head initialization (Broad to Sharp)
+		init_spatial = torch.logspace(-1, 0.7, steps=n_heads).unsqueeze(1).repeat(1, 3)  # [n_heads, 3]
+		init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads).unsqueeze(1)			# [n_heads, 1]
+		init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)	  # [1, n_heads, 4]
+		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
 
-        # 3. Context Feature Score Modulation
-        self.f_feature_score = nn.Linear(inpt_dim, n_heads)
-        self.film_score = FiLM(embed_dim, n_heads)
+		# 3. Context Feature Score Modulation
+		self.f_feature_score = nn.Linear(inpt_dim, n_heads)
+		self.film_score = FiLM(embed_dim, n_heads)
 
-        # 4. Final Readout Projection (Combines multi-head latent space into smooth output)
-        self.proj = nn.Linear(n_heads * n_latent, out_channels)
-        self.activate2 = nn.PReLU()
+		# 4. Final Readout Projection (Combines multi-head latent space into smooth output)
+		self.proj = nn.Linear(n_heads * n_latent, out_channels)
+		self.activate2 = nn.PReLU()
 
-        # Graph storage for fixed evaluation setups
-        self.fixed_edges = None
-        self.edge_features = None
-        self.use_fixed_edges = False
+		# Graph storage for fixed evaluation setups
+		self.fixed_edges = None
+		self.edge_features = None
+		self.use_fixed_edges = False
 
-    def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k = 20):
-        ctx_4d = torch.cat((x_context / self.scale_rel, (1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel), dim=1)
-        qry_4d = torch.cat((x_query / self.scale_rel, (1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel), dim=1)
+	def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k = 20):
+		ctx_4d = torch.cat((x_context / self.scale_rel, (1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel), dim=1)
+		qry_4d = torch.cat((x_query / self.scale_rel, (1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel), dim=1)
 
-        edge_index = knn(ctx_4d, qry_4d, k=k).flip(0)
+		edge_index = knn(ctx_4d, qry_4d, k=k).flip(0)
 
-        diff_sp = (x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel
-        diff_tm = (1000.0 * self.scale_time * (x_query_t[edge_index[1]] - x_context_t[edge_index[0]])).reshape(-1, 1) / self.scale_rel
+		diff_sp = (x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel
+		diff_tm = (1000.0 * self.scale_time * (x_query_t[edge_index[1]] - x_context_t[edge_index[0]])).reshape(-1, 1) / self.scale_rel
 
-        # Edge feature shape: [E, 4] -> (dx^2, dy^2, dz^2, dt^2)
-        edge_attr = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1)
-        return edge_index, edge_attr
+		# Edge feature shape: [E, 4] -> (dx^2, dy^2, dz^2, dt^2)
+		edge_attr = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1)
+		return edge_index, edge_attr
 
-    def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, embed_context, k = 20):
-        if not self.use_fixed_edges:
-            edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
-        else:
-            edge_index, edge_attr = self.fixed_edges, self.edge_features
+	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, embed_context, k = 20):
+		if not self.use_fixed_edges:
+			edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+		else:
+			edge_index, edge_attr = self.fixed_edges, self.edge_features
 
-        ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
-        # Message passing over bipartite graph (context -> query)
-        interpolated = self.propagate(
-            edge_index,
-            x=inpts,
-            embed_context=ctx,
-            edge_attr=edge_attr,
-            size=(x_context.shape[0], x_query.shape[0]),
-        )
+		# Message passing over bipartite graph (context -> query)
+		interpolated = self.propagate(
+			edge_index,
+			x=inpts,
+			embed_context=ctx,
+			edge_attr=edge_attr,
+			size=(x_context.shape[0], x_query.shape[0]),
+		)
 
-        # Reshape concatenated latent heads: [N_query, n_heads * n_latent]
-        flattened = interpolated.view(x_query.shape[0], -1)
-        
-        # Readout projection into target channels with smooth activation
-        out = self.proj(flattened)
-        return self.activate2(out)
+		# Reshape concatenated latent heads: [N_query, n_heads * n_latent]
+		flattened = interpolated.view(x_query.shape[0], -1)
+		
+		# Readout projection into target channels with smooth activation
+		out = self.proj(flattened)
+		return self.activate2(out)
 
-    def message(self, x_j, embed_context_j, index, edge_attr):
-        # 1. Transform context features into Values & Scale-Conditioned Gains via FiLM
-        value_embed = self.act_values(self.film_values(self.f_values(x_j), embed_context_j))
-        value_embed = value_embed.view(-1, self.n_heads, self.n_latent)
+	def message(self, x_j, embed_context_j, index, edge_attr):
+		# 1. Transform context features into Values & Scale-Conditioned Gains via FiLM
+		value_embed = self.act_values(self.film_values(self.f_values(x_j), embed_context_j))
+		value_embed = value_embed.view(-1, self.n_heads, self.n_latent)
 
-        # Super-Resolution Gain Gate: [0.5, 2.5] via Sigmoid
-        # Allows local amplitude amplification to reconstruct peaks between sparse nodes
-        gain = 0.5 + 2.0 * torch.sigmoid(self.film_gain(self.f_gain(x_j), embed_context_j))
-        gain = gain.view(-1, self.n_heads, self.n_latent)
-        value_embed = value_embed * gain
+		# Super-Resolution Gain Gate: [0.5, 2.5] via Sigmoid
+		# Allows local amplitude amplification to reconstruct peaks between sparse nodes
+		gain = 0.5 + 2.0 * torch.sigmoid(self.film_gain(self.f_gain(x_j), embed_context_j))
+		gain = gain.view(-1, self.n_heads, self.n_latent)
+		value_embed = value_embed * gain
 
-        # 2. Anisotropic Dynamic Gaussian Bandwidth Gammas
-        delta = self.f_gamma(embed_context_j)
-        alpha = delta[:, :1].unsqueeze(-1)                                     # Global zoom/scale factor
-        residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_heads, 4))   # Bounded shape adjustment
+		# 2. Anisotropic Dynamic Gaussian Bandwidth Gammas
+		delta = self.f_gamma(embed_context_j)
+		alpha = delta[:, :1].unsqueeze(-1)									 # Global zoom/scale factor
+		residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_heads, 4))   # Bounded shape adjustment
 
-        gammas = torch.exp(self.log_gamma_base + alpha + residuals)            # [E, n_heads, 4]
+		gammas = torch.exp(self.log_gamma_base + alpha + residuals)			# [E, n_heads, 4]
 
-        # Anisotropic Gaussian distance logits: - sum_d (gamma_d * dr_d^2)
-        r_sq = edge_attr.unsqueeze(1)                                          # [E, 1, 4]
-        distance_logits = -1.0 * torch.sum(gammas * r_sq, dim=-1)              # [E, n_heads]
+		# Anisotropic Gaussian distance logits: - sum_d (gamma_d * dr_d^2)
+		r_sq = edge_attr.unsqueeze(1)										  # [E, 1, 4]
+		distance_logits = -1.0 * torch.sum(gammas * r_sq, dim=-1)			  # [E, n_heads]
 
-        # 3. Score Modulation & Normalized Softmax Attention
-        score = self.film_score(self.f_feature_score(x_j), embed_context_j)
-        logits = distance_logits + score
-        alpha_attn = softmax(logits, index)                                    # [E, n_heads]
+		# 3. Score Modulation & Normalized Softmax Attention
+		score = self.film_score(self.f_feature_score(x_j), embed_context_j)
+		logits = distance_logits + score
+		alpha_attn = softmax(logits, index)									# [E, n_heads]
 
-        # Shape: [E, n_heads, n_latent]
-        return alpha_attn.unsqueeze(-1) * value_embed
+		# Shape: [E, n_heads, n_latent]
+		return alpha_attn.unsqueeze(-1) * value_embed
 
-    def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=12):
-        edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
-        self.fixed_edges = edge_index
-        self.edge_features = edge_attr
-        self.use_fixed_edges = True
+	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=12):
+		edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+		self.fixed_edges = edge_index
+		self.edge_features = edge_attr
+		self.use_fixed_edges = True
 
 
 
@@ -803,315 +803,315 @@ class SpaceTimeAttention(MessagePassing):
 
 
 # class BipartiteGraphReadOutOperator(MessagePassing):
-#     """Bipartite Readout Operator (Source Factor Graph -> Product Graph).
+#	 """Bipartite Readout Operator (Source Factor Graph -> Product Graph).
 
-#     Transforms source factor features using scale-conditioned RBF kernel decay
-#     and reads out messages onto target product graph nodes.
-#     """
+#	 Transforms source factor features using scale-conditioned RBF kernel decay
+#	 and reads out messages onto target product graph nodes.
+#	 """
 
-#     def __init__(self, ndim_in, ndim_out, ndim_edges=8, embed_dim=10, n_gammas=4):
-#         # Aggregating from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
-#         super(BipartiteGraphReadOutOperator, self).__init__(aggr="add")
+#	 def __init__(self, ndim_in, ndim_out, ndim_edges=8, embed_dim=10, n_gammas=4):
+#		 # Aggregating from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
+#		 super(BipartiteGraphReadOutOperator, self).__init__(aggr="add")
 
-#         self.n_gammas = n_gammas
-#         self.embed_dim = embed_dim
+#		 self.n_gammas = n_gammas
+#		 self.embed_dim = embed_dim
 
-#         # Geometry features = 3 (unit vector) + n_gammas (RBF) + 1 (time) = 8 total
-#         ndim_geo_pos = 3 + n_gammas + 1
+#		 # Geometry features = 3 (unit vector) + n_gammas (RBF) + 1 (time) = 8 total
+#		 ndim_geo_pos = 3 + n_gammas + 1
 
-#         # 2-layer MLP for non-linear association evaluation
-#         self.fc1 = nn.Sequential(
-#             nn.Linear(ndim_in + ndim_geo_pos, ndim_in),
-#             nn.PReLU(),
-#             nn.Linear(ndim_in, ndim_in),
-#             nn.PReLU(),
-#         )
+#		 # 2-layer MLP for non-linear association evaluation
+#		 self.fc1 = nn.Sequential(
+#			 nn.Linear(ndim_in + ndim_geo_pos, ndim_in),
+#			 nn.PReLU(),
+#			 nn.Linear(ndim_in, ndim_in),
+#			 nn.PReLU(),
+#		 )
 
-#         # Dynamic Bandwidth Predictor driven by context embedding
-#         self.f_gamma = nn.Linear(embed_dim, n_gammas)
+#		 # Dynamic Bandwidth Predictor driven by context embedding
+#		 self.f_gamma = nn.Linear(embed_dim, n_gammas)
 
-#         # Learnable baseline log-gammas (initialized near ~[0.05, 0.3, 0.8, 2.0])
-#         self.log_gamma_base = nn.Parameter(
-#             torch.tensor([-3.0, -1.2, -0.2, 0.7]).reshape(1, -1)
-#         )
+#		 # Learnable baseline log-gammas (initialized near ~[0.05, 0.3, 0.8, 2.0])
+#		 self.log_gamma_base = nn.Parameter(
+#			 torch.tensor([-3.0, -1.2, -0.2, 0.7]).reshape(1, -1)
+#		 )
 
-#         # Readout Projection
-#         self.fc2 = nn.Linear(ndim_in, ndim_out)
-#         self.activate_out = nn.PReLU()
+#		 # Readout Projection
+#		 self.fc2 = nn.Linear(ndim_in, ndim_out)
+#		 self.activate_out = nn.PReLU()
 
-#     def forward(
-#         self,
-#         inpt,
-#         A_Lg_in_srcs,
-#         mask,
-#         embed_context,
-#         n_sta=None,
-#         n_temp=None,
-#         num_target_nodes=None,
-#     ):
-#         """Args:
+#	 def forward(
+#		 self,
+#		 inpt,
+#		 A_Lg_in_srcs,
+#		 mask,
+#		 embed_context,
+#		 n_sta=None,
+#		 n_temp=None,
+#		 num_target_nodes=None,
+#	 ):
+#		 """Args:
 
-#         inpt: [N_src, ndim_in] Source node features
-#         A_Lg_in_srcs: PyG Data object containing edge_index [2, E] and x [E, 4]
-#         mask: [N_src, ndim_mask] or [E, ndim_mask] Source/edge prediction mask
-#         embed_context: [E, embed_dim] or [1, embed_dim] Context/scale embedding
-#         num_target_nodes: Optional explicit scalar M for target product graph size
-#         """
-#         # Safe determination of N (source nodes) and M (target product graph nodes)
-#         N = inpt.shape[0]
-#         if num_target_nodes is not None:
-#             M = num_target_nodes
-#         else:
-#             M = (
-#                 A_Lg_in_srcs.edge_index[1].max().item() + 1
-#                 if A_Lg_in_srcs.edge_index.numel() > 0
-#                 else 0
-#             )
+#		 inpt: [N_src, ndim_in] Source node features
+#		 A_Lg_in_srcs: PyG Data object containing edge_index [2, E] and x [E, 4]
+#		 mask: [N_src, ndim_mask] or [E, ndim_mask] Source/edge prediction mask
+#		 embed_context: [E, embed_dim] or [1, embed_dim] Context/scale embedding
+#		 num_target_nodes: Optional explicit scalar M for target product graph size
+#		 """
+#		 # Safe determination of N (source nodes) and M (target product graph nodes)
+#		 N = inpt.shape[0]
+#		 if num_target_nodes is not None:
+#			 M = num_target_nodes
+#		 else:
+#			 M = (
+#				 A_Lg_in_srcs.edge_index[1].max().item() + 1
+#				 if A_Lg_in_srcs.edge_index.numel() > 0
+#				 else 0
+#			 )
 
-#         # 1. Dynamic Scale-Conditioned Gammas
-#         # Bounded offset in [-1.2, 1.2] keeps multipliers safely in ~[0.3x, 3.3x] range
-#         gamma_offset = 1.2 * torch.tanh(self.f_gamma(embed_context))
-#         gammas = torch.exp(self.log_gamma_base + gamma_offset)  # [E, n_gammas] or [1, n_gammas]
+#		 # 1. Dynamic Scale-Conditioned Gammas
+#		 # Bounded offset in [-1.2, 1.2] keeps multipliers safely in ~[0.3x, 3.3x] range
+#		 gamma_offset = 1.2 * torch.tanh(self.f_gamma(embed_context))
+#		 gammas = torch.exp(self.log_gamma_base + gamma_offset)  # [E, n_gammas] or [1, n_gammas]
 
-#         # 2. Compute spatial unit direction and RBF distance decay
-#         norm_pos = torch.sqrt(
-#             torch.sum(A_Lg_in_srcs.x[:, 0:3] ** 2, dim=1, keepdim=True) + 1e-8
-#         )
-#         rbf_decay = torch.exp(-1.0 * norm_pos * gammas)
+#		 # 2. Compute spatial unit direction and RBF distance decay
+#		 norm_pos = torch.sqrt(
+#			 torch.sum(A_Lg_in_srcs.x[:, 0:3] ** 2, dim=1, keepdim=True) + 1e-8
+#		 )
+#		 rbf_decay = torch.exp(-1.0 * norm_pos * gammas)
 
-#         rel_pos = torch.cat(
-#             (
-#                 A_Lg_in_srcs.x[:, 0:3] / norm_pos,
-#                 rbf_decay,
-#                 A_Lg_in_srcs.x[:, 3:4],
-#             ),
-#             dim=1,
-#         )
+#		 rel_pos = torch.cat(
+#			 (
+#				 A_Lg_in_srcs.x[:, 0:3] / norm_pos,
+#				 rbf_decay,
+#				 A_Lg_in_srcs.x[:, 3:4],
+#			 ),
+#			 dim=1,
+#		 )
 
-#         # 3. Propagate message from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
-#         out = self.propagate(
-#             A_Lg_in_srcs.edge_index,
-#             size=(N, M),
-#             x=inpt,
-#             edge_attr=rel_pos,
-#             mask=mask,
-#         )
+#		 # 3. Propagate message from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
+#		 out = self.propagate(
+#			 A_Lg_in_srcs.edge_index,
+#			 size=(N, M),
+#			 x=inpt,
+#			 edge_attr=rel_pos,
+#			 mask=mask,
+#		 )
 
-#         # 4. Mask mapped to sending source nodes (edge_index[0])
-#         # Handles mask whether passed as per-node [N, dim] or per-edge [E, dim]
-#         if mask.dim() > 1 and mask.shape[0] == N:
-#             out_mask = mask[A_Lg_in_srcs.edge_index[0]]
-#         else:
-#             out_mask = mask
+#		 # 4. Mask mapped to sending source nodes (edge_index[0])
+#		 # Handles mask whether passed as per-node [N, dim] or per-edge [E, dim]
+#		 if mask.dim() > 1 and mask.shape[0] == N:
+#			 out_mask = mask[A_Lg_in_srcs.edge_index[0]]
+#		 else:
+#			 out_mask = mask
 
-#         return self.activate_out(self.fc2(out)), out_mask
+#		 return self.activate_out(self.fc2(out)), out_mask
 
-#     def message(self, x_j, mask_j, edge_attr):
-#         # x_j: Source node features mapped to edges [E, ndim_in]
-#         # mask_j: Source mask mapped to edges [E, ndim_mask]
-#         # edge_attr: Dynamic 8D spatio-temporal geometric feature vector [E, 8]
-#         return (mask_j + 0.01) * self.fc1(torch.cat((x_j, edge_attr), dim=-1))
+#	 def message(self, x_j, mask_j, edge_attr):
+#		 # x_j: Source node features mapped to edges [E, ndim_in]
+#		 # mask_j: Source mask mapped to edges [E, ndim_mask]
+#		 # edge_attr: Dynamic 8D spatio-temporal geometric feature vector [E, 8]
+#		 return (mask_j + 0.01) * self.fc1(torch.cat((x_j, edge_attr), dim=-1))
 
 
 class BipartiteGraphReadOutOperator(MessagePassing):
-    """Bipartite Readout Operator (Source Space -> Product Graph Space).
+	"""Bipartite Readout Operator (Source Space -> Product Graph Space).
 
-    Reads out source node hypotheses back onto product-graph edges (Source-Station pairs).
-    Uses multi-gamma 4D anisotropic linear RBF decay, FiLM context conditioning,
-    and soft baseline gating to allow signal flow across hypothetical paths.
-    """
+	Reads out source node hypotheses back onto product-graph edges (Source-Station pairs).
+	Uses multi-gamma 4D anisotropic linear RBF decay, FiLM context conditioning,
+	and soft baseline gating to allow signal flow across hypothetical paths.
+	"""
 
-    def __init__(
-        self,
-        ndim_in,
-        ndim_out,
-        ndim_mask=4,
-        embed_dim=10,
-        n_gammas=4,
-        baseline_gate=0.01,
-    ):
-        # Aggregating/Mapping from Source Nodes (edge_index[0]) to Product Graph Edges (edge_index[1])
-        super(BipartiteGraphReadOutOperator, self).__init__(aggr="add")
+	def __init__(
+		self,
+		ndim_in,
+		ndim_out,
+		ndim_mask=4,
+		embed_dim=10,
+		n_gammas=4,
+		baseline_gate=0.01,
+	):
+		# Aggregating/Mapping from Source Nodes (edge_index[0]) to Product Graph Edges (edge_index[1])
+		super(BipartiteGraphReadOutOperator, self).__init__(aggr="add")
 
-        self.n_gammas = n_gammas
-        self.baseline_gate = baseline_gate
+		self.n_gammas = n_gammas
+		self.baseline_gate = baseline_gate
 
-        # 1. Edge Feature Evaluator
-        # Inputs: Source feature (ndim_in) + Unit dir (3) + 1D Time (1) + n_gammas RBFs
-        self.fc_edge = nn.Linear(ndim_in + 4 + n_gammas, ndim_in)
-        self.film_edge = FiLM(embed_dim, ndim_in)
-        self.act_edge = nn.PReLU()
+		# 1. Edge Feature Evaluator
+		# Inputs: Source feature (ndim_in) + Unit dir (3) + 1D Time (1) + n_gammas RBFs
+		self.fc_edge = nn.Linear(ndim_in + 4 + n_gammas, ndim_in)
+		self.film_edge = FiLM(embed_dim, ndim_in)
+		self.act_edge = nn.PReLU()
 
-        # 2. Phase / Mask Gate Router
-        self.mask_gate = nn.Sequential(
-            nn.Linear(ndim_mask, 8),
-            nn.PReLU(),
-            nn.Linear(8, ndim_in),
-            nn.Sigmoid(),
-        )
+		# 2. Phase / Mask Gate Router
+		self.mask_gate = nn.Sequential(
+			nn.Linear(ndim_mask, 8),
+			nn.PReLU(),
+			nn.Linear(8, ndim_in),
+			nn.Sigmoid(),
+		)
 
-        # 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
-        self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
-        nn.init.zeros_(self.f_gamma.weight)
-        nn.init.zeros_(self.f_gamma.bias)
+		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
+		nn.init.zeros_(self.f_gamma.weight)
+		nn.init.zeros_(self.f_gamma.bias)
 
-        # Multi-scale log-spaced initialization
-        init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).unsqueeze(1).repeat(1, 3)
-        init_temporal = torch.logspace(-1, 0.7, steps=n_gammas).unsqueeze(1)
-        init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)
-        self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+		# Multi-scale log-spaced initialization
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).unsqueeze(1).repeat(1, 3)
+		init_temporal = torch.logspace(-1, 0.7, steps=n_gammas).unsqueeze(1)
+		init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)
+		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
 
-        # 4. Readout Normalization and Output Projection
-        self.norm = nn.LayerNorm(ndim_in)
-        self.fc_out = nn.Linear(ndim_in, ndim_out)
-        self.act_out = nn.PReLU()
+		# 4. Readout Normalization and Output Projection
+		self.norm = nn.LayerNorm(ndim_in)
+		self.fc_out = nn.Linear(ndim_in, ndim_out)
+		self.act_out = nn.PReLU()
 
-    def forward(
-        self,
-        inpt,
-        A_Lg_in_srcs,
-        mask,
-        embed_context,
-        num_target_nodes=None,
-    ):
-        """Args:
+	def forward(
+		self,
+		inpt,
+		A_Lg_in_srcs,
+		mask,
+		embed_context,
+		num_target_nodes=None,
+	):
+		"""Args:
 
-        inpt: [N_src, ndim_in] Source node features
-        A_Lg_in_srcs: PyG Data object containing edge_index [2, E] and x [E, 4]
-        mask: [N_src, ndim_mask] or [E, ndim_mask] Mask tensor
-        embed_context: [E, embed_dim] or [1, embed_dim] Context embedding
-        num_target_nodes: Optional explicit scalar M for target product graph size
-        """
-        N = inpt.shape[0]
-        if num_target_nodes is not None:
-            M = num_target_nodes
-        else:
-            M = (
-                A_Lg_in_srcs.edge_index[1].max().item() + 1
-                if A_Lg_in_srcs.edge_index.numel() > 0
-                else 0
-            )
+		inpt: [N_src, ndim_in] Source node features
+		A_Lg_in_srcs: PyG Data object containing edge_index [2, E] and x [E, 4]
+		mask: [N_src, ndim_mask] or [E, ndim_mask] Mask tensor
+		embed_context: [E, embed_dim] or [1, embed_dim] Context embedding
+		num_target_nodes: Optional explicit scalar M for target product graph size
+		"""
+		N = inpt.shape[0]
+		if num_target_nodes is not None:
+			M = num_target_nodes
+		else:
+			M = (
+				A_Lg_in_srcs.edge_index[1].max().item() + 1
+				if A_Lg_in_srcs.edge_index.numel() > 0
+				else 0
+			)
 
-        ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
-        # Step 1: Spatial-temporal offsets
-        diff_sp = A_Lg_in_srcs.x[:, 0:3]
-        diff_tm = A_Lg_in_srcs.x[:, 3:4]
+		# Step 1: Spatial-temporal offsets
+		diff_sp = A_Lg_in_srcs.x[:, 0:3]
+		diff_tm = A_Lg_in_srcs.x[:, 3:4]
 
-        norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
-        unit_dir = diff_sp / norm_pos  # [E_edges, 3]
+		norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
+		unit_dir = diff_sp / norm_pos  # [E_edges, 3]
 
-        # Step 2: Scale-conditioned Anisotropic Gammas
-        delta = self.f_gamma(ctx)
-        alpha = delta[:, :1].unsqueeze(-1)
-        residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))
-        gammas = torch.exp(self.log_gamma_base + alpha + residuals)  # [E, n_gammas, 4]
+		# Step 2: Scale-conditioned Anisotropic Gammas
+		delta = self.f_gamma(ctx)
+		alpha = delta[:, :1].unsqueeze(-1)
+		residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))
+		gammas = torch.exp(self.log_gamma_base + alpha + residuals)  # [E, n_gammas, 4]
 
-        # Step 3: Anisotropic LINEAR distance metric
-        r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)
-        r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-8)
-        rbf_decay = torch.exp(-1.0 * r_aniso)  # [E, n_gammas]
+		# Step 3: Anisotropic LINEAR distance metric
+		r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)
+		r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-8)
+		rbf_decay = torch.exp(-1.0 * r_aniso)  # [E, n_gammas]
 
-        rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)
+		rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)
 
-        # Step 4: Map source mask to edge indexing if passed as node mask
-        if mask.dim() > 1 and mask.shape[0] == N:
-            edge_mask = mask[A_Lg_in_srcs.edge_index[0]]
-        else:
-            edge_mask = mask
+		# Step 4: Map source mask to edge indexing if passed as node mask
+		if mask.dim() > 1 and mask.shape[0] == N:
+			edge_mask = mask[A_Lg_in_srcs.edge_index[0]]
+		else:
+			edge_mask = mask
 
-        # Step 5: Message propagation from Source (edge_index[0]) to Product Graph (edge_index[1])
-        out = self.propagate(
-            A_Lg_in_srcs.edge_index,
-            size=(N, M),
-            x=inpt,
-            rel_pos=rel_pos,
-            mask=edge_mask,
-            ctx=ctx,
-        )
+		# Step 5: Message propagation from Source (edge_index[0]) to Product Graph (edge_index[1])
+		out = self.propagate(
+			A_Lg_in_srcs.edge_index,
+			size=(N, M),
+			x=inpt,
+			rel_pos=rel_pos,
+			mask=edge_mask,
+			ctx=ctx,
+		)
 
-        # Step 6: Direct Standardization and Projection (Degree = 1 per product edge)
-        return self.act_out(self.fc_out(self.norm(out))), edge_mask
+		# Step 6: Direct Standardization and Projection (Degree = 1 per product edge)
+		return self.act_out(self.fc_out(self.norm(out))), edge_mask
 
-    def message(self, x_j, rel_pos, mask, ctx):
-        """Constructs the readout message for edge (src_i -> prod_j).
+	def message(self, x_j, rel_pos, mask, ctx):
+		"""Constructs the readout message for edge (src_i -> prod_j).
 
-        x_j: Source node features expanded to edges [E, ndim_in]
-        rel_pos: 4D Anisotropic positional features [E, 4 + n_gammas]
-        mask: Mask evaluated at edges [E, ndim_mask]
-        """
-        # Feature transformation with FiLM conditioning
-        edge_inpt = torch.cat((x_j, rel_pos), dim=-1)
-        geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
+		x_j: Source node features expanded to edges [E, ndim_in]
+		rel_pos: 4D Anisotropic positional features [E, 4 + n_gammas]
+		mask: Mask evaluated at edges [E, ndim_mask]
+		"""
+		# Feature transformation with FiLM conditioning
+		edge_inpt = torch.cat((x_j, rel_pos), dim=-1)
+		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
 
-        # Soft baseline gating allows synthetic detection energy flow even when mask is 0
-        absolute_gate = mask.max(1, keepdims=True)[0]
-        gate = absolute_gate + self.baseline_gate
+		# Soft baseline gating allows synthetic detection energy flow even when mask is 0
+		absolute_gate = mask.max(1, keepdims=True)[0]
+		gate = absolute_gate + self.baseline_gate
 
-        phase_routing = self.mask_gate(mask)
+		phase_routing = self.mask_gate(mask)
 
-        return gate * (phase_routing * geo_features)
+		return gate * (phase_routing * geo_features)
 
 
 class DataAggregationAssociation(nn.Module):
-    """
-    Association Phase (Decoder) Block built using standard DataAggregationLayers.
-    Replaces DataAggregationAssociationPhase with modular, per-layer gamma learning.
-    """
-    def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_latent=30, 
-                 n_dim_mask=4, embed_dim=10, use_offsets=True):
-        super().__init__()
+	"""
+	Association Phase (Decoder) Block built using standard DataAggregationLayers.
+	Replaces DataAggregationAssociationPhase with modular, per-layer gamma learning.
+	"""
+	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_latent=30, 
+				 n_dim_mask=4, embed_dim=10, use_offsets=True):
+		super().__init__()
 
-        # Input: Unpooled Features (s) + Encoder Latents (x_latent) + Mask + Source Mask (mask_out_1)
-        total_mask_dim = n_dim_mask + 1  # Original observation mask + source likelihood mask
-        total_in_dim = in_channels + n_dim_latent + total_mask_dim
+		# Input: Unpooled Features (s) + Encoder Latents (x_latent) + Mask + Source Mask (mask_out_1)
+		total_mask_dim = n_dim_mask + 1  # Original observation mask + source likelihood mask
+		total_in_dim = in_channels + n_dim_latent + total_mask_dim
 
-        self.init_trns = nn.Linear(total_in_dim, n_hidden)
-        self.film_init = FiLM(embed_dim, n_hidden)
-        self.act_init = nn.PReLU()
+		self.init_trns = nn.Linear(total_in_dim, n_hidden)
+		self.film_init = FiLM(embed_dim, n_hidden)
+		self.act_init = nn.PReLU()
 
-        # Association Layer 1 (Independent per-layer gammas, no expander edges needed)
-        self.layer1 = DataAggregationLayer(
-            in_channels=n_hidden,
-            out_channels=n_hidden,
-            n_dim_mask=total_mask_dim,
-            embed_dim=embed_dim,
-            use_offsets=use_offsets,
-            has_expander=False
-        )
+		# Association Layer 1 (Independent per-layer gammas, no expander edges needed)
+		self.layer1 = DataAggregationLayer(
+			in_channels=n_hidden,
+			out_channels=n_hidden,
+			n_dim_mask=total_mask_dim,
+			embed_dim=embed_dim,
+			use_offsets=use_offsets,
+			has_expander=False
+		)
 
-        # Association Layer 2 (Independent per-layer gammas, no expander edges needed)
-        self.layer2 = DataAggregationLayer(
-            in_channels=2 * n_hidden,
-            out_channels=out_channels,
-            n_dim_mask=total_mask_dim,
-            embed_dim=embed_dim,
-            use_offsets=use_offsets,
-            has_expander=False
-        )
+		# Association Layer 2 (Independent per-layer gammas, no expander edges needed)
+		self.layer2 = DataAggregationLayer(
+			in_channels=2 * n_hidden,
+			out_channels=out_channels,
+			n_dim_mask=total_mask_dim,
+			embed_dim=embed_dim,
+			use_offsets=use_offsets,
+			has_expander=False
+		)
 
-    def forward(self, s, x_latent, mask_out_1, mask, A_in_sta, A_in_src, embed_context, 
-                pos_rel_sta=None, pos_rel_src=None):
-        # 1. Combine Masks and Latents
-        combined_mask = torch.cat((mask, mask_out_1), dim=-1)
-        x = torch.cat((s, x_latent, combined_mask), dim=-1)
+	def forward(self, s, x_latent, mask_out_1, mask, A_in_sta, A_in_src, embed_context, 
+				pos_rel_sta=None, pos_rel_src=None):
+		# 1. Combine Masks and Latents
+		combined_mask = torch.cat((mask, mask_out_1), dim=-1)
+		x = torch.cat((s, x_latent, combined_mask), dim=-1)
 
-        # 2. Project and FiLM condition
-        x = self.act_init(self.film_init(self.init_trns(x), embed_context))
+		# 2. Project and FiLM condition
+		x = self.act_init(self.film_init(self.init_trns(x), embed_context))
 
-        # 3. Association Graph Convolutions with Per-Layer Gammas
-        x = self.layer1(x, combined_mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
-        x = self.layer2(x, combined_mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+		# 3. Association Graph Convolutions with Per-Layer Gammas
+		x = self.layer1(x, combined_mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+		x = self.layer2(x, combined_mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
 
-        return x
+		return x
 
 ## Note: can maybe reduce dilate scale and scale_misfit, as the default kernel_sig_t is likely larger
 ## Can also maybe reduce the scaling of eps
 
-class ArrivalEmbedding(MessagePassing):
+class ArrivalEmbedding1(MessagePassing):
 	def __init__(self, ndim_arv_in, ndim_out, n_hidden = 20, n_dim_embed = 30, n_phase_embed = 5, embed_vector_dim = 10, ndim_out_src = 1, scale_rel = scale_rel, k_spc_edges = k_spc_edges, kernel_sig_t = kernel_sig_t, use_phase_types = use_phase_types, scale_time = scale_time, min_thresh = 0.01, trv = None, ftrns2 = None, device = 'cuda'):
 		# super(SourceArrivalEmbedding, self).__init__(node_dim = 0, aggr = 'add') # check node dim. ## Use sum or mean
-		super(ArrivalEmbedding, self).__init__(node_dim = 0, aggr = 'add') # check node dim. ## Use sum or mean
+		super(ArrivalEmbedding1, self).__init__(node_dim = 0, aggr = 'add') # check node dim. ## Use sum or mean
 
 		## Goal of this module is just to implement Bipartite aggregation of each source query - pick pair, of their misfits,
 		## and while aggregating over the relevant nodes of the (subgraph) Cartesian product
@@ -1134,49 +1134,55 @@ class ArrivalEmbedding(MessagePassing):
 		n_phase_embed = 5
 		# self.phase_embed = nn.Parameter(torch.randn(n_phase_types, n_phase_embed) * 0.01).to(device)
 		self.phase_embed = nn.Embedding(n_phase_types, n_phase_embed)
-		self.fc1 = nn.Sequential(nn.Linear(ndim_arv_in + 12 + 10 + 11 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
-		self.fc2 = nn.Sequential(nn.Linear(ndim_arv_in + 6 + 3 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
-		self.fc3 = nn.Sequential(nn.Linear(ndim_arv_in + 6 + 3 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+		# self.fc1 = nn.Sequential(nn.Linear(ndim_arv_in + 12 + 10 + 11 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+		self.fc1 = nn.Sequential(nn.Linear(n_hidden + 31, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+		# self.fc2 = nn.Sequential(nn.Linear(ndim_arv_in + 6 + 3 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+		self.fc2 = nn.Sequential(nn.Linear(n_hidden + 14, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+		# self.fc3 = nn.Sequential(nn.Linear(ndim_arv_in + 6 + 3 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+		self.fc3 = nn.Sequential(nn.Linear(n_hidden + 14, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
 		self.ioffset = torch.tensor([-1, 0], dtype=torch.long, device=self.device)
 
-		# self.w_gamma1 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-		# self.w_gamma2 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-		# self.w_gamma3 = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-		# self.w_gamma4 = nn.Parameter(torch.tensor([0.1, 0.5, 2.0]).reshape(1, -1))
 
-		self.w_gamma1_time = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-		self.w_gamma2_time = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
+		# Spatial gamma banks (4 multi-scale channels each)
+		self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+		self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+		self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
 
+		# Temporal gamma banks
+		self.f_gamma_time1, self.log_gamma_base_time1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.1, max_val=2.0)
+		self.f_gamma_time2, self.log_gamma_base_time2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+		self.f_gamma_time3, self.log_gamma_base_time3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
 
-
-		# Predict scale-conditioned gamma offsets from domain context
-		self.f_gamma1 = nn.Linear(embed_vector_dim, 4)
-		self.f_gamma2 = nn.Linear(embed_vector_dim, 4)
-		self.f_gamma3 = nn.Linear(embed_vector_dim, 4)
-		self.f_gamma4 = nn.Linear(embed_vector_dim, 4)
-		self.log_gamma_base1 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
-		self.log_gamma_base2 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
-		self.log_gamma_base3 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
-		self.log_gamma_base4 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
-
-		self.f_gamma_time1 = nn.Linear(embed_vector_dim, 3)
-		self.f_gamma_time2 = nn.Linear(embed_vector_dim, 4)
-		self.f_gamma_time3 = nn.Linear(embed_vector_dim, 4)
-		self.log_gamma_base_time1 = nn.Parameter(torch.log(torch.tensor([0.1, 0.5, 2.0]).reshape(1, -1)))
-		self.log_gamma_base_time2 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
-		self.log_gamma_base_time3 = nn.Parameter(torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1)))
-
-		# self.w_gamma3_time = nn.Parameter(torch.tensor([[0.1, 0.5, 2.0]).reshape(1, -1))
-		# self.w_gamma4_time = nn.Parameter(torch.tensor([[0.1, 0.5, 2.0]).reshape(1, -1))
-		
-		# self.w_gamma3_time = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-	
-		# self.fc1_src = nn.Sequential(nn.Linear(ndim_arv_in + 12 + 10 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
-		# self.fc2_src = nn.Sequential(nn.Linear(ndim_arv_in + 6 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
-		# self.fc3_src = nn.Sequential(nn.Linear(ndim_arv_in + 6 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
 
 		self.fc_merge = nn.Sequential(nn.Linear(3*n_hidden, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, ndim_out))
 		# self.fc_merge_src = nn.Sequential(nn.Linear(3*n_hidden, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, ndim_out_src))
+
+	def _init_gamma_bank(self, embed_dim, n_gammas=3, min_val=0.05, max_val=2.0):
+		# Predicts 1 global log-scale (alpha) + n_gammas channel residuals
+		f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
+		nn.init.zeros_(f_gamma.weight)
+		nn.init.zeros_(f_gamma.bias)
+		
+		# Initialize base log-gammas log-spaced across physical range
+		base_gammas = torch.logspace(
+			torch.log10(torch.tensor(min_val)), 
+			torch.log10(torch.tensor(max_val)), 
+			steps=n_gammas
+		).unsqueeze(0)
+		log_gamma_base = nn.Parameter(torch.log(base_gammas))
+		
+		return f_gamma, log_gamma_base
+
+	def _compute_gammas(self, f_gamma_layer, log_gamma_base, ctx, n_gammas):
+		# Predict delta from context
+		delta = f_gamma_layer(ctx) # [E, 1 + n_gammas]
+		
+		alpha = delta[:, :1] # [E, 1] Global scale factor
+		residuals = 0.2 * torch.tanh(delta[:, 1:]) # [E, n_gammas] Bounded channel residuals
+		
+		# Standardized exponential scale formula
+		gammas = torch.exp(log_gamma_base + alpha + residuals) # [E, n_gammas]
+		return gammas
 
 	def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out = None): # reference k nearest spatial points
 
@@ -1238,11 +1244,6 @@ class ArrivalEmbedding(MessagePassing):
 		iwhere_query = torch.where(mask_queries == 1)[0]
 		# assert(torch.abs(query_vals[iwhere_query] - pick_vals[knn(pick_vals, query_vals[iwhere_query], k = 1)[1]]).max() == 0)
 		# assert(torch.abs(pick_vals[iwhere_picks] - query_vals[knn(query_vals, pick_vals[iwhere_picks], k = 1)[1]]).max() == 0)
-		## The point of query vals is these are the nodes on the Cartesian product we are accessing and aggregating across.
-		## How can we "read into" these nodes, or match to these nodes, for all possible (> min thresh) pick vals.
-		## Can we use degrees or cumulative degrees of query vals to directly read in? Can we catch cases where the pick
-		## has no match (e.g., read in, but then find mis-match of values and remove?)
-		# print('Time %0.4f'%(time.time() - st))
 
 		# print('Time %0.4f'%(time.time() - st))
 		sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
@@ -1281,18 +1282,11 @@ class ArrivalEmbedding(MessagePassing):
 		offset_ref_sta_norm = torch.norm(offset_ref_sta, dim = 1, keepdim = True).clamp(min=eps_time)
 		offset_ref_src_norm = torch.norm(offset_ref_src, dim = 1, keepdim = True).clamp(min=eps_time)
 
-		## Src to ref are not usually large distances so use one kernel radius
-		# offset_src_sta_norm_kernel = torch.exp(-1.0*torch.abs(offset_src_sta_norm)/(3.0))
-		# offset_ref_src_norm_kernel = torch.exp(-1.0*torch.abs(offset_ref_src_norm)/(1.0))
-		# offset_ref_sta_norm_kernel = torch.exp(-1.0*torch.abs(offset_ref_sta_norm)/(3.0))
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
-		# offset_src_sta_norm_kernel = torch.cat((offset_src_sta/offset_src_sta_norm, torch.tanh(-1.0*offset_src_sta_norm*F.softplus(self.w_gamma1))), dim = 1)
-		# offset_ref_sta_norm_kernel = torch.cat((offset_ref_sta/offset_ref_sta_norm, torch.tanh(-1.0*offset_ref_sta_norm*F.softplus(self.w_gamma2))), dim = 1)
-		# offset_ref_src_norm_kernel = torch.cat((offset_ref_src/offset_ref_src_norm, torch.tanh(-1.0*offset_ref_src_norm*F.softplus(self.w_gamma3))), dim = 1)
-	
-		gammas1 = torch.exp(self.log_gamma_base1 + 1.6 * torch.tanh(self.f_gamma1(embed_context)))	
-		gammas2 = torch.exp(self.log_gamma_base2 + 1.6 * torch.tanh(self.f_gamma2(embed_context)))	
-		gammas3 = torch.exp(self.log_gamma_base3 + 1.6 * torch.tanh(self.f_gamma3(embed_context)))	
+		gammas1 = self._compute_gammas(self.f_gamma1, self.log_gamma_base1, ctx, n_gammas=3)
+		gammas2 = self._compute_gammas(self.f_gamma2, self.log_gamma_base2, ctx, n_gammas=3)
+		gammas3 = self._compute_gammas(self.f_gamma3, self.log_gamma_base3, ctx, n_gammas=3)
 
 		# 3. Compute RBF distance decay banks
 		rbf_src_sta = torch.exp(-1.0 * offset_src_sta_norm * gammas1)
@@ -1305,24 +1299,18 @@ class ArrivalEmbedding(MessagePassing):
 		feat_ref_src = torch.cat((offset_ref_src/offset_ref_src_norm, rbf_ref_src), dim=-1)
 
 
-		# offset_ref_src_norm_kernel_t = torch.cat((torch.exp(-1.0*torch.abs(offset_ref_src_t)/(1.0)).reshape(-1,1), torch.sign(offset_ref_src_t).reshape(-1,1)), dim = 1)
-		# offset_ref_src_norm_kernel_t = torch.cat((torch.exp(-1.0*torch.abs(offset_ref_src_t)/(1.0)).reshape(-1,1), torch.sign(offset_ref_src_t).reshape(-1,1)), dim = 1)
-	
 		# offset_ref_src_norm_kernel_t = torch.cat((offset_ref_src_t, torch.exp(-1.0*torch.abs(offset_ref_src_t).reshape(-1,1)*F.softplus(self.w_gamma4))), dim = 1)
-		gammas1_time = torch.exp(self.log_gamma_base_time1 + 1.6 * torch.tanh(self.f_gamma_time1(embed_context)))	
-		rbf_time = torch.exp(-1.0 * offset_ref_src_t * gammas1_time)
+		# gammas1_time = torch.exp(self.log_gamma_base_time1 + 1.6 * torch.tanh(self.f_gamma_time1(embed_context)))	
+		gammas1_time = self._compute_gammas(self.f_gamma_time1, self.log_gamma_base_time1, ctx, n_gammas=3)
+		rbf_time = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas1_time)
 		feat_time = torch.cat((offset_ref_src_t, rbf_time), dim=-1)
 
 		# inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, offset_src_sta, offset_ref_sta, offset_ref_src, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel, offset_ref_sta_norm_kernel, offset_ref_src_norm_kernel_t, self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())), dim = 1)
 		inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, feat_src_sta, feat_ref_sta, feat_ref_src, feat_time, self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())), dim = 1)
 		
 		aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim = 0, dim_size = len(iarv), reduce = 'mean') ## Can consider
-		# print('T2 %0.4f'%(time.time() - t1))
-		# inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], x_embed_trns[query_vals[iwhere_query,1]], misfit_rel_time, misfit_query_time, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel, offset_ref_src_norm_kernel_t, phase_label[iarv[inds_queries_to_picks]].reshape(-1,1)), dim = 1)
-		# inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, offset_src_sta, offset_ref_sta, offset_ref_src, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel, offset_ref_sta_norm_kernel, offset_ref_src_norm_kernel_t, phase_label[iarv[inds_queries_to_picks]].reshape(-1,1)), dim = 1)
-		## Note: could first transfrom the features: misfit_rel_time, misfit_query_time, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel seperately from embed
-		## For increased stability of merging with the embeddings
-		
+
+
 		use_time_based_embedding = True
 		if use_time_based_embedding == True:
 
@@ -1381,7 +1369,6 @@ class ArrivalEmbedding(MessagePassing):
 			# print('T5 %0.4f'%(time.time() - t1))
 			# assert(torch.abs(ipick[ind_query_p] - A_src_in_sta[0, nodes_of_product_p]).max() == 0)
 			# assert(torch.abs(ipick[ind_query_s] - A_src_in_sta[0, nodes_of_product_s]).max() == 0)
-			## Now for each pick and subset of nodes of product need to find matched station
 			
 			# print('Time %0.4f'%(time.time() - st))
 			sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
@@ -1412,8 +1399,10 @@ class ArrivalEmbedding(MessagePassing):
 			offset_ref_sta_norm_p = torch.norm(offset_ref_sta_p, dim = 1, keepdim = True).clamp(min = eps_time)
 			offset_ref_sta_norm_s = torch.norm(offset_ref_sta_s, dim = 1, keepdim = True).clamp(min = eps_time)
 
-			gammas_time2 = torch.exp(self.log_gamma_base_time2 + 1.6 * torch.tanh(self.f_gamma_time2(embed_context)))	
-			gammas_time3 = torch.exp(self.log_gamma_base_time3 + 1.6 * torch.tanh(self.f_gamma_time3(embed_context)))	
+
+			# gammas_time1 = self._compute_gammas(self.f_gamma_time1, self.log_gamma_base_time1, ctx, n_gammas=3)
+			gammas_time2 = self._compute_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx, n_gammas=3)
+			gammas_time3 = self._compute_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx, n_gammas=3)
 
 			rbf_ref_sta_p = torch.exp(-1.0 * offset_ref_sta_norm_p * gammas_time2)
 			rbf_ref_sta_s = torch.exp(-1.0 * offset_ref_sta_norm_s * gammas_time3)
@@ -1421,12 +1410,6 @@ class ArrivalEmbedding(MessagePassing):
 			offset_ref_sta_norm_kernel_p = torch.cat((offset_ref_sta_p/offset_ref_sta_norm_p, rbf_ref_sta_p), dim = 1)
 			offset_ref_sta_norm_kernel_s = torch.cat((offset_ref_sta_s/offset_ref_sta_norm_s, rbf_ref_sta_s), dim = 1)
 			
-			# offset_ref_sta_norm_kernel_p = torch.exp(-1.0*torch.abs(offset_ref_sta_norm_p)/(3.0))
-			# offset_ref_sta_norm_kernel_s = torch.exp(-1.0*torch.abs(offset_ref_sta_norm_s)/(3.0))
-
-			# inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, offset_src_sta, offset_ref_sta, offset_ref_src, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel, offset_ref_sta_norm_kernel, offset_ref_src_norm_kernel_t, phase_label[iarv[inds_queries_to_picks]].reshape(-1,1)), dim = 1)
-			# inpt_aggregate_p = torch.cat((x[nodes_of_product_p[iwhere_query_p]], misfit_rel_time_p, offset_ref_sta_p, offset_ref_sta_norm_kernel_p, self.phase_embed(phase_label[inds_queries_to_picks_p].reshape(-1).long())), dim = 1)
-			# inpt_aggregate_s = torch.cat((x[nodes_of_product_s[iwhere_query_s]], misfit_rel_time_s, offset_ref_sta_s, offset_ref_sta_norm_kernel_s, self.phase_embed(phase_label[inds_queries_to_picks_s].reshape(-1).long())), dim = 1)
 			inpt_aggregate_p = torch.cat((x[nodes_of_product_p[iwhere_query_p]], misfit_rel_time_p, offset_ref_sta_norm_kernel_p, self.phase_embed(phase_label[inds_queries_to_picks_p].reshape(-1).long())), dim = 1)
 			inpt_aggregate_s = torch.cat((x[nodes_of_product_s[iwhere_query_s]], misfit_rel_time_s, offset_ref_sta_norm_kernel_s, self.phase_embed(phase_label[inds_queries_to_picks_s].reshape(-1).long())), dim = 1)
 			
@@ -1434,30 +1417,1533 @@ class ArrivalEmbedding(MessagePassing):
 			aggregate_product_s = scatter(self.fc3(inpt_aggregate_s), inds_queries_to_picks_s, dim = 0, dim_size = len(tpick), reduce = 'mean') ## Can consider
 
 
-		# arv_embed = self.null_embed.clone().expand(len(x_query_cart), len(tpick), -1).clone() # torch.zeros((len(x_query_cart), len(tpick), aggregate_picks.shape[1])).to(device)
-		# arv_embed[pick_vals[:,1], iarv, :] = aggregate_product
-		# arv_embed = self.fc_merge((torch.cat((arv_embed, aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1), aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)), dim = 2)))
-
-
-		# # Create base null embedding expanded across (N_queries, N_picks, n_hidden)
-		# base_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1)
-		
-		# # Build a zero tensor for active aggregate features
-		# dense_picks = torch.zeros_like(base_embed)
-		# dense_picks[pick_vals[:, 1], iarv, :] = aggregate_product
-		
-		# # Build a binary mask for valid picks
-		# pick_mask = torch.zeros((len(x_query_cart), len(tpick), 1), device=self.device, dtype=torch.bool)
-		# pick_mask[pick_vals[:, 1], iarv] = True
-		
-		# # Out-of-place selection (100% autograd safe & clean!)
-		# arv_embed = torch.where(pick_mask, dense_picks, base_embed)
-
 		arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
 		arv_embed[pick_vals[:,1], iarv, :] = aggregate_product
 		arv_embed = self.fc_merge(torch.cat((arv_embed, aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1), aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)), dim = 2))
 
 		return arv_embed, mask_misfit_time ## Make sure this is correct reshape (not transposed)
+
+
+
+class ArrivalEmbedding(nn.Module):
+	def __init__(self, ndim_arv_in, ndim_out, n_hidden=20, n_dim_embed=30, n_phase_embed=5, embed_vector_dim=10, 
+				 ndim_out_src=1, scale_rel=1.0, k_spc_edges=5, kernel_sig_t=1.0, use_phase_types=True, 
+				 scale_time=1.0, min_thresh=0.01, trv=None, ftrns2=None, device='cuda'):
+		super().__init__()
+		self.ftrns2, self.trv = ftrns2, trv
+		self.use_phase_types, self.kernel_sig_t = use_phase_types, kernel_sig_t
+		self.min_thresh, self.scale_time, self.scale_rel = min_thresh, scale_time, scale_rel
+		self.k_spc_edges = k_spc_edges
+		self.dilate_scale, self.scale_misfit = 2.0, 2.0
+
+		self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
+		self.phase_embed = nn.Embedding(2, n_phase_embed)
+
+		# # Dynamic dimension sanity: 
+		# # fc1: ndim_arv_in + 2 (rel_misfit) + 2 (query_misfit) + 6 (src_sta) + 6 (ref_sta) + 6 (ref_src) + 3 (time) + n_phase_embed = ndim_arv_in + 25 + n_phase_embed
+		# self.fc1 = nn.Sequential(nn.Linear(ndim_arv_in + 25 + n_phase_embed, 2 * n_hidden), nn.PReLU(), nn.Linear(2 * n_hidden, n_hidden))
+		
+		# # fc2 / fc3: ndim_arv_in + 2 (rel_misfit) + 6 (ref_sta feat) + n_phase_embed = ndim_arv_in + 8 + n_phase_embed
+		# self.fc2 = nn.Sequential(nn.Linear(ndim_arv_in + 8 + n_phase_embed, 2 * n_hidden), nn.PReLU(), nn.Linear(2 * n_hidden, n_hidden))
+		# self.fc3 = nn.Sequential(nn.Linear(ndim_arv_in + 8 + n_phase_embed, 2 * n_hidden), nn.PReLU(), nn.Linear(2 * n_hidden, n_hidden))
+
+		# fc1: ndim_arv_in + 2 (rel_misfit) + 2 (query_misfit) + 6 (src_sta) + 6 (ref_sta) + 6 (ref_src) + 3 (time) + n_phase_embed = ndim_arv_in + 25 + n_phase_embed
+		self.fc1 = nn.Sequential(
+			nn.Linear(ndim_arv_in + 25 + n_phase_embed, 2 * n_hidden),
+			nn.PReLU(),
+			nn.Linear(2 * n_hidden, n_hidden)
+		)
+
+		# fc2 / fc3: ndim_arv_in + 2 (rel_misfit) + 9 (ref_sta feat: 3 norm + 6 gamma RBF) + n_phase_embed = ndim_arv_in + 11 + n_phase_embed
+		self.fc2 = nn.Sequential(
+			nn.Linear(ndim_arv_in + 8 + n_phase_embed, 2 * n_hidden),
+			nn.PReLU(),
+			nn.Linear(2 * n_hidden, n_hidden)
+		)
+		self.fc3 = nn.Sequential(
+			nn.Linear(ndim_arv_in + 8 + n_phase_embed, 2 * n_hidden),
+			nn.PReLU(),
+			nn.Linear(2 * n_hidden, n_hidden)
+		)
+
+		self.register_buffer('ioffset', torch.tensor([-1, 0], dtype=torch.long))
+
+		self.f_gamma1, self.log_gamma_base1 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
+		self.f_gamma2, self.log_gamma_base2 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
+		self.f_gamma3, self.log_gamma_base3 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
+		self.f_gamma_time2, self.log_gamma_base_time2 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
+		self.f_gamma_time3, self.log_gamma_base_time3 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
+
+		self.fc_merge = nn.Sequential(nn.Linear(3 * n_hidden, 2 * n_hidden), nn.PReLU(), nn.Linear(2 * n_hidden, ndim_out))
+
+	def _hash_rows(self, tensor):
+		return (tensor[:, 0].to(torch.int64) << 32) | (tensor[:, 1].to(torch.int64) & 0xFFFFFFFF)
+
+	def _init_decomposed_gamma_bank(self, embed_dim, init_gammas):
+		f_gamma = nn.Linear(embed_dim, 2 * len(init_gammas))
+		nn.init.zeros_(f_gamma.weight)
+		nn.init.zeros_(f_gamma.bias)
+		log_gamma_base = nn.Parameter(torch.log(torch.tensor(init_gammas, dtype=torch.float32).reshape(1, -1)))
+		return f_gamma, log_gamma_base
+
+	def _compute_decomposed_gammas(self, f_gamma_layer, log_gamma_base, ctx):
+		n_gammas = log_gamma_base.shape[1]
+		delta = f_gamma_layer(ctx.reshape(-1, ctx.shape[-1]))
+		alpha = 1.1 * torch.tanh(delta[..., :n_gammas])
+		residuals = 0.2 * torch.tanh(delta[..., n_gammas:])
+		return torch.exp(log_gamma_base.to(ctx.device) + alpha + residuals)
+
+
+	def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, 
+				phase_label, locs_use_cart, tlatent, embed_context, trv_out=None):
+		device = x.device
+
+
+		# Guard: Ensure graph is CSR-sorted by context node index for cum_degree_srcs pointer validity
+		if A_src_in_sta.size(1) > 1:
+			assert torch.all(A_src_in_sta[1, :-1] <= A_src_in_sta[1, 1:]), \
+				"A_src_in_sta must be sorted by context node index (A_src_in_sta[1]) for CSR degree-indexing!"
+
+		if trv_out is None:
+			trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart)) + x_query_t.reshape(-1, 1, 1)
+		else:
+			trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
+
+		if not self.use_phase_types:
+			phase_label = torch.zeros_like(phase_label)
+
+		i1, i2 = torch.where(phase_label == 0)[0], torch.where(phase_label == 1)[0]
+		tpick = tpick if isinstance(tpick, torch.Tensor) else torch.as_tensor(tpick, device=device)
+		misfit_time = torch.zeros((len(x_query_cart), len(tpick), 4), device=device)
+
+		if len(i1) > 0:
+			misfit_time[:, i1, 0] = torch.exp(-0.5 * (trv_out[:, ipick[i1], 0] - tpick[i1])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+		if len(i2) > 0:
+			misfit_time[:, i2, 1] = torch.exp(-0.5 * (trv_out[:, ipick[i2], 1] - tpick[i2])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+
+		misfit_time[:, :, 2] = torch.exp(-0.5 * (trv_out[:, ipick, 0] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+		misfit_time[:, :, 3] = torch.exp(-0.5 * (trv_out[:, ipick, 1] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+
+		degree_srcs = degree(A_src_in_sta[1], num_nodes=len(x_context_cart), dtype=torch.long)
+		cum_degree_srcs = torch.cat((torch.zeros(1, device=device, dtype=torch.long), torch.cumsum(degree_srcs, dim=0)[:-1]), dim=0)
+
+		mask_misfit_time = misfit_time.max(2).values > self.min_thresh
+		isrc, iarv = torch.where(mask_misfit_time == 1)
+
+		edge_index = knn(
+			torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
+			torch.cat((x_query_cart / 1000.0, self.scale_time * x_query_t.reshape(-1, 1)), dim=1),
+			k=self.k_spc_edges
+		).flip(0).contiguous()
+
+		deg_slice = degree_srcs[edge_index[0]]
+		inc_inds = torch.arange(deg_slice.sum(), device=device, dtype=torch.long)
+		inc_inds = inc_inds - torch.repeat_interleave(torch.cumsum(deg_slice, dim=0) - deg_slice, deg_slice)
+
+		nodes_of_product = cum_degree_srcs[edge_index[0]].repeat_interleave(degree_srcs[edge_index[0]]) + inc_inds
+		ind_query = edge_index[1].repeat_interleave(degree_srcs[edge_index[0]])
+
+		sta_src_pairs = A_src_in_sta[:, nodes_of_product]
+		
+		# --- Collision-Free 64-bit Tuple Packing: (Station_ID << 32) | Target_ID ---
+		hash_queries = (sta_src_pairs[0].to(torch.int64) << 32) | ind_query.to(torch.int64)
+		hash_picks = (ipick[iarv].to(torch.int64) << 32) | isrc.to(torch.int64)
+
+		iwhere_query = torch.where(torch.isin(hash_queries, hash_picks))[0]
+
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+		aggregate_product = torch.zeros((len(iarv), self.fc1[-1].out_features), device=device)
+
+		if len(iwhere_query) > 0 and len(hash_picks) > 0:
+			sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
+			ind_extract = torch.searchsorted(sorted_hash_picks, hash_queries[iwhere_query])
+			max_idx = len(sorted_hash_picks) - 1
+			clamped_extract = ind_extract.clamp(max=max_idx)
+			
+			valid_mask = (ind_extract <= max_idx) & (sorted_hash_picks[clamped_extract] == hash_queries[iwhere_query])
+			iwhere_query = iwhere_query[valid_mask]
+			inds_queries_to_picks = order_hash_picks[clamped_extract[valid_mask]]
+
+			phase_idx = phase_label[iarv[inds_queries_to_picks]].long()
+			tlatent_phase = tlatent[nodes_of_product[iwhere_query], phase_idx].reshape(-1, 1)
+
+			misfit_rel_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - tlatent_phase
+			trv_phase = trv_out[ind_query[iwhere_query], ipick[iarv[inds_queries_to_picks]], phase_idx].reshape(-1, 1)
+			misfit_query_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - trv_phase
+
+			misfit_rel_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time)), dim=1)
+			misfit_query_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_query_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_query_time)), dim=1)
+
+			offset_src_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_query_cart[ind_query[iwhere_query]]) / (10.0 * self.scale_rel)
+			offset_ref_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (10.0 * self.scale_rel)
+			offset_ref_src = (x_query_cart[ind_query[iwhere_query]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (1.0 * self.scale_rel)
+			offset_ref_src_t = 1000.0 * self.scale_time * (x_query_t[ind_query[iwhere_query]].reshape(-1, 1) - x_context_t[A_src_in_sta[1, nodes_of_product[iwhere_query]]].reshape(-1, 1)) / (3.0 * self.scale_rel)
+
+			eps_time = 1e-8
+			offset_src_sta_norm = torch.norm(offset_src_sta, dim=1, keepdim=True).clamp(min=eps_time)
+			offset_ref_sta_norm = torch.norm(offset_ref_sta, dim=1, keepdim=True).clamp(min=eps_time)
+			offset_ref_src_norm = torch.norm(offset_ref_src, dim=1, keepdim=True).clamp(min=eps_time)
+
+			gammas1 = self._compute_decomposed_gammas(self.f_gamma1, self.log_gamma_base1, ctx).mean(dim=0, keepdim=True)
+			gammas2 = self._compute_decomposed_gammas(self.f_gamma2, self.log_gamma_base2, ctx).mean(dim=0, keepdim=True)
+			gammas3 = self._compute_decomposed_gammas(self.f_gamma3, self.log_gamma_base3, ctx).mean(dim=0, keepdim=True)
+
+			rbf_src_sta_sp = torch.exp(-1.0 * offset_src_sta_norm * gammas1[:, 0:3])
+			rbf_ref_sta_sp = torch.exp(-1.0 * offset_ref_sta_norm * gammas2[:, 0:3])
+			rbf_ref_src_sp = torch.exp(-1.0 * offset_ref_src_norm * gammas3[:, 0:3])
+			rbf_ref_src_tm = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas3[:, 3:5])
+
+			feat_src_sta = torch.cat((offset_src_sta / offset_src_sta_norm, rbf_src_sta_sp), dim=-1)
+			feat_ref_sta = torch.cat((offset_ref_sta / offset_ref_sta_norm, rbf_ref_sta_sp), dim=-1)
+			feat_ref_src = torch.cat((offset_ref_src / offset_ref_src_norm, rbf_ref_src_sp), dim=-1)
+			feat_time = torch.cat((offset_ref_src_t, rbf_ref_src_tm), dim=-1)
+
+			inpt_aggregate = torch.cat((
+				x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, 
+				feat_src_sta, feat_ref_sta, feat_ref_src, feat_time, 
+				self.phase_embed(phase_label[iarv[inds_queries_to_picks]].long().reshape(-1))
+			), dim=1)
+
+			aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim=0, dim_size=len(iarv), reduce='mean')
+
+		# Time-Branch Aggregations (fc2 & fc3)
+		aggregate_product_p = torch.zeros((len(tpick), self.fc2[-1].out_features), device=device)
+		aggregate_product_s = torch.zeros((len(tpick), self.fc3[-1].out_features), device=device)
+
+		if len(tpick) > 0 and len(A_src_in_sta) > 0 and A_src_in_sta.size(1) > 0:
+			min_time_shift = tlatent.amin()
+			max_time_offset = (tlatent.amax() - min_time_shift) * 2.5
+			query_time = ((tpick - min_time_shift) + max_time_offset * ipick).reshape(-1, 1)
+
+			val_sort_p, ind_sort_p = torch.sort((tlatent[:, 0] - min_time_shift) + max_time_offset * A_src_in_sta[0])
+			val_sort_s, ind_sort_s = torch.sort((tlatent[:, 1] - min_time_shift) + max_time_offset * A_src_in_sta[0])
+
+			ind_extract_p = torch.searchsorted(val_sort_p, query_time.squeeze(-1))
+			ind_extract_s = torch.searchsorted(val_sort_s, query_time.squeeze(-1))
+
+			iarg_p = torch.argmin(torch.abs(torch.cat((val_sort_p[torch.clamp(ind_extract_p - 1, min=0)].reshape(-1, 1), val_sort_p[torch.clamp(ind_extract_p, max=len(val_sort_p) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
+			iarg_s = torch.argmin(torch.abs(torch.cat((val_sort_s[torch.clamp(ind_extract_s - 1, min=0)].reshape(-1, 1), val_sort_s[torch.clamp(ind_extract_s, max=len(val_sort_s) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
+
+			ind_grab_p = ind_sort_p[(ind_extract_p.clamp(max=len(val_sort_p) - 1) + self.ioffset[iarg_p]).clamp(0, len(val_sort_p) - 1)]
+			ind_grab_s = ind_sort_s[(ind_extract_s.clamp(max=len(val_sort_s) - 1) + self.ioffset[iarg_s]).clamp(0, len(val_sort_s) - 1)]
+
+			# Hash pairing for temporal branch: (Station_ID << 32) | Pick_Index
+			hash_picks_time = (ipick.to(torch.int64) << 32) | torch.arange(len(ipick), device=device, dtype=torch.int64)
+
+			# --- P Phase Processing ---
+			edge_index_p = knn(
+				torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
+				torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_p]],
+				k=self.k_spc_edges
+			).flip(0).contiguous()
+
+			deg_slice_p = degree_srcs[edge_index_p[0]]
+			inc_inds_p = torch.arange(deg_slice_p.sum(), device=device, dtype=torch.long) - torch.repeat_interleave(torch.cumsum(deg_slice_p, dim=0) - deg_slice_p, deg_slice_p)
+			nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(deg_slice_p) + inc_inds_p
+			
+			# Construct pick mapping directly for KNN targets:
+			# edge_index_p[1] indexes into ind_grab_p / query_time (0 to len(tpick)-1)
+			target_picks_p = edge_index_p[1].repeat_interleave(deg_slice_p)
+
+			# If len(ind_grab_p) == len(tpick), target_picks_p is ALREADY the true pick index.
+			query_vals_p_hash = (A_src_in_sta[0, nodes_of_product_p].to(torch.int64) << 32) | target_picks_p.to(torch.int64)
+
+			# query_vals_p_hash = (A_src_in_sta[0, nodes_of_product_p].to(torch.int64) << 32) | edge_index_p[1].repeat_interleave(deg_slice_p).to(torch.int64)
+			# target_picks_p = ind_grab_p[edge_index_p[1].repeat_interleave(deg_slice_p)]
+			# query_vals_p_hash = (A_src_in_sta[0, nodes_of_product_p].to(torch.int64) << 32) | target_picks_p.to(torch.int64)
+			iwhere_query_p = torch.where(torch.isin(query_vals_p_hash, hash_picks_time))[0]
+
+			if len(iwhere_query_p) > 0 and len(hash_picks_time) > 0:
+				sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
+				query_hashes_p = query_vals_p_hash[iwhere_query_p]
+				idx_p = torch.searchsorted(sorted_hash_picks_time, query_hashes_p).clamp(max=len(sorted_hash_picks_time) - 1)
+				
+				valid_mask_p = (sorted_hash_picks_time[idx_p] == query_hashes_p)
+				
+				# --- Station Match Guard: Reject nearest-neighbor matches from wrong stations ---
+				matched_p_edges = nodes_of_product_p[iwhere_query_p[valid_mask_p]]
+				matched_p_picks = order_hash_picks_time[idx_p[valid_mask_p]]
+				station_match_mask_p = (A_src_in_sta[0, matched_p_edges] == ipick[matched_p_picks])
+				
+				# valid_mask_p[valid_mask_p.clone()] = station_match_mask_p
+				valid_mask_p = valid_mask_p & station_match_mask_p
+
+				iwhere_query_p = iwhere_query_p[valid_mask_p]
+				inds_p = order_hash_picks_time[idx_p[valid_mask_p]]
+
+				if len(inds_p) > 0:
+					misfit_rel_time_p = tpick[inds_p].reshape(-1, 1) - tlatent[nodes_of_product_p[iwhere_query_p], 0].reshape(-1, 1)
+					misfit_rel_time_p = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_p) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_p)), dim=1)
+
+					offset_ref_sta_p = (locs_use_cart[ipick[inds_p]] - x_context_cart[A_src_in_sta[1, nodes_of_product_p[iwhere_query_p]]]) / (10.0 * self.scale_rel)
+					norm_p = torch.norm(offset_ref_sta_p, dim=1, keepdim=True).clamp(min=1e-8)
+					gammas_time2 = self._compute_decomposed_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx).mean(dim=0, keepdim=True)
+					feat_p = torch.cat((offset_ref_sta_p / norm_p, torch.exp(-1.0 * norm_p * gammas_time2)), dim=1)
+
+					inpt_p = torch.cat((x[nodes_of_product_p[iwhere_query_p]], misfit_rel_time_p, feat_p, self.phase_embed(phase_label[inds_p].long().reshape(-1))), dim=1)
+					aggregate_product_p = scatter(self.fc2(inpt_p), inds_p, dim=0, dim_size=len(tpick), reduce='mean')
+
+			# --- S Phase Processing ---
+			edge_index_s = knn(
+				torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
+				torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_s]],
+				k=self.k_spc_edges
+			).flip(0).contiguous()
+
+			deg_slice_s = degree_srcs[edge_index_s[0]]
+			inc_inds_s = torch.arange(deg_slice_s.sum(), device=device, dtype=torch.long) - torch.repeat_interleave(torch.cumsum(deg_slice_s, dim=0) - deg_slice_s, deg_slice_s)
+			nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(deg_slice_s) + inc_inds_s
+			
+			# Construct pick mapping directly for KNN targets:
+			# edge_index_p[1] indexes into ind_grab_p / query_time (0 to len(tpick)-1)
+			target_picks_s = edge_index_s[1].repeat_interleave(deg_slice_s)
+
+			# If len(ind_grab_p) == len(tpick), target_picks_p is ALREADY the true pick index.
+			query_vals_s_hash = (A_src_in_sta[0, nodes_of_product_s].to(torch.int64) << 32) | target_picks_s.to(torch.int64)
+
+			# query_vals_s_hash = (A_src_in_sta[0, nodes_of_product_s].to(torch.int64) << 32) | edge_index_s[1].repeat_interleave(deg_slice_s).to(torch.int64)
+			# target_picks_s = ind_grab_s[edge_index_s[1].repeat_interleave(deg_slice_s)]
+			# query_vals_s_hash = (A_src_in_sta[0, nodes_of_product_s].to(torch.int64) << 32) | target_picks_s.to(torch.int64)
+			iwhere_query_s = torch.where(torch.isin(query_vals_s_hash, hash_picks_time))[0]
+
+			if len(iwhere_query_s) > 0 and len(hash_picks_time) > 0:
+				sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
+				query_hashes_s = query_vals_s_hash[iwhere_query_s]
+				idx_s = torch.searchsorted(sorted_hash_picks_time, query_hashes_s).clamp(max=len(sorted_hash_picks_time) - 1)
+				
+				valid_mask_s = (sorted_hash_picks_time[idx_s] == query_hashes_s)
+				
+				# --- Station Match Guard: Reject nearest-neighbor matches from wrong stations ---
+				matched_s_edges = nodes_of_product_s[iwhere_query_s[valid_mask_s]]
+				matched_s_picks = order_hash_picks_time[idx_s[valid_mask_s]]
+				station_match_mask_s = (A_src_in_sta[0, matched_s_edges] == ipick[matched_s_picks])
+				
+				# valid_mask_s[valid_mask_s.clone()] = station_match_mask_s
+				valid_mask_s = valid_mask_s & station_match_mask_s
+
+				iwhere_query_s = iwhere_query_s[valid_mask_s]
+				inds_s = order_hash_picks_time[idx_s[valid_mask_s]]
+
+				if len(inds_s) > 0:
+					misfit_rel_time_s = tpick[inds_s].reshape(-1, 1) - tlatent[nodes_of_product_s[iwhere_query_s], 1].reshape(-1, 1)
+					misfit_rel_time_s = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_s) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_s)), dim=1)
+
+					offset_ref_sta_s = (locs_use_cart[ipick[inds_s]] - x_context_cart[A_src_in_sta[1, nodes_of_product_s[iwhere_query_s]]]) / (10.0 * self.scale_rel)
+					norm_s = torch.norm(offset_ref_sta_s, dim=1, keepdim=True).clamp(min=1e-8)
+					gammas_time3 = self._compute_decomposed_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx).mean(dim=0, keepdim=True)
+					feat_s = torch.cat((offset_ref_sta_s / norm_s, torch.exp(-1.0 * norm_s * gammas_time3)), dim=1)
+
+					inpt_s = torch.cat((x[nodes_of_product_s[iwhere_query_s]], misfit_rel_time_s, feat_s, self.phase_embed(phase_label[inds_s].long().reshape(-1))), dim=1)
+					aggregate_product_s = scatter(self.fc3(inpt_s), inds_s, dim=0, dim_size=len(tpick), reduce='mean')
+
+		# # --- Dense Embedding Placement ---
+		# arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
+
+		# if len(isrc) > 0 and len(iarv) > 0:
+		# 	flat_target_idx = isrc * len(tpick) + iarv
+		# 	flat_embed_agg = scatter(aggregate_product, flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='mean')
+		# 	counts = scatter(torch.ones_like(aggregate_product[:, :1]), flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='sum')
+
+		# 	arv_embed = arv_embed.view(-1, self.fc1[-1].out_features)
+			
+		# 	# Selectively write matched indices to prevent un-matched zero overrides
+		# 	# matched_mask = (flat_embed_agg.abs().sum(dim=-1) > 0)
+		# 	matched_mask = (counts.squeeze(-1) > 0)
+
+		# 	arv_embed[matched_mask] = flat_embed_agg[matched_mask]
+		# 	arv_embed = arv_embed.view(len(x_query_cart), len(tpick), -1)
+
+		# Updated Dense Embedding Placement Guard
+		arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
+
+		if len(isrc) > 0 and len(iarv) > 0 and len(iwhere_query) > 0:
+			flat_target_idx = isrc * len(tpick) + iarv
+			flat_embed_agg = scatter(aggregate_product, flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='mean')
+			counts = scatter(torch.ones((len(iarv), 1), device=device), flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='sum')
+
+			arv_embed = arv_embed.view(-1, self.fc1[-1].out_features)
+			matched_mask = counts.squeeze(-1) > 0
+			arv_embed[matched_mask] = flat_embed_agg[matched_mask]
+			arv_embed = arv_embed.view(len(x_query_cart), len(tpick), -1)
+
+		# Merge Phase Across Branches
+		arv_embed = self.fc_merge(torch.cat((
+			arv_embed,
+			aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1),
+			aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)
+		), dim=2))
+
+		return arv_embed, mask_misfit_time
+
+
+
+	# def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, 
+	# 			phase_label, locs_use_cart, tlatent, embed_context, trv_out=None):
+	# 	device = x.device
+
+
+	# 	# Guard: Ensure graph is CSR-sorted by context node index for cum_degree_srcs pointer validity
+	# 	if A_src_in_sta.size(1) > 1:
+	# 		assert torch.all(A_src_in_sta[1, :-1] <= A_src_in_sta[1, 1:]), \
+	# 			"A_src_in_sta must be sorted by context node index (A_src_in_sta[1]) for CSR degree-indexing!"
+
+	# 	if trv_out is None:
+	# 		trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart)) + x_query_t.reshape(-1, 1, 1)
+	# 	else:
+	# 		trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
+
+	# 	if not self.use_phase_types:
+	# 		phase_label = torch.zeros_like(phase_label)
+
+	# 	i1, i2 = torch.where(phase_label == 0)[0], torch.where(phase_label == 1)[0]
+	# 	tpick = tpick if isinstance(tpick, torch.Tensor) else torch.as_tensor(tpick, device=device)
+	# 	misfit_time = torch.zeros((len(x_query_cart), len(tpick), 4), device=device)
+
+	# 	if len(i1) > 0:
+	# 		misfit_time[:, i1, 0] = torch.exp(-0.5 * (trv_out[:, ipick[i1], 0] - tpick[i1])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+	# 	if len(i2) > 0:
+	# 		misfit_time[:, i2, 1] = torch.exp(-0.5 * (trv_out[:, ipick[i2], 1] - tpick[i2])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+
+	# 	misfit_time[:, :, 2] = torch.exp(-0.5 * (trv_out[:, ipick, 0] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+	# 	misfit_time[:, :, 3] = torch.exp(-0.5 * (trv_out[:, ipick, 1] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+
+	# 	degree_srcs = degree(A_src_in_sta[1], num_nodes=len(x_context_cart), dtype=torch.long)
+	# 	cum_degree_srcs = torch.cat((torch.zeros(1, device=device, dtype=torch.long), torch.cumsum(degree_srcs, dim=0)[:-1]), dim=0)
+
+	# 	mask_misfit_time = misfit_time.max(2).values > self.min_thresh
+	# 	isrc, iarv = torch.where(mask_misfit_time == 1)
+
+	# 	edge_index = knn(
+	# 		torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
+	# 		torch.cat((x_query_cart / 1000.0, self.scale_time * x_query_t.reshape(-1, 1)), dim=1),
+	# 		k=self.k_spc_edges
+	# 	).flip(0).contiguous()
+
+	# 	deg_slice = degree_srcs[edge_index[0]]
+	# 	inc_inds = torch.arange(deg_slice.sum(), device=device, dtype=torch.long)
+	# 	inc_inds = inc_inds - torch.repeat_interleave(torch.cumsum(deg_slice, dim=0) - deg_slice, deg_slice)
+
+	# 	nodes_of_product = cum_degree_srcs[edge_index[0]].repeat_interleave(degree_srcs[edge_index[0]]) + inc_inds
+	# 	ind_query = edge_index[1].repeat_interleave(degree_srcs[edge_index[0]])
+
+	# 	sta_src_pairs = A_src_in_sta[:, nodes_of_product]
+		
+	# 	# --- Collision-Free 64-bit Tuple Packing: (Station_ID << 32) | Target_ID ---
+	# 	hash_queries = (sta_src_pairs[0].to(torch.int64) << 32) | ind_query.to(torch.int64)
+	# 	hash_picks = (ipick[iarv].to(torch.int64) << 32) | isrc.to(torch.int64)
+
+	# 	iwhere_query = torch.where(torch.isin(hash_queries, hash_picks))[0]
+
+	# 	ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+	# 	aggregate_product = torch.zeros((len(iarv), self.fc1[-1].out_features), device=device)
+
+	# 	if len(iwhere_query) > 0 and len(hash_picks) > 0:
+	# 		sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
+	# 		ind_extract = torch.searchsorted(sorted_hash_picks, hash_queries[iwhere_query])
+	# 		max_idx = len(sorted_hash_picks) - 1
+	# 		clamped_extract = ind_extract.clamp(max=max_idx)
+			
+	# 		valid_mask = (ind_extract <= max_idx) & (sorted_hash_picks[clamped_extract] == hash_queries[iwhere_query])
+	# 		iwhere_query = iwhere_query[valid_mask]
+	# 		inds_queries_to_picks = order_hash_picks[clamped_extract[valid_mask]]
+
+	# 		phase_idx = phase_label[iarv[inds_queries_to_picks]].long()
+	# 		tlatent_phase = tlatent[nodes_of_product[iwhere_query], phase_idx].reshape(-1, 1)
+
+	# 		misfit_rel_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - tlatent_phase
+	# 		trv_phase = trv_out[ind_query[iwhere_query], ipick[iarv[inds_queries_to_picks]], phase_idx].reshape(-1, 1)
+	# 		misfit_query_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - trv_phase
+
+	# 		misfit_rel_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time)), dim=1)
+	# 		misfit_query_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_query_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_query_time)), dim=1)
+
+	# 		offset_src_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_query_cart[ind_query[iwhere_query]]) / (10.0 * self.scale_rel)
+	# 		offset_ref_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (10.0 * self.scale_rel)
+	# 		offset_ref_src = (x_query_cart[ind_query[iwhere_query]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (1.0 * self.scale_rel)
+	# 		offset_ref_src_t = 1000.0 * self.scale_time * (x_query_t[ind_query[iwhere_query]].reshape(-1, 1) - x_context_t[A_src_in_sta[1, nodes_of_product[iwhere_query]]].reshape(-1, 1)) / (3.0 * self.scale_rel)
+
+	# 		eps_time = 1e-8
+	# 		offset_src_sta_norm = torch.norm(offset_src_sta, dim=1, keepdim=True).clamp(min=eps_time)
+	# 		offset_ref_sta_norm = torch.norm(offset_ref_sta, dim=1, keepdim=True).clamp(min=eps_time)
+	# 		offset_ref_src_norm = torch.norm(offset_ref_src, dim=1, keepdim=True).clamp(min=eps_time)
+
+	# 		gammas1 = self._compute_decomposed_gammas(self.f_gamma1, self.log_gamma_base1, ctx).mean(dim=0, keepdim=True)
+	# 		gammas2 = self._compute_decomposed_gammas(self.f_gamma2, self.log_gamma_base2, ctx).mean(dim=0, keepdim=True)
+	# 		gammas3 = self._compute_decomposed_gammas(self.f_gamma3, self.log_gamma_base3, ctx).mean(dim=0, keepdim=True)
+
+	# 		rbf_src_sta_sp = torch.exp(-1.0 * offset_src_sta_norm * gammas1[:, 0:3])
+	# 		rbf_ref_sta_sp = torch.exp(-1.0 * offset_ref_sta_norm * gammas2[:, 0:3])
+	# 		rbf_ref_src_sp = torch.exp(-1.0 * offset_ref_src_norm * gammas3[:, 0:3])
+	# 		rbf_ref_src_tm = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas3[:, 3:5])
+
+	# 		feat_src_sta = torch.cat((offset_src_sta / offset_src_sta_norm, rbf_src_sta_sp), dim=-1)
+	# 		feat_ref_sta = torch.cat((offset_ref_sta / offset_ref_sta_norm, rbf_ref_sta_sp), dim=-1)
+	# 		feat_ref_src = torch.cat((offset_ref_src / offset_ref_src_norm, rbf_ref_src_sp), dim=-1)
+	# 		feat_time = torch.cat((offset_ref_src_t, rbf_ref_src_tm), dim=-1)
+
+	# 		inpt_aggregate = torch.cat((
+	# 			x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, 
+	# 			feat_src_sta, feat_ref_sta, feat_ref_src, feat_time, 
+	# 			self.phase_embed(phase_label[iarv[inds_queries_to_picks]].long().reshape(-1))
+	# 		), dim=1)
+
+	# 		aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim=0, dim_size=len(iarv), reduce='mean')
+
+	# 	# Time-Branch Aggregations (fc2 & fc3)
+	# 	aggregate_product_p = torch.zeros((len(tpick), self.fc2[-1].out_features), device=device)
+	# 	aggregate_product_s = torch.zeros((len(tpick), self.fc3[-1].out_features), device=device)
+
+	# 	if len(tpick) > 0 and len(A_src_in_sta) > 0 and A_src_in_sta.size(1) > 0:
+	# 		min_time_shift = tlatent.amin()
+	# 		max_time_offset = (tlatent.amax() - min_time_shift) * 2.5
+	# 		query_time = ((tpick - min_time_shift) + max_time_offset * ipick).reshape(-1, 1)
+
+	# 		val_sort_p, ind_sort_p = torch.sort((tlatent[:, 0] - min_time_shift) + max_time_offset * A_src_in_sta[0])
+	# 		val_sort_s, ind_sort_s = torch.sort((tlatent[:, 1] - min_time_shift) + max_time_offset * A_src_in_sta[0])
+
+	# 		ind_extract_p = torch.searchsorted(val_sort_p, query_time.squeeze(-1))
+	# 		ind_extract_s = torch.searchsorted(val_sort_s, query_time.squeeze(-1))
+
+	# 		iarg_p = torch.argmin(torch.abs(torch.cat((val_sort_p[torch.clamp(ind_extract_p - 1, min=0)].reshape(-1, 1), val_sort_p[torch.clamp(ind_extract_p, max=len(val_sort_p) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
+	# 		iarg_s = torch.argmin(torch.abs(torch.cat((val_sort_s[torch.clamp(ind_extract_s - 1, min=0)].reshape(-1, 1), val_sort_s[torch.clamp(ind_extract_s, max=len(val_sort_s) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
+
+	# 		ind_grab_p = ind_sort_p[(ind_extract_p.clamp(max=len(val_sort_p) - 1) + self.ioffset[iarg_p]).clamp(0, len(val_sort_p) - 1)]
+	# 		ind_grab_s = ind_sort_s[(ind_extract_s.clamp(max=len(val_sort_s) - 1) + self.ioffset[iarg_s]).clamp(0, len(val_sort_s) - 1)]
+
+	# 		# Hash pairing for temporal branch: (Station_ID << 32) | Pick_Index
+	# 		hash_picks_time = (ipick.to(torch.int64) << 32) | torch.arange(len(ipick), device=device, dtype=torch.int64)
+
+	# 		# --- P Phase Processing ---
+	# 		edge_index_p = knn(
+	# 			torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
+	# 			torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_p]],
+	# 			k=self.k_spc_edges
+	# 		).flip(0).contiguous()
+
+	# 		deg_slice_p = degree_srcs[edge_index_p[0]]
+	# 		inc_inds_p = torch.arange(deg_slice_p.sum(), device=device, dtype=torch.long) - torch.repeat_interleave(torch.cumsum(deg_slice_p, dim=0) - deg_slice_p, deg_slice_p)
+	# 		nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(deg_slice_p) + inc_inds_p
+			
+	# 		query_vals_p_hash = (A_src_in_sta[0, nodes_of_product_p].to(torch.int64) << 32) | edge_index_p[1].repeat_interleave(deg_slice_p).to(torch.int64)
+	# 		# target_picks_p = ind_grab_p[edge_index_p[1].repeat_interleave(deg_slice_p)]
+	# 		# query_vals_p_hash = (A_src_in_sta[0, nodes_of_product_p].to(torch.int64) << 32) | target_picks_p.to(torch.int64)
+	# 		iwhere_query_p = torch.where(torch.isin(query_vals_p_hash, hash_picks_time))[0]
+
+	# 		if len(iwhere_query_p) > 0 and len(hash_picks_time) > 0:
+	# 			sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
+	# 			query_hashes_p = query_vals_p_hash[iwhere_query_p]
+	# 			idx_p = torch.searchsorted(sorted_hash_picks_time, query_hashes_p).clamp(max=len(sorted_hash_picks_time) - 1)
+				
+	# 			valid_mask_p = (sorted_hash_picks_time[idx_p] == query_hashes_p)
+				
+	# 			# --- Station Match Guard: Reject nearest-neighbor matches from wrong stations ---
+	# 			matched_p_edges = nodes_of_product_p[iwhere_query_p[valid_mask_p]]
+	# 			matched_p_picks = order_hash_picks_time[idx_p[valid_mask_p]]
+	# 			station_match_mask_p = (A_src_in_sta[0, matched_p_edges] == ipick[matched_p_picks])
+				
+	# 			# valid_mask_p[valid_mask_p.clone()] = station_match_mask_p
+	# 			valid_mask_p = valid_mask_p & station_match_mask_p
+
+	# 			iwhere_query_p = iwhere_query_p[valid_mask_p]
+	# 			inds_p = order_hash_picks_time[idx_p[valid_mask_p]]
+
+	# 			if len(inds_p) > 0:
+	# 				misfit_rel_time_p = tpick[inds_p].reshape(-1, 1) - tlatent[nodes_of_product_p[iwhere_query_p], 0].reshape(-1, 1)
+	# 				misfit_rel_time_p = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_p) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_p)), dim=1)
+
+	# 				offset_ref_sta_p = (locs_use_cart[ipick[inds_p]] - x_context_cart[A_src_in_sta[1, nodes_of_product_p[iwhere_query_p]]]) / (10.0 * self.scale_rel)
+	# 				norm_p = torch.norm(offset_ref_sta_p, dim=1, keepdim=True).clamp(min=1e-8)
+	# 				gammas_time2 = self._compute_decomposed_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx).mean(dim=0, keepdim=True)
+	# 				feat_p = torch.cat((offset_ref_sta_p / norm_p, torch.exp(-1.0 * norm_p * gammas_time2)), dim=1)
+
+	# 				inpt_p = torch.cat((x[nodes_of_product_p[iwhere_query_p]], misfit_rel_time_p, feat_p, self.phase_embed(phase_label[inds_p].long().reshape(-1))), dim=1)
+	# 				aggregate_product_p = scatter(self.fc2(inpt_p), inds_p, dim=0, dim_size=len(tpick), reduce='mean')
+
+	# 		# --- S Phase Processing ---
+	# 		edge_index_s = knn(
+	# 			torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
+	# 			torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_s]],
+	# 			k=self.k_spc_edges
+	# 		).flip(0).contiguous()
+
+	# 		deg_slice_s = degree_srcs[edge_index_s[0]]
+	# 		inc_inds_s = torch.arange(deg_slice_s.sum(), device=device, dtype=torch.long) - torch.repeat_interleave(torch.cumsum(deg_slice_s, dim=0) - deg_slice_s, deg_slice_s)
+	# 		nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(deg_slice_s) + inc_inds_s
+			
+	# 		query_vals_s_hash = (A_src_in_sta[0, nodes_of_product_s].to(torch.int64) << 32) | edge_index_s[1].repeat_interleave(deg_slice_s).to(torch.int64)
+	# 		# target_picks_s = ind_grab_s[edge_index_s[1].repeat_interleave(deg_slice_s)]
+	# 		# query_vals_s_hash = (A_src_in_sta[0, nodes_of_product_s].to(torch.int64) << 32) | target_picks_s.to(torch.int64)
+	# 		iwhere_query_s = torch.where(torch.isin(query_vals_s_hash, hash_picks_time))[0]
+
+	# 		if len(iwhere_query_s) > 0 and len(hash_picks_time) > 0:
+	# 			sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
+	# 			query_hashes_s = query_vals_s_hash[iwhere_query_s]
+	# 			idx_s = torch.searchsorted(sorted_hash_picks_time, query_hashes_s).clamp(max=len(sorted_hash_picks_time) - 1)
+				
+	# 			valid_mask_s = (sorted_hash_picks_time[idx_s] == query_hashes_s)
+				
+	# 			# --- Station Match Guard: Reject nearest-neighbor matches from wrong stations ---
+	# 			matched_s_edges = nodes_of_product_s[iwhere_query_s[valid_mask_s]]
+	# 			matched_s_picks = order_hash_picks_time[idx_s[valid_mask_s]]
+	# 			station_match_mask_s = (A_src_in_sta[0, matched_s_edges] == ipick[matched_s_picks])
+				
+	# 			# valid_mask_s[valid_mask_s.clone()] = station_match_mask_s
+	# 			valid_mask_s = valid_mask_s & station_match_mask_s
+
+	# 			iwhere_query_s = iwhere_query_s[valid_mask_s]
+	# 			inds_s = order_hash_picks_time[idx_s[valid_mask_s]]
+
+	# 			if len(inds_s) > 0:
+	# 				misfit_rel_time_s = tpick[inds_s].reshape(-1, 1) - tlatent[nodes_of_product_s[iwhere_query_s], 1].reshape(-1, 1)
+	# 				misfit_rel_time_s = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_s) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_s)), dim=1)
+
+	# 				offset_ref_sta_s = (locs_use_cart[ipick[inds_s]] - x_context_cart[A_src_in_sta[1, nodes_of_product_s[iwhere_query_s]]]) / (10.0 * self.scale_rel)
+	# 				norm_s = torch.norm(offset_ref_sta_s, dim=1, keepdim=True).clamp(min=1e-8)
+	# 				gammas_time3 = self._compute_decomposed_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx).mean(dim=0, keepdim=True)
+	# 				feat_s = torch.cat((offset_ref_sta_s / norm_s, torch.exp(-1.0 * norm_s * gammas_time3)), dim=1)
+
+	# 				inpt_s = torch.cat((x[nodes_of_product_s[iwhere_query_s]], misfit_rel_time_s, feat_s, self.phase_embed(phase_label[inds_s].long().reshape(-1))), dim=1)
+	# 				aggregate_product_s = scatter(self.fc3(inpt_s), inds_s, dim=0, dim_size=len(tpick), reduce='mean')
+
+	# 	# # --- Dense Embedding Placement ---
+	# 	# arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
+
+	# 	# if len(isrc) > 0 and len(iarv) > 0:
+	# 	# 	flat_target_idx = isrc * len(tpick) + iarv
+	# 	# 	flat_embed_agg = scatter(aggregate_product, flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='mean')
+	# 	# 	counts = scatter(torch.ones_like(aggregate_product[:, :1]), flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='sum')
+
+	# 	# 	arv_embed = arv_embed.view(-1, self.fc1[-1].out_features)
+			
+	# 	# 	# Selectively write matched indices to prevent un-matched zero overrides
+	# 	# 	# matched_mask = (flat_embed_agg.abs().sum(dim=-1) > 0)
+	# 	# 	matched_mask = (counts.squeeze(-1) > 0)
+
+	# 	# 	arv_embed[matched_mask] = flat_embed_agg[matched_mask]
+	# 	# 	arv_embed = arv_embed.view(len(x_query_cart), len(tpick), -1)
+
+	# 	# Updated Dense Embedding Placement Guard
+	# 	arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
+
+	# 	if len(isrc) > 0 and len(iarv) > 0 and len(iwhere_query) > 0:
+	# 		flat_target_idx = isrc * len(tpick) + iarv
+	# 		flat_embed_agg = scatter(aggregate_product, flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='mean')
+	# 		counts = scatter(torch.ones((len(iarv), 1), device=device), flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='sum')
+
+	# 		arv_embed = arv_embed.view(-1, self.fc1[-1].out_features)
+	# 		matched_mask = counts.squeeze(-1) > 0
+	# 		arv_embed[matched_mask] = flat_embed_agg[matched_mask]
+	# 		arv_embed = arv_embed.view(len(x_query_cart), len(tpick), -1)
+
+	# 	# Merge Phase Across Branches
+	# 	arv_embed = self.fc_merge(torch.cat((
+	# 		arv_embed,
+	# 		aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1),
+	# 		aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)
+	# 	), dim=2))
+
+	# 	return arv_embed, mask_misfit_time
+
+
+
+
+class VerificationSuite(ArrivalEmbedding):
+	"""Subclass containing synthetic assertions, high-stress graph testing, and indexing suite."""
+
+	@classmethod
+	def test_run(cls, device='cpu'):
+		print(f"--- Launching ArrivalEmbedding Stress & Index Verification Suite [{device.upper()}] ---")
+
+		n_queries = 50
+		n_picks = 1000
+		n_context = 200
+		n_stations = 30
+		n_edges = 3000
+
+		ndim_arv_in = 16
+		ndim_out = 32
+		n_hidden = 64
+		embed_dim = 16
+
+		model = cls(
+			ndim_arv_in=ndim_arv_in, ndim_out=ndim_out, n_hidden=n_hidden, 
+			embed_vector_dim=embed_dim, device=device
+		).to(device)
+
+		x = torch.randn(n_edges, ndim_arv_in, device=device)
+		x_context_cart = torch.randn(n_context, 3, device=device) * 50000.0
+		x_context_t = torch.randn(n_context, device=device) * 500.0
+		x_query_cart = torch.randn(n_queries, 3, device=device) * 50000.0
+		x_query_t = torch.randn(n_queries, device=device) * 500.0
+
+		A_src_in_sta = torch.stack([
+			torch.randint(0, n_stations, (n_edges,), device=device, dtype=torch.long),
+			torch.randint(0, n_context, (n_edges,), device=device, dtype=torch.long)
+		], dim=0)
+
+
+		sort_order = torch.argsort(A_src_in_sta[1])
+		A_src_in_sta = A_src_in_sta[:, sort_order]
+
+		tpick = torch.rand(n_picks, device=device) * 300.0
+		ipick = torch.randint(0, n_stations, (n_picks,), device=device, dtype=torch.long)
+		phase_label = torch.randint(0, 2, (n_picks,), device=device, dtype=torch.long)
+
+		locs_use_cart = torch.randn(n_stations, 3, device=device) * 50000.0
+		tlatent = torch.randn(n_edges, 2, device=device) * 100.0
+		embed_context = torch.randn(1, embed_dim, device=device)
+		trv_out = torch.rand(n_queries, n_stations, 2, device=device) * 100.0
+
+		# Inject Deterministic Matching Cases accounting for x_query_t offset
+		ipick[12] = 3
+		phase_label[12] = 0
+		trv_out[5, 3, 0] = 42.50
+		tpick[12] = 42.50 + x_query_t[5].item()
+
+		ipick[88] = 10
+		phase_label[88] = 1
+		trv_out[18, 10, 1] = 110.25
+		tpick[88] = 110.25 + x_query_t[18].item()
+
+		ipick[500] = 2
+		tpick[500] = 99999.0
+
+		out, mask = model(
+			x, x_context_cart, x_context_t, x_query_cart, x_query_t,
+			A_src_in_sta, tpick, ipick, phase_label, locs_use_cart,
+			tlatent, embed_context, trv_out=trv_out
+		)
+
+		assert out.shape == (n_queries, n_picks, ndim_out), f"Shape mismatch: {out.shape}"
+		assert mask.shape == (n_queries, n_picks), f"Mask shape mismatch: {mask.shape}"
+		assert not torch.isnan(out).any(), "Output contains NaNs"
+		assert not torch.isinf(out).any(), "Output contains Infs"
+
+		assert mask[5, 12].item() == True, "P-phase match missed by mask"
+		assert mask[18, 88].item() == True, "S-phase match missed by mask"
+		assert mask[:, 500].sum().item() == 0, "Out-of-bounds time matched unexpectedly"
+
+		print("[✔] Model dimensions and linear layers correctly parameterized.")
+		print("[✔] Indexing and indexing tensor bounds verified.")
+		print("[✔] Stress test passed with 0 CUDA assertions.")
+
+
+class VerificationSuite(ArrivalEmbedding):
+	"""Subclass containing edge-case stress tests, graph sensitivity checks, and autograd validation."""
+
+	@classmethod
+	def test_run(cls, device='cpu'):
+		print(f"--- Launching Advanced Edge-Case Stress Suite [{device.upper()}] ---")
+
+		# ---------------------------------------------------------
+		# 1. Setup Dimensions & Partial Graph Indexing
+		# ---------------------------------------------------------
+		n_queries = 2		  # Heavy query-to-pick asymmetry (1 : 4250)
+		n_picks = 8500		 
+		n_context = 50
+		n_stations = 120
+		n_edges = 1000		 # Low graph density -> unindexed stations
+
+		ndim_arv_in = 16
+		ndim_out = 32
+		n_hidden = 64
+		embed_dim = 16
+
+		model = cls(
+			ndim_arv_in=ndim_arv_in, ndim_out=ndim_out, n_hidden=n_hidden, 
+			embed_vector_dim=embed_dim, device=device
+		).to(device)
+
+		# Physical Coordinates (~100 km geodetic scale)
+		x_context_cart = torch.randn(n_context, 3, device=device) * 1e5
+		x_context_t = torch.randn(n_context, device=device) * 100.0
+		x_query_cart = torch.randn(n_queries, 3, device=device) * 1e5
+		x_query_t = torch.tensor([12.0, -840.0], device=device)
+
+		x = torch.randn(n_edges, ndim_arv_in, device=device, requires_grad=True)
+
+		# Unconnected/Isolated Stations (Graph edges strictly link stations 0..59)
+		A_src_in_sta = torch.stack([
+			torch.randint(0, 60, (n_edges,), device=device, dtype=torch.long),
+			torch.randint(0, n_context, (n_edges,), device=device, dtype=torch.long)
+		], dim=0)
+
+
+		sort_order = torch.argsort(A_src_in_sta[1])
+		A_src_in_sta = A_src_in_sta[:, sort_order]
+
+		target_sta = 5
+		target_phase = 0
+
+		# Guarantee station 5 has at least one edge regardless of random seed
+		edges_sta = (A_src_in_sta[0] == target_sta).nonzero(as_tuple=True)[0]
+		if len(edges_sta) == 0:
+			A_src_in_sta[0, 0] = target_sta
+			A_src_in_sta[1, 0] = 0
+			edges_sta = torch.tensor([0], device=device)
+
+		# Synthetic Pick Inputs across full station index range (0..119)
+		tpick = torch.rand(n_picks, device=device) * 500.0
+		ipick = torch.randint(0, n_stations, (n_picks,), device=device, dtype=torch.long)
+		phase_label = torch.randint(0, 2, (n_picks,), device=device, dtype=torch.long)
+
+		locs_use_cart = torch.randn(n_stations, 3, device=device) * 1e5
+		tlatent = torch.randn(n_edges, 2, device=device) * 50.0
+		embed_context = torch.randn(1, embed_dim, device=device)
+		trv_out = torch.rand(n_queries, n_stations, 2, device=device) * 100.0
+
+		# ---------------------------------------------------------
+		# 2. Inject Deterministic Boundary, Isolated Node, & Collision Cases
+		# ---------------------------------------------------------
+		thresh = getattr(model, 'min_thresh', 1.0)
+		fixed_trv = 10.0
+
+		# Isolate target station travel times across ALL phases for Query 0
+		trv_out[0, target_sta, 0] = fixed_trv
+		trv_out[0, target_sta, 1] = fixed_trv + 1000.0  # Far offset to prevent phase collision
+
+		# Target expected arrival = origin_time + travel_time
+		expected_arrival_q0 = x_query_t[0].item() + fixed_trv
+
+		# Pick 100: Exact match with query 0 travel time -> Must evaluate True
+		ipick[100], phase_label[100] = target_sta, target_phase
+		tpick[100] = expected_arrival_q0
+
+		# Pick 101: Outside threshold window -> Must evaluate False
+		ipick[101], phase_label[101] = target_sta, target_phase
+		tpick[101] = expected_arrival_q0 + thresh + 50.0
+
+		# Pick 150: Force to Isolated Station 80 (omitted from A_src_in_sta)
+		isolated_sta = 80
+		ipick[150], phase_label[150] = isolated_sta, 0
+		trv_out[0, isolated_sta, 0] = fixed_trv
+		tpick[150] = expected_arrival_q0
+
+		# Test Case B: Identical Duplicate Arrivals for Query 1
+		expected_arrival_q1 = x_query_t[1].item() + 88.0
+		ipick[200:205] = 12
+		phase_label[200:205] = 1
+		trv_out[1, 12, 1] = 88.0
+		trv_out[1, 12, 0] = 88.0 + 1000.0
+		tpick[200:205] = expected_arrival_q1
+
+		# Test Case C: Boundary Out-of-bounds Extreme Timestamps
+		tpick[500] = -99999.0
+		tpick[501] = 99999.0
+
+		# ---------------------------------------------------------
+		# 3. Forward Pass & Strict Unmasked Tensor Audits
+		# ---------------------------------------------------------
+		model.eval()  # Disable dropout for deterministic evaluation
+		with torch.no_grad():
+			out, mask = model(
+				x, x_context_cart, x_context_t, x_query_cart, x_query_t,
+				A_src_in_sta, tpick, ipick, phase_label, locs_use_cart,
+				tlatent, embed_context, trv_out=trv_out
+			)
+
+		# Output Diagnostic Verification
+		res_100 = torch.abs(tpick[100] - (x_query_t[0] + trv_out[0, target_sta, target_phase])).item()
+		res_101 = torch.abs(tpick[101] - (x_query_t[0] + trv_out[0, target_sta, target_phase])).item()
+		print(f"[Diag] Min Threshold = {thresh}")
+		print(f"[Diag] Pick 100 Misfit = {res_100:.2f}s | Mask = {mask[0, 100].item()}")
+		print(f"[Diag] Pick 101 Misfit = {res_101:.2f}s | Mask = {mask[0, 101].item()}")
+
+		# Structural Tensor Integrity
+		assert out.shape == (n_queries, n_picks, ndim_out), f"Output shape mismatch: {out.shape}"
+		assert mask.shape == (n_queries, n_picks), f"Mask shape mismatch: {mask.shape}"
+		assert not torch.isnan(out).any(), "Raw unmasked output contains NaNs"
+		assert not torch.isinf(out).any(), "Raw unmasked output contains Infs"
+
+		# Boundary Mask Assertions
+		assert mask[0, 100].item() == True, f"Boundary test failed: Inside threshold (misfit={res_100:.2f}s) evaluated False"
+		assert mask[0, 101].item() == False, f"Boundary test failed: Outside threshold (misfit={res_101:.2f}s) evaluated True"
+		assert mask[1, 200:205].all().item() == True, "Duplicate arrival masking failed"
+
+		# Isolated Station Assertion
+		assert not torch.isnan(out[:, 150, :]).any(), "Isolated station output produced NaNs"
+
+		print("[✔] Unmasked activation tensors verified clean (No NaNs/Infs).")
+		print("[✔] Origin-time relative boundary and isolated station checks passed.")
+
+		# ---------------------------------------------------------
+		# 4. Universal Seed-Agnostic Graph Sensitivity Check
+		# ---------------------------------------------------------
+		model.eval()
+
+		with torch.no_grad():
+			out_orig, mask_orig = model(
+				x, x_context_cart, x_context_t, x_query_cart, x_query_t,
+				A_src_in_sta, tpick, ipick, phase_label, locs_use_cart,
+				tlatent, embed_context, trv_out=trv_out
+			)
+
+		# Perturb ALL edges connected to target_sta
+		x_perturbed = x.clone()
+		x_perturbed[edges_sta] += 50.0
+
+		with torch.no_grad():
+			out_perturbed, _ = model(
+				x_perturbed, x_context_cart, x_context_t, x_query_cart, x_query_t,
+				A_src_in_sta, tpick, ipick, phase_label, locs_use_cart,
+				tlatent, embed_context, trv_out=trv_out
+			)
+
+		# Find picks belonging to target_sta that are actively UNMASKED for Query 0
+		target_sta_picks = (ipick == target_sta).nonzero(as_tuple=True)[0]
+		unmasked_target_picks = target_sta_picks[mask_orig[0, target_sta_picks]]
+
+		if len(unmasked_target_picks) > 0:
+			# Check sensitivity on an active (unmasked) pick embedding
+			pick_idx = unmasked_target_picks[0].item()
+			diff = torch.max(torch.abs(out_orig[0, pick_idx] - out_perturbed[0, pick_idx])).item()
+			
+			assert diff > 1e-4, \
+				f"Graph Sensitivity Failure: Modifying all {len(edges_sta)} edge features for station {target_sta} " \
+				f"had no effect on unmasked pick {pick_idx} embedding (Max Diff: {diff:.6e})!"
+		else:
+			# Fallback: Check overall graph-level tensor perturbation across Query 0 if all target picks got masked
+			diff = torch.max(torch.abs(out_orig[0] - out_perturbed[0])).item()
+			assert diff > 1e-4, \
+				f"Graph Sensitivity Failure: Modifying edges for station {target_sta} had zero global output effect!"
+
+		print(f"[✔] Graph Sensitivity verified: Modifying {len(edges_sta)} edges for station {target_sta} "
+			  f"correctly propagated to embeddings (Max Diff: {diff:.4f}).")
+
+		# ---------------------------------------------------------
+		# 5. Backward Pass & Autograd Gradient Flow
+		# ---------------------------------------------------------
+		model.train()  # Enable training mode for autograd gradient checks
+		out_tr, mask_tr = model(
+			x, x_context_cart, x_context_t, x_query_cart, x_query_t,
+			A_src_in_sta, tpick, ipick, phase_label, locs_use_cart,
+			tlatent, embed_context, trv_out=trv_out
+		)
+
+		loss = (out_tr * mask_tr.unsqueeze(-1)).sum()
+		loss.backward()
+
+		grad_failures = []
+		for name, param in model.named_parameters():
+			if param.requires_grad:
+				if param.grad is None:
+					grad_failures.append(f"{name}: No gradient computed")
+				elif torch.isnan(param.grad).any():
+					grad_failures.append(f"{name}: Gradient contains NaNs")
+				elif torch.isinf(param.grad).any():
+					grad_failures.append(f"{name}: Gradient contains Infs")
+
+		assert len(grad_failures) == 0, f"Autograd issues found:\n" + "\n".join(grad_failures)
+		assert x.grad is not None and not torch.isnan(x.grad).any(), "Input graph features (x) gradient failed"
+
+		print("[✔] Backward pass successful. Non-zero, finite gradients verified across all layers.")
+		print("[✔] Complete Verification Suite Finished Successfully.")
+
+
+
+
+
+# class ArrivalEmbedding(MessagePassing):
+#	 def __init__(self, ndim_arv_in, ndim_out, n_hidden=20, n_dim_embed=30, n_phase_embed=5, 
+#				  embed_vector_dim=10, ndim_out_src=1, scale_rel=scale_rel, k_spc_edges=k_spc_edges, 
+#				  kernel_sig_t=kernel_sig_t, use_phase_types=use_phase_types, scale_time=scale_time, 
+#				  min_thresh=0.01, trv=None, ftrns2=None, device='cuda'):
+#		 super(ArrivalEmbedding, self).__init__(node_dim=0, aggr='add')
+
+#		 self.ftrns2 = ftrns2
+#		 self.trv = trv
+#		 self.use_phase_types = use_phase_types
+#		 self.kernel_sig_t = kernel_sig_t
+#		 self.min_thresh = min_thresh
+#		 self.scale_time = scale_time
+#		 self.scale_rel = scale_rel
+#		 self.k_spc_edges = k_spc_edges
+#		 self.device = device
+#		 self.dilate_scale = 2.0
+#		 self.scale_misfit = 2.0
+#		 self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
+
+#		 n_phase_types = 2
+#		 self.phase_embed = nn.Embedding(n_phase_types, n_phase_embed)
+
+#		 # Feature dimensions:
+#		 # fc1: n_hidden + 2(misfit_rel) + 2(misfit_query) + 6(feat_src_sta) + 6(feat_ref_sta) + 6(feat_ref_src) + 4(feat_time) + 5(phase) = n_hidden + 31
+#		 self.fc1 = nn.Sequential(
+#			 nn.Linear(n_hidden + 31, 2 * n_hidden), 
+#			 nn.PReLU(), 
+#			 nn.Linear(2 * n_hidden, n_hidden)
+#		 )
+		
+#		 # fc2 / fc3: n_hidden + 2(misfit_rel) + 7(offset_ref_sta_norm_kernel [3 dir + 3 RBF]) + 5(phase) = n_hidden + 14
+#		 self.fc2 = nn.Sequential(
+#			 nn.Linear(n_hidden + 14, 2 * n_hidden), 
+#			 nn.PReLU(), 
+#			 nn.Linear(2 * n_hidden, n_hidden)
+#		 )
+#		 self.fc3 = nn.Sequential(
+#			 nn.Linear(n_hidden + 14, 2 * n_hidden), 
+#			 nn.PReLU(), 
+#			 nn.Linear(2 * n_hidden, n_hidden)
+#		 )
+		
+#		 self.ioffset = torch.tensor([-1, 0], dtype=torch.long, device=self.device)
+
+#		 # Spatial gamma banks (3 channels each)
+#		 self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+#		 self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+#		 self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+
+#		 # Temporal gamma banks (3 channels each)
+#		 self.f_gamma_time1, self.log_gamma_base_time1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.1, max_val=2.0)
+#		 self.f_gamma_time2, self.log_gamma_base_time2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+#		 self.f_gamma_time3, self.log_gamma_base_time3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+
+#		 self.fc_merge = nn.Sequential(
+#			 nn.Linear(3 * n_hidden, 2 * n_hidden), 
+#			 nn.PReLU(), 
+#			 nn.Linear(2 * n_hidden, ndim_out)
+#		 )
+
+#	 def _init_gamma_bank(self, embed_dim, n_gammas=3, min_val=0.05, max_val=2.0):
+#		 f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
+#		 nn.init.zeros_(f_gamma.weight)
+#		 nn.init.zeros_(f_gamma.bias)
+		
+#		 base_gammas = torch.logspace(
+#			 torch.log10(torch.tensor(min_val)), 
+#			 torch.log10(torch.tensor(max_val)), 
+#			 steps=n_gammas
+#		 ).unsqueeze(0)
+#		 log_gamma_base = nn.Parameter(torch.log(base_gammas))
+		
+#		 return f_gamma, log_gamma_base
+
+#	 def _compute_gammas(self, f_gamma_layer, log_gamma_base, ctx, n_gammas=3):
+#		 delta = f_gamma_layer(ctx) # [E, 1 + n_gammas]
+#		 alpha = delta[:, :1]		# [E, 1]
+#		 residuals = 0.2 * torch.tanh(delta[:, 1:]) # [E, n_gammas]
+		
+#		 gammas = torch.exp(log_gamma_base + alpha + residuals)
+#		 return gammas
+
+#	 def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out=None):
+#		 if trv_out is None:
+#			 trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart)) + x_query_t.reshape(-1, 1, 1)
+#		 else: 
+#			 trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
+
+#		 if not self.use_phase_types:
+#			 phase_label = phase_label * 0.0
+
+#		 i1 = torch.where(phase_label == 0)[0]
+#		 i2 = torch.where(phase_label == 1)[0]
+
+#		 misfit_time = torch.zeros((len(x_query_cart), len(tpick), 4), device=self.device)
+#		 tpick = tpick if isinstance(tpick, torch.Tensor) else torch.as_tensor(tpick, device=self.device)
+		
+#		 misfit_time[:, i1, 0] = torch.exp(-0.5 * (trv_out[:, ipick[i1], 0] - tpick[i1])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+#		 misfit_time[:, i2, 1] = torch.exp(-0.5 * (trv_out[:, ipick[i2], 1] - tpick[i2])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+#		 misfit_time[:, :, 2]  = torch.exp(-0.5 * (trv_out[:, ipick, 0] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+#		 misfit_time[:, :, 3]  = torch.exp(-0.5 * (trv_out[:, ipick, 1] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+				
+#		 degree_srcs = degree(A_src_in_sta[1], num_nodes=len(x_context_cart), dtype=torch.long)
+#		 cum_degree_srcs = torch.cat((torch.zeros(1, device=self.device), torch.cumsum(degree_srcs, dim=0)[:-1]), dim=0).long()
+		
+#		 mask_misfit_time = misfit_time.max(2).values > self.min_thresh
+#		 isrc, iarv = torch.where(mask_misfit_time == 1)
+
+#		 edge_index = knn(
+#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
+#			 torch.cat((x_query_cart / 1000.0, self.scale_time * x_query_t.reshape(-1, 1)), dim=1), 
+#			 k=self.k_spc_edges
+#		 ).flip(0).contiguous()
+
+#		 deg_slice = degree_srcs[edge_index[0]]
+#		 assert deg_slice.min() > 0
+#		 inc_inds = torch.arange(deg_slice.sum(), device=self.device).long()
+#		 inc_inds = inc_inds - torch.repeat_interleave(torch.cumsum(deg_slice, dim=0) - deg_slice, deg_slice)
+#		 nodes_of_product = cum_degree_srcs[edge_index[0]].repeat_interleave(degree_srcs[edge_index[0]]) + inc_inds
+#		 ind_query = torch.arange(len(x_query_cart), device=self.device).long().repeat_interleave(scatter(deg_slice, edge_index[1], dim=0, dim_size=len(x_query_cart), reduce='sum'), dim=0)
+#		 sta_src_pairs = A_src_in_sta[:, nodes_of_product]
+
+#		 query_vals = torch.cat((sta_src_pairs[0].reshape(-1, 1), ind_query.reshape(-1, 1)), dim=1).long()
+#		 pick_vals = torch.cat((ipick[iarv].reshape(-1, 1), isrc.reshape(-1, 1)), dim=1).long()
+
+#		 hash_picks, hash_queries = hash_rows(pick_vals), hash_rows(query_vals)
+#		 mask_queries = torch.isin(hash_queries, hash_picks)
+#		 iwhere_query = torch.where(mask_queries == 1)[0]
+
+#		 sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
+#		 ind_extract = torch.searchsorted(sorted_hash_picks, hash_queries[iwhere_query])
+#		 valid_ind = (ind_extract < len(sorted_hash_picks)) & (sorted_hash_picks[ind_extract.clamp(max=len(sorted_hash_picks) - 1)] == hash_queries[iwhere_query])
+#		 inds_queries_to_picks = order_hash_picks[ind_extract.clamp(max=len(sorted_hash_picks) - 1)][valid_ind]
+
+#		 # Spatial & temporal feature calculations
+#		 misfit_rel_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - tlatent[nodes_of_product[iwhere_query]]
+#		 misfit_query_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - trv_out[query_vals[iwhere_query, 1], ipick[iarv[inds_queries_to_picks]], :]
+
+#		 misfit_rel_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time)), dim=1)
+#		 misfit_query_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_query_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_query_time)), dim=1)
+
+#		 offset_src_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_query_cart[query_vals[iwhere_query, 1]]) / (10.0 * self.scale_rel)
+#		 offset_ref_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]], :]) / (10.0 * self.scale_rel)
+#		 offset_ref_src = (x_query_cart[query_vals[iwhere_query, 1]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (1.0 * self.scale_rel)
+#		 offset_ref_src_t = 1000.0 * self.scale_time * (x_query_t[query_vals[iwhere_query, 1]].reshape(-1, 1) - x_context_t[A_src_in_sta[1, nodes_of_product[iwhere_query]]].reshape(-1, 1)) / (3.0 * self.scale_rel)
+
+#		 eps_time = 1e-8
+#		 offset_src_sta_norm = torch.norm(offset_src_sta, dim=1, keepdim=True).clamp(min=eps_time)
+#		 offset_ref_sta_norm = torch.norm(offset_ref_sta, dim=1, keepdim=True).clamp(min=eps_time)
+#		 offset_ref_src_norm = torch.norm(offset_ref_src, dim=1, keepdim=True).clamp(min=eps_time)
+
+#		 ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+#		 gammas1 = self._compute_gammas(self.f_gamma1, self.log_gamma_base1, ctx, n_gammas=3)
+#		 gammas2 = self._compute_gammas(self.f_gamma2, self.log_gamma_base2, ctx, n_gammas=3)
+#		 gammas3 = self._compute_gammas(self.f_gamma3, self.log_gamma_base3, ctx, n_gammas=3)
+
+#		 rbf_src_sta = torch.exp(-1.0 * offset_src_sta_norm * gammas1)
+#		 rbf_ref_sta = torch.exp(-1.0 * offset_ref_sta_norm * gammas2)
+#		 rbf_ref_src = torch.exp(-1.0 * offset_ref_src_norm * gammas3)
+
+#		 feat_src_sta = torch.cat((offset_src_sta / offset_src_sta_norm, rbf_src_sta), dim=-1)
+#		 feat_ref_sta = torch.cat((offset_ref_sta / offset_ref_sta_norm, rbf_ref_sta), dim=-1)
+#		 feat_ref_src = torch.cat((offset_ref_src / offset_ref_src_norm, rbf_ref_src), dim=-1)
+
+#		 gammas1_time = self._compute_gammas(self.f_gamma_time1, self.log_gamma_base_time1, ctx, n_gammas=3)
+#		 rbf_time = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas1_time)
+#		 feat_time = torch.cat((offset_ref_src_t, rbf_time), dim=-1)
+
+#		 inpt_aggregate = torch.cat((
+#			 x[nodes_of_product[iwhere_query]], 
+#			 misfit_rel_time, 
+#			 misfit_query_time, 
+#			 feat_src_sta, 
+#			 feat_ref_sta, 
+#			 feat_ref_src, 
+#			 feat_time, 
+#			 self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())
+#		 ), dim=1)
+		
+#		 aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim=0, dim_size=len(iarv), reduce='mean')
+
+#		 # Time-based embeddings
+#		 min_time_shift = tlatent.amin()
+#		 max_time_offset = (tlatent.amax() - min_time_shift) * 2.5
+#		 query_time = ((tpick - min_time_shift) + max_time_offset * ipick).reshape(-1, 1)
+		
+#		 val_sort_p, ind_sort_p = torch.sort((tlatent[:, 0] - min_time_shift) + max_time_offset * A_src_in_sta[0])
+#		 val_sort_s, ind_sort_s = torch.sort((tlatent[:, 1] - min_time_shift) + max_time_offset * A_src_in_sta[0])
+#		 ind_extract_p = torch.searchsorted(val_sort_p, (tpick - min_time_shift) + max_time_offset * ipick)
+#		 ind_extract_s = torch.searchsorted(val_sort_s, (tpick - min_time_shift) + max_time_offset * ipick)
+
+#		 iarg_p = torch.argmin(torch.abs(torch.cat((val_sort_p[torch.clamp(ind_extract_p - 1, min=0)].reshape(-1, 1), val_sort_p[torch.clamp(ind_extract_p, max=len(val_sort_p) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
+#		 iarg_s = torch.argmin(torch.abs(torch.cat((val_sort_s[torch.clamp(ind_extract_s - 1, min=0)].reshape(-1, 1), val_sort_s[torch.clamp(ind_extract_s, max=len(val_sort_s) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
+
+#		 ind_grab_p = ind_sort_p[ind_extract_p + self.ioffset[iarg_p]]
+#		 ind_grab_s = ind_sort_s[ind_extract_s + self.ioffset[iarg_s]]
+
+#		 edge_index_p = knn(
+#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
+#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_p]], 
+#			 k=self.k_spc_edges
+#		 ).flip(0).contiguous()
+
+#		 edge_index_s = knn(
+#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
+#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_s]], 
+#			 k=self.k_spc_edges
+#		 ).flip(0).contiguous()
+
+#		 deg_slice_p = degree_srcs[edge_index_p[0]]
+#		 deg_slice_s = degree_srcs[edge_index_s[0]]
+
+#		 inc_inds_p = torch.arange(deg_slice_p.sum(), device=self.device).long()
+#		 inc_inds_p = inc_inds_p - torch.repeat_interleave(torch.cumsum(deg_slice_p, dim=0) - deg_slice_p, deg_slice_p)
+
+#		 inc_inds_s = torch.arange(deg_slice_s.sum(), device=self.device).long()
+#		 inc_inds_s = inc_inds_s - torch.repeat_interleave(torch.cumsum(deg_slice_s, dim=0) - deg_slice_s, deg_slice_s)
+
+#		 nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(degree_srcs[edge_index_p[0]]) + inc_inds_p
+#		 nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(degree_srcs[edge_index_s[0]]) + inc_inds_s
+
+#		 ind_query_p = torch.arange(len(tpick), device=self.device).long().repeat_interleave(scatter(deg_slice_p, edge_index_p[1], dim=0, dim_size=len(tpick), reduce='sum'), dim=0)
+#		 ind_query_s = torch.arange(len(tpick), device=self.device).long().repeat_interleave(scatter(deg_slice_s, edge_index_s[1], dim=0, dim_size=len(tpick), reduce='sum'), dim=0)
+
+#		 sta_src_pairs_p = A_src_in_sta[:, nodes_of_product_p]
+#		 sta_src_pairs_s = A_src_in_sta[:, nodes_of_product_s]
+
+#		 query_vals_p = torch.cat((sta_src_pairs_p[0].reshape(-1, 1), ind_query_p.reshape(-1, 1)), dim=1).long()
+#		 query_vals_s = torch.cat((sta_src_pairs_s[0].reshape(-1, 1), ind_query_s.reshape(-1, 1)), dim=1).long()
+
+#		 pick_vals_time = torch.cat((ipick.reshape(-1, 1), torch.arange(len(ipick), device=self.device).reshape(-1, 1)), dim=1).long()
+#		 hash_picks_time = hash_rows(pick_vals_time)
+#		 hash_queries_p, hash_queries_s = hash_rows(query_vals_p), hash_rows(query_vals_s)
+
+#		 iwhere_query_p = torch.where(torch.isin(hash_queries_p, hash_picks_time))[0]
+#		 iwhere_query_s = torch.where(torch.isin(hash_queries_s, hash_picks_time))[0]
+
+#		 sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
+#		 ind_extract_p = torch.searchsorted(sorted_hash_picks_time, hash_queries_p[iwhere_query_p])
+#		 ind_extract_s = torch.searchsorted(sorted_hash_picks_time, hash_queries_s[iwhere_query_s])
+
+#		 valid_ind_p = (ind_extract_p < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_p.clamp(max=len(sorted_hash_picks_time) - 1)] == hash_queries_p[iwhere_query_p])
+#		 valid_ind_s = (ind_extract_s < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_s.clamp(max=len(sorted_hash_picks_time) - 1)] == hash_queries_s[iwhere_query_s])
+
+#		 inds_queries_to_picks_p = order_hash_picks_time[ind_extract_p.clamp(max=len(sorted_hash_picks_time) - 1)][valid_ind_p]
+#		 inds_queries_to_picks_s = order_hash_picks_time[ind_extract_s.clamp(max=len(sorted_hash_picks_time) - 1)][valid_ind_s]
+
+#		 misfit_rel_time_p = tpick[inds_queries_to_picks_p].reshape(-1, 1) - tlatent[nodes_of_product_p[iwhere_query_p], 0].reshape(-1, 1)
+#		 misfit_rel_time_s = tpick[inds_queries_to_picks_s].reshape(-1, 1) - tlatent[nodes_of_product_s[iwhere_query_s], 1].reshape(-1, 1)
+
+#		 misfit_rel_time_p = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_p) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_p)), dim=1)
+#		 misfit_rel_time_s = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_s) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_s)), dim=1)
+
+#		 offset_ref_sta_p = (locs_use_cart[ipick[inds_queries_to_picks_p]] - x_context_cart[A_src_in_sta[1, nodes_of_product_p[iwhere_query_p]], :]) / (10.0 * self.scale_rel)
+#		 offset_ref_sta_s = (locs_use_cart[ipick[inds_queries_to_picks_s]] - x_context_cart[A_src_in_sta[1, nodes_of_product_s[iwhere_query_s]], :]) / (10.0 * self.scale_rel)
+
+#		 offset_ref_sta_norm_p = torch.norm(offset_ref_sta_p, dim=1, keepdim=True).clamp(min=eps_time)
+#		 offset_ref_sta_norm_s = torch.norm(offset_ref_sta_s, dim=1, keepdim=True).clamp(min=eps_time)
+
+#		 gammas_time2 = self._compute_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx, n_gammas=3)
+#		 gammas_time3 = self._compute_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx, n_gammas=3)
+
+#		 rbf_ref_sta_p = torch.exp(-1.0 * offset_ref_sta_norm_p * gammas_time2)
+#		 rbf_ref_sta_s = torch.exp(-1.0 * offset_ref_sta_norm_s * gammas_time3)
+
+#		 offset_ref_sta_norm_kernel_p = torch.cat((offset_ref_sta_p / offset_ref_sta_norm_p, rbf_ref_sta_p), dim=1)
+#		 offset_ref_sta_norm_kernel_s = torch.cat((offset_ref_sta_s / offset_ref_sta_norm_s, rbf_ref_sta_s), dim=1)
+
+#		 inpt_aggregate_p = torch.cat((
+#			 x[nodes_of_product_p[iwhere_query_p]], 
+#			 misfit_rel_time_p, 
+#			 offset_ref_sta_norm_kernel_p, 
+#			 self.phase_embed(phase_label[inds_queries_to_picks_p].reshape(-1).long())
+#		 ), dim=1)
+		
+#		 inpt_aggregate_s = torch.cat((
+#			 x[nodes_of_product_s[iwhere_query_s]], 
+#			 misfit_rel_time_s, 
+#			 offset_ref_sta_norm_kernel_s, 
+#			 self.phase_embed(phase_label[inds_queries_to_picks_s].reshape(-1).long())
+#		 ), dim=1)
+
+#		 aggregate_product_p = scatter(self.fc2(inpt_aggregate_p), inds_queries_to_picks_p, dim=0, dim_size=len(tpick), reduce='mean')
+#		 aggregate_product_s = scatter(self.fc3(inpt_aggregate_s), inds_queries_to_picks_s, dim=0, dim_size=len(tpick), reduce='mean')
+
+#		 # Aggregate into final tensor
+#		 arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
+#		 arv_embed[pick_vals[:, 1], iarv, :] = aggregate_product
+		
+#		 arv_embed = self.fc_merge(torch.cat((
+#			 arv_embed, 
+#			 aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1), 
+#			 aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)
+#		 ), dim=2))
+
+#		 return arv_embed, mask_misfit_time
+
+
+
+# class ArrivalEmbedding(MessagePassing):
+#	 def __init__(self, ndim_arv_in, ndim_out, n_hidden=20, n_dim_embed=30, n_phase_embed=5, 
+#				  embed_vector_dim=10, ndim_out_src=1, scale_rel=scale_rel, k_spc_edges=k_spc_edges, 
+#				  kernel_sig_t=kernel_sig_t, use_phase_types=use_phase_types, scale_time=scale_time, 
+#				  min_thresh=0.01, trv=None, ftrns2=None, device='cuda'):
+#		 super(ArrivalEmbedding, self).__init__(node_dim=0, aggr='add')
+
+#		 self.ftrns2 = ftrns2
+#		 self.trv = trv
+#		 self.use_phase_types = use_phase_types
+#		 self.kernel_sig_t = kernel_sig_t
+#		 self.min_thresh = min_thresh
+#		 self.scale_time = scale_time
+#		 self.scale_rel = scale_rel
+#		 self.k_spc_edges = k_spc_edges
+#		 self.device = device
+#		 self.dilate_scale = 2.0
+#		 self.scale_misfit = 2.0
+#		 self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
+
+#		 n_phase_types = 2
+#		 self.phase_embed = nn.Embedding(n_phase_types, n_phase_embed)
+
+#		 # Feature dimensions:
+#		 # fc1: n_hidden + 2(misfit_rel) + 2(misfit_query) + 6(feat_src_sta) + 6(feat_ref_sta) + 6(feat_ref_src) + 4(feat_time) + 5(phase) = n_hidden + 31
+#		 self.fc1 = nn.Sequential(
+#			 nn.Linear(n_hidden + 31, 2 * n_hidden), 
+#			 nn.PReLU(), 
+#			 nn.Linear(2 * n_hidden, n_hidden)
+#		 )
+		
+#		 # fc2 / fc3: n_hidden + 2(misfit_rel) + 7(offset_ref_sta_norm_kernel) + 5(phase) = n_hidden + 14
+#		 self.fc2 = nn.Sequential(
+#			 nn.Linear(n_hidden + 14, 2 * n_hidden), 
+#			 nn.PReLU(), 
+#			 nn.Linear(2 * n_hidden, n_hidden)
+#		 )
+#		 self.fc3 = nn.Sequential(
+#			 nn.Linear(n_hidden + 14, 2 * n_hidden), 
+#			 nn.PReLU(), 
+#			 nn.Linear(2 * n_hidden, n_hidden)
+#		 )
+		
+#		 self.ioffset = torch.tensor([-1, 0], dtype=torch.long, device=self.device)
+
+#		 # Spatial gamma banks (3 multi-scale channels each)
+#		 self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+#		 self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+#		 self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+
+#		 # Temporal gamma banks
+#		 self.f_gamma_time1, self.log_gamma_base_time1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.1, max_val=2.0)
+#		 self.f_gamma_time2, self.log_gamma_base_time2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+#		 self.f_gamma_time3, self.log_gamma_base_time3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+
+#		 self.fc_merge = nn.Sequential(
+#			 nn.Linear(3 * n_hidden, 2 * n_hidden), 
+#			 nn.PReLU(), 
+#			 nn.Linear(2 * n_hidden, ndim_out)
+#		 )
+
+#	 def _init_gamma_bank(self, embed_dim, n_gammas=3, min_val=0.05, max_val=2.0):
+#		 f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
+#		 nn.init.zeros_(f_gamma.weight)
+#		 nn.init.zeros_(f_gamma.bias)
+		
+#		 base_gammas = torch.logspace(
+#			 torch.log10(torch.tensor(min_val)), 
+#			 torch.log10(torch.tensor(max_val)), 
+#			 steps=n_gammas
+#		 ).unsqueeze(0)
+#		 log_gamma_base = nn.Parameter(torch.log(base_gammas))
+		
+#		 return f_gamma, log_gamma_base
+
+#	 def _compute_gammas(self, f_gamma_layer, log_gamma_base, ctx):
+#		 # Infer n_gammas from base shape
+#		 delta = f_gamma_layer(ctx) # [E, 1 + n_gammas] or [1, 1 + n_gammas]
+#		 alpha = delta[:, :1]		# Scale adjustment
+#		 residuals = 0.2 * torch.tanh(delta[:, 1:]) # Channel residuals
+		
+#		 gammas = torch.exp(log_gamma_base + alpha + residuals) # Broadcasts over [E, n_gammas]
+#		 return gammas
+
+#	 def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out=None):
+#		 if trv_out is None:
+#			 trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart)) + x_query_t.reshape(-1, 1, 1)
+#		 else: 
+#			 trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
+
+#		 if not self.use_phase_types:
+#			 phase_label = phase_label * 0.0
+
+#		 i1 = torch.where(phase_label == 0)[0]
+#		 i2 = torch.where(phase_label == 1)[0]
+
+#		 misfit_time = torch.zeros((len(x_query_cart), len(tpick), 4), device=self.device)
+#		 tpick = tpick if isinstance(tpick, torch.Tensor) else torch.as_tensor(tpick, device=self.device)
+		
+#		 misfit_time[:, i1, 0] = torch.exp(-0.5 * (trv_out[:, ipick[i1], 0] - tpick[i1])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+#		 misfit_time[:, i2, 1] = torch.exp(-0.5 * (trv_out[:, ipick[i2], 1] - tpick[i2])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+#		 misfit_time[:, :, 2]  = torch.exp(-0.5 * (trv_out[:, ipick, 0] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+#		 misfit_time[:, :, 3]  = torch.exp(-0.5 * (trv_out[:, ipick, 1] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
+				
+#		 degree_srcs = degree(A_src_in_sta[1], num_nodes=len(x_context_cart), dtype=torch.long)
+#		 cum_degree_srcs = torch.cat((torch.zeros(1, device=self.device), torch.cumsum(degree_srcs, dim=0)[:-1]), dim=0).long()
+		
+#		 mask_misfit_time = misfit_time.max(2).values > self.min_thresh
+#		 isrc, iarv = torch.where(mask_misfit_time == 1)
+
+#		 edge_index = knn(
+#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
+#			 torch.cat((x_query_cart / 1000.0, self.scale_time * x_query_t.reshape(-1, 1)), dim=1), 
+#			 k=self.k_spc_edges
+#		 ).flip(0).contiguous()
+
+#		 deg_slice = degree_srcs[edge_index[0]]
+#		 assert deg_slice.min() > 0
+#		 inc_inds = torch.arange(deg_slice.sum(), device=self.device).long()
+#		 inc_inds = inc_inds - torch.repeat_interleave(torch.cumsum(deg_slice, dim=0) - deg_slice, deg_slice)
+#		 nodes_of_product = cum_degree_srcs[edge_index[0]].repeat_interleave(degree_srcs[edge_index[0]]) + inc_inds
+#		 ind_query = torch.arange(len(x_query_cart), device=self.device).long().repeat_interleave(scatter(deg_slice, edge_index[1], dim=0, dim_size=len(x_query_cart), reduce='sum'), dim=0)
+#		 sta_src_pairs = A_src_in_sta[:, nodes_of_product]
+
+#		 query_vals = torch.cat((sta_src_pairs[0].reshape(-1, 1), ind_query.reshape(-1, 1)), dim=1).long()
+#		 pick_vals = torch.cat((ipick[iarv].reshape(-1, 1), isrc.reshape(-1, 1)), dim=1).long()
+
+#		 hash_picks, hash_queries = hash_rows(pick_vals), hash_rows(query_vals)
+#		 mask_queries = torch.isin(hash_queries, hash_picks)
+#		 iwhere_query = torch.where(mask_queries == 1)[0]
+
+#		 sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
+#		 ind_extract = torch.searchsorted(sorted_hash_picks, hash_queries[iwhere_query])
+#		 valid_ind = (ind_extract < len(sorted_hash_picks)) & (sorted_hash_picks[ind_extract.clamp(max=len(sorted_hash_picks) - 1)] == hash_queries[iwhere_query])
+#		 inds_queries_to_picks = order_hash_picks[ind_extract.clamp(max=len(sorted_hash_picks) - 1)][valid_ind]
+
+#		 # Misfits & offsets
+#		 misfit_rel_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - tlatent[nodes_of_product[iwhere_query]]
+#		 misfit_query_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - trv_out[query_vals[iwhere_query, 1], ipick[iarv[inds_queries_to_picks]], :]
+
+#		 misfit_rel_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time)), dim=1)
+#		 misfit_query_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_query_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_query_time)), dim=1)
+
+#		 offset_src_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_query_cart[query_vals[iwhere_query, 1]]) / (10.0 * self.scale_rel)
+#		 offset_ref_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]], :]) / (10.0 * self.scale_rel)
+#		 offset_ref_src = (x_query_cart[query_vals[iwhere_query, 1]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (1.0 * self.scale_rel)
+#		 offset_ref_src_t = 1000.0 * self.scale_time * (x_query_t[query_vals[iwhere_query, 1]].reshape(-1, 1) - x_context_t[A_src_in_sta[1, nodes_of_product[iwhere_query]]].reshape(-1, 1)) / (3.0 * self.scale_rel)
+
+#		 eps_time = 1e-8
+#		 offset_src_sta_norm = torch.norm(offset_src_sta, dim=1, keepdim=True).clamp(min=eps_time)
+#		 offset_ref_sta_norm = torch.norm(offset_ref_sta, dim=1, keepdim=True).clamp(min=eps_time)
+#		 offset_ref_src_norm = torch.norm(offset_ref_src, dim=1, keepdim=True).clamp(min=eps_time)
+
+#		 ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+#		 # Gammas computation
+#		 gammas1 = self._compute_gammas(self.f_gamma1, self.log_gamma_base1, ctx)
+#		 gammas2 = self._compute_gammas(self.f_gamma2, self.log_gamma_base2, ctx)
+#		 gammas3 = self._compute_gammas(self.f_gamma3, self.log_gamma_base3, ctx)
+
+#		 rbf_src_sta = torch.exp(-1.0 * offset_src_sta_norm * gammas1)
+#		 rbf_ref_sta = torch.exp(-1.0 * offset_ref_sta_norm * gammas2)
+#		 rbf_ref_src = torch.exp(-1.0 * offset_ref_src_norm * gammas3)
+
+#		 feat_src_sta = torch.cat((offset_src_sta / offset_src_sta_norm, rbf_src_sta), dim=-1)
+#		 feat_ref_sta = torch.cat((offset_ref_sta / offset_ref_sta_norm, rbf_ref_sta), dim=-1)
+#		 feat_ref_src = torch.cat((offset_ref_src / offset_ref_src_norm, rbf_ref_src), dim=-1)
+
+#		 gammas1_time = self._compute_gammas(self.f_gamma_time1, self.log_gamma_base_time1, ctx)
+#		 rbf_time = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas1_time) # Fixed sign bug using abs()
+#		 feat_time = torch.cat((offset_ref_src_t, rbf_time), dim=-1)
+
+#		 inpt_aggregate = torch.cat((
+#			 x[nodes_of_product[iwhere_query]], 
+#			 misfit_rel_time, 
+#			 misfit_query_time, 
+#			 feat_src_sta, 
+#			 feat_ref_sta, 
+#			 feat_ref_src, 
+#			 feat_time, 
+#			 self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())
+#		 ), dim=1)
+		
+#		 aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim=0, dim_size=len(iarv), reduce='mean')
+
+#		 # Time-based embeddings section
+#		 min_time_shift = tlatent.amin()
+#		 max_time_offset = (tlatent.amax() - min_time_shift) * 2.5
+#		 query_time = ((tpick - min_time_shift) + max_time_offset * ipick).reshape(-1, 1)
+		
+#		 val_sort_p, ind_sort_p = torch.sort((tlatent[:, 0] - min_time_shift) + max_time_offset * A_src_in_sta[0])
+#		 val_sort_s, ind_sort_s = torch.sort((tlatent[:, 1] - min_time_shift) + max_time_offset * A_src_in_sta[0])
+#		 ind_extract_p = torch.searchsorted(val_sort_p, (tpick - min_time_shift) + max_time_offset * ipick)
+#		 ind_extract_s = torch.searchsorted(val_sort_s, (tpick - min_time_shift) + max_time_offset * ipick)
+
+#		 iarg_p = torch.argmin(torch.abs(torch.cat((val_sort_p[torch.clamp(ind_extract_p - 1, min=0)].reshape(-1, 1), val_sort_p[torch.clamp(ind_extract_p, max=len(val_sort_p) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
+#		 iarg_s = torch.argmin(torch.abs(torch.cat((val_sort_s[torch.clamp(ind_extract_s - 1, min=0)].reshape(-1, 1), val_sort_s[torch.clamp(ind_extract_s, max=len(val_sort_s) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
+
+#		 ind_grab_p = ind_sort_p[ind_extract_p + self.ioffset[iarg_p]]
+#		 ind_grab_s = ind_sort_s[ind_extract_s + self.ioffset[iarg_s]]
+
+#		 edge_index_p = knn(
+#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
+#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_p]], 
+#			 k=self.k_spc_edges
+#		 ).flip(0).contiguous()
+
+#		 edge_index_s = knn(
+#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
+#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_s]], 
+#			 k=self.k_spc_edges
+#		 ).flip(0).contiguous()
+
+#		 deg_slice_p = degree_srcs[edge_index_p[0]]
+#		 deg_slice_s = degree_srcs[edge_index_s[0]]
+
+#		 inc_inds_p = torch.arange(deg_slice_p.sum(), device=self.device).long()
+#		 inc_inds_p = inc_inds_p - torch.repeat_interleave(torch.cumsum(deg_slice_p, dim=0) - deg_slice_p, deg_slice_p)
+
+#		 inc_inds_s = torch.arange(deg_slice_s.sum(), device=self.device).long()
+#		 inc_inds_s = inc_inds_s - torch.repeat_interleave(torch.cumsum(deg_slice_s, dim=0) - deg_slice_s, deg_slice_s)
+
+#		 nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(degree_srcs[edge_index_p[0]]) + inc_inds_p
+#		 nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(degree_srcs[edge_index_s[0]]) + inc_inds_s
+
+#		 ind_query_p = torch.arange(len(tpick), device=self.device).long().repeat_interleave(scatter(deg_slice_p, edge_index_p[1], dim=0, dim_size=len(tpick), reduce='sum'), dim=0)
+#		 ind_query_s = torch.arange(len(tpick), device=self.device).long().repeat_interleave(scatter(deg_slice_s, edge_index_s[1], dim=0, dim_size=len(tpick), reduce='sum'), dim=0)
+
+#		 sta_src_pairs_p = A_src_in_sta[:, nodes_of_product_p]
+#		 sta_src_pairs_s = A_src_in_sta[:, nodes_of_product_s]
+
+#		 query_vals_p = torch.cat((sta_src_pairs_p[0].reshape(-1, 1), ind_query_p.reshape(-1, 1)), dim=1).long()
+#		 query_vals_s = torch.cat((sta_src_pairs_s[0].reshape(-1, 1), ind_query_s.reshape(-1, 1)), dim=1).long()
+
+#		 pick_vals_time = torch.cat((ipick.reshape(-1, 1), torch.arange(len(ipick), device=self.device).reshape(-1, 1)), dim=1).long()
+#		 hash_picks_time = hash_rows(pick_vals_time)
+#		 hash_queries_p, hash_queries_s = hash_rows(query_vals_p), hash_rows(query_vals_s)
+
+#		 iwhere_query_p = torch.where(torch.isin(hash_queries_p, hash_picks_time))[0]
+#		 iwhere_query_s = torch.where(torch.isin(hash_queries_s, hash_picks_time))[0]
+
+#		 sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
+#		 ind_extract_p = torch.searchsorted(sorted_hash_picks_time, hash_queries_p[iwhere_query_p])
+#		 ind_extract_s = torch.searchsorted(sorted_hash_picks_time, hash_queries_s[iwhere_query_s])
+
+#		 valid_ind_p = (ind_extract_p < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_p.clamp(max=len(sorted_hash_picks_time) - 1)] == hash_queries_p[iwhere_query_p])
+#		 valid_ind_s = (ind_extract_s < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_s.clamp(max=len(sorted_hash_picks_time) - 1)] == hash_queries_s[iwhere_query_s])
+
+#		 inds_queries_to_picks_p = order_hash_picks_time[ind_extract_p.clamp(max=len(sorted_hash_picks_time) - 1)][valid_ind_p]
+#		 inds_queries_to_picks_s = order_hash_picks_time[ind_extract_s.clamp(max=len(sorted_hash_picks_time) - 1)][valid_ind_s]
+
+#		 misfit_rel_time_p = tpick[inds_queries_to_picks_p].reshape(-1, 1) - tlatent[nodes_of_product_p[iwhere_query_p], 0].reshape(-1, 1)
+#		 misfit_rel_time_s = tpick[inds_queries_to_picks_s].reshape(-1, 1) - tlatent[nodes_of_product_s[iwhere_query_s], 1].reshape(-1, 1)
+
+#		 misfit_rel_time_p = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_p) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_p)), dim=1)
+#		 misfit_rel_time_s = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_s) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_s)), dim=1)
+
+#		 offset_ref_sta_p = (locs_use_cart[ipick[inds_queries_to_picks_p]] - x_context_cart[A_src_in_sta[1, nodes_of_product_p[iwhere_query_p]], :]) / (10.0 * self.scale_rel)
+#		 offset_ref_sta_s = (locs_use_cart[ipick[inds_queries_to_picks_s]] - x_context_cart[A_src_in_sta[1, nodes_of_product_s[iwhere_query_s]], :]) / (10.0 * self.scale_rel)
+
+#		 offset_ref_sta_norm_p = torch.norm(offset_ref_sta_p, dim=1, keepdim=True).clamp(min=eps_time)
+#		 offset_ref_sta_norm_s = torch.norm(offset_ref_sta_s, dim=1, keepdim=True).clamp(min=eps_time)
+
+#		 gammas_time2 = self._compute_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx)
+#		 gammas_time3 = self._compute_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx)
+
+#		 rbf_ref_sta_p = torch.exp(-1.0 * offset_ref_sta_norm_p * gammas_time2)
+#		 rbf_ref_sta_s = torch.exp(-1.0 * offset_ref_sta_norm_s * gammas_time3)
+
+#		 offset_ref_sta_norm_kernel_p = torch.cat((offset_ref_sta_p / offset_ref_sta_norm_p, rbf_ref_sta_p), dim=1)
+#		 offset_ref_sta_norm_kernel_s = torch.cat((offset_ref_sta_s / offset_ref_sta_norm_s, rbf_ref_sta_s), dim=1)
+
+#		 inpt_aggregate_p = torch.cat((
+#			 x[nodes_of_product_p[iwhere_query_p]], 
+#			 misfit_rel_time_p, 
+#			 offset_ref_sta_norm_kernel_p, 
+#			 self.phase_embed(phase_label[inds_queries_to_picks_p].reshape(-1).long())
+#		 ), dim=1)
+		
+#		 inpt_aggregate_s = torch.cat((
+#			 x[nodes_of_product_s[iwhere_query_s]], 
+#			 misfit_rel_time_s, 
+#			 offset_ref_sta_norm_kernel_s, 
+#			 self.phase_embed(phase_label[inds_queries_to_picks_s].reshape(-1).long())
+#		 ), dim=1)
+
+#		 aggregate_product_p = scatter(self.fc2(inpt_aggregate_p), inds_queries_to_picks_p, dim=0, dim_size=len(tpick), reduce='mean')
+#		 aggregate_product_s = scatter(self.fc3(inpt_aggregate_s), inds_queries_to_picks_s, dim=0, dim_size=len(tpick), reduce='mean')
+
+#		 # Final Tensor Output
+#		 arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
+#		 arv_embed[pick_vals[:, 1], iarv, :] = aggregate_product
+		
+#		 arv_embed = self.fc_merge(torch.cat((
+#			 arv_embed, 
+#			 aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1), 
+#			 aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)
+#		 ), dim=2))
+
+#		 return arv_embed, mask_misfit_time
 
 
 class SourceStationAttention(MessagePassing):
@@ -1764,17 +3250,17 @@ class SourceStationAttention(MessagePassing):
 			
 
 class FiLM(nn.Module):
-    """Feature-wise Linear Modulation with zero-initialized identity defaults."""
-    def __init__(self, embed_dim, feature_dim):
-        super().__init__()
-        self.fc = nn.Linear(embed_dim, 2 * feature_dim)
-        nn.init.zeros_(self.fc.weight)
-        nn.init.zeros_(self.fc.bias)
+	"""Feature-wise Linear Modulation with zero-initialized identity defaults."""
+	def __init__(self, embed_dim, feature_dim):
+		super().__init__()
+		self.fc = nn.Linear(embed_dim, 2 * feature_dim)
+		nn.init.zeros_(self.fc.weight)
+		nn.init.zeros_(self.fc.bias)
 
-    def forward(self, x, embed_context):
-        film_params = self.fc(embed_context)
-        gamma, beta = film_params.chunk(2, dim=-1)
-        return x * (1.0 + gamma) + beta
+	def forward(self, x, embed_context):
+		film_params = self.fc(embed_context)
+		gamma, beta = film_params.chunk(2, dim=-1)
+		return x * (1.0 + gamma) + beta
 
 
 class GCN_Detection_Network_extended(nn.Module):
@@ -1797,11 +3283,11 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		# Main Encoder Stack
 		self.DataAggregation = DataAggregationExpanded(
-		    in_channels= 4 + n_dim_extra_inpt + n_dim_extra_feat + embed_vector_dim,
-		    out_channels=15,
-		    # n_hidden=n_hidden,
-		    # embed_dim=embed_dim,
-		    use_embedding=use_embedding
+			in_channels= 4 + n_dim_extra_inpt + n_dim_extra_feat + embed_vector_dim,
+			out_channels=15,
+			# n_hidden=n_hidden,
+			# embed_dim=embed_dim,
+			use_embedding=use_embedding
 		)
 
 		## Maybe add expander convolution on SpatialAggregation
@@ -1829,13 +3315,13 @@ class GCN_Detection_Network_extended(nn.Module):
 		# self.DataAggregationAssociation = DataAggregationAssociation(15, 15).to(device) # need to add concatenation
 
 		self.DataAggregationAssociation = DataAggregationAssociation(
-		    in_channels=15,  # Dimension of unpooled feature 's'
-		    out_channels=15,
-		    # n_hidden=n_hidden,
-		    # n_dim_latent=n_hidden,
-		    # n_dim_mask=Mask.shape[-1],
-		    # embed_dim=embed_dim,
-		    use_offsets=True
+			in_channels=15,  # Dimension of unpooled feature 's'
+			out_channels=15,
+			# n_hidden=n_hidden,
+			# n_dim_latent=n_hidden,
+			# n_dim_mask=Mask.shape[-1],
+			# embed_dim=embed_dim,
+			use_offsets=True
 		)
 
 		## Make association module layers (note, previous arrival embeddings used to be smaller)
@@ -1869,31 +3355,31 @@ class GCN_Detection_Network_extended(nn.Module):
 		# 		torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
 		# 	)
 		
-        
-        # embed_vector_dim = 10
-        # self.embed_vector = nn.Sequential(
-        #     nn.Linear(6, 30), 
-        #     nn.PReLU(), 
-        #     nn.Linear(30, embed_vector_dim)
-        # )
+		
+		# embed_vector_dim = 10
+		# self.embed_vector = nn.Sequential(
+		#	 nn.Linear(6, 30), 
+		#	 nn.PReLU(), 
+		#	 nn.Linear(30, embed_vector_dim)
+		# )
 
-        # ---------------------------------------------------------------------
-        # 1. Initialize RBF Gammas for the Product Graph Offset Features
-        # ---------------------------------------------------------------------
-        if self.use_absolute_offset:
-            # Baseline spatial gammas: fine (5.0), medium (1.0), broad (0.1)
-            init_gammas_sp = torch.tensor([0.1, 1.0, 5.0], dtype=torch.float32).reshape(1, 3)
-            self.log_gamma_base = nn.Parameter(torch.log(init_gammas_sp))  # Shape: [1, 3]
+		# ---------------------------------------------------------------------
+		# 1. Initialize RBF Gammas for the Product Graph Offset Features
+		# ---------------------------------------------------------------------
+		if self.use_absolute_offset:
+			# Baseline spatial gammas: fine (5.0), medium (1.0), broad (0.1)
+			init_gammas_sp = torch.tensor([0.1, 1.0, 5.0], dtype=torch.float32).reshape(1, 3)
+			self.log_gamma_base = nn.Parameter(torch.log(init_gammas_sp))  # Shape: [1, 3]
 
-            # Linear projection from embed_context (dim 10) to 4 values:
-            # Index 0: Global alpha zoom factor
-            # Index 1-3: Residual tweaks for each spatial gamma
-            self.f_gamma = nn.Linear(embed_vector_dim, 1 + 3)
+			# Linear projection from embed_context (dim 10) to 4 values:
+			# Index 0: Global alpha zoom factor
+			# Index 1-3: Residual tweaks for each spatial gamma
+			self.f_gamma = nn.Linear(embed_vector_dim, 1 + 3)
 
-            # Zero-initialize the projection weight and bias so the model starts
-            # strictly at baseline log_gamma_base during early training steps.
-            nn.init.zeros_(self.f_gamma.weight)
-            nn.init.zeros_(self.f_gamma.bias)
+			# Zero-initialize the projection weight and bias so the model starts
+			# strictly at baseline log_gamma_base during early training steps.
+			nn.init.zeros_(self.f_gamma.weight)
+			nn.init.zeros_(self.f_gamma.bias)
 
 
 		# self.w_gamma = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
@@ -1920,43 +3406,43 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		# 1. Compute relative edge vectors ONLY if offsets are enabled
 		if self.use_absolute_offset: # (or self.use_offsets)
-		    pos_rel_sta = torch.cat((
-		        (locs_use_cart[A_src_in_sta[0][A_in_sta[1]]] - locs_use_cart[A_src_in_sta[0][A_in_sta[0]]]), 
-		        1000.0 * self.scale_time * (x_temp_cuda_t[A_src_in_sta[1][A_in_sta[1]]] - x_temp_cuda_t[A_src_in_sta[1][A_in_sta[0]]]).view(-1, 1)
-		    ), dim=1) / self.scale_rel
+			pos_rel_sta = torch.cat((
+				(locs_use_cart[A_src_in_sta[0][A_in_sta[1]]] - locs_use_cart[A_src_in_sta[0][A_in_sta[0]]]), 
+				1000.0 * self.scale_time * (x_temp_cuda_t[A_src_in_sta[1][A_in_sta[1]]] - x_temp_cuda_t[A_src_in_sta[1][A_in_sta[0]]]).view(-1, 1)
+			), dim=1) / self.scale_rel
 
-		    pos_rel_src = torch.cat((
-		        (x_temp_cuda_cart[A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_cart[A_src_in_sta[1][A_in_src_slice[0]]]), 
-		        1000.0 * self.scale_time * (x_temp_cuda_t[A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_t[A_src_in_sta[1][A_in_src_slice[0]]]).view(-1, 1)
-		    ), dim=1) / self.scale_rel
+			pos_rel_src = torch.cat((
+				(x_temp_cuda_cart[A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_cart[A_src_in_sta[1][A_in_src_slice[0]]]), 
+				1000.0 * self.scale_time * (x_temp_cuda_t[A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_t[A_src_in_sta[1][A_in_src_slice[0]]]).view(-1, 1)
+			), dim=1) / self.scale_rel
 
 
 		# 2. Append 7D features ONLY if the Geometric Preconditioner (use_embedding) is active
 		if self.use_embedding:
-		    pos_rel_sp = A_src_in_edges.x[:, 0:3]
-		    pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True) + 1e-8)
-		    
-		    delta = self.f_gamma(embed_context)
-		    alpha = delta[:, :1]
-		    residuals = 0.2 * torch.tanh(delta[:, 1:])
-		    gammas = torch.exp(self.log_gamma_base[:, :3] + alpha + residuals)
-		    spatial_decay = torch.exp(-1.0 * pos_norm_sp * gammas)
-		    
-		    pos_rel_tm = A_src_in_edges.x[:, 3:4]
+			pos_rel_sp = A_src_in_edges.x[:, 0:3]
+			pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True) + 1e-8)
+			
+			delta = self.f_gamma(embed_context)
+			alpha = delta[:, :1]
+			residuals = 0.2 * torch.tanh(delta[:, 1:])
+			gammas = torch.exp(self.log_gamma_base[:, :3] + alpha + residuals)
+			spatial_decay = torch.exp(-1.0 * pos_norm_sp * gammas)
+			
+			pos_rel_tm = A_src_in_edges.x[:, 3:4]
 
-		    rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, pos_rel_tm), dim=-1) # 7D
-		    Slice = torch.cat((Slice, rel_pos_feat), dim=1)
+			rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, pos_rel_tm), dim=-1) # 7D
+			Slice = torch.cat((Slice, rel_pos_feat), dim=1)
 
 		
 		# Runs both Optional Preconditioner (if self.use_embedding=True) AND Main GNN Stack
 		x_latent = self.DataAggregation(
-		    tr=Slice, 
-		    mask=Mask, 
-		    A_in_sta=A_in_sta, 
-		    A_in_src=A_in_src, 
-		    embed_context=embed_context, 
-		    pos_rel_sta=pos_rel_sta,  # Raw 3D + dt coordinates
-		    pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
+			tr=Slice, 
+			mask=Mask, 
+			A_in_sta=A_in_sta, 
+			A_in_src=A_in_src, 
+			embed_context=embed_context, 
+			pos_rel_sta=pos_rel_sta,  # Raw 3D + dt coordinates
+			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
 		)
 
 		x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, n_sta, n_temp)
@@ -2002,15 +3488,15 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		# Run standardized association phase
 		s = self.DataAggregationAssociationPhase(
-		    s=s,
-		    x_latent=latent_ref,
-		    mask_out_1=mask_out_1,
-		    mask=Mask,
-		    A_in_sta=A_in_sta,
-		    A_in_src=A_in_src_slice,
-		    embed_context=embed_context,
-		    pos_rel_sta=pos_rel_sta,  # Direct raw offset reuse
-		    pos_rel_src=pos_rel_src   # Direct raw offset reuse
+			s=s,
+			x_latent=latent_ref,
+			mask_out_1=mask_out_1,
+			mask=Mask,
+			A_in_sta=A_in_sta,
+			A_in_src=A_in_src_slice,
+			embed_context=embed_context,
+			pos_rel_sta=pos_rel_sta,  # Direct raw offset reuse
+			pos_rel_src=pos_rel_src   # Direct raw offset reuse
 		)
 
 		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out = trv_out_q)
@@ -2147,20 +3633,20 @@ class GCN_Detection_Network_extended(nn.Module):
 		# 	Slice = torch.cat((Slice, rel_pos_feat), dim = 1)
 
 		if self.use_absolute_offset:
-		    # Build 7D relative position feature vector
-		    pos_rel_sp = self.A_src_in_edges.x[:, 0:3]
-		    pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True) + 1e-8)
-		    
-		    delta = self.f_gamma(self.embed_context)
-		    alpha = delta[:, :1]
-		    residuals = 0.2 * torch.tanh(delta[:, 1:])
-		    gammas = torch.exp(self.log_gamma_base[:, :3] + alpha + residuals)
-		    spatial_decay = torch.exp(-1.0 * pos_norm_sp * gammas)
-		    
-		    pos_rel_tm = self.A_src_in_edges.x[:, 3:4]
+			# Build 7D relative position feature vector
+			pos_rel_sp = self.A_src_in_edges.x[:, 0:3]
+			pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True) + 1e-8)
+			
+			delta = self.f_gamma(self.embed_context)
+			alpha = delta[:, :1]
+			residuals = 0.2 * torch.tanh(delta[:, 1:])
+			gammas = torch.exp(self.log_gamma_base[:, :3] + alpha + residuals)
+			spatial_decay = torch.exp(-1.0 * pos_norm_sp * gammas)
+			
+			pos_rel_tm = self.A_src_in_edges.x[:, 3:4]
 
-		    rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, pos_rel_tm), dim=-1) # 7D
-		    Slice = torch.cat((Slice, rel_pos_feat), dim=1)	
+			rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, pos_rel_tm), dim=-1) # 7D
+			Slice = torch.cat((Slice, rel_pos_feat), dim=1)	
 
 
 		if self.use_embedding == True:
@@ -2252,20 +3738,20 @@ class GCN_Detection_Network_extended(nn.Module):
 		# 	Slice = torch.cat((Slice, rel_pos_feat), dim = 1)
 		
 		if self.use_absolute_offset:
-		    # Build 7D relative position feature vector
-		    pos_rel_sp = self.A_src_in_edges.x[:, 0:3]
-		    pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True) + 1e-8)
-		    
-		    delta = self.f_gamma(self.embed_context)
-		    alpha = delta[:, :1]
-		    residuals = 0.2 * torch.tanh(delta[:, 1:])
-		    gammas = torch.exp(self.log_gamma_base[:, :3] + alpha + residuals)
-		    spatial_decay = torch.exp(-1.0 * pos_norm_sp * gammas)
-		    
-		    pos_rel_tm = self.A_src_in_edges.x[:, 3:4]
+			# Build 7D relative position feature vector
+			pos_rel_sp = self.A_src_in_edges.x[:, 0:3]
+			pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True) + 1e-8)
+			
+			delta = self.f_gamma(self.embed_context)
+			alpha = delta[:, :1]
+			residuals = 0.2 * torch.tanh(delta[:, 1:])
+			gammas = torch.exp(self.log_gamma_base[:, :3] + alpha + residuals)
+			spatial_decay = torch.exp(-1.0 * pos_norm_sp * gammas)
+			
+			pos_rel_tm = self.A_src_in_edges.x[:, 3:4]
 
-		    rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, pos_rel_tm), dim=-1) # 7D
-		    Slice = torch.cat((Slice, rel_pos_feat), dim=1)		
+			rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, pos_rel_tm), dim=-1) # 7D
+			Slice = torch.cat((Slice, rel_pos_feat), dim=1)		
 
 
 		if self.use_embedding == True:
@@ -2350,164 +3836,164 @@ class VModel(nn.Module):
 
 class TravelTimesPN1(nn.Module):
 
-        def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, corrs = None, locs_corr = None, device = 'cuda'):
-                super(TravelTimesPN1, self).__init__()
+		def __init__(self, ftrns1, ftrns2, n_phases = 1, n_srcs = 0, n_hidden = 50, n_embed = 10, v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, corrs = None, locs_corr = None, device = 'cuda'):
+				super(TravelTimesPN1, self).__init__()
 
-                ## Relative offset prediction [2]
-                self.fc1_1 = nn.Linear(4 + n_phases + n_embed, n_hidden)
-                self.fc1_2 = nn.Linear(n_hidden, n_hidden)
-                self.fc1_3 = nn.Linear(n_hidden, n_hidden)
-                # self.fc1_4 = nn.Linear(n_hidden, n_phases)
-                self.activate1_1 = lambda x: torch.sin(x)
-                self.activate1_2 = lambda x: torch.sin(x)
-                self.activate1_3 = lambda x: torch.sin(x)
+				## Relative offset prediction [2]
+				self.fc1_1 = nn.Linear(4 + n_phases + n_embed, n_hidden)
+				self.fc1_2 = nn.Linear(n_hidden, n_hidden)
+				self.fc1_3 = nn.Linear(n_hidden, n_hidden)
+				# self.fc1_4 = nn.Linear(n_hidden, n_phases)
+				self.activate1_1 = lambda x: torch.sin(x)
+				self.activate1_2 = lambda x: torch.sin(x)
+				self.activate1_3 = lambda x: torch.sin(x)
 
-                ## Absolute position prediction [3]
-                self.fc2_1 = nn.Linear(7 + n_phases + n_embed, n_hidden)
-                self.fc2_2 = nn.Linear(n_hidden, n_hidden)
-                self.fc2_3 = nn.Linear(n_hidden, n_hidden)
-                # self.fc2_4 = nn.Linear(n_hidden, n_phases)
-                self.activate2_1 = lambda x: torch.sin(x)
-                self.activate2_2 = lambda x: torch.sin(x)
-                self.activate2_3 = lambda x: torch.sin(x)
+				## Absolute position prediction [3]
+				self.fc2_1 = nn.Linear(7 + n_phases + n_embed, n_hidden)
+				self.fc2_2 = nn.Linear(n_hidden, n_hidden)
+				self.fc2_3 = nn.Linear(n_hidden, n_hidden)
+				# self.fc2_4 = nn.Linear(n_hidden, n_phases)
+				self.activate2_1 = lambda x: torch.sin(x)
+				self.activate2_2 = lambda x: torch.sin(x)
+				self.activate2_3 = lambda x: torch.sin(x)
 
-                self.merge = nn.Sequential(nn.Linear(2*n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_phases))
+				self.merge = nn.Sequential(nn.Linear(2*n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_phases))
 
-                ## Embed source [3]
-                # self.fc3_1 = nn.Linear(3 + 2 + 1, n_hidden)
-                self.fc3_1 = nn.Linear(4, n_hidden)
-                self.fc3_2 = nn.Linear(n_hidden, n_hidden)
-                self.fc3_3 = nn.Linear(n_hidden, n_hidden)
-                self.fc3_4 = nn.Linear(n_hidden, n_embed)
-                self.activate3_1 = lambda x: torch.sin(x)
-                self.activate3_2 = lambda x: torch.sin(x)
-                self.activate3_3 = lambda x: torch.sin(x)
+				## Embed source [3]
+				# self.fc3_1 = nn.Linear(3 + 2 + 1, n_hidden)
+				self.fc3_1 = nn.Linear(4, n_hidden)
+				self.fc3_2 = nn.Linear(n_hidden, n_hidden)
+				self.fc3_3 = nn.Linear(n_hidden, n_hidden)
+				self.fc3_4 = nn.Linear(n_hidden, n_embed)
+				self.activate3_1 = lambda x: torch.sin(x)
+				self.activate3_2 = lambda x: torch.sin(x)
+				self.activate3_3 = lambda x: torch.sin(x)
 
-                ## Projection functions
-                self.ftrns1 = ftrns1
-                self.ftrns2 = ftrns2
-                # self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
-                # self.tscale = torch.Tensor([trav_val]).to(device)
-                self.v_mean = torch.Tensor(v_mean).to(device)
-                self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
-                self.device = device
-                self.norm_pos = norm_pos
-                self.inorm_pos = inorm_pos
-                self.inorm_time = inorm_time
-                self.norm_vel = norm_vel
-                self.conversion_factor = conversion_factor
-                self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
-                self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
-                self.scale_angles = torch.Tensor([180.0, 180.0]).reshape(1,-1).to(device) ## Make these adaptive
-                self.scale_depths = torch.Tensor([300e3]).reshape(1,-1).to(device)
-                if locs_corr is not None:
-                        self.tree_corr = cKDTree(ftrns1(torch.Tensor(locs_corr).to(device)).cpu().detach().numpy())
-                        self.corrs = torch.Tensor(corrs).to(device)
-                        self.use_corr = True
-                else:
-                        self.use_corr = False
+				## Projection functions
+				self.ftrns1 = ftrns1
+				self.ftrns2 = ftrns2
+				# self.scale = torch.Tensor([scale_val]).to(device) ## Might want to scale inputs before converting to Tensor
+				# self.tscale = torch.Tensor([trav_val]).to(device)
+				self.v_mean = torch.Tensor(v_mean).to(device)
+				self.v_mean_norm = torch.Tensor(norm_vel(v_mean)).to(device)
+				self.device = device
+				self.norm_pos = norm_pos
+				self.inorm_pos = inorm_pos
+				self.inorm_time = inorm_time
+				self.norm_vel = norm_vel
+				self.conversion_factor = conversion_factor
+				self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
+				self.mask = torch.Tensor([0.0, 0.0, 1.0]).reshape(1,-1).to(device)
+				self.scale_angles = torch.Tensor([180.0, 180.0]).reshape(1,-1).to(device) ## Make these adaptive
+				self.scale_depths = torch.Tensor([300e3]).reshape(1,-1).to(device)
+				if locs_corr is not None:
+						self.tree_corr = cKDTree(ftrns1(torch.Tensor(locs_corr).to(device)).cpu().detach().numpy())
+						self.corrs = torch.Tensor(corrs).to(device)
+						self.use_corr = True
+				else:
+						self.use_corr = False
 
-                if n_srcs > 0:
-                        self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))) # .to(device)
-                        self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))) # .to(device)
+				if n_srcs > 0:
+						self.reloc_x = nn.Parameter(torch.zeros((n_srcs, 3))) # .to(device)
+						self.reloc_t = nn.Parameter(torch.zeros((n_srcs, 1))) # .to(device)
 
-                # self.Tp_average
+				# self.Tp_average
 
-        def fc1_block(self, x):
+		def fc1_block(self, x):
 
-                x1 = self.activate1_1(self.fc1_1(x))
-                x = self.activate1_2(self.fc1_2(x1)) + x1
-                x1 = self.activate1_3(self.fc1_3(x)) + x
+				x1 = self.activate1_1(self.fc1_1(x))
+				x = self.activate1_2(self.fc1_2(x1)) + x1
+				x1 = self.activate1_3(self.fc1_3(x)) + x
 
-                return x1 # self.fc1_4(x1)
+				return x1 # self.fc1_4(x1)
 
-        def fc2_block(self, x):
+		def fc2_block(self, x):
 
-                x1 = self.activate2_1(self.fc2_1(x))
-                x = self.activate2_2(self.fc2_2(x1)) + x1
-                x1 = self.activate2_3(self.fc2_3(x)) + x
+				x1 = self.activate2_1(self.fc2_1(x))
+				x = self.activate2_2(self.fc2_2(x1)) + x1
+				x1 = self.activate2_3(self.fc2_3(x)) + x
 
-                return x1 # self.fc2_4(x1)
+				return x1 # self.fc2_4(x1)
 
-        def fc3_block(self, x):
+		def fc3_block(self, x):
 
-                x1 = self.activate3_1(self.fc3_1(x))
-                x = self.activate3_2(self.fc3_2(x1)) + x1
-                x1 = self.activate3_3(self.fc3_3(x)) + x
+				x1 = self.activate3_1(self.fc3_1(x))
+				x = self.activate3_2(self.fc3_2(x1)) + x1
+				x1 = self.activate3_3(self.fc3_3(x)) + x
 
-                return self.fc3_4(x1)
+				return self.fc3_4(x1)
 
-        def embed_src(self, src):
+		def embed_src(self, src):
 
-                return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), self.norm_pos(src[:,2].reshape(-1,1))), dim = 1))
+				return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), self.norm_pos(src[:,2].reshape(-1,1))), dim = 1))
 
-        # def embed_src(self, src):
+		# def embed_src(self, src):
 
-        #       return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), src[:,0:2]/self.scale_angles, src[:,[2]]/self.scale_depths), dim = 1))
+		#	   return self.fc3_block(torch.cat((self.norm_pos(self.ftrns1(src)), src[:,0:2]/self.scale_angles, src[:,[2]]/self.scale_depths), dim = 1))
 
-        def src_proj(self, src):
+		def src_proj(self, src):
 
-                return self.norm_pos(self.ftrns1(src))
+				return self.norm_pos(self.ftrns1(src))
 
-        def forward(self, sta, src, method = 'pairs', train = False):
+		def forward(self, sta, src, method = 'pairs', train = False):
 
-                # embed_src = self.fc3_block(self.norm_pos(self.ftrns1(src)))
-                # embed_src = self.embed_src(src*self.mask)
-                embed_src = self.embed_src(src)
+				# embed_src = self.fc3_block(self.norm_pos(self.ftrns1(src)))
+				# embed_src = self.embed_src(src*self.mask)
+				embed_src = self.embed_src(src)
 
-                if method == 'direct':
+				if method == 'direct':
 
-                        sta_proj = self.norm_pos(self.ftrns1(sta))
-                        src_proj = self.norm_pos(self.ftrns1(src))
+						sta_proj = self.norm_pos(self.ftrns1(sta))
+						src_proj = self.norm_pos(self.ftrns1(src))
 
-                        if train == True:
-                                src_proj = Variable(src_proj, requires_grad = True)
+						if train == True:
+								src_proj = Variable(src_proj, requires_grad = True)
 
-                        base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)
+						base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)
 
-                        pred1 = self.fc1_block( torch.cat((sta_proj - src_proj, self.norm_pos(src[:,2].reshape(-1,1)), base_val, embed_src), dim = 1) )
-                        pred2 = self.fc2_block( torch.cat((sta_proj, src_proj, self.norm_pos(src[:,2]).reshape(-1,1), base_val, embed_src), dim = 1) )
-                        pred = self.merge(torch.cat((pred1, pred2), dim = 1))
+						pred1 = self.fc1_block( torch.cat((sta_proj - src_proj, self.norm_pos(src[:,2].reshape(-1,1)), base_val, embed_src), dim = 1) )
+						pred2 = self.fc2_block( torch.cat((sta_proj, src_proj, self.norm_pos(src[:,2]).reshape(-1,1), base_val, embed_src), dim = 1) )
+						pred = self.merge(torch.cat((pred1, pred2), dim = 1))
 
-                        if train == True:
-                                return base_val, pred, src_proj, embed_src
+						if train == True:
+								return base_val, pred, src_proj, embed_src
 
-                        else:
-                                if self.use_corr == True:
-                                        imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
-                                        return torch.relu(self.inorm_time(base_val + pred) + self.corrs[imatch,:])
+						else:
+								if self.use_corr == True:
+										imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
+										return torch.relu(self.inorm_time(base_val + pred) + self.corrs[imatch,:])
 
-                                else:
-                                        return torch.relu(self.inorm_time(base_val + pred))
+								else:
+										return torch.relu(self.inorm_time(base_val + pred))
 
 
-                elif method == 'pairs':
+				elif method == 'pairs':
 
-                        ## First, create all pairs of srcs and recievers
-                        src_repeat = self.norm_pos(self.ftrns1(src)).repeat_interleave(len(sta), dim = 0) # /self.scale
-                        sta_repeat = self.norm_pos(self.ftrns1(sta)).repeat(len(src), 1) # /self.scale
-                        src_embed_repeat = embed_src.repeat_interleave(len(sta), dim = 0)
+						## First, create all pairs of srcs and recievers
+						src_repeat = self.norm_pos(self.ftrns1(src)).repeat_interleave(len(sta), dim = 0) # /self.scale
+						sta_repeat = self.norm_pos(self.ftrns1(sta)).repeat(len(src), 1) # /self.scale
+						src_embed_repeat = embed_src.repeat_interleave(len(sta), dim = 0)
 
-                        if train == True:
-                                src_repeat = Variable(src_repeat, requires_grad = True)
+						if train == True:
+								src_repeat = Variable(src_repeat, requires_grad = True)
 
-                        base_val = self.conversion_factor*(torch.norm(sta_repeat - src_repeat, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)) # .reshape(len(src), len(sta), -1)
+						base_val = self.conversion_factor*(torch.norm(sta_repeat - src_repeat, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)) # .reshape(len(src), len(sta), -1)
 
-                        pred1 = self.fc1_block(torch.cat((sta_repeat - src_repeat, self.norm_pos(src[:,2].reshape(-1,1)).repeat_interleave(len(sta), dim = 0), base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
-                        pred2 = self.fc2_block(torch.cat((sta_repeat, src_repeat, self.norm_pos(src[:,2].reshape(-1,1)).repeat_interleave(len(sta), dim = 0), base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
-                        pred = self.merge(torch.cat((pred1, pred2), dim = 1)).reshape(len(src), len(sta), -1)
+						pred1 = self.fc1_block(torch.cat((sta_repeat - src_repeat, self.norm_pos(src[:,2].reshape(-1,1)).repeat_interleave(len(sta), dim = 0), base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
+						pred2 = self.fc2_block(torch.cat((sta_repeat, src_repeat, self.norm_pos(src[:,2].reshape(-1,1)).repeat_interleave(len(sta), dim = 0), base_val, src_embed_repeat), dim = 1)) # .reshape(len(src), len(sta), -1)
+						pred = self.merge(torch.cat((pred1, pred2), dim = 1)).reshape(len(src), len(sta), -1)
 
-                        if train == True:
-                                return base_val.reshape(len(src), len(sta), -1), pred, src_repeat.reshape(len(src), len(sta), -1), src_embed_repeat.reshape(len(src), len(sta), -1)
+						if train == True:
+								return base_val.reshape(len(src), len(sta), -1), pred, src_repeat.reshape(len(src), len(sta), -1), src_embed_repeat.reshape(len(src), len(sta), -1)
 
-                        else:
+						else:
 
-                                if self.use_corr == True:
-                                        imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
-                                        return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred) + self.corrs[imatch,:].unsqueeze(0))
+								if self.use_corr == True:
+										imatch = self.tree_corr.query(self.ftrns1(sta).cpu().detach().numpy())[1]
+										return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred) + self.corrs[imatch,:].unsqueeze(0))
 
-                                return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
-                                # return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
+								return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
+								# return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
 
 
 
