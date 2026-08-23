@@ -121,8 +121,8 @@ class DataAggregationLayer(MessagePassing):
 
 			self.f_gamma_sta = nn.Linear(embed_dim, 1 + 3)
 			self.f_gamma_src = nn.Linear(embed_dim, 1 + 5)
-			nn.init.zeros_(self.f_gamma_sta.weight); nn.init.zeros_(self.f_gamma_sta.bias)
-			nn.init.zeros_(self.f_gamma_src.weight); nn.init.zeros_(self.f_gamma_src.bias)
+			nn.init.normal_(self.f_gamma_sta.weight); nn.init.zeros_(self.f_gamma_sta.bias)
+			nn.init.normal_(self.f_gamma_src.weight); nn.init.zeros_(self.f_gamma_src.bias)
 
 	def _compute_edge_attrs(self, pos_rel_sta, pos_rel_src, embed_context):
 		if not self.use_offsets or pos_rel_sta is None or pos_rel_src is None:
@@ -130,21 +130,27 @@ class DataAggregationLayer(MessagePassing):
 
 		# Station Edges (6D: 3D Direction + 3 Spatial RBFs)
 		sta_sp = pos_rel_sta[:, 0:3]
-		sta_norm_sp = torch.sqrt(torch.sum(sta_sp**2, dim=1, keepdim=True) + 1e-8)
+		# sta_norm_sp = torch.sqrt(torch.sum(sta_sp**2, dim=1, keepdim=True) + 1e-6)
+		sta_norm_sp = torch.linalg.vector_norm(sta_sp, dim = 1, keepdim = True)
+
 		d_sta = self.f_gamma_sta(embed_context)
 		gammas_sta = torch.exp(self.log_gamma_sta_base + d_sta[:, :1] + 0.2 * torch.tanh(d_sta[:, 1:]))
-		edge_sta = torch.cat((sta_sp / sta_norm_sp, torch.exp(-1.0 * sta_norm_sp * gammas_sta)), dim=1)
+		# edge_sta = torch.cat((sta_sp / sta_norm_sp, torch.exp(-1.0 * sta_norm_sp * gammas_sta)), dim=1)
+		edge_sta = torch.cat((sta_sp / sta_norm_sp.clamp(min = 1e-6), torch.exp(-1.0 * sta_norm_sp * gammas_sta)), dim=1)
 
 		# Source Edges (9D: 3D Direction + 3 Spatial RBFs + 2 Temporal RBFs + 1 dt)
 		src_sp, src_tm = pos_rel_src[:, 0:3], pos_rel_src[:, 3:4]
-		src_norm_sp = torch.sqrt(torch.sum(src_sp**2, dim=1, keepdim=True) + 1e-8)
+		# src_norm_sp = torch.sqrt(torch.sum(src_sp**2, dim=1, keepdim=True) + 1e-6)
+		src_norm_sp = torch.linalg.vector_norm(src_sp, dim = 1, keepdim = True)
+
 		src_norm_tm = torch.abs(src_tm)
 		d_src = self.f_gamma_src(embed_context)
 		gammas_src = torch.exp(self.log_gamma_src_base + d_src[:, :1] + 0.2 * torch.tanh(d_src[:, 1:]))
 		
 		sp_decay = torch.exp(-1.0 * src_norm_sp * gammas_src[:, 0:3])
 		tm_decay = torch.exp(-1.0 * src_norm_tm * gammas_src[:, 3:5])
-		edge_src = torch.cat((src_sp / src_norm_sp, sp_decay, tm_decay, src_tm), dim=1)
+		# edge_src = torch.cat((src_sp / src_norm_sp, sp_decay, tm_decay, src_tm), dim=1)
+		edge_src = torch.cat((src_sp / src_norm_sp.clamp(min = 1e-6), sp_decay, tm_decay, src_tm), dim=1)
 
 		return edge_sta, edge_src
 
@@ -297,7 +303,7 @@ class BipartiteGraphOperator(MessagePassing):
 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
 		# Outputs [1 + n_gammas * 4] -> 1 global zoom factor + 4D directional offsets per gamma
 		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
-		nn.init.zeros_(self.f_gamma.weight)
+		nn.init.normal_(self.f_gamma.weight)
 		nn.init.zeros_(self.f_gamma.bias)
 
 		# Log-spaced initialization across spectrum: ~[0.05, 0.3, 0.8, 2.0]
@@ -332,8 +338,9 @@ class BipartiteGraphOperator(MessagePassing):
 		diff_tm = A_src_in_edges.x[:, 3:4] # / self.scale_rel
 
 		# Unit directional vector for spatial geometry
-		norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
-		unit_dir = diff_sp / norm_pos  # [E_edges, 3]
+		# norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
+		norm_pos = torch.linalg.vector_norm(diff_sp, dim = 1, keepdim = True)
+		unit_dir = diff_sp / norm_pos.clamp(min = 1e-6)  # [E_edges, 3]
 		# print('Norm')
 		# print(norm_pos.amin())
 		# print(norm_pos.amax())
@@ -388,7 +395,7 @@ class SpatialAggregation(MessagePassing):
 		if not self.zero_offsets:
 			# Predict 1 global scale (alpha) + 5 per-frequency residuals (3 spatial + 2 temporal)
 			self.f_gamma = nn.Linear(embed_dim, 1 + 5)
-			nn.init.zeros_(self.f_gamma.weight)
+			nn.init.normal_(self.f_gamma.weight)
 			nn.init.zeros_(self.f_gamma.bias)
 			
 			# Base gammas: 3 spatial (0.1, 1.0, 5.0) + 2 temporal (0.5 [broad], 10.0 [sharp])
@@ -421,7 +428,8 @@ class SpatialAggregation(MessagePassing):
 			pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
 			
 			pos_rel_sp = pos_rel[:, 0:3]
-			pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp ** 2, dim=1, keepdim=True) + 1e-8)
+			# pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp ** 2, dim=1, keepdim=True) + 1e-8)
+			pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim = 1, keepdim = True) # .clamp(min = 1e-6)
 
 			pos_rel_tm = pos_rel[:, 3:4]
 			pos_norm_tm = torch.abs(pos_rel_tm)
@@ -450,7 +458,7 @@ class SpatialAggregation(MessagePassing):
 			temporal_decay = torch.exp(-1.0 * pos_norm_tm * edge_gammas[:, 3:5])
 
 			# Construct 9D Edge Features
-			edge_attr = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, temporal_decay, pos_rel_tm), dim=1)
+			edge_attr = torch.cat((pos_rel_sp / pos_norm_sp.clamp(min = 1e-6), spatial_decay, temporal_decay, pos_rel_tm), dim=1)
 		else:
 			edge_attr = torch.zeros((A_src.shape[1], 0), dtype=tr.dtype, device=tr.device)
 
@@ -532,7 +540,7 @@ class SpaceTimeAttention(MessagePassing):
 
 		# 2. Anisotropic Dynamic Gaussian Bandwidth Predictor (3 Spatial + 1 Temporal = 4D)
 		self.f_gamma = nn.Linear(embed_dim, 1 + n_heads * 4)
-		nn.init.zeros_(self.f_gamma.weight)
+		nn.init.normal_(self.f_gamma.weight)
 		nn.init.zeros_(self.f_gamma.bias)
 
 		# Multi-frequency head initialization (Broad to Sharp)
@@ -782,7 +790,7 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 
 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
 		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
-		nn.init.zeros_(self.f_gamma.weight)
+		nn.init.normal_(self.f_gamma.weight)
 		nn.init.zeros_(self.f_gamma.bias)
 
 		# Multi-scale log-spaced initialization
@@ -828,8 +836,9 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		diff_sp = A_Lg_in_srcs.x[:, 0:3]
 		diff_tm = A_Lg_in_srcs.x[:, 3:4]
 
-		norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
-		unit_dir = diff_sp / norm_pos  # [E_edges, 3]
+		# norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
+		norm_pos = torch.linalg.vector_norm(diff_sp, dim = 1, keepdim = True)
+		unit_dir = diff_sp / norm_pos.clamp(min = 1e-6)  # [E_edges, 3]
 
 		# print('Dir')
 		# print(norm_pos.amin())
@@ -1008,7 +1017,7 @@ class ArrivalEmbedding(nn.Module):
 
 	def _init_decomposed_gamma_bank(self, embed_dim, init_gammas):
 		f_gamma = nn.Linear(embed_dim, 2 * len(init_gammas))
-		nn.init.zeros_(f_gamma.weight)
+		nn.init.normal_(f_gamma.weight)
 		nn.init.zeros_(f_gamma.bias)
 		log_gamma_base = nn.Parameter(torch.log(torch.tensor(init_gammas, dtype=torch.float32).reshape(1, -1)))
 		return f_gamma, log_gamma_base
@@ -1125,10 +1134,10 @@ class ArrivalEmbedding(nn.Module):
 			offset_ref_src = (x_query_cart[ind_query[iwhere_query]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (1.0 * self.scale_rel)
 			offset_ref_src_t = 1000.0 * self.scale_time * (x_query_t[ind_query[iwhere_query]].reshape(-1, 1) - x_context_t[A_src_in_sta[1, nodes_of_product[iwhere_query]]].reshape(-1, 1)) / (3.0 * self.scale_rel)
 
-			eps_time = 1e-8
-			offset_src_sta_norm = torch.norm(offset_src_sta, dim=1, keepdim=True).clamp(min=eps_time)
-			offset_ref_sta_norm = torch.norm(offset_ref_sta, dim=1, keepdim=True).clamp(min=eps_time)
-			offset_ref_src_norm = torch.norm(offset_ref_src, dim=1, keepdim=True).clamp(min=eps_time)
+			eps_time = 1e-6
+			offset_src_sta_norm = torch.linalg.vector_norm(offset_src_sta, dim = 1, keepdim = True) # .clamp(min=eps_time)
+			offset_ref_sta_norm = torch.linalg.vector_norm(offset_ref_sta, dim = 1, keepdim = True) # .clamp(min=eps_time)
+			offset_ref_src_norm = torch.linalg.vector_norm(offset_ref_src, dim = 1, keepdim = True) # .clamp(min=eps_time)
 
 			gammas1 = self._compute_decomposed_gammas(self.f_gamma1, self.log_gamma_base1, ctx).mean(dim=0, keepdim=True)
 			gammas2 = self._compute_decomposed_gammas(self.f_gamma2, self.log_gamma_base2, ctx).mean(dim=0, keepdim=True)
@@ -1147,9 +1156,9 @@ class ArrivalEmbedding(nn.Module):
 			rbf_ref_src_sp = torch.exp(-1.0 * offset_ref_src_norm * gammas3[:, 0:3])
 			rbf_ref_src_tm = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas3[:, 3:5])
 
-			feat_src_sta = torch.cat((offset_src_sta / offset_src_sta_norm, rbf_src_sta_sp), dim=-1)
-			feat_ref_sta = torch.cat((offset_ref_sta / offset_ref_sta_norm, rbf_ref_sta_sp), dim=-1)
-			feat_ref_src = torch.cat((offset_ref_src / offset_ref_src_norm, rbf_ref_src_sp), dim=-1)
+			feat_src_sta = torch.cat((offset_src_sta / offset_src_sta_norm.clamp(min = eps_time), rbf_src_sta_sp), dim=-1)
+			feat_ref_sta = torch.cat((offset_ref_sta / offset_ref_sta_norm.clamp(min = eps_time), rbf_ref_sta_sp), dim=-1)
+			feat_ref_src = torch.cat((offset_ref_src / offset_ref_src_norm.clamp(min = eps_time), rbf_ref_src_sp), dim=-1)
 			feat_time = torch.cat((offset_ref_src_t, rbf_ref_src_tm), dim=-1)
 
 			inpt_aggregate = torch.cat((
@@ -1227,9 +1236,9 @@ class ArrivalEmbedding(nn.Module):
 					misfit_rel_time_p = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_p) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_p)), dim=1)
 
 					offset_ref_sta_p = (locs_use_cart[ipick[inds_p]] - x_context_cart[A_src_in_sta[1, nodes_of_product_p[iwhere_query_p]]]) / (10.0 * self.scale_rel)
-					norm_p = torch.norm(offset_ref_sta_p, dim=1, keepdim=True).clamp(min=1e-8)
+					norm_p = torch.linalg.vector_norm(offset_ref_sta_p, dim = 1, keepdim = True) # .clamp(min=1e-8)
 					gammas_time2 = self._compute_decomposed_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx).mean(dim=0, keepdim=True)
-					feat_p = torch.cat((offset_ref_sta_p / norm_p, torch.exp(-1.0 * norm_p * gammas_time2)), dim=1)
+					feat_p = torch.cat((offset_ref_sta_p / norm_p.clamp(min = 1e-6), torch.exp(-1.0 * norm_p * gammas_time2)), dim=1)
 
 					inpt_p = torch.cat((x[nodes_of_product_p[iwhere_query_p]], misfit_rel_time_p, feat_p, self.phase_embed(phase_label[inds_p].long().reshape(-1))), dim=1)
 					aggregate_product_p = scatter(self.fc2(inpt_p), inds_p, dim=0, dim_size=len(tpick), reduce='mean')
@@ -1277,9 +1286,9 @@ class ArrivalEmbedding(nn.Module):
 					misfit_rel_time_s = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_s) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_s)), dim=1)
 
 					offset_ref_sta_s = (locs_use_cart[ipick[inds_s]] - x_context_cart[A_src_in_sta[1, nodes_of_product_s[iwhere_query_s]]]) / (10.0 * self.scale_rel)
-					norm_s = torch.norm(offset_ref_sta_s, dim=1, keepdim=True).clamp(min=1e-8)
+					norm_s = torch.linalg.vector_norm(offset_ref_sta_s, dim = 1, keepdim = True) # .clamp(min=1e-8)
 					gammas_time3 = self._compute_decomposed_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx).mean(dim=0, keepdim=True)
-					feat_s = torch.cat((offset_ref_sta_s / norm_s, torch.exp(-1.0 * norm_s * gammas_time3)), dim=1)
+					feat_s = torch.cat((offset_ref_sta_s / norm_s.clamp(min = 1e-6), torch.exp(-1.0 * norm_s * gammas_time3)), dim=1)
 
 					inpt_s = torch.cat((x[nodes_of_product_s[iwhere_query_s]], misfit_rel_time_s, feat_s, self.phase_embed(phase_label[inds_s].long().reshape(-1))), dim=1)
 					aggregate_product_s = scatter(self.fc3(inpt_s), inds_s, dim=0, dim_size=len(tpick), reduce='mean')
@@ -2646,7 +2655,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			init_gammas_sp = torch.tensor([0.1, 1.0, 5.0], dtype=torch.float32).reshape(1, 3)
 			self.log_gamma_base = nn.Parameter(torch.log(init_gammas_sp))  # Shape: [1, 3]
 			self.f_gamma = nn.Linear(embed_vector_dim, 1 + 3)
-			nn.init.zeros_(self.f_gamma.weight)
+			nn.init.normal_(self.f_gamma.weight)
 			nn.init.zeros_(self.f_gamma.bias)
 
 
@@ -2692,8 +2701,9 @@ class GCN_Detection_Network_extended(nn.Module):
 		# 2. Append 7D features ONLY if the Geometric Preconditioner (use_embedding) is active
 		if self.use_embedding:
 			pos_rel_sp = A_src_in_edges.x[:, 0:3]
-			pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True) + 1e-8)
-			
+			# pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True)).clamp(min = 1e-6)
+			pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim = 1, keepdim = True) # ).clamp(min = 1e-6)
+
 			delta = self.f_gamma(embed_context)
 			alpha = delta[:, :1]
 			residuals = 0.2 * torch.tanh(delta[:, 1:])
@@ -2702,7 +2712,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			
 			pos_rel_tm = A_src_in_edges.x[:, 3:4]
 
-			rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, pos_rel_tm), dim=-1) # 7D
+			rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp.clamp(min = 1e-6), spatial_decay, pos_rel_tm), dim=-1) # 7D
 			Slice = torch.cat((Slice, rel_pos_feat), dim=1)
 
 		
