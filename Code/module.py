@@ -121,8 +121,8 @@ class DataAggregationLayer(MessagePassing):
 
 			self.f_gamma_sta = nn.Linear(embed_dim, 1 + 3)
 			self.f_gamma_src = nn.Linear(embed_dim, 1 + 5)
-			nn.init.normal_(self.f_gamma_sta.weight); nn.init.zeros_(self.f_gamma_sta.bias)
-			nn.init.normal_(self.f_gamma_src.weight); nn.init.zeros_(self.f_gamma_src.bias)
+			nn.init.normal_(self.f_gamma_sta.weight, std = 0.01); nn.init.zeros_(self.f_gamma_sta.bias)
+			nn.init.normal_(self.f_gamma_src.weight, std = 0.01); nn.init.zeros_(self.f_gamma_src.bias)
 
 	def _compute_edge_attrs(self, pos_rel_sta, pos_rel_src, embed_context):
 		if not self.use_offsets or pos_rel_sta is None or pos_rel_src is None:
@@ -303,7 +303,7 @@ class BipartiteGraphOperator(MessagePassing):
 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
 		# Outputs [1 + n_gammas * 4] -> 1 global zoom factor + 4D directional offsets per gamma
 		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
-		nn.init.normal_(self.f_gamma.weight)
+		nn.init.normal_(self.f_gamma.weight, std = 0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
 		# Log-spaced initialization across spectrum: ~[0.05, 0.3, 0.8, 2.0]
@@ -395,7 +395,7 @@ class SpatialAggregation(MessagePassing):
 		if not self.zero_offsets:
 			# Predict 1 global scale (alpha) + 5 per-frequency residuals (3 spatial + 2 temporal)
 			self.f_gamma = nn.Linear(embed_dim, 1 + 5)
-			nn.init.normal_(self.f_gamma.weight)
+			nn.init.normal_(self.f_gamma.weight, std = 0.01)
 			nn.init.zeros_(self.f_gamma.bias)
 			
 			# Base gammas: 3 spatial (0.1, 1.0, 5.0) + 2 temporal (0.5 [broad], 10.0 [sharp])
@@ -540,7 +540,7 @@ class SpaceTimeAttention(MessagePassing):
 
 		# 2. Anisotropic Dynamic Gaussian Bandwidth Predictor (3 Spatial + 1 Temporal = 4D)
 		self.f_gamma = nn.Linear(embed_dim, 1 + n_heads * 4)
-		nn.init.normal_(self.f_gamma.weight)
+		nn.init.normal_(self.f_gamma.weight, std = 0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
 		# Multi-frequency head initialization (Broad to Sharp)
@@ -554,7 +554,8 @@ class SpaceTimeAttention(MessagePassing):
 		self.film_score = FiLM(embed_dim, n_heads)
 
 		# 4. Final Readout Projection (Combines multi-head latent space into smooth output)
-		self.proj = nn.Linear(n_heads * n_latent, out_channels)
+		# self.proj = nn.Linear(n_heads * n_latent, out_channels)
+		self.proj = nn.Linear(n_heads * n_latent + embed_dim, out_channels)
 		self.activate2 = nn.PReLU()
 
 		# Graph storage for fixed evaluation setups
@@ -610,7 +611,9 @@ class SpaceTimeAttention(MessagePassing):
 		flattened = interpolated.view(x_query.shape[0], -1)
 		
 		# Readout projection into target channels with smooth activation
-		out = self.proj(flattened)
+		out = self.proj(torch.cat((flattened, ctx.expand(x_query.shape[0], -1)), dim = 1))
+		# out = self.proj(flattened)
+
 		return self.activate2(out)
 
 	def message(self, x_j, embed_context_j, index, edge_attr):
@@ -636,7 +639,9 @@ class SpaceTimeAttention(MessagePassing):
 		distance_logits = -1.0 * torch.sum(gammas * r_sq, dim=-1)			  # [E, n_heads]
 
 		# 3. Score Modulation & Normalized Softmax Attention
-		score = self.film_score(self.f_feature_score(x_j), embed_context_j)
+		# score = self.film_score(self.f_feature_score(x_j), embed_context_j)
+		raw_score = self.film_score(self.f_feature_score(x_j), embed_context_j)	
+		score = 2.0 * torch.tanh(raw_score) ## Bound influence of FiLM on the attention score	
 		logits = distance_logits + score
 		alpha_attn = softmax(logits, index)									# [E, n_heads]
 
@@ -790,7 +795,7 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 
 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
 		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
-		nn.init.normal_(self.f_gamma.weight)
+		nn.init.normal_(self.f_gamma.weight, std = 0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
 		# Multi-scale log-spaced initialization
@@ -1017,7 +1022,7 @@ class ArrivalEmbedding(nn.Module):
 
 	def _init_decomposed_gamma_bank(self, embed_dim, init_gammas):
 		f_gamma = nn.Linear(embed_dim, 2 * len(init_gammas))
-		nn.init.normal_(f_gamma.weight)
+		nn.init.normal_(f_gamma.weight, std = 0.01)
 		nn.init.zeros_(f_gamma.bias)
 		log_gamma_base = nn.Parameter(torch.log(torch.tensor(init_gammas, dtype=torch.float32).reshape(1, -1)))
 		return f_gamma, log_gamma_base
@@ -2588,7 +2593,8 @@ class GCN_Detection_Network_extended(nn.Module):
 		if use_absolute_offset == True: n_dim_extra_inpt = n_dim_extra_inpt + 7 # concatenate the spatial offsets between source nodes and recievers into input feature
 		
 		embed_vector_dim = 10 ## Note can add normalization to output
-		self.embed_vector = nn.Sequential(nn.Linear(6, 30), nn.PReLU(), nn.Linear(30, embed_vector_dim))
+		# self.embed_vector = nn.Sequential(nn.Linear(6, 30), nn.PReLU(), nn.Linear(30, embed_vector_dim))
+		self.embed_vector = nn.Sequential(nn.Linear(6, 30), nn.PReLU(), nn.Linear(30, embed_vector_dim), nn.LayerNorm(embed_vector_dim))
 
 		# Main Encoder Stack
 		self.DataAggregation = DataAggregationExpanded(
@@ -2655,7 +2661,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			init_gammas_sp = torch.tensor([0.1, 1.0, 5.0], dtype=torch.float32).reshape(1, 3)
 			self.log_gamma_base = nn.Parameter(torch.log(init_gammas_sp))  # Shape: [1, 3]
 			self.f_gamma = nn.Linear(embed_vector_dim, 1 + 3)
-			nn.init.normal_(self.f_gamma.weight)
+			nn.init.normal_(self.f_gamma.weight, std = 0.01)
 			nn.init.zeros_(self.f_gamma.bias)
 
 
