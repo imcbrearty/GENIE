@@ -334,6 +334,9 @@ class BipartiteGraphOperator(MessagePassing):
 		# Unit directional vector for spatial geometry
 		norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
 		unit_dir = diff_sp / norm_pos  # [E_edges, 3]
+		print('Norm')
+		print(norm_pos.amin())
+		print(norm_pos.amax())
 
 		# Step 2: Scale-conditioned Anisotropic Gammas
 		delta = self.f_gamma(ctx)
@@ -422,6 +425,13 @@ class SpatialAggregation(MessagePassing):
 
 			pos_rel_tm = pos_rel[:, 3:4]
 			pos_norm_tm = torch.abs(pos_rel_tm)
+
+			print('Norm [2]')
+			print(pos_rel.amin(0))
+			print(pos_rel.amax(0))
+			print(pos_norm_sp.amin(0))
+			print(pos_norm_sp.amax(0))
+
 
 			# Decomposed Gammas: Global Alpha + Bounded Residuals
 			delta = self.f_gamma(ctx)
@@ -575,6 +585,9 @@ class SpaceTimeAttention(MessagePassing):
 		# print(edge_attr)
 		# print(x_context.shape)
 		# print(x_query.shape)
+		print('Edges')
+		print(edge_attr.amin(0))
+		print(edge_attr.amax(0))
 
 		# Message passing over bipartite graph (context -> query)
 		interpolated = self.propagate(
@@ -818,6 +831,10 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
 		unit_dir = diff_sp / norm_pos  # [E_edges, 3]
 
+		print('Dir')
+		print(norm_pos.amin())
+		print(norm_pos.amax())
+
 		# Step 2: Scale-conditioned Anisotropic Gammas
 		delta = self.f_gamma(ctx)
 		alpha = delta[:, :1].unsqueeze(-1)
@@ -919,6 +936,11 @@ class DataAggregationAssociation(nn.Module):
 		# print(self.init_trns)
 		# print(self.film_init)
 		x = torch.cat((s, x_latent, combined_mask), dim=-1)
+		print('Assoc')
+		print(pos_rel_sta.amin(0))
+		print(pos_rel_sta.amax(0))
+		print(pos_rel_src.amin(0))
+		print(pos_rel_src.amax(0))
 
 		# 2. Project and FiLM condition
 		x = self.act_init(self.film_init(self.init_trns(x), embed_context))
@@ -969,9 +991,13 @@ class ArrivalEmbedding(nn.Module):
 
 		self.register_buffer('ioffset', torch.tensor([-1, 0], dtype=torch.long))
 
-		self.f_gamma1, self.log_gamma_base1 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
-		self.f_gamma2, self.log_gamma_base2 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
+		# self.f_gamma1, self.log_gamma_base1 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
+		# self.f_gamma2, self.log_gamma_base2 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
+
+		self.f_gamma1, self.log_gamma_base1 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
+		self.f_gamma2, self.log_gamma_base2 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
 		self.f_gamma3, self.log_gamma_base3 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
+
 		self.f_gamma_time2, self.log_gamma_base_time2 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
 		self.f_gamma_time3, self.log_gamma_base_time3 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
 
@@ -1107,6 +1133,14 @@ class ArrivalEmbedding(nn.Module):
 			gammas1 = self._compute_decomposed_gammas(self.f_gamma1, self.log_gamma_base1, ctx).mean(dim=0, keepdim=True)
 			gammas2 = self._compute_decomposed_gammas(self.f_gamma2, self.log_gamma_base2, ctx).mean(dim=0, keepdim=True)
 			gammas3 = self._compute_decomposed_gammas(self.f_gamma3, self.log_gamma_base3, ctx).mean(dim=0, keepdim=True)
+
+			print('Norms [2]')
+			print(offset_src_sta_norm.amin(0))
+			print(offset_src_sta_norm.amax(0))
+			print(offset_ref_sta_norm.amin(0))
+			print(offset_ref_sta_norm.amax(0))
+			print(offset_ref_src_norm.amin(0))
+			print(offset_ref_src_norm.amax(0))
 
 			rbf_src_sta_sp = torch.exp(-1.0 * offset_src_sta_norm * gammas1[:, 0:3])
 			rbf_ref_sta_sp = torch.exp(-1.0 * offset_ref_sta_norm * gammas2[:, 0:3])
@@ -2620,8 +2654,11 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		self.ftrns1 = ftrns1
 		self.ftrns2 = ftrns2
+		# self.time_agg = np.zeros(10)
 
 	def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q, save_state = False):
+
+		# start_time = time.time()
 
 		n_line_nodes = Slice.shape[0]
 		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
@@ -2646,6 +2683,11 @@ class GCN_Detection_Network_extended(nn.Module):
 				1000.0 * self.scale_time * (x_temp_cuda_t[A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_t[A_src_in_sta[1][A_in_src_slice[0]]]).view(-1, 1)
 			), dim=1) / self.scale_rel
 
+		print('Rel')
+		print(pos_rel_sta.amin(0))
+		print(pos_rel_sta.amax(0))
+		print(pos_rel_src.amin(0))
+		print(pos_rel_src.amax(0))
 
 		# 2. Append 7D features ONLY if the Geometric Preconditioner (use_embedding) is active
 		if self.use_embedding:
@@ -3464,6 +3506,13 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
+
+		## Initial offsets, Embedding concataneation, DataAggregation, Bipartite Read in, Spatial Aggregation
+		## Space Time Attention, Bipartite Read out, Data Aggregation Association, Arrival Embedding, Souce Station Arrival attention
+		# array([ 0.20333743,  0.21460271,  3.28502584,  0.41162753,  1.15440059,
+		#        13.10068655,  0.35386872,  1.01192713,  9.72299457,  3.3110702 ])
+
 
 		## Can directly use torch_scatter to coalesce the data
 		# bias = self.bias[inds][:,:,ind,phase].mean(1) ## Use knn to average coefficients (probably better to do interpolation or a denser grid + k value!)
