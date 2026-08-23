@@ -742,7 +742,7 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		self,
 		ndim_in,
 		ndim_out,
-		ndim_mask=4,
+		ndim_mask=1,
 		embed_dim=10,
 		n_gammas=3, # 4
 		baseline_gate=0.01,
@@ -911,6 +911,13 @@ class DataAggregationAssociation(nn.Module):
 				pos_rel_sta=None, pos_rel_src=None):
 		# 1. Combine Masks and Latents
 		combined_mask = torch.cat((mask, mask_out_1), dim=-1)
+
+		# print('Shapes')
+		# print(s.shape)
+		# print(x_latent.shape)
+		# print(combined_mask.shape)
+		# print(self.init_trns)
+		# print(self.film_init)
 		x = torch.cat((s, x_latent, combined_mask), dim=-1)
 
 		# 2. Project and FiLM condition
@@ -1060,6 +1067,14 @@ class ArrivalEmbedding(nn.Module):
 
 			phase_idx = phase_label[iarv[inds_queries_to_picks]].long()
 			tlatent_phase = tlatent[nodes_of_product[iwhere_query], phase_idx].reshape(-1, 1)
+
+			print('Shapes')
+			print(tpick.shape)
+			print(ipick.shape)
+			print(iarv.shape)
+			print(inds_queries_to_picks.shape)
+			print(inds_queries_to_picks)
+			print(tlatent_phase.shape)
 
 			misfit_rel_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - tlatent_phase
 			trv_phase = trv_out[ind_query[iwhere_query], ipick[iarv[inds_queries_to_picks]], phase_idx].reshape(-1, 1)
@@ -2353,13 +2368,14 @@ class GCN_Detection_Network_extended(nn.Module):
 		mask_p_thresh = 0.1
 		mask_out = torch.relu(y - mask_p_thresh)
 		
-		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, embed_context, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
+
+		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, embed_context, num_target_nodes = n_line_nodes) # could we concatenate masks and pass through a single one into next layer
 		
 
 		latent_ref = x_latent if self.use_src_pred else x_latent.detach()
 
 		# Run standardized association phase
-		s = self.DataAggregationAssociationPhase(
+		s = self.DataAggregationAssociation(
 			s=s,
 			x_latent=latent_ref,
 			mask_out_1=mask_out_1,
@@ -2553,7 +2569,6 @@ class GCN_Detection_Network_extended(nn.Module):
 		slope_width = 0.1
 		mask_p_thresh = 0.1
 		mask_out = torch.relu(y - mask_p_thresh)
-		
 
 		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, self.embed_context, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
 
