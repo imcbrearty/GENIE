@@ -55,7 +55,7 @@ k_spc_edges = config['k_spc_edges']
 template_ver = process_config['template_ver']
 
 
-scale_t = train_config['kernel_sig_t']*3.0
+# scale_t = train_config['kernel_sig_t']*3.0
 eps = train_config['kernel_sig_t']*3.0
 kernel_sig_t = train_config['kernel_sig_t']
 
@@ -85,7 +85,7 @@ class DataAggregationLayer(MessagePassing):
 		super(DataAggregationLayer, self).__init__('mean')
 
 		self.use_offsets = use_offsets
-		self.has_expander = has_expander
+		self.use_expanded = use_expanded
 		self.out_channels = out_channels
 
 		# Local Branch Transforms
@@ -98,7 +98,7 @@ class DataAggregationLayer(MessagePassing):
 		self.film_local = FiLM(embed_dim, 2 * out_channels)
 
 		# Expander Branch Transforms (Optional)
-		if self.has_expander:
+		if self.use_expanded:
 			self.l_t1_1c = nn.Linear(in_channels, out_channels)
 			self.l_t1_2c = nn.Linear(in_channels + out_channels + n_dim_mask, out_channels)
 			self.l_t2_1c = nn.Linear(in_channels, out_channels)
@@ -157,7 +157,7 @@ class DataAggregationLayer(MessagePassing):
 		x_local = self.act_local(torch.cat((x1, x2), dim=1))
 		x_local = self.film_local(x_local, embed_context)
 
-		if not self.has_expander:
+		if not self.use_expanded:
 			return x_local
 
 		# Expander Path
@@ -181,7 +181,7 @@ class DataAggregationLayer(MessagePassing):
 # =====================================================================
 class DataAggregationExpanded(nn.Module):
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_mask=4, 
-				 use_absolute_pos=True, use_offsets=True, embed_dim=10, use_embedding=True):
+				 use_absolute_pos=True, use_offsets=True, embed_dim=10, n_embedding = 10, use_embedding=True):
 		super(DataAggregationExpanded, self).__init__()
 
 		self.use_embedding = use_embedding
@@ -197,30 +197,30 @@ class DataAggregationExpanded(nn.Module):
 
 			self.geom_layer1 = DataAggregationLayer(
 				in_channels=n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
-				embed_dim=embed_dim, use_offsets=use_offsets, has_expander=False
+				embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=False
 			)
 			self.geom_layer2 = DataAggregationLayer(
-				in_channels=2 * n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
-				embed_dim=embed_dim, use_offsets=use_offsets, has_expander=False
+				in_channels=2 * n_hidden, out_channels=n_embedding, n_dim_mask=n_dim_mask, 
+				embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=False
 			)
-			in_channels += 2 * n_hidden  # Concatenate structural embedding to main input
+			in_channels += 2 * n_embedding  # Concatenate structural embedding to main input
 
 		# --- MAIN OBSERVATION GNN STACK ---
-		self.init_trns = nn.Linear(in_channels + n_dim_mask, n_hidden)
+		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37, n_hidden)
 		self.film_init = FiLM(embed_dim, n_hidden)
 		self.act_init = nn.PReLU()
 
 		self.layer1 = DataAggregationLayer(
 			in_channels=n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
-			embed_dim=embed_dim, use_offsets=use_offsets, has_expander=True
+			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=True
 		)
 		self.layer2 = DataAggregationLayer(
 			in_channels=2 * n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
-			embed_dim=embed_dim, use_offsets=use_offsets, has_expander=True
+			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=True
 		)
 		self.layer3 = DataAggregationLayer(
 			in_channels=2 * n_hidden, out_channels=out_channels, n_dim_mask=n_dim_mask, 
-			embed_dim=embed_dim, use_offsets=use_offsets, has_expander=False
+			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=False
 		)
 
 	def forward(self, tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None):
@@ -237,14 +237,21 @@ class DataAggregationExpanded(nn.Module):
 
 			# Concatenate structural embedding with original observation slice
 			tr = torch.cat((tr, g_emb), dim=-1)
+			# print('Use embedding')
+			# print(tr.shape)
 
 		# 2. Main Observation Processing Stack
 		tr = torch.cat((tr, mask), dim=-1)
+		# print(tr.shape)
+		# print(self.init_trns)
+		# print(self.film_init)
 		tr = self.act_init(self.film_init(self.init_trns(tr), embed_context))
+		# print(tr.shape)
 
 		tr = self.layer1(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
 		tr = self.layer2(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
 		tr = self.layer3(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+		# print(tr.shape)
 
 		return tr
 
@@ -304,7 +311,7 @@ class BipartiteGraphOperator(MessagePassing):
 		self.fc_out = nn.Linear(ndim_in, ndim_out)
 		self.act_out = nn.PReLU()
 
-	def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None):
+	def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None): # Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, n_sta, n_temp)
 		"""
 		Args:
 			inpt: [E_edges, ndim_in]
@@ -541,7 +548,7 @@ class SpaceTimeAttention(MessagePassing):
 		ctx_4d = torch.cat((x_context / self.scale_rel, (1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel), dim=1)
 		qry_4d = torch.cat((x_query / self.scale_rel, (1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel), dim=1)
 
-		edge_index = knn(ctx_4d, qry_4d, k=k).flip(0)
+		edge_index = knn(ctx_4d, qry_4d, k=k).flip(0).to(x_query.device)
 
 		diff_sp = (x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel
 		diff_tm = (1000.0 * self.scale_time * (x_query_t[edge_index[1]] - x_context_t[edge_index[0]])).reshape(-1, 1) / self.scale_rel
@@ -558,11 +565,22 @@ class SpaceTimeAttention(MessagePassing):
 
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
+		# print('Attention')
+		# print(edge_index)
+		# print(edge_index.shape)
+		# print(edge_index.amax(1))
+		# print(ctx.shape)
+		# print(inpts.shape)
+		# print(edge_attr.shape)
+		# print(edge_attr)
+		# print(x_context.shape)
+		# print(x_query.shape)
+
 		# Message passing over bipartite graph (context -> query)
 		interpolated = self.propagate(
 			edge_index,
 			x=inpts,
-			embed_context=ctx,
+			embed_context=ctx.expand(len(inpts), -1),
 			edge_attr=edge_attr,
 			size=(x_context.shape[0], x_query.shape[0]),
 		)
@@ -876,7 +894,7 @@ class DataAggregationAssociation(nn.Module):
 			n_dim_mask=total_mask_dim,
 			embed_dim=embed_dim,
 			use_offsets=use_offsets,
-			has_expander=False
+			use_expanded=False
 		)
 
 		# Association Layer 2 (Independent per-layer gammas, no expander edges needed)
@@ -886,7 +904,7 @@ class DataAggregationAssociation(nn.Module):
 			n_dim_mask=total_mask_dim,
 			embed_dim=embed_dim,
 			use_offsets=use_offsets,
-			has_expander=False
+			use_expanded=False
 		)
 
 	def forward(self, s, x_latent, mask_out_1, mask, A_in_sta, A_in_src, embed_context, 
@@ -986,7 +1004,7 @@ class ArrivalEmbedding(nn.Module):
 			trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
 
 		if not self.use_phase_types:
-			phase_label = torch.zeros_like(phase_label)
+			phase_label = torch.zeros_like(phase_label).to(device)
 
 		i1, i2 = torch.where(phase_label == 0)[0], torch.where(phase_label == 1)[0]
 		tpick = tpick if isinstance(tpick, torch.Tensor) else torch.as_tensor(tpick, device=device)
@@ -2180,12 +2198,12 @@ class GCN_Detection_Network_extended(nn.Module):
 		)
 
 		## Maybe add expander convolution on SpatialAggregation
-		self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15, ndim_edges = 8).to(device) # 30, 15
+		self.Bipartite_ReadIn = BipartiteGraphOperator(30, 15).to(device) # ndim_edges = 8 # 30, 15
 		self.SpatialAggregation1 = SpatialAggregation(15, 30).to(device) # 15, 30
 		self.SpatialAggregation2 = SpatialAggregation(30, 30).to(device) # 15, 30
 		self.SpatialAggregation3 = SpatialAggregation(30, 30).to(device) # 15, 30
 		self.SpaceTimeDirect = SpaceTimeDirect(30, 30).to(device) # 15, 30
-		self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 8, 15, device = device).to(device)
+		self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 8, 15).to(device)
 		# self.SpaceTimeAttention = SpaceTimeAttention(30, 30, 4, 15, device = device).to(device)
 
 		if use_expanded == True:
@@ -2298,7 +2316,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
 		)
 
-		x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, n_sta, n_temp)
+		x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, num_target_nodes = n_temp)
 		x = self.SpatialAggregation1(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda) # x_temp_cuda_cart
 		x_local = self.SpatialAggregation2(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda)
 		if self.use_expanded == True:
@@ -2319,6 +2337,13 @@ class GCN_Detection_Network_extended(nn.Module):
 		if save_state == True:
 			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
 			
+		# print('Shapes')
+		# print(x_spatial.shape)
+		# print(x_query_cart.shape)
+		# print(x_temp_cuda_cart.shape)
+		# print(t_query.shape)
+		# print(x_temp_cuda_t.shape)
+		# print(embed_context.shape)
 		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, embed_context) # second slowest module (could use this embedding to seed source source attention vector).
 
 		x_src = []
