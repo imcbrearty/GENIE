@@ -81,7 +81,7 @@ device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cp
 # =====================================================================
 class DataAggregationLayer(MessagePassing):
 	def __init__(self, in_channels, out_channels, n_dim_mask=4, embed_dim=10, 
-				 use_offsets=True, has_expander=True, ndim_proj_sta=6, ndim_proj_src=9):
+				 use_offsets=True, use_expanded=True, ndim_proj_sta=6, ndim_proj_src=9):
 		super(DataAggregationLayer, self).__init__('mean')
 
 		self.use_offsets = use_offsets
@@ -249,96 +249,6 @@ class DataAggregationExpanded(nn.Module):
 		return tr
 
 
-# class BipartiteGraphOperator(MessagePassing):
-#	 def __init__(self, ndim_in, ndim_out, ndim_edges=8, ndim_mask=4, embed_dim=10):
-#		 super(BipartiteGraphOperator, self).__init__(aggr="add")
-
-#		 # 1. Edge MLP: Evaluates travel-time misfit + 4D geometry
-#		 # 3 (unit dir) + 4 (RBF gammas) + 1 (time) = 8 spatial-temporal features
-#		 self.fc1 = nn.Sequential(
-#			 nn.Linear(ndim_in + 8, ndim_in),
-#			 nn.PReLU(),
-#			 nn.Linear(ndim_in, ndim_in),
-#			 nn.PReLU(),
-#		 )
-
-#		 # 2. Low-Rank Gating (Prevents synthetic memorization)
-#		 self.mask_gate = nn.Sequential(
-#			 nn.Linear(ndim_mask, 4),
-#			 nn.PReLU(),
-#			 nn.Linear(4, ndim_in),
-#			 nn.Sigmoid(),
-#		 )
-
-#		 # 3. Dynamic Bandwidth Predictor driven by domain context embedding
-#		 # Outputs 4 dynamic bandwidth offsets
-#		 self.f_gamma = nn.Linear(embed_dim, 4)
-
-#		 # Learnable baseline log-gammas (initialized near ~[0.05, 0.3, 0.8, 2.0])
-#		 self.log_gamma_base = nn.Parameter(torch.tensor([-3.0, -1.2, -0.2, 0.7]).reshape(1, -1))
-
-#		 # 4. LayerNorm standardizes feature distribution across channels
-#		 self.norm = nn.LayerNorm(ndim_in)
-
-#		 # 5. Final Projection
-#		 self.fc2 = nn.Linear(ndim_in, ndim_out)
-#		 self.activate_out = nn.PReLU()
-
-#	 def forward(self, inpt, A_src_in_edges, mask, embed_context, n_sta=None, n_temp=None, num_target_nodes=None):
-#		 """
-#		 Args:
-#			 inpt: [E, ndim_in]
-#			 A_src_in_edges: PyG Data object containing edge_index and x
-#			 mask: [E, ndim_mask]
-#			 embed_context: [E, embed_dim] or [1, embed_dim] context embedding per edge or graph
-#		 """
-#		 # Target nodes (M) represent the factor graph space being stacked onto
-#		 N = inpt.shape[0]
-#		 if num_target_nodes is not None:
-#			 M = num_target_nodes
-#		 else:
-#			 M = A_src_in_edges.edge_index[1].max().item() + 1 if A_src_in_edges.edge_index.numel() > 0 else 0
-
-#		 # Step 1: Existential gate for active mask edges
-#		 absolute_gate = mask.max(1, keepdims=True)[0]
-
-#		 # Step 2: Dynamic Scale-Conditioned Gammas
-#		 # Bounded offset in [-1.2, 1.2] ensures dynamic multipliers stay roughly in [0.3x, 3.3x]
-#		 gamma_offset = 1.2 * torch.tanh(self.f_gamma(embed_context))
-#		 gammas = torch.exp(self.log_gamma_base + gamma_offset)  # [E, 4] or [1, 4]
-
-#		 # Step 3: Compute non-linear geometric features & phase routing
-#		 norm_pos = torch.sqrt(torch.sum(A_src_in_edges.x[:, 0:3] ** 2, dim=1, keepdim=True) + 1e-8)
-		
-#		 # Exponential RBF decay conditioned on context
-#		 rbf_decay = torch.exp(-1.0 * norm_pos * gammas)  # [E, 4]
-
-#		 rel_pos = torch.cat(
-#			 (A_src_in_edges.x[:, 0:3] / norm_pos, rbf_decay, A_src_in_edges.x[:, 3:4]),
-#			 dim=1,
-#		 )
-
-#		 geo_features = self.fc1(torch.cat((inpt, rel_pos), dim=-1))
-#		 phase_routing_vectors = self.mask_gate(mask)
-
-#		 # Step 4: Gated message composition
-#		 msg = absolute_gate * (phase_routing_vectors * geo_features)
-
-#		 # Step 5: Perform raw physical stacking (Constructive Summing)
-#		 stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
-
-#		 # Step 6: Compute active degree E_i per target node (only counting active mask edges)
-#		 target_indices = A_src_in_edges.edge_index[1]
-#		 deg = torch.zeros((M, 1), device=stacked.device, dtype=stacked.dtype)
-#		 deg.index_add_(0, target_indices, absolute_gate)
-
-#		 # Step 7: Scale by 1 / sqrt(E_i) -> Keeps noise floor equal between core hubs & sparse nodes
-#		 stacked_normalized = stacked / torch.sqrt(deg.clamp(min=1.0))
-
-#		 # Step 8: Channel-wise standardization & final projection
-#		 return self.activate_out(self.fc2(self.norm(stacked_normalized)))
-
-
 class BipartiteGraphOperator(MessagePassing):
 	"""Product Graph to Source Graph Bipartite Projection Operator.
 
@@ -353,9 +263,9 @@ class BipartiteGraphOperator(MessagePassing):
 		ndim_out,
 		ndim_mask=4,
 		embed_dim=10,
-		n_gammas=4,
-		scale_rel=1.0,
-		scale_time=1.0,
+		n_gammas=3, # 4
+		scale_rel=scale_rel,
+		scale_time=scale_time,
 	):
 		super(BipartiteGraphOperator, self).__init__(aggr="add")
 
@@ -458,7 +368,7 @@ class BipartiteGraphOperator(MessagePassing):
 
 
 class SpatialAggregation(MessagePassing):
-	def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=1.0, 
+	def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel, 
 				 n_global=5, n_hidden=30, zero_offsets=False):
 		super(SpatialAggregation, self).__init__(aggr='mean')
 
@@ -582,8 +492,8 @@ class SpaceTimeAttention(MessagePassing):
 		n_latent=30,
 		embed_dim=10,
 		n_heads=5,
-		scale_rel=1.0,
-		scale_time=1.0,
+		scale_rel=scale_rel,
+		scale_time=scale_time,
 	):
 		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
 		self.n_heads = n_heads
@@ -802,117 +712,6 @@ class SpaceTimeAttention(MessagePassing):
 
 
 
-# class BipartiteGraphReadOutOperator(MessagePassing):
-#	 """Bipartite Readout Operator (Source Factor Graph -> Product Graph).
-
-#	 Transforms source factor features using scale-conditioned RBF kernel decay
-#	 and reads out messages onto target product graph nodes.
-#	 """
-
-#	 def __init__(self, ndim_in, ndim_out, ndim_edges=8, embed_dim=10, n_gammas=4):
-#		 # Aggregating from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
-#		 super(BipartiteGraphReadOutOperator, self).__init__(aggr="add")
-
-#		 self.n_gammas = n_gammas
-#		 self.embed_dim = embed_dim
-
-#		 # Geometry features = 3 (unit vector) + n_gammas (RBF) + 1 (time) = 8 total
-#		 ndim_geo_pos = 3 + n_gammas + 1
-
-#		 # 2-layer MLP for non-linear association evaluation
-#		 self.fc1 = nn.Sequential(
-#			 nn.Linear(ndim_in + ndim_geo_pos, ndim_in),
-#			 nn.PReLU(),
-#			 nn.Linear(ndim_in, ndim_in),
-#			 nn.PReLU(),
-#		 )
-
-#		 # Dynamic Bandwidth Predictor driven by context embedding
-#		 self.f_gamma = nn.Linear(embed_dim, n_gammas)
-
-#		 # Learnable baseline log-gammas (initialized near ~[0.05, 0.3, 0.8, 2.0])
-#		 self.log_gamma_base = nn.Parameter(
-#			 torch.tensor([-3.0, -1.2, -0.2, 0.7]).reshape(1, -1)
-#		 )
-
-#		 # Readout Projection
-#		 self.fc2 = nn.Linear(ndim_in, ndim_out)
-#		 self.activate_out = nn.PReLU()
-
-#	 def forward(
-#		 self,
-#		 inpt,
-#		 A_Lg_in_srcs,
-#		 mask,
-#		 embed_context,
-#		 n_sta=None,
-#		 n_temp=None,
-#		 num_target_nodes=None,
-#	 ):
-#		 """Args:
-
-#		 inpt: [N_src, ndim_in] Source node features
-#		 A_Lg_in_srcs: PyG Data object containing edge_index [2, E] and x [E, 4]
-#		 mask: [N_src, ndim_mask] or [E, ndim_mask] Source/edge prediction mask
-#		 embed_context: [E, embed_dim] or [1, embed_dim] Context/scale embedding
-#		 num_target_nodes: Optional explicit scalar M for target product graph size
-#		 """
-#		 # Safe determination of N (source nodes) and M (target product graph nodes)
-#		 N = inpt.shape[0]
-#		 if num_target_nodes is not None:
-#			 M = num_target_nodes
-#		 else:
-#			 M = (
-#				 A_Lg_in_srcs.edge_index[1].max().item() + 1
-#				 if A_Lg_in_srcs.edge_index.numel() > 0
-#				 else 0
-#			 )
-
-#		 # 1. Dynamic Scale-Conditioned Gammas
-#		 # Bounded offset in [-1.2, 1.2] keeps multipliers safely in ~[0.3x, 3.3x] range
-#		 gamma_offset = 1.2 * torch.tanh(self.f_gamma(embed_context))
-#		 gammas = torch.exp(self.log_gamma_base + gamma_offset)  # [E, n_gammas] or [1, n_gammas]
-
-#		 # 2. Compute spatial unit direction and RBF distance decay
-#		 norm_pos = torch.sqrt(
-#			 torch.sum(A_Lg_in_srcs.x[:, 0:3] ** 2, dim=1, keepdim=True) + 1e-8
-#		 )
-#		 rbf_decay = torch.exp(-1.0 * norm_pos * gammas)
-
-#		 rel_pos = torch.cat(
-#			 (
-#				 A_Lg_in_srcs.x[:, 0:3] / norm_pos,
-#				 rbf_decay,
-#				 A_Lg_in_srcs.x[:, 3:4],
-#			 ),
-#			 dim=1,
-#		 )
-
-#		 # 3. Propagate message from Source Factor (edge_index[0]) to Product Graph (edge_index[1])
-#		 out = self.propagate(
-#			 A_Lg_in_srcs.edge_index,
-#			 size=(N, M),
-#			 x=inpt,
-#			 edge_attr=rel_pos,
-#			 mask=mask,
-#		 )
-
-#		 # 4. Mask mapped to sending source nodes (edge_index[0])
-#		 # Handles mask whether passed as per-node [N, dim] or per-edge [E, dim]
-#		 if mask.dim() > 1 and mask.shape[0] == N:
-#			 out_mask = mask[A_Lg_in_srcs.edge_index[0]]
-#		 else:
-#			 out_mask = mask
-
-#		 return self.activate_out(self.fc2(out)), out_mask
-
-#	 def message(self, x_j, mask_j, edge_attr):
-#		 # x_j: Source node features mapped to edges [E, ndim_in]
-#		 # mask_j: Source mask mapped to edges [E, ndim_mask]
-#		 # edge_attr: Dynamic 8D spatio-temporal geometric feature vector [E, 8]
-#		 return (mask_j + 0.01) * self.fc1(torch.cat((x_j, edge_attr), dim=-1))
-
-
 class BipartiteGraphReadOutOperator(MessagePassing):
 	"""Bipartite Readout Operator (Source Space -> Product Graph Space).
 
@@ -927,7 +726,7 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		ndim_out,
 		ndim_mask=4,
 		embed_dim=10,
-		n_gammas=4,
+		n_gammas=3, # 4
 		baseline_gate=0.01,
 	):
 		# Aggregating/Mapping from Source Nodes (edge_index[0]) to Product Graph Edges (edge_index[1])
@@ -1108,327 +907,11 @@ class DataAggregationAssociation(nn.Module):
 ## Note: can maybe reduce dilate scale and scale_misfit, as the default kernel_sig_t is likely larger
 ## Can also maybe reduce the scaling of eps
 
-class ArrivalEmbedding1(MessagePassing):
-	def __init__(self, ndim_arv_in, ndim_out, n_hidden = 20, n_dim_embed = 30, n_phase_embed = 5, embed_vector_dim = 10, ndim_out_src = 1, scale_rel = scale_rel, k_spc_edges = k_spc_edges, kernel_sig_t = kernel_sig_t, use_phase_types = use_phase_types, scale_time = scale_time, min_thresh = 0.01, trv = None, ftrns2 = None, device = 'cuda'):
-		# super(SourceArrivalEmbedding, self).__init__(node_dim = 0, aggr = 'add') # check node dim. ## Use sum or mean
-		super(ArrivalEmbedding1, self).__init__(node_dim = 0, aggr = 'add') # check node dim. ## Use sum or mean
-
-		## Goal of this module is just to implement Bipartite aggregation of each source query - pick pair, of their misfits,
-		## and while aggregating over the relevant nodes of the (subgraph) Cartesian product
-		self.ftrns2 = ftrns2
-		self.trv = trv
-		self.use_phase_types = use_phase_types
-		self.kernel_sig_t = kernel_sig_t
-		self.min_thresh = min_thresh
-		self.scale_time = scale_time
-		self.scale_rel = scale_rel
-		self.k_spc_edges = k_spc_edges
-		self.device = device
-		self.dilate_scale = 2.0 # 3.0
-		self.scale_misfit = 2.0 # 3.0
-		# self.null_embed = nn.Parameter(torch.randn(1, 1, n_hidden).to(device) * 0.01) # .to(device)
-		# self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden).to(device)) # .to(device)
-		self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden)) # .to(device)
-
-		n_phase_types = 2
-		n_phase_embed = 5
-		# self.phase_embed = nn.Parameter(torch.randn(n_phase_types, n_phase_embed) * 0.01).to(device)
-		self.phase_embed = nn.Embedding(n_phase_types, n_phase_embed)
-		# self.fc1 = nn.Sequential(nn.Linear(ndim_arv_in + 12 + 10 + 11 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
-		self.fc1 = nn.Sequential(nn.Linear(n_hidden + 31, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
-		# self.fc2 = nn.Sequential(nn.Linear(ndim_arv_in + 6 + 3 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
-		self.fc2 = nn.Sequential(nn.Linear(n_hidden + 14, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
-		# self.fc3 = nn.Sequential(nn.Linear(ndim_arv_in + 6 + 3 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
-		self.fc3 = nn.Sequential(nn.Linear(n_hidden + 14, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
-		self.ioffset = torch.tensor([-1, 0], dtype=torch.long, device=self.device)
-
-
-		# Spatial gamma banks (4 multi-scale channels each)
-		self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-		self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-		self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-
-		# Temporal gamma banks
-		self.f_gamma_time1, self.log_gamma_base_time1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.1, max_val=2.0)
-		self.f_gamma_time2, self.log_gamma_base_time2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-		self.f_gamma_time3, self.log_gamma_base_time3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-
-
-		self.fc_merge = nn.Sequential(nn.Linear(3*n_hidden, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, ndim_out))
-		# self.fc_merge_src = nn.Sequential(nn.Linear(3*n_hidden, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, ndim_out_src))
-
-	def _init_gamma_bank(self, embed_dim, n_gammas=3, min_val=0.05, max_val=2.0):
-		# Predicts 1 global log-scale (alpha) + n_gammas channel residuals
-		f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
-		nn.init.zeros_(f_gamma.weight)
-		nn.init.zeros_(f_gamma.bias)
-		
-		# Initialize base log-gammas log-spaced across physical range
-		base_gammas = torch.logspace(
-			torch.log10(torch.tensor(min_val)), 
-			torch.log10(torch.tensor(max_val)), 
-			steps=n_gammas
-		).unsqueeze(0)
-		log_gamma_base = nn.Parameter(torch.log(base_gammas))
-		
-		return f_gamma, log_gamma_base
-
-	def _compute_gammas(self, f_gamma_layer, log_gamma_base, ctx, n_gammas):
-		# Predict delta from context
-		delta = f_gamma_layer(ctx) # [E, 1 + n_gammas]
-		
-		alpha = delta[:, :1] # [E, 1] Global scale factor
-		residuals = 0.2 * torch.tanh(delta[:, 1:]) # [E, n_gammas] Bounded channel residuals
-		
-		# Standardized exponential scale formula
-		gammas = torch.exp(log_gamma_base + alpha + residuals) # [E, n_gammas]
-		return gammas
-
-	def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out = None): # reference k nearest spatial points
-
-		if trv_out is None:
-			trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart)) + x_query_t.reshape(-1, 1, 1) ## Use full travel times, as we check for stations from the full product
-		else: 
-			trv_out = trv_out + x_query_t.reshape(-1, 1, 1) ## Is this being applied outside this layer?
-
-		if self.use_phase_types == False:
-			phase_label = phase_label*0.0
-
-		# ipick_unique = torch.unique(ipick).long()
-		i1 = torch.where(phase_label == 0)[0]
-		i2 = torch.where(phase_label == 1)[0]
-
-		## Note: computing misfit times but not even using them other than for mask
-		misfit_time = torch.zeros((len(x_query_cart), len(tpick), 4)).to(self.device) ## Question: is it necessary to produce these pairwise misfits? Can we focus on the pairs that "likely" have arrival times within threshold (e.g., bound min and max times based on distances between src reciever first, before computing travel times)
-		# misfit_time[:,i1,0] = torch.exp(-0.5*(trv_out[:,ipick[i1],0] - torch.Tensor(tpick[i1]).to(self.device))**2/((self.dilate_scale*self.kernel_sig_t)**2))
-		# misfit_time[:,i2,1] = torch.exp(-0.5*(trv_out[:,ipick[i2],1] - torch.Tensor(tpick[i2]).to(self.device))**2/((self.dilate_scale*self.kernel_sig_t)**2))
-		# misfit_time[:,:,2] = torch.exp(-0.5*(trv_out[:,ipick,0] - torch.Tensor(tpick).to(self.device))**2/((self.dilate_scale*self.kernel_sig_t)**2))
-		# misfit_time[:,:,3] = torch.exp(-0.5*(trv_out[:,ipick,1] - torch.Tensor(tpick).to(self.device))**2/((self.dilate_scale*self.kernel_sig_t)**2))
-
-		tpick = tpick if isinstance(tpick, torch.Tensor) else torch.as_tensor(tpick, device=self.device)
-		misfit_time[:,i1,0] = torch.exp(-0.5*(trv_out[:,ipick[i1],0] - tpick[i1])**2/((self.dilate_scale*self.kernel_sig_t)**2))
-		misfit_time[:,i2,1] = torch.exp(-0.5*(trv_out[:,ipick[i2],1] - tpick[i2])**2/((self.dilate_scale*self.kernel_sig_t)**2))
-		misfit_time[:,:,2] = torch.exp(-0.5*(trv_out[:,ipick,0] - tpick)**2/((self.dilate_scale*self.kernel_sig_t)**2))
-		misfit_time[:,:,3] = torch.exp(-0.5*(trv_out[:,ipick,1] - tpick)**2/((self.dilate_scale*self.kernel_sig_t)**2))
-				
-		## Can compute these degree vectors outside of loop
-		degree_srcs = degree(A_src_in_sta[1], num_nodes = len(x_context_cart), dtype = torch.long)
-		cum_degree_srcs = torch.cat((torch.zeros(1).to(self.device), torch.cumsum(degree_srcs, dim = 0)[0:-1]), dim = 0).long()
-		## Should check if minimal degree srcs really are accessing nearest stations
-		mask_misfit_time = misfit_time.max(2).values > self.min_thresh ## Save this, so can use as mask in the attention layer
-		isrc, iarv = torch.where(mask_misfit_time == 1)
-
-		## Build src-src indices (may or may not use the edge feature of source query to source node offsets)
-		edge_index = knn(torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_query_cart/1000.0, self.scale_time*x_query_t.reshape(-1,1)), dim = 1), k = self.k_spc_edges).flip(0).contiguous()
-
-		# Build a single flattened arange from size = sum(idx)
-		deg_slice = degree_srcs[edge_index[0]]
-		assert(deg_slice.min() > 0) ## This may not work for degree zero nodes (which shouldn't exist on the subgraph? E.g., all source nodes have some connected stations)
-		inc_inds = torch.arange(deg_slice.sum()).long().to(self.device)
-		inc_inds = inc_inds - torch.repeat_interleave(torch.cumsum(deg_slice, dim = 0) - deg_slice, deg_slice)
-		nodes_of_product = cum_degree_srcs[edge_index[0]].repeat_interleave(degree_srcs[edge_index[0]]) + inc_inds
-		ind_query = torch.arange(len(x_query_cart)).long().to(self.device).repeat_interleave(scatter(deg_slice, edge_index[1], dim = 0, dim_size = len(x_query_cart), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
-		sta_src_pairs = A_src_in_sta[:, nodes_of_product]
-		## Query_vals is shaped based on nodes_of_product. So when we aggregate or want to extract Cartesian product node features, we can use these.
-
-		# k_matches = knn(sta_src_pairs.T, torch.cat((ipick[iarv].reshape(-1,1), ))
-		query_vals = torch.cat((sta_src_pairs[0].reshape(-1,1), ind_query.reshape(-1,1)), dim = 1).long() # .float()
-		pick_vals = torch.cat((ipick[iarv].reshape(-1,1), isrc.reshape(-1,1)), dim = 1).long() # .float()
-
-		## Note: query_vals represents the pairs of station and query inds
-		## pick_vals represents the pairs of station and query inds
-		hash_picks, hash_queries = hash_rows(pick_vals), hash_rows(query_vals) ## Do not define directly if only using one mask below
-		mask_picks = torch.isin(hash_picks, hash_queries) # set(map(tuple, l1))
-		mask_queries = torch.isin(hash_queries, hash_picks) # set(map(tuple, l1))
-		iwhere_picks = torch.where(mask_picks == 1)[0] ## Not used
-		iwhere_query = torch.where(mask_queries == 1)[0]
-		# assert(torch.abs(query_vals[iwhere_query] - pick_vals[knn(pick_vals, query_vals[iwhere_query], k = 1)[1]]).max() == 0)
-		# assert(torch.abs(pick_vals[iwhere_picks] - query_vals[knn(query_vals, pick_vals[iwhere_picks], k = 1)[1]]).max() == 0)
-
-		# print('Time %0.4f'%(time.time() - st))
-		sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
-		ind_extract = torch.searchsorted(sorted_hash_picks, hash_queries[iwhere_query])
-		valid_ind = (ind_extract < len(sorted_hash_picks)) & (sorted_hash_picks[ind_extract.clamp(max = len(sorted_hash_picks) - 1)] == hash_queries[iwhere_query])
-		inds_queries_to_picks = order_hash_picks[ind_extract.clamp(max = len(sorted_hash_picks) - 1)][valid_ind]
-		assert(valid_ind.sum() == len(valid_ind))
-
-		# use_checks = True
-		# if use_checks == True:
-		# 	## For a random set of queries, check if have correct edges
-		# 	n_check = 30
-		# 	for n in range(n_check):
-		# 		i0 = np.random.choice(len(x_query))
-		# 		e1 = knn(torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_query_cart/1000.0, self.scale_time*x_query_t.reshape(-1,1)), dim = 1)[i0,:].reshape(1,-1), k = self.k_spc_edges).flip(0).contiguous()
-
-		## Compute features
-		misfit_rel_time = tpick[iarv[inds_queries_to_picks]].reshape(-1,1) - tlatent[nodes_of_product[iwhere_query]]
-		misfit_query_time = tpick[iarv[inds_queries_to_picks]].reshape(-1,1) - trv_out[query_vals[iwhere_query,1], ipick[iarv[inds_queries_to_picks]], :]
-		# misfit_rel_time = torch.cat((torch.exp(-0.5*(misfit_rel_time**2)/(((self.scale_misfit*self.kernel_sig_t)**2))), torch.sign(misfit_rel_time)), dim = 1)
-		# misfit_query_time = torch.cat((torch.exp(-0.5*(misfit_query_time**2)/(((self.scale_misfit*self.kernel_sig_t)**2))), torch.sign(misfit_query_time)), dim = 1)
-
-		misfit_rel_time = torch.cat((torch.exp(-1.0*torch.abs(misfit_rel_time)/(((self.scale_misfit*self.kernel_sig_t)**1))), torch.sign(misfit_rel_time)), dim = 1)
-		misfit_query_time = torch.cat((torch.exp(-1.0*torch.abs(misfit_query_time)/(((self.scale_misfit*self.kernel_sig_t)**1))), torch.sign(misfit_query_time)), dim = 1)
-
-		offset_src_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_query_cart[query_vals[iwhere_query,1]])/(10.0*self.scale_rel)
-		offset_ref_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_context_cart[A_src_in_sta[1,nodes_of_product[iwhere_query]],:])/(10.0*self.scale_rel)
-
-		## Distances between reference nodes and query (including time offsets)
-		offset_ref_src = (x_query_cart[query_vals[iwhere_query,1]] - x_context_cart[A_src_in_sta[1,nodes_of_product[iwhere_query]]])/(1.0*self.scale_rel)
-		# offset_ref_src_t = (x_query_t[query_vals[iwhere_query,1]].reshape(-1,1) - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]].reshape(-1,1))/(1.0*self.scale_time)
-		offset_ref_src_t = 1000.0*self.scale_time*(x_query_t[query_vals[iwhere_query,1]].reshape(-1,1) - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]].reshape(-1,1))/(3.0*self.scale_rel)
-
-		eps_time = 1e-8
-		offset_src_sta_norm = torch.norm(offset_src_sta, dim = 1, keepdim = True).clamp(min=eps_time)
-		offset_ref_sta_norm = torch.norm(offset_ref_sta, dim = 1, keepdim = True).clamp(min=eps_time)
-		offset_ref_src_norm = torch.norm(offset_ref_src, dim = 1, keepdim = True).clamp(min=eps_time)
-
-		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-
-		gammas1 = self._compute_gammas(self.f_gamma1, self.log_gamma_base1, ctx, n_gammas=3)
-		gammas2 = self._compute_gammas(self.f_gamma2, self.log_gamma_base2, ctx, n_gammas=3)
-		gammas3 = self._compute_gammas(self.f_gamma3, self.log_gamma_base3, ctx, n_gammas=3)
-
-		# 3. Compute RBF distance decay banks
-		rbf_src_sta = torch.exp(-1.0 * offset_src_sta_norm * gammas1)
-		rbf_ref_sta = torch.exp(-1.0 * offset_ref_sta_norm * gammas2)
-		rbf_ref_src = torch.exp(-1.0 * offset_ref_src_norm * gammas3)
-
-		# 4. Construct rich 8D spatio-temporal features: [unit_dir (3D), RBF bank (4D), dt (1D)]
-		feat_src_sta = torch.cat((offset_src_sta/offset_src_sta_norm, rbf_src_sta), dim=-1)
-		feat_ref_sta = torch.cat((offset_ref_sta/offset_ref_sta_norm, rbf_ref_sta), dim=-1)
-		feat_ref_src = torch.cat((offset_ref_src/offset_ref_src_norm, rbf_ref_src), dim=-1)
-
-
-		# offset_ref_src_norm_kernel_t = torch.cat((offset_ref_src_t, torch.exp(-1.0*torch.abs(offset_ref_src_t).reshape(-1,1)*F.softplus(self.w_gamma4))), dim = 1)
-		# gammas1_time = torch.exp(self.log_gamma_base_time1 + 1.6 * torch.tanh(self.f_gamma_time1(embed_context)))	
-		gammas1_time = self._compute_gammas(self.f_gamma_time1, self.log_gamma_base_time1, ctx, n_gammas=3)
-		rbf_time = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas1_time)
-		feat_time = torch.cat((offset_ref_src_t, rbf_time), dim=-1)
-
-		# inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, offset_src_sta, offset_ref_sta, offset_ref_src, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel, offset_ref_sta_norm_kernel, offset_ref_src_norm_kernel_t, self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())), dim = 1)
-		inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, feat_src_sta, feat_ref_sta, feat_ref_src, feat_time, self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())), dim = 1)
-		
-		aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim = 0, dim_size = len(iarv), reduce = 'mean') ## Can consider
-
-
-		use_time_based_embedding = True
-		if use_time_based_embedding == True:
-
-			min_time_shift = tlatent.amin()
-			max_time_offset = (tlatent.amax() - min_time_shift)*2.5
-			query_time = ((tpick - min_time_shift) + max_time_offset*ipick).reshape(-1,1)
-			val_sort_p, ind_sort_p = torch.sort((tlatent[:,0] - min_time_shift) + max_time_offset*A_src_in_sta[0]) ## Could do these steps outside the training loop
-			val_sort_s, ind_sort_s = torch.sort((tlatent[:,1] - min_time_shift) + max_time_offset*A_src_in_sta[0])
-			ind_extract_p = torch.searchsorted(val_sort_p, (tpick - min_time_shift) + max_time_offset*ipick)
-			ind_extract_s = torch.searchsorted(val_sort_s, (tpick - min_time_shift) + max_time_offset*ipick)
-
-			iarg_p = torch.argmin(torch.abs(torch.cat((val_sort_p[torch.clamp(ind_extract_p - 1, min = 0)].reshape(-1,1), val_sort_p[torch.clamp(ind_extract_p, max = len(val_sort_p) - 1)].reshape(-1,1)), dim = 1) - query_time), dim = 1)
-			iarg_s = torch.argmin(torch.abs(torch.cat((val_sort_s[torch.clamp(ind_extract_s - 1, min = 0)].reshape(-1,1), val_sort_s[torch.clamp(ind_extract_s, max = len(val_sort_s) - 1)].reshape(-1,1)), dim = 1) - query_time), dim = 1)
-			# ioffset = torch.Tensor([-1, 0]).long().to(self.device)
-			ind_grab_p = ind_sort_p[ind_extract_p + self.ioffset[iarg_p]] ## For each pick, the nearest arrival time of the nodes of the product
-			ind_grab_s = ind_sort_s[ind_extract_s + self.ioffset[iarg_s]] ## (Must confirm station indices are identical and mask if not)
-			sta_match_p = (A_src_in_sta[0,ind_grab_p] == ipick)
-			sta_match_s = (A_src_in_sta[0,ind_grab_s] == ipick)
-
-			# print('T4 %0.4f'%(time.time() - t1))
-			edge_index_p = knn(torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1)[A_src_in_sta[1, ind_grab_p]], k = self.k_spc_edges).flip(0).contiguous()
-			edge_index_s = knn(torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1)[A_src_in_sta[1, ind_grab_s]], k = self.k_spc_edges).flip(0).contiguous()
-
-			# Build a single flattened arange from size = sum(idx)
-			deg_slice_p = degree_srcs[edge_index_p[0]]
-			deg_slice_s = degree_srcs[edge_index_s[0]]
-			assert(deg_slice_p.min() > 0) ## This may not work for degree zero nodes (which shouldn't exist on the subgraph? E.g., all source nodes have some connected stations)
-			assert(deg_slice_s.min() > 0) ## This may not work for degree zero nodes (which shouldn't exist on the subgraph? E.g., all source nodes have some connected stations)
-			inc_inds_p = torch.arange(deg_slice_p.sum()).long().to(self.device)
-			inc_inds_p = inc_inds_p - torch.repeat_interleave(torch.cumsum(deg_slice_p, dim = 0) - deg_slice_p, deg_slice_p)
-
-			inc_inds_s = torch.arange(deg_slice_s.sum()).long().to(self.device)
-			inc_inds_s = inc_inds_s - torch.repeat_interleave(torch.cumsum(deg_slice_s, dim = 0) - deg_slice_s, deg_slice_s)
-
-			nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(degree_srcs[edge_index_p[0]]) + inc_inds_p
-			nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(degree_srcs[edge_index_s[0]]) + inc_inds_s
-
-			ind_query_p = torch.arange(len(tpick)).long().to(self.device).repeat_interleave(scatter(deg_slice_p, edge_index_p[1], dim = 0, dim_size = len(tpick), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
-			ind_query_s = torch.arange(len(tpick)).long().to(self.device).repeat_interleave(scatter(deg_slice_s, edge_index_s[1], dim = 0, dim_size = len(tpick), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
-
-			sta_src_pairs_p = A_src_in_sta[:, nodes_of_product_p]
-			sta_src_pairs_s = A_src_in_sta[:, nodes_of_product_s]
-
-			## Note: do we use all the pick_vals or just the pick_vals with positive entries, like above. We have actually created these queries based on "all" the picks
-			# k_matches = knn(sta_src_pairs.T, torch.cat((ipick[iarv].reshape(-1,1), ))
-			query_vals_p = torch.cat((sta_src_pairs_p[0].reshape(-1,1), ind_query_p.reshape(-1,1)), dim = 1).long() # .float()
-			query_vals_s = torch.cat((sta_src_pairs_s[0].reshape(-1,1), ind_query_s.reshape(-1,1)), dim = 1).long() # .float()
-
-			pick_vals_time = torch.cat((ipick.reshape(-1,1), torch.arange(len(ipick)).reshape(-1,1).to(self.device)), dim = 1).long() # .float()
-			hash_picks_time = hash_rows(pick_vals_time)
-			hash_queries_p, hash_queries_s = hash_rows(query_vals_p), hash_rows(query_vals_s)
-			mask_queries_p = torch.isin(hash_queries_p, hash_picks_time) # set(map(tuple, l1))
-			mask_queries_s = torch.isin(hash_queries_s, hash_picks_time) # set(map(tuple, l1))
-			iwhere_query_p = torch.where(mask_queries_p == 1)[0]
-			iwhere_query_s = torch.where(mask_queries_s == 1)[0]
-			# print('T5 %0.4f'%(time.time() - t1))
-			# assert(torch.abs(ipick[ind_query_p] - A_src_in_sta[0, nodes_of_product_p]).max() == 0)
-			# assert(torch.abs(ipick[ind_query_s] - A_src_in_sta[0, nodes_of_product_s]).max() == 0)
-			
-			# print('Time %0.4f'%(time.time() - st))
-			sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
-			ind_extract_p = torch.searchsorted(sorted_hash_picks_time, hash_queries_p[iwhere_query_p])
-			ind_extract_s = torch.searchsorted(sorted_hash_picks_time, hash_queries_s[iwhere_query_s])
-
-			valid_ind_p = (ind_extract_p < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_p.clamp(max = len(sorted_hash_picks_time) - 1)] == hash_queries_p[iwhere_query_p])
-			valid_ind_s = (ind_extract_s < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_s.clamp(max = len(sorted_hash_picks_time) - 1)] == hash_queries_s[iwhere_query_s])
-
-			inds_queries_to_picks_p = order_hash_picks_time[ind_extract_p.clamp(max = len(sorted_hash_picks_time) - 1)][valid_ind_p]
-			inds_queries_to_picks_s = order_hash_picks_time[ind_extract_s.clamp(max = len(sorted_hash_picks_time) - 1)][valid_ind_s]
-			# assert(valid_ind_p.sum() == len(valid_ind_p))
-			# assert(valid_ind_s.sum() == len(valid_ind_s))
-			# assert(torch.abs(pick_vals_time[inds_queries_to_picks_p,0] - query_vals_p[iwhere_query_p,0]).amax() == 0)
-			# assert(torch.abs(pick_vals_time[inds_queries_to_picks_s,0] - query_vals_s[iwhere_query_s,0]).amax() == 0)
-
-			misfit_rel_time_p = tpick[inds_queries_to_picks_p].reshape(-1,1) - tlatent[nodes_of_product_p[iwhere_query_p],0].reshape(-1,1)
-			misfit_rel_time_s = tpick[inds_queries_to_picks_s].reshape(-1,1) - tlatent[nodes_of_product_s[iwhere_query_s],1].reshape(-1,1)
-			# assert(degree(inds_queries_to_picks_p).amax() <= self.k_spc_edges)
-			# assert(degree(inds_queries_to_picks_s).amax() <= self.k_spc_edges)
-
-			misfit_rel_time_p = torch.cat((torch.exp(-1.0*torch.abs(misfit_rel_time_p)/(((self.scale_misfit*self.kernel_sig_t)**1))), torch.sign(misfit_rel_time_p)), dim = 1)
-			misfit_rel_time_s = torch.cat((torch.exp(-1.0*torch.abs(misfit_rel_time_s)/(((self.scale_misfit*self.kernel_sig_t)**1))), torch.sign(misfit_rel_time_s)), dim = 1)
-
-			offset_ref_sta_p = (locs_use_cart[ipick[inds_queries_to_picks_p]] - x_context_cart[A_src_in_sta[1,nodes_of_product_p[iwhere_query_p]],:])/(10.0*self.scale_rel)
-			offset_ref_sta_s = (locs_use_cart[ipick[inds_queries_to_picks_s]] - x_context_cart[A_src_in_sta[1,nodes_of_product_s[iwhere_query_s]],:])/(10.0*self.scale_rel)
-
-			offset_ref_sta_norm_p = torch.norm(offset_ref_sta_p, dim = 1, keepdim = True).clamp(min = eps_time)
-			offset_ref_sta_norm_s = torch.norm(offset_ref_sta_s, dim = 1, keepdim = True).clamp(min = eps_time)
-
-
-			# gammas_time1 = self._compute_gammas(self.f_gamma_time1, self.log_gamma_base_time1, ctx, n_gammas=3)
-			gammas_time2 = self._compute_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx, n_gammas=3)
-			gammas_time3 = self._compute_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx, n_gammas=3)
-
-			rbf_ref_sta_p = torch.exp(-1.0 * offset_ref_sta_norm_p * gammas_time2)
-			rbf_ref_sta_s = torch.exp(-1.0 * offset_ref_sta_norm_s * gammas_time3)
-
-			offset_ref_sta_norm_kernel_p = torch.cat((offset_ref_sta_p/offset_ref_sta_norm_p, rbf_ref_sta_p), dim = 1)
-			offset_ref_sta_norm_kernel_s = torch.cat((offset_ref_sta_s/offset_ref_sta_norm_s, rbf_ref_sta_s), dim = 1)
-			
-			inpt_aggregate_p = torch.cat((x[nodes_of_product_p[iwhere_query_p]], misfit_rel_time_p, offset_ref_sta_norm_kernel_p, self.phase_embed(phase_label[inds_queries_to_picks_p].reshape(-1).long())), dim = 1)
-			inpt_aggregate_s = torch.cat((x[nodes_of_product_s[iwhere_query_s]], misfit_rel_time_s, offset_ref_sta_norm_kernel_s, self.phase_embed(phase_label[inds_queries_to_picks_s].reshape(-1).long())), dim = 1)
-			
-			aggregate_product_p = scatter(self.fc2(inpt_aggregate_p), inds_queries_to_picks_p, dim = 0, dim_size = len(tpick), reduce = 'mean') ## Can consider
-			aggregate_product_s = scatter(self.fc3(inpt_aggregate_s), inds_queries_to_picks_s, dim = 0, dim_size = len(tpick), reduce = 'mean') ## Can consider
-
-
-		arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
-		arv_embed[pick_vals[:,1], iarv, :] = aggregate_product
-		arv_embed = self.fc_merge(torch.cat((arv_embed, aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1), aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)), dim = 2))
-
-		return arv_embed, mask_misfit_time ## Make sure this is correct reshape (not transposed)
-
-
 
 class ArrivalEmbedding(nn.Module):
 	def __init__(self, ndim_arv_in, ndim_out, n_hidden=20, n_dim_embed=30, n_phase_embed=5, embed_vector_dim=10, 
-				 ndim_out_src=1, scale_rel=1.0, k_spc_edges=5, kernel_sig_t=1.0, use_phase_types=True, 
-				 scale_time=1.0, min_thresh=0.01, trv=None, ftrns2=None, device='cuda'):
+				 ndim_out_src=1, scale_rel=scale_rel, k_spc_edges=5, kernel_sig_t=1.0, use_phase_types=True, 
+				 scale_time=scale_time, min_thresh=0.01, trv=None, ftrns2=None, device='cuda'):
 		super().__init__()
 		self.ftrns2, self.trv = ftrns2, trv
 		self.use_phase_types, self.kernel_sig_t = use_phase_types, kernel_sig_t
@@ -1439,13 +922,6 @@ class ArrivalEmbedding(nn.Module):
 		self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
 		self.phase_embed = nn.Embedding(2, n_phase_embed)
 
-		# # Dynamic dimension sanity: 
-		# # fc1: ndim_arv_in + 2 (rel_misfit) + 2 (query_misfit) + 6 (src_sta) + 6 (ref_sta) + 6 (ref_src) + 3 (time) + n_phase_embed = ndim_arv_in + 25 + n_phase_embed
-		# self.fc1 = nn.Sequential(nn.Linear(ndim_arv_in + 25 + n_phase_embed, 2 * n_hidden), nn.PReLU(), nn.Linear(2 * n_hidden, n_hidden))
-		
-		# # fc2 / fc3: ndim_arv_in + 2 (rel_misfit) + 6 (ref_sta feat) + n_phase_embed = ndim_arv_in + 8 + n_phase_embed
-		# self.fc2 = nn.Sequential(nn.Linear(ndim_arv_in + 8 + n_phase_embed, 2 * n_hidden), nn.PReLU(), nn.Linear(2 * n_hidden, n_hidden))
-		# self.fc3 = nn.Sequential(nn.Linear(ndim_arv_in + 8 + n_phase_embed, 2 * n_hidden), nn.PReLU(), nn.Linear(2 * n_hidden, n_hidden))
 
 		# fc1: ndim_arv_in + 2 (rel_misfit) + 2 (query_misfit) + 6 (src_sta) + 6 (ref_sta) + 6 (ref_src) + 3 (time) + n_phase_embed = ndim_arv_in + 25 + n_phase_embed
 		self.fc1 = nn.Sequential(
@@ -1642,10 +1118,7 @@ class ArrivalEmbedding(nn.Module):
 			nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(deg_slice_p) + inc_inds_p
 			
 			# Construct pick mapping directly for KNN targets:
-			# edge_index_p[1] indexes into ind_grab_p / query_time (0 to len(tpick)-1)
 			target_picks_p = edge_index_p[1].repeat_interleave(deg_slice_p)
-
-			# If len(ind_grab_p) == len(tpick), target_picks_p is ALREADY the true pick index.
 			query_vals_p_hash = (A_src_in_sta[0, nodes_of_product_p].to(torch.int64) << 32) | target_picks_p.to(torch.int64)
 
 			# query_vals_p_hash = (A_src_in_sta[0, nodes_of_product_p].to(torch.int64) << 32) | edge_index_p[1].repeat_interleave(deg_slice_p).to(torch.int64)
@@ -1695,10 +1168,7 @@ class ArrivalEmbedding(nn.Module):
 			nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(deg_slice_s) + inc_inds_s
 			
 			# Construct pick mapping directly for KNN targets:
-			# edge_index_p[1] indexes into ind_grab_p / query_time (0 to len(tpick)-1)
 			target_picks_s = edge_index_s[1].repeat_interleave(deg_slice_s)
-
-			# If len(ind_grab_p) == len(tpick), target_picks_p is ALREADY the true pick index.
 			query_vals_s_hash = (A_src_in_sta[0, nodes_of_product_s].to(torch.int64) << 32) | target_picks_s.to(torch.int64)
 
 			# query_vals_s_hash = (A_src_in_sta[0, nodes_of_product_s].to(torch.int64) << 32) | edge_index_s[1].repeat_interleave(deg_slice_s).to(torch.int64)
@@ -1736,22 +1206,6 @@ class ArrivalEmbedding(nn.Module):
 					inpt_s = torch.cat((x[nodes_of_product_s[iwhere_query_s]], misfit_rel_time_s, feat_s, self.phase_embed(phase_label[inds_s].long().reshape(-1))), dim=1)
 					aggregate_product_s = scatter(self.fc3(inpt_s), inds_s, dim=0, dim_size=len(tpick), reduce='mean')
 
-		# # --- Dense Embedding Placement ---
-		# arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
-
-		# if len(isrc) > 0 and len(iarv) > 0:
-		# 	flat_target_idx = isrc * len(tpick) + iarv
-		# 	flat_embed_agg = scatter(aggregate_product, flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='mean')
-		# 	counts = scatter(torch.ones_like(aggregate_product[:, :1]), flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='sum')
-
-		# 	arv_embed = arv_embed.view(-1, self.fc1[-1].out_features)
-			
-		# 	# Selectively write matched indices to prevent un-matched zero overrides
-		# 	# matched_mask = (flat_embed_agg.abs().sum(dim=-1) > 0)
-		# 	matched_mask = (counts.squeeze(-1) > 0)
-
-		# 	arv_embed[matched_mask] = flat_embed_agg[matched_mask]
-		# 	arv_embed = arv_embed.view(len(x_query_cart), len(tpick), -1)
 
 		# Updated Dense Embedding Placement Guard
 		arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
@@ -1776,274 +1230,320 @@ class ArrivalEmbedding(nn.Module):
 		return arv_embed, mask_misfit_time
 
 
+# class ArrivalEmbedding1(MessagePassing):
+# 	def __init__(self, ndim_arv_in, ndim_out, n_hidden = 20, n_dim_embed = 30, n_phase_embed = 5, embed_vector_dim = 10, ndim_out_src = 1, scale_rel = scale_rel, k_spc_edges = k_spc_edges, kernel_sig_t = kernel_sig_t, use_phase_types = use_phase_types, scale_time = scale_time, min_thresh = 0.01, trv = None, ftrns2 = None, device = 'cuda'):
+# 		# super(SourceArrivalEmbedding, self).__init__(node_dim = 0, aggr = 'add') # check node dim. ## Use sum or mean
+# 		super(ArrivalEmbedding1, self).__init__(node_dim = 0, aggr = 'add') # check node dim. ## Use sum or mean
 
-	# def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, 
-	# 			phase_label, locs_use_cart, tlatent, embed_context, trv_out=None):
-	# 	device = x.device
+# 		## Goal of this module is just to implement Bipartite aggregation of each source query - pick pair, of their misfits,
+# 		## and while aggregating over the relevant nodes of the (subgraph) Cartesian product
+# 		self.ftrns2 = ftrns2
+# 		self.trv = trv
+# 		self.use_phase_types = use_phase_types
+# 		self.kernel_sig_t = kernel_sig_t
+# 		self.min_thresh = min_thresh
+# 		self.scale_time = scale_time
+# 		self.scale_rel = scale_rel
+# 		self.k_spc_edges = k_spc_edges
+# 		self.device = device
+# 		self.dilate_scale = 2.0 # 3.0
+# 		self.scale_misfit = 2.0 # 3.0
+# 		# self.null_embed = nn.Parameter(torch.randn(1, 1, n_hidden).to(device) * 0.01) # .to(device)
+# 		# self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden).to(device)) # .to(device)
+# 		self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden)) # .to(device)
+
+# 		n_phase_types = 2
+# 		n_phase_embed = 5
+# 		# self.phase_embed = nn.Parameter(torch.randn(n_phase_types, n_phase_embed) * 0.01).to(device)
+# 		self.phase_embed = nn.Embedding(n_phase_types, n_phase_embed)
+# 		# self.fc1 = nn.Sequential(nn.Linear(ndim_arv_in + 12 + 10 + 11 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+# 		self.fc1 = nn.Sequential(nn.Linear(n_hidden + 31, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+# 		# self.fc2 = nn.Sequential(nn.Linear(ndim_arv_in + 6 + 3 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+# 		self.fc2 = nn.Sequential(nn.Linear(n_hidden + 14, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+# 		# self.fc3 = nn.Sequential(nn.Linear(ndim_arv_in + 6 + 3 + n_phase_embed, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+# 		self.fc3 = nn.Sequential(nn.Linear(n_hidden + 14, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, n_hidden)) ## Inputs: 4 x misfit features, query and reference, 6 offset features, query and reference, 2 norm features
+# 		self.ioffset = torch.tensor([-1, 0], dtype=torch.long, device=self.device)
 
 
-	# 	# Guard: Ensure graph is CSR-sorted by context node index for cum_degree_srcs pointer validity
-	# 	if A_src_in_sta.size(1) > 1:
-	# 		assert torch.all(A_src_in_sta[1, :-1] <= A_src_in_sta[1, 1:]), \
-	# 			"A_src_in_sta must be sorted by context node index (A_src_in_sta[1]) for CSR degree-indexing!"
+# 		# Spatial gamma banks (4 multi-scale channels each)
+# 		self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+# 		self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+# 		self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
 
-	# 	if trv_out is None:
-	# 		trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart)) + x_query_t.reshape(-1, 1, 1)
-	# 	else:
-	# 		trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
+# 		# Temporal gamma banks
+# 		self.f_gamma_time1, self.log_gamma_base_time1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.1, max_val=2.0)
+# 		self.f_gamma_time2, self.log_gamma_base_time2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
+# 		self.f_gamma_time3, self.log_gamma_base_time3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
 
-	# 	if not self.use_phase_types:
-	# 		phase_label = torch.zeros_like(phase_label)
 
-	# 	i1, i2 = torch.where(phase_label == 0)[0], torch.where(phase_label == 1)[0]
-	# 	tpick = tpick if isinstance(tpick, torch.Tensor) else torch.as_tensor(tpick, device=device)
-	# 	misfit_time = torch.zeros((len(x_query_cart), len(tpick), 4), device=device)
+# 		self.fc_merge = nn.Sequential(nn.Linear(3*n_hidden, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, ndim_out))
+# 		# self.fc_merge_src = nn.Sequential(nn.Linear(3*n_hidden, 2*n_hidden), nn.PReLU(), nn.Linear(2*n_hidden, ndim_out_src))
 
-	# 	if len(i1) > 0:
-	# 		misfit_time[:, i1, 0] = torch.exp(-0.5 * (trv_out[:, ipick[i1], 0] - tpick[i1])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-	# 	if len(i2) > 0:
-	# 		misfit_time[:, i2, 1] = torch.exp(-0.5 * (trv_out[:, ipick[i2], 1] - tpick[i2])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-
-	# 	misfit_time[:, :, 2] = torch.exp(-0.5 * (trv_out[:, ipick, 0] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-	# 	misfit_time[:, :, 3] = torch.exp(-0.5 * (trv_out[:, ipick, 1] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-
-	# 	degree_srcs = degree(A_src_in_sta[1], num_nodes=len(x_context_cart), dtype=torch.long)
-	# 	cum_degree_srcs = torch.cat((torch.zeros(1, device=device, dtype=torch.long), torch.cumsum(degree_srcs, dim=0)[:-1]), dim=0)
-
-	# 	mask_misfit_time = misfit_time.max(2).values > self.min_thresh
-	# 	isrc, iarv = torch.where(mask_misfit_time == 1)
-
-	# 	edge_index = knn(
-	# 		torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
-	# 		torch.cat((x_query_cart / 1000.0, self.scale_time * x_query_t.reshape(-1, 1)), dim=1),
-	# 		k=self.k_spc_edges
-	# 	).flip(0).contiguous()
-
-	# 	deg_slice = degree_srcs[edge_index[0]]
-	# 	inc_inds = torch.arange(deg_slice.sum(), device=device, dtype=torch.long)
-	# 	inc_inds = inc_inds - torch.repeat_interleave(torch.cumsum(deg_slice, dim=0) - deg_slice, deg_slice)
-
-	# 	nodes_of_product = cum_degree_srcs[edge_index[0]].repeat_interleave(degree_srcs[edge_index[0]]) + inc_inds
-	# 	ind_query = edge_index[1].repeat_interleave(degree_srcs[edge_index[0]])
-
-	# 	sta_src_pairs = A_src_in_sta[:, nodes_of_product]
+# 	def _init_gamma_bank(self, embed_dim, n_gammas=3, min_val=0.05, max_val=2.0):
+# 		# Predicts 1 global log-scale (alpha) + n_gammas channel residuals
+# 		f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
+# 		nn.init.zeros_(f_gamma.weight)
+# 		nn.init.zeros_(f_gamma.bias)
 		
-	# 	# --- Collision-Free 64-bit Tuple Packing: (Station_ID << 32) | Target_ID ---
-	# 	hash_queries = (sta_src_pairs[0].to(torch.int64) << 32) | ind_query.to(torch.int64)
-	# 	hash_picks = (ipick[iarv].to(torch.int64) << 32) | isrc.to(torch.int64)
+# 		# Initialize base log-gammas log-spaced across physical range
+# 		base_gammas = torch.logspace(
+# 			torch.log10(torch.tensor(min_val)), 
+# 			torch.log10(torch.tensor(max_val)), 
+# 			steps=n_gammas
+# 		).unsqueeze(0)
+# 		log_gamma_base = nn.Parameter(torch.log(base_gammas))
+		
+# 		return f_gamma, log_gamma_base
 
-	# 	iwhere_query = torch.where(torch.isin(hash_queries, hash_picks))[0]
+# 	def _compute_gammas(self, f_gamma_layer, log_gamma_base, ctx, n_gammas):
+# 		# Predict delta from context
+# 		delta = f_gamma_layer(ctx) # [E, 1 + n_gammas]
+		
+# 		alpha = delta[:, :1] # [E, 1] Global scale factor
+# 		residuals = 0.2 * torch.tanh(delta[:, 1:]) # [E, n_gammas] Bounded channel residuals
+		
+# 		# Standardized exponential scale formula
+# 		gammas = torch.exp(log_gamma_base + alpha + residuals) # [E, n_gammas]
+# 		return gammas
 
-	# 	ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-	# 	aggregate_product = torch.zeros((len(iarv), self.fc1[-1].out_features), device=device)
+# 	def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out = None): # reference k nearest spatial points
 
-	# 	if len(iwhere_query) > 0 and len(hash_picks) > 0:
-	# 		sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
-	# 		ind_extract = torch.searchsorted(sorted_hash_picks, hash_queries[iwhere_query])
-	# 		max_idx = len(sorted_hash_picks) - 1
-	# 		clamped_extract = ind_extract.clamp(max=max_idx)
+# 		if trv_out is None:
+# 			trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart)) + x_query_t.reshape(-1, 1, 1) ## Use full travel times, as we check for stations from the full product
+# 		else: 
+# 			trv_out = trv_out + x_query_t.reshape(-1, 1, 1) ## Is this being applied outside this layer?
+
+# 		if self.use_phase_types == False:
+# 			phase_label = phase_label*0.0
+
+# 		# ipick_unique = torch.unique(ipick).long()
+# 		i1 = torch.where(phase_label == 0)[0]
+# 		i2 = torch.where(phase_label == 1)[0]
+
+# 		## Note: computing misfit times but not even using them other than for mask
+# 		misfit_time = torch.zeros((len(x_query_cart), len(tpick), 4)).to(self.device) ## Question: is it necessary to produce these pairwise misfits? Can we focus on the pairs that "likely" have arrival times within threshold (e.g., bound min and max times based on distances between src reciever first, before computing travel times)
+# 		# misfit_time[:,i1,0] = torch.exp(-0.5*(trv_out[:,ipick[i1],0] - torch.Tensor(tpick[i1]).to(self.device))**2/((self.dilate_scale*self.kernel_sig_t)**2))
+# 		# misfit_time[:,i2,1] = torch.exp(-0.5*(trv_out[:,ipick[i2],1] - torch.Tensor(tpick[i2]).to(self.device))**2/((self.dilate_scale*self.kernel_sig_t)**2))
+# 		# misfit_time[:,:,2] = torch.exp(-0.5*(trv_out[:,ipick,0] - torch.Tensor(tpick).to(self.device))**2/((self.dilate_scale*self.kernel_sig_t)**2))
+# 		# misfit_time[:,:,3] = torch.exp(-0.5*(trv_out[:,ipick,1] - torch.Tensor(tpick).to(self.device))**2/((self.dilate_scale*self.kernel_sig_t)**2))
+
+# 		tpick = tpick if isinstance(tpick, torch.Tensor) else torch.as_tensor(tpick, device=self.device)
+# 		misfit_time[:,i1,0] = torch.exp(-0.5*(trv_out[:,ipick[i1],0] - tpick[i1])**2/((self.dilate_scale*self.kernel_sig_t)**2))
+# 		misfit_time[:,i2,1] = torch.exp(-0.5*(trv_out[:,ipick[i2],1] - tpick[i2])**2/((self.dilate_scale*self.kernel_sig_t)**2))
+# 		misfit_time[:,:,2] = torch.exp(-0.5*(trv_out[:,ipick,0] - tpick)**2/((self.dilate_scale*self.kernel_sig_t)**2))
+# 		misfit_time[:,:,3] = torch.exp(-0.5*(trv_out[:,ipick,1] - tpick)**2/((self.dilate_scale*self.kernel_sig_t)**2))
+				
+# 		## Can compute these degree vectors outside of loop
+# 		degree_srcs = degree(A_src_in_sta[1], num_nodes = len(x_context_cart), dtype = torch.long)
+# 		cum_degree_srcs = torch.cat((torch.zeros(1).to(self.device), torch.cumsum(degree_srcs, dim = 0)[0:-1]), dim = 0).long()
+# 		## Should check if minimal degree srcs really are accessing nearest stations
+# 		mask_misfit_time = misfit_time.max(2).values > self.min_thresh ## Save this, so can use as mask in the attention layer
+# 		isrc, iarv = torch.where(mask_misfit_time == 1)
+
+# 		## Build src-src indices (may or may not use the edge feature of source query to source node offsets)
+# 		edge_index = knn(torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_query_cart/1000.0, self.scale_time*x_query_t.reshape(-1,1)), dim = 1), k = self.k_spc_edges).flip(0).contiguous()
+
+# 		# Build a single flattened arange from size = sum(idx)
+# 		deg_slice = degree_srcs[edge_index[0]]
+# 		assert(deg_slice.min() > 0) ## This may not work for degree zero nodes (which shouldn't exist on the subgraph? E.g., all source nodes have some connected stations)
+# 		inc_inds = torch.arange(deg_slice.sum()).long().to(self.device)
+# 		inc_inds = inc_inds - torch.repeat_interleave(torch.cumsum(deg_slice, dim = 0) - deg_slice, deg_slice)
+# 		nodes_of_product = cum_degree_srcs[edge_index[0]].repeat_interleave(degree_srcs[edge_index[0]]) + inc_inds
+# 		ind_query = torch.arange(len(x_query_cart)).long().to(self.device).repeat_interleave(scatter(deg_slice, edge_index[1], dim = 0, dim_size = len(x_query_cart), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
+# 		sta_src_pairs = A_src_in_sta[:, nodes_of_product]
+# 		## Query_vals is shaped based on nodes_of_product. So when we aggregate or want to extract Cartesian product node features, we can use these.
+
+# 		# k_matches = knn(sta_src_pairs.T, torch.cat((ipick[iarv].reshape(-1,1), ))
+# 		query_vals = torch.cat((sta_src_pairs[0].reshape(-1,1), ind_query.reshape(-1,1)), dim = 1).long() # .float()
+# 		pick_vals = torch.cat((ipick[iarv].reshape(-1,1), isrc.reshape(-1,1)), dim = 1).long() # .float()
+
+# 		## Note: query_vals represents the pairs of station and query inds
+# 		## pick_vals represents the pairs of station and query inds
+# 		hash_picks, hash_queries = hash_rows(pick_vals), hash_rows(query_vals) ## Do not define directly if only using one mask below
+# 		mask_picks = torch.isin(hash_picks, hash_queries) # set(map(tuple, l1))
+# 		mask_queries = torch.isin(hash_queries, hash_picks) # set(map(tuple, l1))
+# 		iwhere_picks = torch.where(mask_picks == 1)[0] ## Not used
+# 		iwhere_query = torch.where(mask_queries == 1)[0]
+# 		# assert(torch.abs(query_vals[iwhere_query] - pick_vals[knn(pick_vals, query_vals[iwhere_query], k = 1)[1]]).max() == 0)
+# 		# assert(torch.abs(pick_vals[iwhere_picks] - query_vals[knn(query_vals, pick_vals[iwhere_picks], k = 1)[1]]).max() == 0)
+
+# 		# print('Time %0.4f'%(time.time() - st))
+# 		sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
+# 		ind_extract = torch.searchsorted(sorted_hash_picks, hash_queries[iwhere_query])
+# 		valid_ind = (ind_extract < len(sorted_hash_picks)) & (sorted_hash_picks[ind_extract.clamp(max = len(sorted_hash_picks) - 1)] == hash_queries[iwhere_query])
+# 		inds_queries_to_picks = order_hash_picks[ind_extract.clamp(max = len(sorted_hash_picks) - 1)][valid_ind]
+# 		assert(valid_ind.sum() == len(valid_ind))
+
+# 		# use_checks = True
+# 		# if use_checks == True:
+# 		# 	## For a random set of queries, check if have correct edges
+# 		# 	n_check = 30
+# 		# 	for n in range(n_check):
+# 		# 		i0 = np.random.choice(len(x_query))
+# 		# 		e1 = knn(torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_query_cart/1000.0, self.scale_time*x_query_t.reshape(-1,1)), dim = 1)[i0,:].reshape(1,-1), k = self.k_spc_edges).flip(0).contiguous()
+
+# 		## Compute features
+# 		misfit_rel_time = tpick[iarv[inds_queries_to_picks]].reshape(-1,1) - tlatent[nodes_of_product[iwhere_query]]
+# 		misfit_query_time = tpick[iarv[inds_queries_to_picks]].reshape(-1,1) - trv_out[query_vals[iwhere_query,1], ipick[iarv[inds_queries_to_picks]], :]
+# 		# misfit_rel_time = torch.cat((torch.exp(-0.5*(misfit_rel_time**2)/(((self.scale_misfit*self.kernel_sig_t)**2))), torch.sign(misfit_rel_time)), dim = 1)
+# 		# misfit_query_time = torch.cat((torch.exp(-0.5*(misfit_query_time**2)/(((self.scale_misfit*self.kernel_sig_t)**2))), torch.sign(misfit_query_time)), dim = 1)
+
+# 		misfit_rel_time = torch.cat((torch.exp(-1.0*torch.abs(misfit_rel_time)/(((self.scale_misfit*self.kernel_sig_t)**1))), torch.sign(misfit_rel_time)), dim = 1)
+# 		misfit_query_time = torch.cat((torch.exp(-1.0*torch.abs(misfit_query_time)/(((self.scale_misfit*self.kernel_sig_t)**1))), torch.sign(misfit_query_time)), dim = 1)
+
+# 		offset_src_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_query_cart[query_vals[iwhere_query,1]])/(10.0*self.scale_rel)
+# 		offset_ref_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_context_cart[A_src_in_sta[1,nodes_of_product[iwhere_query]],:])/(10.0*self.scale_rel)
+
+# 		## Distances between reference nodes and query (including time offsets)
+# 		offset_ref_src = (x_query_cart[query_vals[iwhere_query,1]] - x_context_cart[A_src_in_sta[1,nodes_of_product[iwhere_query]]])/(1.0*self.scale_rel)
+# 		# offset_ref_src_t = (x_query_t[query_vals[iwhere_query,1]].reshape(-1,1) - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]].reshape(-1,1))/(1.0*self.scale_time)
+# 		offset_ref_src_t = 1000.0*self.scale_time*(x_query_t[query_vals[iwhere_query,1]].reshape(-1,1) - x_context_t[A_src_in_sta[1,nodes_of_product[iwhere_query]]].reshape(-1,1))/(3.0*self.scale_rel)
+
+# 		eps_time = 1e-8
+# 		offset_src_sta_norm = torch.norm(offset_src_sta, dim = 1, keepdim = True).clamp(min=eps_time)
+# 		offset_ref_sta_norm = torch.norm(offset_ref_sta, dim = 1, keepdim = True).clamp(min=eps_time)
+# 		offset_ref_src_norm = torch.norm(offset_ref_src, dim = 1, keepdim = True).clamp(min=eps_time)
+
+# 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+# 		gammas1 = self._compute_gammas(self.f_gamma1, self.log_gamma_base1, ctx, n_gammas=3)
+# 		gammas2 = self._compute_gammas(self.f_gamma2, self.log_gamma_base2, ctx, n_gammas=3)
+# 		gammas3 = self._compute_gammas(self.f_gamma3, self.log_gamma_base3, ctx, n_gammas=3)
+
+# 		# 3. Compute RBF distance decay banks
+# 		rbf_src_sta = torch.exp(-1.0 * offset_src_sta_norm * gammas1)
+# 		rbf_ref_sta = torch.exp(-1.0 * offset_ref_sta_norm * gammas2)
+# 		rbf_ref_src = torch.exp(-1.0 * offset_ref_src_norm * gammas3)
+
+# 		# 4. Construct rich 8D spatio-temporal features: [unit_dir (3D), RBF bank (4D), dt (1D)]
+# 		feat_src_sta = torch.cat((offset_src_sta/offset_src_sta_norm, rbf_src_sta), dim=-1)
+# 		feat_ref_sta = torch.cat((offset_ref_sta/offset_ref_sta_norm, rbf_ref_sta), dim=-1)
+# 		feat_ref_src = torch.cat((offset_ref_src/offset_ref_src_norm, rbf_ref_src), dim=-1)
+
+
+# 		# offset_ref_src_norm_kernel_t = torch.cat((offset_ref_src_t, torch.exp(-1.0*torch.abs(offset_ref_src_t).reshape(-1,1)*F.softplus(self.w_gamma4))), dim = 1)
+# 		# gammas1_time = torch.exp(self.log_gamma_base_time1 + 1.6 * torch.tanh(self.f_gamma_time1(embed_context)))	
+# 		gammas1_time = self._compute_gammas(self.f_gamma_time1, self.log_gamma_base_time1, ctx, n_gammas=3)
+# 		rbf_time = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas1_time)
+# 		feat_time = torch.cat((offset_ref_src_t, rbf_time), dim=-1)
+
+# 		# inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, offset_src_sta, offset_ref_sta, offset_ref_src, offset_src_sta_norm_kernel, offset_ref_src_norm_kernel, offset_ref_sta_norm_kernel, offset_ref_src_norm_kernel_t, self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())), dim = 1)
+# 		inpt_aggregate = torch.cat((x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, feat_src_sta, feat_ref_sta, feat_ref_src, feat_time, self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())), dim = 1)
+		
+# 		aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim = 0, dim_size = len(iarv), reduce = 'mean') ## Can consider
+
+
+# 		use_time_based_embedding = True
+# 		if use_time_based_embedding == True:
+
+# 			min_time_shift = tlatent.amin()
+# 			max_time_offset = (tlatent.amax() - min_time_shift)*2.5
+# 			query_time = ((tpick - min_time_shift) + max_time_offset*ipick).reshape(-1,1)
+# 			val_sort_p, ind_sort_p = torch.sort((tlatent[:,0] - min_time_shift) + max_time_offset*A_src_in_sta[0]) ## Could do these steps outside the training loop
+# 			val_sort_s, ind_sort_s = torch.sort((tlatent[:,1] - min_time_shift) + max_time_offset*A_src_in_sta[0])
+# 			ind_extract_p = torch.searchsorted(val_sort_p, (tpick - min_time_shift) + max_time_offset*ipick)
+# 			ind_extract_s = torch.searchsorted(val_sort_s, (tpick - min_time_shift) + max_time_offset*ipick)
+
+# 			iarg_p = torch.argmin(torch.abs(torch.cat((val_sort_p[torch.clamp(ind_extract_p - 1, min = 0)].reshape(-1,1), val_sort_p[torch.clamp(ind_extract_p, max = len(val_sort_p) - 1)].reshape(-1,1)), dim = 1) - query_time), dim = 1)
+# 			iarg_s = torch.argmin(torch.abs(torch.cat((val_sort_s[torch.clamp(ind_extract_s - 1, min = 0)].reshape(-1,1), val_sort_s[torch.clamp(ind_extract_s, max = len(val_sort_s) - 1)].reshape(-1,1)), dim = 1) - query_time), dim = 1)
+# 			# ioffset = torch.Tensor([-1, 0]).long().to(self.device)
+# 			ind_grab_p = ind_sort_p[ind_extract_p + self.ioffset[iarg_p]] ## For each pick, the nearest arrival time of the nodes of the product
+# 			ind_grab_s = ind_sort_s[ind_extract_s + self.ioffset[iarg_s]] ## (Must confirm station indices are identical and mask if not)
+# 			sta_match_p = (A_src_in_sta[0,ind_grab_p] == ipick)
+# 			sta_match_s = (A_src_in_sta[0,ind_grab_s] == ipick)
+
+# 			# print('T4 %0.4f'%(time.time() - t1))
+# 			edge_index_p = knn(torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1)[A_src_in_sta[1, ind_grab_p]], k = self.k_spc_edges).flip(0).contiguous()
+# 			edge_index_s = knn(torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1), torch.cat((x_context_cart/1000.0, self.scale_time*x_context_t.reshape(-1,1)), dim = 1)[A_src_in_sta[1, ind_grab_s]], k = self.k_spc_edges).flip(0).contiguous()
+
+# 			# Build a single flattened arange from size = sum(idx)
+# 			deg_slice_p = degree_srcs[edge_index_p[0]]
+# 			deg_slice_s = degree_srcs[edge_index_s[0]]
+# 			assert(deg_slice_p.min() > 0) ## This may not work for degree zero nodes (which shouldn't exist on the subgraph? E.g., all source nodes have some connected stations)
+# 			assert(deg_slice_s.min() > 0) ## This may not work for degree zero nodes (which shouldn't exist on the subgraph? E.g., all source nodes have some connected stations)
+# 			inc_inds_p = torch.arange(deg_slice_p.sum()).long().to(self.device)
+# 			inc_inds_p = inc_inds_p - torch.repeat_interleave(torch.cumsum(deg_slice_p, dim = 0) - deg_slice_p, deg_slice_p)
+
+# 			inc_inds_s = torch.arange(deg_slice_s.sum()).long().to(self.device)
+# 			inc_inds_s = inc_inds_s - torch.repeat_interleave(torch.cumsum(deg_slice_s, dim = 0) - deg_slice_s, deg_slice_s)
+
+# 			nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(degree_srcs[edge_index_p[0]]) + inc_inds_p
+# 			nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(degree_srcs[edge_index_s[0]]) + inc_inds_s
+
+# 			ind_query_p = torch.arange(len(tpick)).long().to(self.device).repeat_interleave(scatter(deg_slice_p, edge_index_p[1], dim = 0, dim_size = len(tpick), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
+# 			ind_query_s = torch.arange(len(tpick)).long().to(self.device).repeat_interleave(scatter(deg_slice_s, edge_index_s[1], dim = 0, dim_size = len(tpick), reduce = 'sum'), dim = 0) ## The indices of a fixed query source (is this correct?)
+
+# 			sta_src_pairs_p = A_src_in_sta[:, nodes_of_product_p]
+# 			sta_src_pairs_s = A_src_in_sta[:, nodes_of_product_s]
+
+# 			## Note: do we use all the pick_vals or just the pick_vals with positive entries, like above. We have actually created these queries based on "all" the picks
+# 			# k_matches = knn(sta_src_pairs.T, torch.cat((ipick[iarv].reshape(-1,1), ))
+# 			query_vals_p = torch.cat((sta_src_pairs_p[0].reshape(-1,1), ind_query_p.reshape(-1,1)), dim = 1).long() # .float()
+# 			query_vals_s = torch.cat((sta_src_pairs_s[0].reshape(-1,1), ind_query_s.reshape(-1,1)), dim = 1).long() # .float()
+
+# 			pick_vals_time = torch.cat((ipick.reshape(-1,1), torch.arange(len(ipick)).reshape(-1,1).to(self.device)), dim = 1).long() # .float()
+# 			hash_picks_time = hash_rows(pick_vals_time)
+# 			hash_queries_p, hash_queries_s = hash_rows(query_vals_p), hash_rows(query_vals_s)
+# 			mask_queries_p = torch.isin(hash_queries_p, hash_picks_time) # set(map(tuple, l1))
+# 			mask_queries_s = torch.isin(hash_queries_s, hash_picks_time) # set(map(tuple, l1))
+# 			iwhere_query_p = torch.where(mask_queries_p == 1)[0]
+# 			iwhere_query_s = torch.where(mask_queries_s == 1)[0]
+# 			# print('T5 %0.4f'%(time.time() - t1))
+# 			# assert(torch.abs(ipick[ind_query_p] - A_src_in_sta[0, nodes_of_product_p]).max() == 0)
+# 			# assert(torch.abs(ipick[ind_query_s] - A_src_in_sta[0, nodes_of_product_s]).max() == 0)
 			
-	# 		valid_mask = (ind_extract <= max_idx) & (sorted_hash_picks[clamped_extract] == hash_queries[iwhere_query])
-	# 		iwhere_query = iwhere_query[valid_mask]
-	# 		inds_queries_to_picks = order_hash_picks[clamped_extract[valid_mask]]
+# 			# print('Time %0.4f'%(time.time() - st))
+# 			sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
+# 			ind_extract_p = torch.searchsorted(sorted_hash_picks_time, hash_queries_p[iwhere_query_p])
+# 			ind_extract_s = torch.searchsorted(sorted_hash_picks_time, hash_queries_s[iwhere_query_s])
 
-	# 		phase_idx = phase_label[iarv[inds_queries_to_picks]].long()
-	# 		tlatent_phase = tlatent[nodes_of_product[iwhere_query], phase_idx].reshape(-1, 1)
+# 			valid_ind_p = (ind_extract_p < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_p.clamp(max = len(sorted_hash_picks_time) - 1)] == hash_queries_p[iwhere_query_p])
+# 			valid_ind_s = (ind_extract_s < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_s.clamp(max = len(sorted_hash_picks_time) - 1)] == hash_queries_s[iwhere_query_s])
 
-	# 		misfit_rel_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - tlatent_phase
-	# 		trv_phase = trv_out[ind_query[iwhere_query], ipick[iarv[inds_queries_to_picks]], phase_idx].reshape(-1, 1)
-	# 		misfit_query_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - trv_phase
+# 			inds_queries_to_picks_p = order_hash_picks_time[ind_extract_p.clamp(max = len(sorted_hash_picks_time) - 1)][valid_ind_p]
+# 			inds_queries_to_picks_s = order_hash_picks_time[ind_extract_s.clamp(max = len(sorted_hash_picks_time) - 1)][valid_ind_s]
+# 			# assert(valid_ind_p.sum() == len(valid_ind_p))
+# 			# assert(valid_ind_s.sum() == len(valid_ind_s))
+# 			# assert(torch.abs(pick_vals_time[inds_queries_to_picks_p,0] - query_vals_p[iwhere_query_p,0]).amax() == 0)
+# 			# assert(torch.abs(pick_vals_time[inds_queries_to_picks_s,0] - query_vals_s[iwhere_query_s,0]).amax() == 0)
 
-	# 		misfit_rel_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time)), dim=1)
-	# 		misfit_query_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_query_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_query_time)), dim=1)
+# 			misfit_rel_time_p = tpick[inds_queries_to_picks_p].reshape(-1,1) - tlatent[nodes_of_product_p[iwhere_query_p],0].reshape(-1,1)
+# 			misfit_rel_time_s = tpick[inds_queries_to_picks_s].reshape(-1,1) - tlatent[nodes_of_product_s[iwhere_query_s],1].reshape(-1,1)
+# 			# assert(degree(inds_queries_to_picks_p).amax() <= self.k_spc_edges)
+# 			# assert(degree(inds_queries_to_picks_s).amax() <= self.k_spc_edges)
 
-	# 		offset_src_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_query_cart[ind_query[iwhere_query]]) / (10.0 * self.scale_rel)
-	# 		offset_ref_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (10.0 * self.scale_rel)
-	# 		offset_ref_src = (x_query_cart[ind_query[iwhere_query]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (1.0 * self.scale_rel)
-	# 		offset_ref_src_t = 1000.0 * self.scale_time * (x_query_t[ind_query[iwhere_query]].reshape(-1, 1) - x_context_t[A_src_in_sta[1, nodes_of_product[iwhere_query]]].reshape(-1, 1)) / (3.0 * self.scale_rel)
+# 			misfit_rel_time_p = torch.cat((torch.exp(-1.0*torch.abs(misfit_rel_time_p)/(((self.scale_misfit*self.kernel_sig_t)**1))), torch.sign(misfit_rel_time_p)), dim = 1)
+# 			misfit_rel_time_s = torch.cat((torch.exp(-1.0*torch.abs(misfit_rel_time_s)/(((self.scale_misfit*self.kernel_sig_t)**1))), torch.sign(misfit_rel_time_s)), dim = 1)
 
-	# 		eps_time = 1e-8
-	# 		offset_src_sta_norm = torch.norm(offset_src_sta, dim=1, keepdim=True).clamp(min=eps_time)
-	# 		offset_ref_sta_norm = torch.norm(offset_ref_sta, dim=1, keepdim=True).clamp(min=eps_time)
-	# 		offset_ref_src_norm = torch.norm(offset_ref_src, dim=1, keepdim=True).clamp(min=eps_time)
+# 			offset_ref_sta_p = (locs_use_cart[ipick[inds_queries_to_picks_p]] - x_context_cart[A_src_in_sta[1,nodes_of_product_p[iwhere_query_p]],:])/(10.0*self.scale_rel)
+# 			offset_ref_sta_s = (locs_use_cart[ipick[inds_queries_to_picks_s]] - x_context_cart[A_src_in_sta[1,nodes_of_product_s[iwhere_query_s]],:])/(10.0*self.scale_rel)
 
-	# 		gammas1 = self._compute_decomposed_gammas(self.f_gamma1, self.log_gamma_base1, ctx).mean(dim=0, keepdim=True)
-	# 		gammas2 = self._compute_decomposed_gammas(self.f_gamma2, self.log_gamma_base2, ctx).mean(dim=0, keepdim=True)
-	# 		gammas3 = self._compute_decomposed_gammas(self.f_gamma3, self.log_gamma_base3, ctx).mean(dim=0, keepdim=True)
+# 			offset_ref_sta_norm_p = torch.norm(offset_ref_sta_p, dim = 1, keepdim = True).clamp(min = eps_time)
+# 			offset_ref_sta_norm_s = torch.norm(offset_ref_sta_s, dim = 1, keepdim = True).clamp(min = eps_time)
 
-	# 		rbf_src_sta_sp = torch.exp(-1.0 * offset_src_sta_norm * gammas1[:, 0:3])
-	# 		rbf_ref_sta_sp = torch.exp(-1.0 * offset_ref_sta_norm * gammas2[:, 0:3])
-	# 		rbf_ref_src_sp = torch.exp(-1.0 * offset_ref_src_norm * gammas3[:, 0:3])
-	# 		rbf_ref_src_tm = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas3[:, 3:5])
 
-	# 		feat_src_sta = torch.cat((offset_src_sta / offset_src_sta_norm, rbf_src_sta_sp), dim=-1)
-	# 		feat_ref_sta = torch.cat((offset_ref_sta / offset_ref_sta_norm, rbf_ref_sta_sp), dim=-1)
-	# 		feat_ref_src = torch.cat((offset_ref_src / offset_ref_src_norm, rbf_ref_src_sp), dim=-1)
-	# 		feat_time = torch.cat((offset_ref_src_t, rbf_ref_src_tm), dim=-1)
+# 			# gammas_time1 = self._compute_gammas(self.f_gamma_time1, self.log_gamma_base_time1, ctx, n_gammas=3)
+# 			gammas_time2 = self._compute_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx, n_gammas=3)
+# 			gammas_time3 = self._compute_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx, n_gammas=3)
 
-	# 		inpt_aggregate = torch.cat((
-	# 			x[nodes_of_product[iwhere_query]], misfit_rel_time, misfit_query_time, 
-	# 			feat_src_sta, feat_ref_sta, feat_ref_src, feat_time, 
-	# 			self.phase_embed(phase_label[iarv[inds_queries_to_picks]].long().reshape(-1))
-	# 		), dim=1)
+# 			rbf_ref_sta_p = torch.exp(-1.0 * offset_ref_sta_norm_p * gammas_time2)
+# 			rbf_ref_sta_s = torch.exp(-1.0 * offset_ref_sta_norm_s * gammas_time3)
 
-	# 		aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim=0, dim_size=len(iarv), reduce='mean')
-
-	# 	# Time-Branch Aggregations (fc2 & fc3)
-	# 	aggregate_product_p = torch.zeros((len(tpick), self.fc2[-1].out_features), device=device)
-	# 	aggregate_product_s = torch.zeros((len(tpick), self.fc3[-1].out_features), device=device)
-
-	# 	if len(tpick) > 0 and len(A_src_in_sta) > 0 and A_src_in_sta.size(1) > 0:
-	# 		min_time_shift = tlatent.amin()
-	# 		max_time_offset = (tlatent.amax() - min_time_shift) * 2.5
-	# 		query_time = ((tpick - min_time_shift) + max_time_offset * ipick).reshape(-1, 1)
-
-	# 		val_sort_p, ind_sort_p = torch.sort((tlatent[:, 0] - min_time_shift) + max_time_offset * A_src_in_sta[0])
-	# 		val_sort_s, ind_sort_s = torch.sort((tlatent[:, 1] - min_time_shift) + max_time_offset * A_src_in_sta[0])
-
-	# 		ind_extract_p = torch.searchsorted(val_sort_p, query_time.squeeze(-1))
-	# 		ind_extract_s = torch.searchsorted(val_sort_s, query_time.squeeze(-1))
-
-	# 		iarg_p = torch.argmin(torch.abs(torch.cat((val_sort_p[torch.clamp(ind_extract_p - 1, min=0)].reshape(-1, 1), val_sort_p[torch.clamp(ind_extract_p, max=len(val_sort_p) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
-	# 		iarg_s = torch.argmin(torch.abs(torch.cat((val_sort_s[torch.clamp(ind_extract_s - 1, min=0)].reshape(-1, 1), val_sort_s[torch.clamp(ind_extract_s, max=len(val_sort_s) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
-
-	# 		ind_grab_p = ind_sort_p[(ind_extract_p.clamp(max=len(val_sort_p) - 1) + self.ioffset[iarg_p]).clamp(0, len(val_sort_p) - 1)]
-	# 		ind_grab_s = ind_sort_s[(ind_extract_s.clamp(max=len(val_sort_s) - 1) + self.ioffset[iarg_s]).clamp(0, len(val_sort_s) - 1)]
-
-	# 		# Hash pairing for temporal branch: (Station_ID << 32) | Pick_Index
-	# 		hash_picks_time = (ipick.to(torch.int64) << 32) | torch.arange(len(ipick), device=device, dtype=torch.int64)
-
-	# 		# --- P Phase Processing ---
-	# 		edge_index_p = knn(
-	# 			torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
-	# 			torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_p]],
-	# 			k=self.k_spc_edges
-	# 		).flip(0).contiguous()
-
-	# 		deg_slice_p = degree_srcs[edge_index_p[0]]
-	# 		inc_inds_p = torch.arange(deg_slice_p.sum(), device=device, dtype=torch.long) - torch.repeat_interleave(torch.cumsum(deg_slice_p, dim=0) - deg_slice_p, deg_slice_p)
-	# 		nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(deg_slice_p) + inc_inds_p
+# 			offset_ref_sta_norm_kernel_p = torch.cat((offset_ref_sta_p/offset_ref_sta_norm_p, rbf_ref_sta_p), dim = 1)
+# 			offset_ref_sta_norm_kernel_s = torch.cat((offset_ref_sta_s/offset_ref_sta_norm_s, rbf_ref_sta_s), dim = 1)
 			
-	# 		query_vals_p_hash = (A_src_in_sta[0, nodes_of_product_p].to(torch.int64) << 32) | edge_index_p[1].repeat_interleave(deg_slice_p).to(torch.int64)
-	# 		# target_picks_p = ind_grab_p[edge_index_p[1].repeat_interleave(deg_slice_p)]
-	# 		# query_vals_p_hash = (A_src_in_sta[0, nodes_of_product_p].to(torch.int64) << 32) | target_picks_p.to(torch.int64)
-	# 		iwhere_query_p = torch.where(torch.isin(query_vals_p_hash, hash_picks_time))[0]
-
-	# 		if len(iwhere_query_p) > 0 and len(hash_picks_time) > 0:
-	# 			sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
-	# 			query_hashes_p = query_vals_p_hash[iwhere_query_p]
-	# 			idx_p = torch.searchsorted(sorted_hash_picks_time, query_hashes_p).clamp(max=len(sorted_hash_picks_time) - 1)
-				
-	# 			valid_mask_p = (sorted_hash_picks_time[idx_p] == query_hashes_p)
-				
-	# 			# --- Station Match Guard: Reject nearest-neighbor matches from wrong stations ---
-	# 			matched_p_edges = nodes_of_product_p[iwhere_query_p[valid_mask_p]]
-	# 			matched_p_picks = order_hash_picks_time[idx_p[valid_mask_p]]
-	# 			station_match_mask_p = (A_src_in_sta[0, matched_p_edges] == ipick[matched_p_picks])
-				
-	# 			# valid_mask_p[valid_mask_p.clone()] = station_match_mask_p
-	# 			valid_mask_p = valid_mask_p & station_match_mask_p
-
-	# 			iwhere_query_p = iwhere_query_p[valid_mask_p]
-	# 			inds_p = order_hash_picks_time[idx_p[valid_mask_p]]
-
-	# 			if len(inds_p) > 0:
-	# 				misfit_rel_time_p = tpick[inds_p].reshape(-1, 1) - tlatent[nodes_of_product_p[iwhere_query_p], 0].reshape(-1, 1)
-	# 				misfit_rel_time_p = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_p) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_p)), dim=1)
-
-	# 				offset_ref_sta_p = (locs_use_cart[ipick[inds_p]] - x_context_cart[A_src_in_sta[1, nodes_of_product_p[iwhere_query_p]]]) / (10.0 * self.scale_rel)
-	# 				norm_p = torch.norm(offset_ref_sta_p, dim=1, keepdim=True).clamp(min=1e-8)
-	# 				gammas_time2 = self._compute_decomposed_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx).mean(dim=0, keepdim=True)
-	# 				feat_p = torch.cat((offset_ref_sta_p / norm_p, torch.exp(-1.0 * norm_p * gammas_time2)), dim=1)
-
-	# 				inpt_p = torch.cat((x[nodes_of_product_p[iwhere_query_p]], misfit_rel_time_p, feat_p, self.phase_embed(phase_label[inds_p].long().reshape(-1))), dim=1)
-	# 				aggregate_product_p = scatter(self.fc2(inpt_p), inds_p, dim=0, dim_size=len(tpick), reduce='mean')
-
-	# 		# --- S Phase Processing ---
-	# 		edge_index_s = knn(
-	# 			torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
-	# 			torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_s]],
-	# 			k=self.k_spc_edges
-	# 		).flip(0).contiguous()
-
-	# 		deg_slice_s = degree_srcs[edge_index_s[0]]
-	# 		inc_inds_s = torch.arange(deg_slice_s.sum(), device=device, dtype=torch.long) - torch.repeat_interleave(torch.cumsum(deg_slice_s, dim=0) - deg_slice_s, deg_slice_s)
-	# 		nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(deg_slice_s) + inc_inds_s
+# 			inpt_aggregate_p = torch.cat((x[nodes_of_product_p[iwhere_query_p]], misfit_rel_time_p, offset_ref_sta_norm_kernel_p, self.phase_embed(phase_label[inds_queries_to_picks_p].reshape(-1).long())), dim = 1)
+# 			inpt_aggregate_s = torch.cat((x[nodes_of_product_s[iwhere_query_s]], misfit_rel_time_s, offset_ref_sta_norm_kernel_s, self.phase_embed(phase_label[inds_queries_to_picks_s].reshape(-1).long())), dim = 1)
 			
-	# 		query_vals_s_hash = (A_src_in_sta[0, nodes_of_product_s].to(torch.int64) << 32) | edge_index_s[1].repeat_interleave(deg_slice_s).to(torch.int64)
-	# 		# target_picks_s = ind_grab_s[edge_index_s[1].repeat_interleave(deg_slice_s)]
-	# 		# query_vals_s_hash = (A_src_in_sta[0, nodes_of_product_s].to(torch.int64) << 32) | target_picks_s.to(torch.int64)
-	# 		iwhere_query_s = torch.where(torch.isin(query_vals_s_hash, hash_picks_time))[0]
+# 			aggregate_product_p = scatter(self.fc2(inpt_aggregate_p), inds_queries_to_picks_p, dim = 0, dim_size = len(tpick), reduce = 'mean') ## Can consider
+# 			aggregate_product_s = scatter(self.fc3(inpt_aggregate_s), inds_queries_to_picks_s, dim = 0, dim_size = len(tpick), reduce = 'mean') ## Can consider
 
-	# 		if len(iwhere_query_s) > 0 and len(hash_picks_time) > 0:
-	# 			sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
-	# 			query_hashes_s = query_vals_s_hash[iwhere_query_s]
-	# 			idx_s = torch.searchsorted(sorted_hash_picks_time, query_hashes_s).clamp(max=len(sorted_hash_picks_time) - 1)
-				
-	# 			valid_mask_s = (sorted_hash_picks_time[idx_s] == query_hashes_s)
-				
-	# 			# --- Station Match Guard: Reject nearest-neighbor matches from wrong stations ---
-	# 			matched_s_edges = nodes_of_product_s[iwhere_query_s[valid_mask_s]]
-	# 			matched_s_picks = order_hash_picks_time[idx_s[valid_mask_s]]
-	# 			station_match_mask_s = (A_src_in_sta[0, matched_s_edges] == ipick[matched_s_picks])
-				
-	# 			# valid_mask_s[valid_mask_s.clone()] = station_match_mask_s
-	# 			valid_mask_s = valid_mask_s & station_match_mask_s
 
-	# 			iwhere_query_s = iwhere_query_s[valid_mask_s]
-	# 			inds_s = order_hash_picks_time[idx_s[valid_mask_s]]
+# 		arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
+# 		arv_embed[pick_vals[:,1], iarv, :] = aggregate_product
+# 		arv_embed = self.fc_merge(torch.cat((arv_embed, aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1), aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)), dim = 2))
 
-	# 			if len(inds_s) > 0:
-	# 				misfit_rel_time_s = tpick[inds_s].reshape(-1, 1) - tlatent[nodes_of_product_s[iwhere_query_s], 1].reshape(-1, 1)
-	# 				misfit_rel_time_s = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_s) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_s)), dim=1)
-
-	# 				offset_ref_sta_s = (locs_use_cart[ipick[inds_s]] - x_context_cart[A_src_in_sta[1, nodes_of_product_s[iwhere_query_s]]]) / (10.0 * self.scale_rel)
-	# 				norm_s = torch.norm(offset_ref_sta_s, dim=1, keepdim=True).clamp(min=1e-8)
-	# 				gammas_time3 = self._compute_decomposed_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx).mean(dim=0, keepdim=True)
-	# 				feat_s = torch.cat((offset_ref_sta_s / norm_s, torch.exp(-1.0 * norm_s * gammas_time3)), dim=1)
-
-	# 				inpt_s = torch.cat((x[nodes_of_product_s[iwhere_query_s]], misfit_rel_time_s, feat_s, self.phase_embed(phase_label[inds_s].long().reshape(-1))), dim=1)
-	# 				aggregate_product_s = scatter(self.fc3(inpt_s), inds_s, dim=0, dim_size=len(tpick), reduce='mean')
-
-	# 	# # --- Dense Embedding Placement ---
-	# 	# arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
-
-	# 	# if len(isrc) > 0 and len(iarv) > 0:
-	# 	# 	flat_target_idx = isrc * len(tpick) + iarv
-	# 	# 	flat_embed_agg = scatter(aggregate_product, flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='mean')
-	# 	# 	counts = scatter(torch.ones_like(aggregate_product[:, :1]), flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='sum')
-
-	# 	# 	arv_embed = arv_embed.view(-1, self.fc1[-1].out_features)
-			
-	# 	# 	# Selectively write matched indices to prevent un-matched zero overrides
-	# 	# 	# matched_mask = (flat_embed_agg.abs().sum(dim=-1) > 0)
-	# 	# 	matched_mask = (counts.squeeze(-1) > 0)
-
-	# 	# 	arv_embed[matched_mask] = flat_embed_agg[matched_mask]
-	# 	# 	arv_embed = arv_embed.view(len(x_query_cart), len(tpick), -1)
-
-	# 	# Updated Dense Embedding Placement Guard
-	# 	arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
-
-	# 	if len(isrc) > 0 and len(iarv) > 0 and len(iwhere_query) > 0:
-	# 		flat_target_idx = isrc * len(tpick) + iarv
-	# 		flat_embed_agg = scatter(aggregate_product, flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='mean')
-	# 		counts = scatter(torch.ones((len(iarv), 1), device=device), flat_target_idx, dim=0, dim_size=len(x_query_cart) * len(tpick), reduce='sum')
-
-	# 		arv_embed = arv_embed.view(-1, self.fc1[-1].out_features)
-	# 		matched_mask = counts.squeeze(-1) > 0
-	# 		arv_embed[matched_mask] = flat_embed_agg[matched_mask]
-	# 		arv_embed = arv_embed.view(len(x_query_cart), len(tpick), -1)
-
-	# 	# Merge Phase Across Branches
-	# 	arv_embed = self.fc_merge(torch.cat((
-	# 		arv_embed,
-	# 		aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1),
-	# 		aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)
-	# 	), dim=2))
-
-	# 	return arv_embed, mask_misfit_time
-
+# 		return arv_embed, mask_misfit_time ## Make sure this is correct reshape (not transposed)
 
 
 
@@ -2339,611 +1839,6 @@ class VerificationSuite(ArrivalEmbedding):
 		print("[✔] Backward pass successful. Non-zero, finite gradients verified across all layers.")
 		print("[✔] Complete Verification Suite Finished Successfully.")
 
-
-
-
-
-# class ArrivalEmbedding(MessagePassing):
-#	 def __init__(self, ndim_arv_in, ndim_out, n_hidden=20, n_dim_embed=30, n_phase_embed=5, 
-#				  embed_vector_dim=10, ndim_out_src=1, scale_rel=scale_rel, k_spc_edges=k_spc_edges, 
-#				  kernel_sig_t=kernel_sig_t, use_phase_types=use_phase_types, scale_time=scale_time, 
-#				  min_thresh=0.01, trv=None, ftrns2=None, device='cuda'):
-#		 super(ArrivalEmbedding, self).__init__(node_dim=0, aggr='add')
-
-#		 self.ftrns2 = ftrns2
-#		 self.trv = trv
-#		 self.use_phase_types = use_phase_types
-#		 self.kernel_sig_t = kernel_sig_t
-#		 self.min_thresh = min_thresh
-#		 self.scale_time = scale_time
-#		 self.scale_rel = scale_rel
-#		 self.k_spc_edges = k_spc_edges
-#		 self.device = device
-#		 self.dilate_scale = 2.0
-#		 self.scale_misfit = 2.0
-#		 self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
-
-#		 n_phase_types = 2
-#		 self.phase_embed = nn.Embedding(n_phase_types, n_phase_embed)
-
-#		 # Feature dimensions:
-#		 # fc1: n_hidden + 2(misfit_rel) + 2(misfit_query) + 6(feat_src_sta) + 6(feat_ref_sta) + 6(feat_ref_src) + 4(feat_time) + 5(phase) = n_hidden + 31
-#		 self.fc1 = nn.Sequential(
-#			 nn.Linear(n_hidden + 31, 2 * n_hidden), 
-#			 nn.PReLU(), 
-#			 nn.Linear(2 * n_hidden, n_hidden)
-#		 )
-		
-#		 # fc2 / fc3: n_hidden + 2(misfit_rel) + 7(offset_ref_sta_norm_kernel [3 dir + 3 RBF]) + 5(phase) = n_hidden + 14
-#		 self.fc2 = nn.Sequential(
-#			 nn.Linear(n_hidden + 14, 2 * n_hidden), 
-#			 nn.PReLU(), 
-#			 nn.Linear(2 * n_hidden, n_hidden)
-#		 )
-#		 self.fc3 = nn.Sequential(
-#			 nn.Linear(n_hidden + 14, 2 * n_hidden), 
-#			 nn.PReLU(), 
-#			 nn.Linear(2 * n_hidden, n_hidden)
-#		 )
-		
-#		 self.ioffset = torch.tensor([-1, 0], dtype=torch.long, device=self.device)
-
-#		 # Spatial gamma banks (3 channels each)
-#		 self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-#		 self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-#		 self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-
-#		 # Temporal gamma banks (3 channels each)
-#		 self.f_gamma_time1, self.log_gamma_base_time1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.1, max_val=2.0)
-#		 self.f_gamma_time2, self.log_gamma_base_time2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-#		 self.f_gamma_time3, self.log_gamma_base_time3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-
-#		 self.fc_merge = nn.Sequential(
-#			 nn.Linear(3 * n_hidden, 2 * n_hidden), 
-#			 nn.PReLU(), 
-#			 nn.Linear(2 * n_hidden, ndim_out)
-#		 )
-
-#	 def _init_gamma_bank(self, embed_dim, n_gammas=3, min_val=0.05, max_val=2.0):
-#		 f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
-#		 nn.init.zeros_(f_gamma.weight)
-#		 nn.init.zeros_(f_gamma.bias)
-		
-#		 base_gammas = torch.logspace(
-#			 torch.log10(torch.tensor(min_val)), 
-#			 torch.log10(torch.tensor(max_val)), 
-#			 steps=n_gammas
-#		 ).unsqueeze(0)
-#		 log_gamma_base = nn.Parameter(torch.log(base_gammas))
-		
-#		 return f_gamma, log_gamma_base
-
-#	 def _compute_gammas(self, f_gamma_layer, log_gamma_base, ctx, n_gammas=3):
-#		 delta = f_gamma_layer(ctx) # [E, 1 + n_gammas]
-#		 alpha = delta[:, :1]		# [E, 1]
-#		 residuals = 0.2 * torch.tanh(delta[:, 1:]) # [E, n_gammas]
-		
-#		 gammas = torch.exp(log_gamma_base + alpha + residuals)
-#		 return gammas
-
-#	 def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out=None):
-#		 if trv_out is None:
-#			 trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart)) + x_query_t.reshape(-1, 1, 1)
-#		 else: 
-#			 trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
-
-#		 if not self.use_phase_types:
-#			 phase_label = phase_label * 0.0
-
-#		 i1 = torch.where(phase_label == 0)[0]
-#		 i2 = torch.where(phase_label == 1)[0]
-
-#		 misfit_time = torch.zeros((len(x_query_cart), len(tpick), 4), device=self.device)
-#		 tpick = tpick if isinstance(tpick, torch.Tensor) else torch.as_tensor(tpick, device=self.device)
-		
-#		 misfit_time[:, i1, 0] = torch.exp(-0.5 * (trv_out[:, ipick[i1], 0] - tpick[i1])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-#		 misfit_time[:, i2, 1] = torch.exp(-0.5 * (trv_out[:, ipick[i2], 1] - tpick[i2])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-#		 misfit_time[:, :, 2]  = torch.exp(-0.5 * (trv_out[:, ipick, 0] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-#		 misfit_time[:, :, 3]  = torch.exp(-0.5 * (trv_out[:, ipick, 1] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-				
-#		 degree_srcs = degree(A_src_in_sta[1], num_nodes=len(x_context_cart), dtype=torch.long)
-#		 cum_degree_srcs = torch.cat((torch.zeros(1, device=self.device), torch.cumsum(degree_srcs, dim=0)[:-1]), dim=0).long()
-		
-#		 mask_misfit_time = misfit_time.max(2).values > self.min_thresh
-#		 isrc, iarv = torch.where(mask_misfit_time == 1)
-
-#		 edge_index = knn(
-#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
-#			 torch.cat((x_query_cart / 1000.0, self.scale_time * x_query_t.reshape(-1, 1)), dim=1), 
-#			 k=self.k_spc_edges
-#		 ).flip(0).contiguous()
-
-#		 deg_slice = degree_srcs[edge_index[0]]
-#		 assert deg_slice.min() > 0
-#		 inc_inds = torch.arange(deg_slice.sum(), device=self.device).long()
-#		 inc_inds = inc_inds - torch.repeat_interleave(torch.cumsum(deg_slice, dim=0) - deg_slice, deg_slice)
-#		 nodes_of_product = cum_degree_srcs[edge_index[0]].repeat_interleave(degree_srcs[edge_index[0]]) + inc_inds
-#		 ind_query = torch.arange(len(x_query_cart), device=self.device).long().repeat_interleave(scatter(deg_slice, edge_index[1], dim=0, dim_size=len(x_query_cart), reduce='sum'), dim=0)
-#		 sta_src_pairs = A_src_in_sta[:, nodes_of_product]
-
-#		 query_vals = torch.cat((sta_src_pairs[0].reshape(-1, 1), ind_query.reshape(-1, 1)), dim=1).long()
-#		 pick_vals = torch.cat((ipick[iarv].reshape(-1, 1), isrc.reshape(-1, 1)), dim=1).long()
-
-#		 hash_picks, hash_queries = hash_rows(pick_vals), hash_rows(query_vals)
-#		 mask_queries = torch.isin(hash_queries, hash_picks)
-#		 iwhere_query = torch.where(mask_queries == 1)[0]
-
-#		 sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
-#		 ind_extract = torch.searchsorted(sorted_hash_picks, hash_queries[iwhere_query])
-#		 valid_ind = (ind_extract < len(sorted_hash_picks)) & (sorted_hash_picks[ind_extract.clamp(max=len(sorted_hash_picks) - 1)] == hash_queries[iwhere_query])
-#		 inds_queries_to_picks = order_hash_picks[ind_extract.clamp(max=len(sorted_hash_picks) - 1)][valid_ind]
-
-#		 # Spatial & temporal feature calculations
-#		 misfit_rel_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - tlatent[nodes_of_product[iwhere_query]]
-#		 misfit_query_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - trv_out[query_vals[iwhere_query, 1], ipick[iarv[inds_queries_to_picks]], :]
-
-#		 misfit_rel_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time)), dim=1)
-#		 misfit_query_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_query_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_query_time)), dim=1)
-
-#		 offset_src_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_query_cart[query_vals[iwhere_query, 1]]) / (10.0 * self.scale_rel)
-#		 offset_ref_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]], :]) / (10.0 * self.scale_rel)
-#		 offset_ref_src = (x_query_cart[query_vals[iwhere_query, 1]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (1.0 * self.scale_rel)
-#		 offset_ref_src_t = 1000.0 * self.scale_time * (x_query_t[query_vals[iwhere_query, 1]].reshape(-1, 1) - x_context_t[A_src_in_sta[1, nodes_of_product[iwhere_query]]].reshape(-1, 1)) / (3.0 * self.scale_rel)
-
-#		 eps_time = 1e-8
-#		 offset_src_sta_norm = torch.norm(offset_src_sta, dim=1, keepdim=True).clamp(min=eps_time)
-#		 offset_ref_sta_norm = torch.norm(offset_ref_sta, dim=1, keepdim=True).clamp(min=eps_time)
-#		 offset_ref_src_norm = torch.norm(offset_ref_src, dim=1, keepdim=True).clamp(min=eps_time)
-
-#		 ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-
-#		 gammas1 = self._compute_gammas(self.f_gamma1, self.log_gamma_base1, ctx, n_gammas=3)
-#		 gammas2 = self._compute_gammas(self.f_gamma2, self.log_gamma_base2, ctx, n_gammas=3)
-#		 gammas3 = self._compute_gammas(self.f_gamma3, self.log_gamma_base3, ctx, n_gammas=3)
-
-#		 rbf_src_sta = torch.exp(-1.0 * offset_src_sta_norm * gammas1)
-#		 rbf_ref_sta = torch.exp(-1.0 * offset_ref_sta_norm * gammas2)
-#		 rbf_ref_src = torch.exp(-1.0 * offset_ref_src_norm * gammas3)
-
-#		 feat_src_sta = torch.cat((offset_src_sta / offset_src_sta_norm, rbf_src_sta), dim=-1)
-#		 feat_ref_sta = torch.cat((offset_ref_sta / offset_ref_sta_norm, rbf_ref_sta), dim=-1)
-#		 feat_ref_src = torch.cat((offset_ref_src / offset_ref_src_norm, rbf_ref_src), dim=-1)
-
-#		 gammas1_time = self._compute_gammas(self.f_gamma_time1, self.log_gamma_base_time1, ctx, n_gammas=3)
-#		 rbf_time = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas1_time)
-#		 feat_time = torch.cat((offset_ref_src_t, rbf_time), dim=-1)
-
-#		 inpt_aggregate = torch.cat((
-#			 x[nodes_of_product[iwhere_query]], 
-#			 misfit_rel_time, 
-#			 misfit_query_time, 
-#			 feat_src_sta, 
-#			 feat_ref_sta, 
-#			 feat_ref_src, 
-#			 feat_time, 
-#			 self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())
-#		 ), dim=1)
-		
-#		 aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim=0, dim_size=len(iarv), reduce='mean')
-
-#		 # Time-based embeddings
-#		 min_time_shift = tlatent.amin()
-#		 max_time_offset = (tlatent.amax() - min_time_shift) * 2.5
-#		 query_time = ((tpick - min_time_shift) + max_time_offset * ipick).reshape(-1, 1)
-		
-#		 val_sort_p, ind_sort_p = torch.sort((tlatent[:, 0] - min_time_shift) + max_time_offset * A_src_in_sta[0])
-#		 val_sort_s, ind_sort_s = torch.sort((tlatent[:, 1] - min_time_shift) + max_time_offset * A_src_in_sta[0])
-#		 ind_extract_p = torch.searchsorted(val_sort_p, (tpick - min_time_shift) + max_time_offset * ipick)
-#		 ind_extract_s = torch.searchsorted(val_sort_s, (tpick - min_time_shift) + max_time_offset * ipick)
-
-#		 iarg_p = torch.argmin(torch.abs(torch.cat((val_sort_p[torch.clamp(ind_extract_p - 1, min=0)].reshape(-1, 1), val_sort_p[torch.clamp(ind_extract_p, max=len(val_sort_p) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
-#		 iarg_s = torch.argmin(torch.abs(torch.cat((val_sort_s[torch.clamp(ind_extract_s - 1, min=0)].reshape(-1, 1), val_sort_s[torch.clamp(ind_extract_s, max=len(val_sort_s) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
-
-#		 ind_grab_p = ind_sort_p[ind_extract_p + self.ioffset[iarg_p]]
-#		 ind_grab_s = ind_sort_s[ind_extract_s + self.ioffset[iarg_s]]
-
-#		 edge_index_p = knn(
-#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
-#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_p]], 
-#			 k=self.k_spc_edges
-#		 ).flip(0).contiguous()
-
-#		 edge_index_s = knn(
-#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
-#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_s]], 
-#			 k=self.k_spc_edges
-#		 ).flip(0).contiguous()
-
-#		 deg_slice_p = degree_srcs[edge_index_p[0]]
-#		 deg_slice_s = degree_srcs[edge_index_s[0]]
-
-#		 inc_inds_p = torch.arange(deg_slice_p.sum(), device=self.device).long()
-#		 inc_inds_p = inc_inds_p - torch.repeat_interleave(torch.cumsum(deg_slice_p, dim=0) - deg_slice_p, deg_slice_p)
-
-#		 inc_inds_s = torch.arange(deg_slice_s.sum(), device=self.device).long()
-#		 inc_inds_s = inc_inds_s - torch.repeat_interleave(torch.cumsum(deg_slice_s, dim=0) - deg_slice_s, deg_slice_s)
-
-#		 nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(degree_srcs[edge_index_p[0]]) + inc_inds_p
-#		 nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(degree_srcs[edge_index_s[0]]) + inc_inds_s
-
-#		 ind_query_p = torch.arange(len(tpick), device=self.device).long().repeat_interleave(scatter(deg_slice_p, edge_index_p[1], dim=0, dim_size=len(tpick), reduce='sum'), dim=0)
-#		 ind_query_s = torch.arange(len(tpick), device=self.device).long().repeat_interleave(scatter(deg_slice_s, edge_index_s[1], dim=0, dim_size=len(tpick), reduce='sum'), dim=0)
-
-#		 sta_src_pairs_p = A_src_in_sta[:, nodes_of_product_p]
-#		 sta_src_pairs_s = A_src_in_sta[:, nodes_of_product_s]
-
-#		 query_vals_p = torch.cat((sta_src_pairs_p[0].reshape(-1, 1), ind_query_p.reshape(-1, 1)), dim=1).long()
-#		 query_vals_s = torch.cat((sta_src_pairs_s[0].reshape(-1, 1), ind_query_s.reshape(-1, 1)), dim=1).long()
-
-#		 pick_vals_time = torch.cat((ipick.reshape(-1, 1), torch.arange(len(ipick), device=self.device).reshape(-1, 1)), dim=1).long()
-#		 hash_picks_time = hash_rows(pick_vals_time)
-#		 hash_queries_p, hash_queries_s = hash_rows(query_vals_p), hash_rows(query_vals_s)
-
-#		 iwhere_query_p = torch.where(torch.isin(hash_queries_p, hash_picks_time))[0]
-#		 iwhere_query_s = torch.where(torch.isin(hash_queries_s, hash_picks_time))[0]
-
-#		 sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
-#		 ind_extract_p = torch.searchsorted(sorted_hash_picks_time, hash_queries_p[iwhere_query_p])
-#		 ind_extract_s = torch.searchsorted(sorted_hash_picks_time, hash_queries_s[iwhere_query_s])
-
-#		 valid_ind_p = (ind_extract_p < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_p.clamp(max=len(sorted_hash_picks_time) - 1)] == hash_queries_p[iwhere_query_p])
-#		 valid_ind_s = (ind_extract_s < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_s.clamp(max=len(sorted_hash_picks_time) - 1)] == hash_queries_s[iwhere_query_s])
-
-#		 inds_queries_to_picks_p = order_hash_picks_time[ind_extract_p.clamp(max=len(sorted_hash_picks_time) - 1)][valid_ind_p]
-#		 inds_queries_to_picks_s = order_hash_picks_time[ind_extract_s.clamp(max=len(sorted_hash_picks_time) - 1)][valid_ind_s]
-
-#		 misfit_rel_time_p = tpick[inds_queries_to_picks_p].reshape(-1, 1) - tlatent[nodes_of_product_p[iwhere_query_p], 0].reshape(-1, 1)
-#		 misfit_rel_time_s = tpick[inds_queries_to_picks_s].reshape(-1, 1) - tlatent[nodes_of_product_s[iwhere_query_s], 1].reshape(-1, 1)
-
-#		 misfit_rel_time_p = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_p) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_p)), dim=1)
-#		 misfit_rel_time_s = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_s) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_s)), dim=1)
-
-#		 offset_ref_sta_p = (locs_use_cart[ipick[inds_queries_to_picks_p]] - x_context_cart[A_src_in_sta[1, nodes_of_product_p[iwhere_query_p]], :]) / (10.0 * self.scale_rel)
-#		 offset_ref_sta_s = (locs_use_cart[ipick[inds_queries_to_picks_s]] - x_context_cart[A_src_in_sta[1, nodes_of_product_s[iwhere_query_s]], :]) / (10.0 * self.scale_rel)
-
-#		 offset_ref_sta_norm_p = torch.norm(offset_ref_sta_p, dim=1, keepdim=True).clamp(min=eps_time)
-#		 offset_ref_sta_norm_s = torch.norm(offset_ref_sta_s, dim=1, keepdim=True).clamp(min=eps_time)
-
-#		 gammas_time2 = self._compute_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx, n_gammas=3)
-#		 gammas_time3 = self._compute_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx, n_gammas=3)
-
-#		 rbf_ref_sta_p = torch.exp(-1.0 * offset_ref_sta_norm_p * gammas_time2)
-#		 rbf_ref_sta_s = torch.exp(-1.0 * offset_ref_sta_norm_s * gammas_time3)
-
-#		 offset_ref_sta_norm_kernel_p = torch.cat((offset_ref_sta_p / offset_ref_sta_norm_p, rbf_ref_sta_p), dim=1)
-#		 offset_ref_sta_norm_kernel_s = torch.cat((offset_ref_sta_s / offset_ref_sta_norm_s, rbf_ref_sta_s), dim=1)
-
-#		 inpt_aggregate_p = torch.cat((
-#			 x[nodes_of_product_p[iwhere_query_p]], 
-#			 misfit_rel_time_p, 
-#			 offset_ref_sta_norm_kernel_p, 
-#			 self.phase_embed(phase_label[inds_queries_to_picks_p].reshape(-1).long())
-#		 ), dim=1)
-		
-#		 inpt_aggregate_s = torch.cat((
-#			 x[nodes_of_product_s[iwhere_query_s]], 
-#			 misfit_rel_time_s, 
-#			 offset_ref_sta_norm_kernel_s, 
-#			 self.phase_embed(phase_label[inds_queries_to_picks_s].reshape(-1).long())
-#		 ), dim=1)
-
-#		 aggregate_product_p = scatter(self.fc2(inpt_aggregate_p), inds_queries_to_picks_p, dim=0, dim_size=len(tpick), reduce='mean')
-#		 aggregate_product_s = scatter(self.fc3(inpt_aggregate_s), inds_queries_to_picks_s, dim=0, dim_size=len(tpick), reduce='mean')
-
-#		 # Aggregate into final tensor
-#		 arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
-#		 arv_embed[pick_vals[:, 1], iarv, :] = aggregate_product
-		
-#		 arv_embed = self.fc_merge(torch.cat((
-#			 arv_embed, 
-#			 aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1), 
-#			 aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)
-#		 ), dim=2))
-
-#		 return arv_embed, mask_misfit_time
-
-
-
-# class ArrivalEmbedding(MessagePassing):
-#	 def __init__(self, ndim_arv_in, ndim_out, n_hidden=20, n_dim_embed=30, n_phase_embed=5, 
-#				  embed_vector_dim=10, ndim_out_src=1, scale_rel=scale_rel, k_spc_edges=k_spc_edges, 
-#				  kernel_sig_t=kernel_sig_t, use_phase_types=use_phase_types, scale_time=scale_time, 
-#				  min_thresh=0.01, trv=None, ftrns2=None, device='cuda'):
-#		 super(ArrivalEmbedding, self).__init__(node_dim=0, aggr='add')
-
-#		 self.ftrns2 = ftrns2
-#		 self.trv = trv
-#		 self.use_phase_types = use_phase_types
-#		 self.kernel_sig_t = kernel_sig_t
-#		 self.min_thresh = min_thresh
-#		 self.scale_time = scale_time
-#		 self.scale_rel = scale_rel
-#		 self.k_spc_edges = k_spc_edges
-#		 self.device = device
-#		 self.dilate_scale = 2.0
-#		 self.scale_misfit = 2.0
-#		 self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
-
-#		 n_phase_types = 2
-#		 self.phase_embed = nn.Embedding(n_phase_types, n_phase_embed)
-
-#		 # Feature dimensions:
-#		 # fc1: n_hidden + 2(misfit_rel) + 2(misfit_query) + 6(feat_src_sta) + 6(feat_ref_sta) + 6(feat_ref_src) + 4(feat_time) + 5(phase) = n_hidden + 31
-#		 self.fc1 = nn.Sequential(
-#			 nn.Linear(n_hidden + 31, 2 * n_hidden), 
-#			 nn.PReLU(), 
-#			 nn.Linear(2 * n_hidden, n_hidden)
-#		 )
-		
-#		 # fc2 / fc3: n_hidden + 2(misfit_rel) + 7(offset_ref_sta_norm_kernel) + 5(phase) = n_hidden + 14
-#		 self.fc2 = nn.Sequential(
-#			 nn.Linear(n_hidden + 14, 2 * n_hidden), 
-#			 nn.PReLU(), 
-#			 nn.Linear(2 * n_hidden, n_hidden)
-#		 )
-#		 self.fc3 = nn.Sequential(
-#			 nn.Linear(n_hidden + 14, 2 * n_hidden), 
-#			 nn.PReLU(), 
-#			 nn.Linear(2 * n_hidden, n_hidden)
-#		 )
-		
-#		 self.ioffset = torch.tensor([-1, 0], dtype=torch.long, device=self.device)
-
-#		 # Spatial gamma banks (3 multi-scale channels each)
-#		 self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-#		 self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-#		 self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-
-#		 # Temporal gamma banks
-#		 self.f_gamma_time1, self.log_gamma_base_time1 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.1, max_val=2.0)
-#		 self.f_gamma_time2, self.log_gamma_base_time2 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-#		 self.f_gamma_time3, self.log_gamma_base_time3 = self._init_gamma_bank(embed_vector_dim, n_gammas=3, min_val=0.05, max_val=2.0)
-
-#		 self.fc_merge = nn.Sequential(
-#			 nn.Linear(3 * n_hidden, 2 * n_hidden), 
-#			 nn.PReLU(), 
-#			 nn.Linear(2 * n_hidden, ndim_out)
-#		 )
-
-#	 def _init_gamma_bank(self, embed_dim, n_gammas=3, min_val=0.05, max_val=2.0):
-#		 f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
-#		 nn.init.zeros_(f_gamma.weight)
-#		 nn.init.zeros_(f_gamma.bias)
-		
-#		 base_gammas = torch.logspace(
-#			 torch.log10(torch.tensor(min_val)), 
-#			 torch.log10(torch.tensor(max_val)), 
-#			 steps=n_gammas
-#		 ).unsqueeze(0)
-#		 log_gamma_base = nn.Parameter(torch.log(base_gammas))
-		
-#		 return f_gamma, log_gamma_base
-
-#	 def _compute_gammas(self, f_gamma_layer, log_gamma_base, ctx):
-#		 # Infer n_gammas from base shape
-#		 delta = f_gamma_layer(ctx) # [E, 1 + n_gammas] or [1, 1 + n_gammas]
-#		 alpha = delta[:, :1]		# Scale adjustment
-#		 residuals = 0.2 * torch.tanh(delta[:, 1:]) # Channel residuals
-		
-#		 gammas = torch.exp(log_gamma_base + alpha + residuals) # Broadcasts over [E, n_gammas]
-#		 return gammas
-
-#	 def forward(self, x, x_context_cart, x_context_t, x_query_cart, x_query_t, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out=None):
-#		 if trv_out is None:
-#			 trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart)) + x_query_t.reshape(-1, 1, 1)
-#		 else: 
-#			 trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
-
-#		 if not self.use_phase_types:
-#			 phase_label = phase_label * 0.0
-
-#		 i1 = torch.where(phase_label == 0)[0]
-#		 i2 = torch.where(phase_label == 1)[0]
-
-#		 misfit_time = torch.zeros((len(x_query_cart), len(tpick), 4), device=self.device)
-#		 tpick = tpick if isinstance(tpick, torch.Tensor) else torch.as_tensor(tpick, device=self.device)
-		
-#		 misfit_time[:, i1, 0] = torch.exp(-0.5 * (trv_out[:, ipick[i1], 0] - tpick[i1])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-#		 misfit_time[:, i2, 1] = torch.exp(-0.5 * (trv_out[:, ipick[i2], 1] - tpick[i2])**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-#		 misfit_time[:, :, 2]  = torch.exp(-0.5 * (trv_out[:, ipick, 0] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-#		 misfit_time[:, :, 3]  = torch.exp(-0.5 * (trv_out[:, ipick, 1] - tpick)**2 / ((self.dilate_scale * self.kernel_sig_t)**2))
-				
-#		 degree_srcs = degree(A_src_in_sta[1], num_nodes=len(x_context_cart), dtype=torch.long)
-#		 cum_degree_srcs = torch.cat((torch.zeros(1, device=self.device), torch.cumsum(degree_srcs, dim=0)[:-1]), dim=0).long()
-		
-#		 mask_misfit_time = misfit_time.max(2).values > self.min_thresh
-#		 isrc, iarv = torch.where(mask_misfit_time == 1)
-
-#		 edge_index = knn(
-#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
-#			 torch.cat((x_query_cart / 1000.0, self.scale_time * x_query_t.reshape(-1, 1)), dim=1), 
-#			 k=self.k_spc_edges
-#		 ).flip(0).contiguous()
-
-#		 deg_slice = degree_srcs[edge_index[0]]
-#		 assert deg_slice.min() > 0
-#		 inc_inds = torch.arange(deg_slice.sum(), device=self.device).long()
-#		 inc_inds = inc_inds - torch.repeat_interleave(torch.cumsum(deg_slice, dim=0) - deg_slice, deg_slice)
-#		 nodes_of_product = cum_degree_srcs[edge_index[0]].repeat_interleave(degree_srcs[edge_index[0]]) + inc_inds
-#		 ind_query = torch.arange(len(x_query_cart), device=self.device).long().repeat_interleave(scatter(deg_slice, edge_index[1], dim=0, dim_size=len(x_query_cart), reduce='sum'), dim=0)
-#		 sta_src_pairs = A_src_in_sta[:, nodes_of_product]
-
-#		 query_vals = torch.cat((sta_src_pairs[0].reshape(-1, 1), ind_query.reshape(-1, 1)), dim=1).long()
-#		 pick_vals = torch.cat((ipick[iarv].reshape(-1, 1), isrc.reshape(-1, 1)), dim=1).long()
-
-#		 hash_picks, hash_queries = hash_rows(pick_vals), hash_rows(query_vals)
-#		 mask_queries = torch.isin(hash_queries, hash_picks)
-#		 iwhere_query = torch.where(mask_queries == 1)[0]
-
-#		 sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
-#		 ind_extract = torch.searchsorted(sorted_hash_picks, hash_queries[iwhere_query])
-#		 valid_ind = (ind_extract < len(sorted_hash_picks)) & (sorted_hash_picks[ind_extract.clamp(max=len(sorted_hash_picks) - 1)] == hash_queries[iwhere_query])
-#		 inds_queries_to_picks = order_hash_picks[ind_extract.clamp(max=len(sorted_hash_picks) - 1)][valid_ind]
-
-#		 # Misfits & offsets
-#		 misfit_rel_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - tlatent[nodes_of_product[iwhere_query]]
-#		 misfit_query_time = tpick[iarv[inds_queries_to_picks]].reshape(-1, 1) - trv_out[query_vals[iwhere_query, 1], ipick[iarv[inds_queries_to_picks]], :]
-
-#		 misfit_rel_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time)), dim=1)
-#		 misfit_query_time = torch.cat((torch.exp(-1.0 * torch.abs(misfit_query_time) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_query_time)), dim=1)
-
-#		 offset_src_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_query_cart[query_vals[iwhere_query, 1]]) / (10.0 * self.scale_rel)
-#		 offset_ref_sta = (locs_use_cart[ipick[iarv[inds_queries_to_picks]]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]], :]) / (10.0 * self.scale_rel)
-#		 offset_ref_src = (x_query_cart[query_vals[iwhere_query, 1]] - x_context_cart[A_src_in_sta[1, nodes_of_product[iwhere_query]]]) / (1.0 * self.scale_rel)
-#		 offset_ref_src_t = 1000.0 * self.scale_time * (x_query_t[query_vals[iwhere_query, 1]].reshape(-1, 1) - x_context_t[A_src_in_sta[1, nodes_of_product[iwhere_query]]].reshape(-1, 1)) / (3.0 * self.scale_rel)
-
-#		 eps_time = 1e-8
-#		 offset_src_sta_norm = torch.norm(offset_src_sta, dim=1, keepdim=True).clamp(min=eps_time)
-#		 offset_ref_sta_norm = torch.norm(offset_ref_sta, dim=1, keepdim=True).clamp(min=eps_time)
-#		 offset_ref_src_norm = torch.norm(offset_ref_src, dim=1, keepdim=True).clamp(min=eps_time)
-
-#		 ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-
-#		 # Gammas computation
-#		 gammas1 = self._compute_gammas(self.f_gamma1, self.log_gamma_base1, ctx)
-#		 gammas2 = self._compute_gammas(self.f_gamma2, self.log_gamma_base2, ctx)
-#		 gammas3 = self._compute_gammas(self.f_gamma3, self.log_gamma_base3, ctx)
-
-#		 rbf_src_sta = torch.exp(-1.0 * offset_src_sta_norm * gammas1)
-#		 rbf_ref_sta = torch.exp(-1.0 * offset_ref_sta_norm * gammas2)
-#		 rbf_ref_src = torch.exp(-1.0 * offset_ref_src_norm * gammas3)
-
-#		 feat_src_sta = torch.cat((offset_src_sta / offset_src_sta_norm, rbf_src_sta), dim=-1)
-#		 feat_ref_sta = torch.cat((offset_ref_sta / offset_ref_sta_norm, rbf_ref_sta), dim=-1)
-#		 feat_ref_src = torch.cat((offset_ref_src / offset_ref_src_norm, rbf_ref_src), dim=-1)
-
-#		 gammas1_time = self._compute_gammas(self.f_gamma_time1, self.log_gamma_base_time1, ctx)
-#		 rbf_time = torch.exp(-1.0 * torch.abs(offset_ref_src_t) * gammas1_time) # Fixed sign bug using abs()
-#		 feat_time = torch.cat((offset_ref_src_t, rbf_time), dim=-1)
-
-#		 inpt_aggregate = torch.cat((
-#			 x[nodes_of_product[iwhere_query]], 
-#			 misfit_rel_time, 
-#			 misfit_query_time, 
-#			 feat_src_sta, 
-#			 feat_ref_sta, 
-#			 feat_ref_src, 
-#			 feat_time, 
-#			 self.phase_embed(phase_label[iarv[inds_queries_to_picks]].reshape(-1).long())
-#		 ), dim=1)
-		
-#		 aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim=0, dim_size=len(iarv), reduce='mean')
-
-#		 # Time-based embeddings section
-#		 min_time_shift = tlatent.amin()
-#		 max_time_offset = (tlatent.amax() - min_time_shift) * 2.5
-#		 query_time = ((tpick - min_time_shift) + max_time_offset * ipick).reshape(-1, 1)
-		
-#		 val_sort_p, ind_sort_p = torch.sort((tlatent[:, 0] - min_time_shift) + max_time_offset * A_src_in_sta[0])
-#		 val_sort_s, ind_sort_s = torch.sort((tlatent[:, 1] - min_time_shift) + max_time_offset * A_src_in_sta[0])
-#		 ind_extract_p = torch.searchsorted(val_sort_p, (tpick - min_time_shift) + max_time_offset * ipick)
-#		 ind_extract_s = torch.searchsorted(val_sort_s, (tpick - min_time_shift) + max_time_offset * ipick)
-
-#		 iarg_p = torch.argmin(torch.abs(torch.cat((val_sort_p[torch.clamp(ind_extract_p - 1, min=0)].reshape(-1, 1), val_sort_p[torch.clamp(ind_extract_p, max=len(val_sort_p) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
-#		 iarg_s = torch.argmin(torch.abs(torch.cat((val_sort_s[torch.clamp(ind_extract_s - 1, min=0)].reshape(-1, 1), val_sort_s[torch.clamp(ind_extract_s, max=len(val_sort_s) - 1)].reshape(-1, 1)), dim=1) - query_time), dim=1)
-
-#		 ind_grab_p = ind_sort_p[ind_extract_p + self.ioffset[iarg_p]]
-#		 ind_grab_s = ind_sort_s[ind_extract_s + self.ioffset[iarg_s]]
-
-#		 edge_index_p = knn(
-#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
-#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_p]], 
-#			 k=self.k_spc_edges
-#		 ).flip(0).contiguous()
-
-#		 edge_index_s = knn(
-#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1), 
-#			 torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1)[A_src_in_sta[1, ind_grab_s]], 
-#			 k=self.k_spc_edges
-#		 ).flip(0).contiguous()
-
-#		 deg_slice_p = degree_srcs[edge_index_p[0]]
-#		 deg_slice_s = degree_srcs[edge_index_s[0]]
-
-#		 inc_inds_p = torch.arange(deg_slice_p.sum(), device=self.device).long()
-#		 inc_inds_p = inc_inds_p - torch.repeat_interleave(torch.cumsum(deg_slice_p, dim=0) - deg_slice_p, deg_slice_p)
-
-#		 inc_inds_s = torch.arange(deg_slice_s.sum(), device=self.device).long()
-#		 inc_inds_s = inc_inds_s - torch.repeat_interleave(torch.cumsum(deg_slice_s, dim=0) - deg_slice_s, deg_slice_s)
-
-#		 nodes_of_product_p = cum_degree_srcs[edge_index_p[0]].repeat_interleave(degree_srcs[edge_index_p[0]]) + inc_inds_p
-#		 nodes_of_product_s = cum_degree_srcs[edge_index_s[0]].repeat_interleave(degree_srcs[edge_index_s[0]]) + inc_inds_s
-
-#		 ind_query_p = torch.arange(len(tpick), device=self.device).long().repeat_interleave(scatter(deg_slice_p, edge_index_p[1], dim=0, dim_size=len(tpick), reduce='sum'), dim=0)
-#		 ind_query_s = torch.arange(len(tpick), device=self.device).long().repeat_interleave(scatter(deg_slice_s, edge_index_s[1], dim=0, dim_size=len(tpick), reduce='sum'), dim=0)
-
-#		 sta_src_pairs_p = A_src_in_sta[:, nodes_of_product_p]
-#		 sta_src_pairs_s = A_src_in_sta[:, nodes_of_product_s]
-
-#		 query_vals_p = torch.cat((sta_src_pairs_p[0].reshape(-1, 1), ind_query_p.reshape(-1, 1)), dim=1).long()
-#		 query_vals_s = torch.cat((sta_src_pairs_s[0].reshape(-1, 1), ind_query_s.reshape(-1, 1)), dim=1).long()
-
-#		 pick_vals_time = torch.cat((ipick.reshape(-1, 1), torch.arange(len(ipick), device=self.device).reshape(-1, 1)), dim=1).long()
-#		 hash_picks_time = hash_rows(pick_vals_time)
-#		 hash_queries_p, hash_queries_s = hash_rows(query_vals_p), hash_rows(query_vals_s)
-
-#		 iwhere_query_p = torch.where(torch.isin(hash_queries_p, hash_picks_time))[0]
-#		 iwhere_query_s = torch.where(torch.isin(hash_queries_s, hash_picks_time))[0]
-
-#		 sorted_hash_picks_time, order_hash_picks_time = torch.sort(hash_picks_time)
-#		 ind_extract_p = torch.searchsorted(sorted_hash_picks_time, hash_queries_p[iwhere_query_p])
-#		 ind_extract_s = torch.searchsorted(sorted_hash_picks_time, hash_queries_s[iwhere_query_s])
-
-#		 valid_ind_p = (ind_extract_p < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_p.clamp(max=len(sorted_hash_picks_time) - 1)] == hash_queries_p[iwhere_query_p])
-#		 valid_ind_s = (ind_extract_s < len(sorted_hash_picks_time)) & (sorted_hash_picks_time[ind_extract_s.clamp(max=len(sorted_hash_picks_time) - 1)] == hash_queries_s[iwhere_query_s])
-
-#		 inds_queries_to_picks_p = order_hash_picks_time[ind_extract_p.clamp(max=len(sorted_hash_picks_time) - 1)][valid_ind_p]
-#		 inds_queries_to_picks_s = order_hash_picks_time[ind_extract_s.clamp(max=len(sorted_hash_picks_time) - 1)][valid_ind_s]
-
-#		 misfit_rel_time_p = tpick[inds_queries_to_picks_p].reshape(-1, 1) - tlatent[nodes_of_product_p[iwhere_query_p], 0].reshape(-1, 1)
-#		 misfit_rel_time_s = tpick[inds_queries_to_picks_s].reshape(-1, 1) - tlatent[nodes_of_product_s[iwhere_query_s], 1].reshape(-1, 1)
-
-#		 misfit_rel_time_p = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_p) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_p)), dim=1)
-#		 misfit_rel_time_s = torch.cat((torch.exp(-1.0 * torch.abs(misfit_rel_time_s) / (self.scale_misfit * self.kernel_sig_t)), torch.sign(misfit_rel_time_s)), dim=1)
-
-#		 offset_ref_sta_p = (locs_use_cart[ipick[inds_queries_to_picks_p]] - x_context_cart[A_src_in_sta[1, nodes_of_product_p[iwhere_query_p]], :]) / (10.0 * self.scale_rel)
-#		 offset_ref_sta_s = (locs_use_cart[ipick[inds_queries_to_picks_s]] - x_context_cart[A_src_in_sta[1, nodes_of_product_s[iwhere_query_s]], :]) / (10.0 * self.scale_rel)
-
-#		 offset_ref_sta_norm_p = torch.norm(offset_ref_sta_p, dim=1, keepdim=True).clamp(min=eps_time)
-#		 offset_ref_sta_norm_s = torch.norm(offset_ref_sta_s, dim=1, keepdim=True).clamp(min=eps_time)
-
-#		 gammas_time2 = self._compute_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx)
-#		 gammas_time3 = self._compute_gammas(self.f_gamma_time3, self.log_gamma_base_time3, ctx)
-
-#		 rbf_ref_sta_p = torch.exp(-1.0 * offset_ref_sta_norm_p * gammas_time2)
-#		 rbf_ref_sta_s = torch.exp(-1.0 * offset_ref_sta_norm_s * gammas_time3)
-
-#		 offset_ref_sta_norm_kernel_p = torch.cat((offset_ref_sta_p / offset_ref_sta_norm_p, rbf_ref_sta_p), dim=1)
-#		 offset_ref_sta_norm_kernel_s = torch.cat((offset_ref_sta_s / offset_ref_sta_norm_s, rbf_ref_sta_s), dim=1)
-
-#		 inpt_aggregate_p = torch.cat((
-#			 x[nodes_of_product_p[iwhere_query_p]], 
-#			 misfit_rel_time_p, 
-#			 offset_ref_sta_norm_kernel_p, 
-#			 self.phase_embed(phase_label[inds_queries_to_picks_p].reshape(-1).long())
-#		 ), dim=1)
-		
-#		 inpt_aggregate_s = torch.cat((
-#			 x[nodes_of_product_s[iwhere_query_s]], 
-#			 misfit_rel_time_s, 
-#			 offset_ref_sta_norm_kernel_s, 
-#			 self.phase_embed(phase_label[inds_queries_to_picks_s].reshape(-1).long())
-#		 ), dim=1)
-
-#		 aggregate_product_p = scatter(self.fc2(inpt_aggregate_p), inds_queries_to_picks_p, dim=0, dim_size=len(tpick), reduce='mean')
-#		 aggregate_product_s = scatter(self.fc3(inpt_aggregate_s), inds_queries_to_picks_s, dim=0, dim_size=len(tpick), reduce='mean')
-
-#		 # Final Tensor Output
-#		 arv_embed = self.null_embed.expand(len(x_query_cart), len(tpick), -1).clone()
-#		 arv_embed[pick_vals[:, 1], iarv, :] = aggregate_product
-		
-#		 arv_embed = self.fc_merge(torch.cat((
-#			 arv_embed, 
-#			 aggregate_product_p.unsqueeze(0).expand(len(x_query_cart), -1, -1), 
-#			 aggregate_product_s.unsqueeze(0).expand(len(x_query_cart), -1, -1)
-#		 ), dim=2))
-
-#		 return arv_embed, mask_misfit_time
 
 
 class SourceStationAttention(MessagePassing):
@@ -3275,12 +2170,6 @@ class GCN_Detection_Network_extended(nn.Module):
 		embed_vector_dim = 10 ## Note can add normalization to output
 		self.embed_vector = nn.Sequential(nn.Linear(6, 30), nn.PReLU(), nn.Linear(30, embed_vector_dim))
 
-		# if use_expanded == False:
-		# 	# self.DataAggregation = DataAggregation(4 + n_dim_extra_inpt + n_dim_extra_feat + embed_vector_dim, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
-		# 	self.DataAggregation = DataAggregation(4 + n_dim_extra_inpt + n_dim_extra_feat, 15).to(device) # output size is latent size for (half of) bipartite code # , 15
-		# else:
-		# 	self.DataAggregation = DataAggregationExpanded(4 + n_dim_extra_inpt + n_dim_extra_feat, 15, device = device).to(device) # output size is latent size for (half of) bipartite code # , 15				
-
 		# Main Encoder Stack
 		self.DataAggregation = DataAggregationExpanded(
 			in_channels= 4 + n_dim_extra_inpt + n_dim_extra_feat + embed_vector_dim,
@@ -3310,10 +2199,6 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		self.BipartiteGraphReadOutOperator = BipartiteGraphReadOutOperator(30, 15).to(device)
 
-		## For now, don't use expanded on the downstream DataAggregationAssociationPhase (may be slightly unnecessary)
-		# if use_expanded == False:
-		# self.DataAggregationAssociation = DataAggregationAssociation(15, 15).to(device) # need to add concatenation
-
 		self.DataAggregationAssociation = DataAggregationAssociation(
 			in_channels=15,  # Dimension of unpooled feature 's'
 			out_channels=15,
@@ -3330,10 +2215,6 @@ class GCN_Detection_Network_extended(nn.Module):
 		if use_src_pred == True:
 			self.alpha = nn.Parameter(torch.tensor([0.1], device = device))
 
-		# if use_embedding == True:
-		# 	# self.DataAggregationEmbedding = DataAggregationEmbedding(1 + n_dim_extra_inpt + embed_vector_dim, int(n_dim_extra_feat/2))
-		# 	self.DataAggregationEmbedding = DataAggregationEmbedding(1 + n_dim_extra_inpt, int(n_dim_extra_feat/2))
-
 		self.use_absolute_pos = use_absolute_pos
 		self.scale_rel = scale_rel
 		self.scale_time = scale_time
@@ -3347,45 +2228,17 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.use_src_pred = use_src_pred
 		self.use_absolute_offset = use_absolute_offset
 
-		# if use_absolute_offset == True:
-		# 	# Predict scale-conditioned gamma offsets from domain context
-		# 	self.f_gamma = nn.Linear(embed_vector_dim, 4)
-		# 	# Base log-gammas (e.g. multi-scale physical bounds)
-		# 	self.log_gamma_base = nn.Parameter(
-		# 		torch.log(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-		# 	)
-		
-		
-		# embed_vector_dim = 10
-		# self.embed_vector = nn.Sequential(
-		#	 nn.Linear(6, 30), 
-		#	 nn.PReLU(), 
-		#	 nn.Linear(30, embed_vector_dim)
-		# )
-
 		# ---------------------------------------------------------------------
 		# 1. Initialize RBF Gammas for the Product Graph Offset Features
 		# ---------------------------------------------------------------------
 		if self.use_absolute_offset:
-			# Baseline spatial gammas: fine (5.0), medium (1.0), broad (0.1)
 			init_gammas_sp = torch.tensor([0.1, 1.0, 5.0], dtype=torch.float32).reshape(1, 3)
 			self.log_gamma_base = nn.Parameter(torch.log(init_gammas_sp))  # Shape: [1, 3]
-
-			# Linear projection from embed_context (dim 10) to 4 values:
-			# Index 0: Global alpha zoom factor
-			# Index 1-3: Residual tweaks for each spatial gamma
 			self.f_gamma = nn.Linear(embed_vector_dim, 1 + 3)
-
-			# Zero-initialize the projection weight and bias so the model starts
-			# strictly at baseline log_gamma_base during early training steps.
 			nn.init.zeros_(self.f_gamma.weight)
 			nn.init.zeros_(self.f_gamma.bias)
 
 
-		# self.w_gamma = nn.Parameter(torch.tensor([0.05, 0.3, 0.8, 2.0]).reshape(1, -1))
-		# self.use_src_pred = self.Arrivals.src_pred
-		# self.scale_output = torch.Tensor([1.0/10.0]).to(device)
-		# self.use_sigmoid = use_sigmoid
 		self.device = device
 
 		self.ftrns1 = ftrns1
@@ -3477,12 +2330,6 @@ class GCN_Detection_Network_extended(nn.Module):
 		
 		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, embed_context, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
 		
-		# ## Maybe re-concatenate the initial Cartesian product input misfit features back into s here
-		# if self.use_expanded == False:
-		# 	s = self.DataAggregationAssociation(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, A_in_sta, A_in_src, embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
-
-		# else: ## This assumes that DataAggregationAssociationPhase does not use expanded version
-		# 	s = self.DataAggregationAssociation(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, A_in_sta, A_in_src[0], embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
 
 		latent_ref = x_latent if self.use_src_pred else x_latent.detach()
 
@@ -3517,9 +2364,9 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.scale_rel = scale_rel
 		self.scale_time = scale_time
 
-		if self.use_embedding == True:
-			self.DataAggregationEmbedding.scale_rel = scale_rel
-			self.DataAggregationEmbedding.scale_time = scale_time
+		# if self.use_embedding == True:
+		# 	self.DataAggregationEmbedding.scale_rel = scale_rel
+		# 	self.DataAggregationEmbedding.scale_time = scale_time
 
 		self.SpatialAggregation1.scale_rel = scale_rel
 		self.SpatialAggregation1.scale_time = scale_time
@@ -3551,12 +2398,6 @@ class GCN_Detection_Network_extended(nn.Module):
 		
 	def set_adjacencies(self, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, pos_loc, pos_src):
 
-		# pos_rel_sta = (pos_loc[A_src_in_sta[0][A_in_sta[0]]] - pos_loc[A_src_in_sta[0][A_in_sta[1]]])/self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-		# pos_rel_src = (pos_src[A_src_in_sta[1][A_in_src[0]]] - pos_src[A_src_in_sta[1][A_in_src[1]]])/self.DataAggregation.scale_rel # , self.fproj_recieve(pos_i/1e6), self.fproj_send(pos_j/1e6)), dim = 1)
-		# dist_rel_sta = torch.norm(pos_rel_sta, dim = 1, keepdim = True)
-		# dist_rel_src = torch.norm(pos_rel_src, dim = 1, keepdim = True)
-		# pos_rel_sta = torch.cat((pos_rel_sta, dist_rel_sta), dim = 1)
-		# pos_rel_src = torch.cat((pos_rel_src, dist_rel_src), dim = 1)
 		
 		self.A_in_sta = A_in_sta
 		self.A_in_src = A_in_src
