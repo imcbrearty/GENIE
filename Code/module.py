@@ -3115,8 +3115,8 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		y = self.proj_soln1(y_latent)
 		
-		if save_state == True:
-			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
+		# if save_state == True:
+		# 	self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
 			
 		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
 
