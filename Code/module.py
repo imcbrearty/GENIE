@@ -386,26 +386,30 @@ class BipartiteGraphOperator(MessagePassing):
 
 class SpatialAggregation(MessagePassing):
 	def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel, 
-				 n_global=5, n_hidden=30, zero_offsets=False):
+				 n_gammas = 3, n_global=5, n_hidden=30, zero_offsets=False):
 		super(SpatialAggregation, self).__init__(aggr='mean')
 
 		self.zero_offsets = zero_offsets
 		self.scale_rel = scale_rel
 
 		if not self.zero_offsets:
-			# Predict 1 global scale (alpha) + 5 per-frequency residuals (3 spatial + 2 temporal)
-			self.f_gamma = nn.Linear(embed_dim, 1 + 5)
+
+			# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
+			self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
 			nn.init.normal_(self.f_gamma.weight, std = 0.01)
 			nn.init.zeros_(self.f_gamma.bias)
-			
-			# Base gammas: 3 spatial (0.1, 1.0, 5.0) + 2 temporal (0.5 [broad], 10.0 [sharp])
-			init_gammas = torch.tensor([0.1, 1.0, 5.0, 0.5, 10.0]).reshape(1, -1)
+
+			# Multi-scale log-spaced initialization
+			init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).unsqueeze(1).repeat(1, 3)
+			init_temporal = torch.logspace(-1, 0.7, steps=n_gammas).unsqueeze(1)
+			init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)
 			self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
 
-			# Edge dim: 3D dir (3) + Spatial RBF (3) + Temporal RBF (2) + Normalized dt (1) = 9
-			edge_dim = 9
+			# Edge dim: 3D dir (3) + Spatial RBF (3) + Temporal RBF (3) + Normalized dt (1) = 10
+			edge_dim = 10
 		else:
 			edge_dim = 0
+
 
 		# Feature transformations
 		self.fc1 = nn.Linear(in_channels + edge_dim + n_global, n_hidden)
@@ -424,41 +428,33 @@ class SpatialAggregation(MessagePassing):
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
 		if not self.zero_offsets:
-			# Unified 4D relative position normalized by scale_rel
-			pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
-			
-			pos_rel_sp = pos_rel[:, 0:3]
-			# pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp ** 2, dim=1, keepdim=True) + 1e-8)
-			pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim = 1, keepdim = True) # .clamp(min = 1e-6)
 
-			pos_rel_tm = pos_rel[:, 3:4]
-			pos_norm_tm = torch.abs(pos_rel_tm)
+			# Step 1: Normalize spatial-temporal offsets
+			diff_sp = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
+			diff_tm = pos_rel[:,3:4] # / self.scale_rel
 
-			# print('Norm [2]')
-			# print(pos_rel.amin(0))
-			# print(pos_rel.amax(0))
-			# print(pos_norm_sp.amin(0))
-			# print(pos_norm_sp.amax(0))
+			# Unit directional vector for spatial geometry
+			# norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
+			norm_pos = torch.linalg.vector_norm(diff_sp[:,0:3], dim = 1, keepdim = True)
+			unit_dir = diff_sp[:,0:3] / norm_pos.clamp(min = 1e-6)  # [E_edges, 3]
 
-
-			# Decomposed Gammas: Global Alpha + Bounded Residuals
+			# Step 2: Scale-conditioned Anisotropic Gammas
 			delta = self.f_gamma(ctx)
-			alpha = delta[:, :1]						   # Global zoom/density factor
-			residuals = 0.2 * torch.tanh(delta[:, 1:])	 # Bounded shape adjustment [-0.2, +0.2]
+			alpha = delta[:, :1].unsqueeze(-1)									 # Global scale factor
+			residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))  # Anisotropic variations
+			gammas = torch.exp(self.log_gamma_base + alpha + residuals)			# [E_edges, n_gammas, 4]
 
-			# Optional: Cap alpha shift to a max 3x scale factor change (~ exp(1.1))
-			# alpha = 1.1 * torch.tanh(delta[:, :1])
-			# residuals = 0.2 * torch.tanh(delta[:, 1:])
+			# Step 3: Anisotropic LINEAR distance metric: sqrt( sum_d gamma_d * dr_d^2 )
+			# Linear distance prevents gradient cliffs over long-range global paths
+			r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)	# [E_edges, 1, 4]
+			r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-8)		  # [E_edges, n_gammas]
 
-			gammas = torch.exp(self.log_gamma_base + alpha + residuals)
-			edge_gammas = gammas[A_src[0]] if gammas.shape[0] > 1 else gammas
+			# Exponential linear RBF decay: exp(-r_aniso)
+			rbf_decay = torch.exp(-1.0 * r_aniso)								  # [E_edges, n_gammas]
 
-			# Anisotropic Spatial and Temporal Decays
-			spatial_decay = torch.exp(-1.0 * pos_norm_sp * edge_gammas[:, 0:3])
-			temporal_decay = torch.exp(-1.0 * pos_norm_tm * edge_gammas[:, 3:5])
+			# Step 4: Non-linear geometric feature fusion with FiLM scale conditioning
+			edge_attr = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)			# [E_edges, 4 + n_gammas]
 
-			# Construct 9D Edge Features
-			edge_attr = torch.cat((pos_rel_sp / pos_norm_sp.clamp(min = 1e-6), spatial_decay, temporal_decay, pos_rel_tm), dim=1)
 		else:
 			edge_attr = torch.zeros((A_src.shape[1], 0), dtype=tr.dtype, device=tr.device)
 
@@ -487,6 +483,36 @@ class SpatialAggregation(MessagePassing):
 
 		# Apply unified FiLM modulation and activation
 		return self.activate1(self.film(h, embed_context))
+
+
+
+		# Unified 4D relative position normalized by scale_rel
+		# pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
+		# pos_rel_sp = pos_rel[:, 0:3]
+		# # pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp ** 2, dim=1, keepdim=True) + 1e-8)
+		# pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim = 1, keepdim = True) # .clamp(min = 1e-6)
+		# pos_rel_tm = pos_rel[:, 3:4]
+		# pos_norm_tm = torch.abs(pos_rel_tm)
+		# # print('Norm [2]')
+		# # print(pos_rel.amin(0))
+		# # print(pos_rel.amax(0))
+		# # print(pos_norm_sp.amin(0))
+		# # print(pos_norm_sp.amax(0))
+		# # Decomposed Gammas: Global Alpha + Bounded Residuals
+		# delta = self.f_gamma(ctx)
+		# alpha = delta[:, :1]						   # Global zoom/density factor
+		# residuals = 0.2 * torch.tanh(delta[:, 1:])	 # Bounded shape adjustment [-0.2, +0.2]
+		# # Optional: Cap alpha shift to a max 3x scale factor change (~ exp(1.1))
+		# # alpha = 1.1 * torch.tanh(delta[:, :1])
+		# # residuals = 0.2 * torch.tanh(delta[:, 1:])
+		# gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+		# edge_gammas = gammas[A_src[0]] if gammas.shape[0] > 1 else gammas
+		# # Anisotropic Spatial and Temporal Decays
+		# spatial_decay = torch.exp(-1.0 * pos_norm_sp * edge_gammas[:, 0:3])
+		# temporal_decay = torch.exp(-1.0 * pos_norm_tm * edge_gammas[:, 3:5])
+		# # Construct 9D Edge Features
+		# edge_attr = torch.cat((pos_rel_sp / pos_norm_sp.clamp(min = 1e-6), spatial_decay, temporal_decay, pos_rel_tm), dim=1)
+
 
 
 # class SpatialAggregation(MessagePassing):
