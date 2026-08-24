@@ -81,7 +81,7 @@ device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cp
 # =====================================================================
 class DataAggregationLayer(MessagePassing):
 	def __init__(self, in_channels, out_channels, n_dim_mask=4, embed_dim=10, 
-				 use_offsets=True, use_expanded=True, ndim_proj_sta=6, ndim_proj_src=9):
+				 use_offsets=True, use_expanded=use_expanded, ndim_proj_sta=6, ndim_proj_src=9):
 		super(DataAggregationLayer, self).__init__('mean')
 
 		self.use_offsets = use_offsets
@@ -187,7 +187,7 @@ class DataAggregationLayer(MessagePassing):
 # =====================================================================
 class DataAggregationExpanded(nn.Module):
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_mask=4, 
-				 use_absolute_pos=True, use_offsets=True, embed_dim=10, n_embedding = 10, use_embedding=True):
+				 use_absolute_pos=True, use_offsets=True, embed_dim=10, n_embedding = 10, use_expanded = use_expanded, use_embedding=True):
 		super(DataAggregationExpanded, self).__init__()
 
 		self.use_embedding = use_embedding
@@ -218,15 +218,15 @@ class DataAggregationExpanded(nn.Module):
 
 		self.layer1 = DataAggregationLayer(
 			in_channels=n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
-			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=True
+			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded = use_expanded
 		)
 		self.layer2 = DataAggregationLayer(
 			in_channels=2 * n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
-			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=True
+			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded = use_expanded
 		)
 		self.layer3 = DataAggregationLayer(
 			in_channels=2 * n_hidden, out_channels=out_channels, n_dim_mask=n_dim_mask, 
-			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=False
+			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded = use_expanded
 		)
 
 	def forward(self, tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None):
@@ -1106,7 +1106,7 @@ class DataAggregationAssociation(nn.Module):
 
 class ArrivalEmbedding(nn.Module):
 	def __init__(self, ndim_arv_in, ndim_out, n_hidden=20, n_dim_embed=30, n_phase_embed=5, embed_vector_dim=10, 
-				 ndim_out_src=1, scale_rel=scale_rel, k_spc_edges=5, kernel_sig_t=1.0, use_phase_types=True, 
+				 ndim_out_src=1, scale_rel=scale_rel, k_spc_edges=5, kernel_sig_t=kernel_sig_t, use_phase_types=use_phase_types, 
 				 scale_time=scale_time, min_thresh=0.01, trv=None, ftrns2=None, device='cuda'):
 		super().__init__()
 		self.ftrns2, self.trv = ftrns2, trv
@@ -1149,6 +1149,10 @@ class ArrivalEmbedding(nn.Module):
 
 		self.f_gamma_time2, self.log_gamma_base_time2 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
 		self.f_gamma_time3, self.log_gamma_base_time3 = self._init_decomposed_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
+
+		self.film1 = FiLM(embed_vector_dim, n_hidden)
+		self.film2 = FiLM(embed_vector_dim, n_hidden)
+		self.film3 = FiLM(embed_vector_dim, n_hidden)
 
 		self.fc_merge = nn.Sequential(nn.Linear(3 * n_hidden, 2 * n_hidden), nn.PReLU(), nn.Linear(2 * n_hidden, ndim_out))
 
@@ -1229,6 +1233,7 @@ class ArrivalEmbedding(nn.Module):
 
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 		aggregate_product = torch.zeros((len(iarv), self.fc1[-1].out_features), device=device)
+		# ctx_expand = ctx.expand(len(iarv), -1)
 
 		if len(iwhere_query) > 0 and len(hash_picks) > 0:
 			sorted_hash_picks, order_hash_picks = torch.sort(hash_picks)
@@ -1307,7 +1312,7 @@ class ArrivalEmbedding(nn.Module):
 				self.phase_embed(phase_label[iarv[inds_queries_to_picks]].long().reshape(-1))
 			), dim=1)
 
-			aggregate_product = scatter(self.fc1(inpt_aggregate), inds_queries_to_picks, dim=0, dim_size=len(iarv), reduce='mean')
+			aggregate_product = scatter(self.film1(self.fc1(inpt_aggregate), ctx.expand(len(inpt_aggregate), -1)), inds_queries_to_picks, dim=0, dim_size=len(iarv), reduce='mean')
 
 		# Time-Branch Aggregations (fc2 & fc3)
 		aggregate_product_p = torch.zeros((len(tpick), self.fc2[-1].out_features), device=device)
@@ -1379,9 +1384,9 @@ class ArrivalEmbedding(nn.Module):
 					norm_p = torch.linalg.vector_norm(offset_ref_sta_p, dim = 1, keepdim = True) # .clamp(min=1e-8)
 					gammas_time2 = self._compute_decomposed_gammas(self.f_gamma_time2, self.log_gamma_base_time2, ctx).mean(dim=0, keepdim=True)
 					feat_p = torch.cat((offset_ref_sta_p / norm_p.clamp(min = 1e-6), torch.exp(-1.0 * norm_p * gammas_time2)), dim=1)
-
 					inpt_p = torch.cat((x[nodes_of_product_p[iwhere_query_p]], misfit_rel_time_p, feat_p, self.phase_embed(phase_label[inds_p].long().reshape(-1))), dim=1)
-					aggregate_product_p = scatter(self.fc2(inpt_p), inds_p, dim=0, dim_size=len(tpick), reduce='mean')
+
+					aggregate_product_p = scatter(self.film2(self.fc2(inpt_p), ctx.expand(len(inpt_p), -1)), inds_p, dim=0, dim_size=len(tpick), reduce='mean')
 
 			# --- S Phase Processing ---
 			edge_index_s = knn(
@@ -1431,7 +1436,7 @@ class ArrivalEmbedding(nn.Module):
 					feat_s = torch.cat((offset_ref_sta_s / norm_s.clamp(min = 1e-6), torch.exp(-1.0 * norm_s * gammas_time3)), dim=1)
 
 					inpt_s = torch.cat((x[nodes_of_product_s[iwhere_query_s]], misfit_rel_time_s, feat_s, self.phase_embed(phase_label[inds_s].long().reshape(-1))), dim=1)
-					aggregate_product_s = scatter(self.fc3(inpt_s), inds_s, dim=0, dim_size=len(tpick), reduce='mean')
+					aggregate_product_s = scatter(self.film3(self.fc3(inpt_s), ctx.expand(len(inpt_s), -1)), inds_s, dim=0, dim_size=len(tpick), reduce='mean')
 
 
 		# Updated Dense Embedding Placement Guard
@@ -3014,12 +3019,15 @@ class GCN_Detection_Network_extended(nn.Module):
 
 	def forward_queries(self, x_query_cart, t_query, train = False): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 
+		embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
 		## Use this to obtain query predictions. Note, can modify to also return the spatial embeddings (prior to proj_soln)
-		return self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t, self.embed_context))
+		return self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t, embed_context))
 
 	def forward_src_queries(self, x_query_src_cart, tq_sample, tpick, ipick, phase_label, trv_out_q): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 
-		arv_embed, mask_arv = self.ArrivalEmbedding(self.s, self.x_temp_cuda_cart, self.x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, self.locs_use_cart, self.tlatent, trv_out = trv_out_q)
+		embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
+
+		arv_embed, mask_arv = self.ArrivalEmbedding(self.s, self.x_temp_cuda_cart, self.x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, self.locs_use_cart, self.tlatent, embed_context, trv_out = trv_out_q)
 		if self.use_src_pred == True:
 			arv, src = self.Arrivals(tq_sample, trv_out_q, self.locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
@@ -3033,29 +3041,38 @@ class GCN_Detection_Network_extended(nn.Module):
 
 	def forward_fixed(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q):
 
-		# embed_context = self.embed_vector(self.embedding_vector).expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
-		
+		# start_time = time.time()
+
 		n_line_nodes = Slice.shape[0]
 		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
-		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
-		pos_rel_sta, pos_rel_src = None, None
-		# embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
 		assert(x_temp_cuda_cart.shape[1] == 3)
-
 		
-		# if self.use_absolute_offset == True:
-		# 	norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-		# 	gamma_offset = 1.6 * torch.tanh(self.f_gamma(self.embed_context))
-		# 	gammas = torch.exp(self.log_gamma_base + gamma_offset)
-		# 	spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
-		# 	rel_pos_feat = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, self.A_src_in_edges.x[:,3:4]), dim=-1)
-		# 	Slice = torch.cat((Slice, rel_pos_feat), dim = 1)
+		# embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
+		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)		
 
-		if self.use_absolute_offset:
-			# Build 7D relative position feature vector
+		A_in_src_slice = self.A_in_src[0] if self.use_expanded else self.A_in_src
+		pos_rel_sta, pos_rel_src = None, None
+
+
+		# 1. Compute relative edge vectors ONLY if offsets are enabled
+		if self.use_absolute_offset: # (or self.use_offsets)
+			pos_rel_sta = torch.cat((
+				(locs_use_cart[self.A_src_in_sta[0][self.A_in_sta[1]]] - locs_use_cart[self.A_src_in_sta[0][self.A_in_sta[0]]]), 
+				1000.0 * self.scale_time * (x_temp_cuda_t[self.A_src_in_sta[1][self.A_in_sta[1]]] - x_temp_cuda_t[self.A_src_in_sta[1][self.A_in_sta[0]]]).view(-1, 1)
+			), dim=1) / self.scale_rel
+
+			pos_rel_src = torch.cat((
+				(x_temp_cuda_cart[self.A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_cart[self.A_src_in_sta[1][A_in_src_slice[0]]]), 
+				1000.0 * self.scale_time * (x_temp_cuda_t[self.A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_t[self.A_src_in_sta[1][A_in_src_slice[0]]]).view(-1, 1)
+			), dim=1) / self.scale_rel
+
+
+		# 2. Append 7D features ONLY if the Geometric Preconditioner (use_embedding) is active
+		if self.use_embedding:
 			pos_rel_sp = self.A_src_in_edges.x[:, 0:3]
-			pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True) + 1e-8)
-			
+			# pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True)).clamp(min = 1e-6)
+			pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim = 1, keepdim = True) # ).clamp(min = 1e-6)
+
 			delta = self.f_gamma(self.embed_context)
 			alpha = delta[:, :1]
 			residuals = 0.2 * torch.tanh(delta[:, 1:])
@@ -3064,102 +3081,117 @@ class GCN_Detection_Network_extended(nn.Module):
 			
 			pos_rel_tm = self.A_src_in_edges.x[:, 3:4]
 
-			rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, pos_rel_tm), dim=-1) # 7D
-			Slice = torch.cat((Slice, rel_pos_feat), dim=1)	
-
-
-		if self.use_embedding == True:
-			ndim_slice = -1 if (self.attach_time == True)*(self.use_absolute_offset == False) else -8
-			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  Slice[:, ndim_slice::]), dim = 1) if ((self.attach_time == True) or (self.use_absolute_offset == True)) else torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device) # .to(Slice.device)
-			# inpt_embedding = torch.cat((inpt_embedding, self.embed_context.expand(n_line_nodes, -1)), dim = 1)
-
-			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, self.embed_context) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, self.embed_context)
-			Slice = torch.cat((Slice, embedding), dim = 1)
+			rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp.clamp(min = 1e-6), spatial_decay, pos_rel_tm), dim=-1) # 7D
+			Slice = torch.cat((Slice, rel_pos_feat), dim=1)
 
 		
-		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, n_sta, n_temp)
-		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
-		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda)
+		# Runs both Optional Preconditioner (if self.use_embedding=True) AND Main GNN Stack
+		x_latent = self.DataAggregation(
+			tr=Slice, 
+			mask=Mask, 
+			A_in_sta=self.A_in_sta, 
+			A_in_src=self.A_in_src, 
+			embed_context=self.embed_context, 
+			pos_rel_sta=pos_rel_sta,  # Raw 3D + dt coordinates
+			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
+		)
+
+		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, num_target_nodes = n_temp)
+		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda)
 		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			x_expand = self.SpatialAggregation2_expanded(x, embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
 			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, self.embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
 			x = x_local
 		x_spatial = self.SpatialAggregation3(x, self.embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
-
-		# use_direct_output = False
 		if self.use_direct_output == True:
 			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
-
 		else:
 			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, self.embed_context) # contains data on spatial and temporal solution at fixed nodes
 
 		y = self.proj_soln1(y_latent)
-		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
 		
+		if save_state == True:
+			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
+			
+		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+
 		x_src = []
 		x = self.proj_soln2(x)
-
+		
 		slope_width = 0.1
 		mask_p_thresh = 0.1
 		mask_out = torch.relu(y - mask_p_thresh)
-
-		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, self.embed_context, n_sta, n_temp) # could we concatenate masks and pass through a single one into next layer
-
-		if self.use_expanded == False:
-			s = self.DataAggregationAssociation(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src, self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
-
-		else: ## This assumes that DataAggregationAssociationPhase does not use expanded version
-			s = self.DataAggregationAssociation(s, x_latent.detach() if self.use_src_pred == False else self.alpha*x_latent, mask_out_1, Mask, self.A_in_sta, self.A_in_src[0], self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # detach x_latent. Just a "reference"
-
-		## Arrival embedding
-		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, self.tlatent, self.embed_context, trv_out = trv_out_q)
 		
-		## x_query_src_cart
+
+		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, self.embed_context, num_target_nodes = n_line_nodes) # could we concatenate masks and pass through a single one into next layer
+		
+
+		latent_ref = x_latent if self.use_src_pred else x_latent.detach()
+
+		# Run standardized association phase
+		s = self.DataAggregationAssociation(
+			s=s,
+			x_latent=latent_ref,
+			mask_out_1=mask_out_1,
+			mask=Mask,
+			A_in_sta=self.A_in_sta,
+			A_in_src=A_in_src_slice,
+			embed_context=self.embed_context,
+			pos_rel_sta=pos_rel_sta,  # Direct raw offset reuse
+			pos_rel_src=pos_rel_src   # Direct raw offset reuse
+		)
+
+		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, self.tlatent, self.embed_context, trv_out = trv_out_q)
+
 		if self.use_src_pred == True:
 			arv, src = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
-
-		else:
-			arv = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
-			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
-
-		
-		if self.use_src_pred == True:
 			return y, x, arv_p, arv_s, src
 
 		else:
+			
+			arv = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label) # trv_out_q[:,ipick,0].view(-1)
+			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)			
 			return y, x, arv_p, arv_s
 
-		
-	## Maye need to add new module that maps to the association - source locations
+
 	def forward_fixed_source(self, Slice, Mask, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, t_query, n_reshape = 1, save_state = False):
-	
-		# embed_context = self.embed_vector(self.embedding_vector).expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
+
+		# start_time = time.time()
 
 		n_line_nodes = Slice.shape[0]
 		n_temp, n_sta = x_temp_cuda_cart.shape[0], locs_use_cart.shape[0]
-		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)
-		pos_rel_sta, pos_rel_src = None, None
 		assert(x_temp_cuda_cart.shape[1] == 3)
 		
+		# embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
+		x_temp_cuda = torch.cat((x_temp_cuda_cart, 1000.0*self.scale_time*x_temp_cuda_t.reshape(-1,1)), dim = 1)		
 
-		# if self.use_absolute_offset == True:
-		# 	norm_pos = torch.sqrt(torch.sum(self.A_src_in_edges.x[:,0:3]**2, dim = 1, keepdim = True) + 1e-8)
-		# 	gamma_offset = 1.6 * torch.tanh(self.f_gamma(self.embed_context))
-		# 	gammas = torch.exp(self.log_gamma_base + gamma_offset)
-		# 	spatial_decay = torch.exp(-1.0 * norm_pos * gammas)  # [N_product, 4]
-		# 	rel_pos_feat = torch.cat((self.A_src_in_edges.x[:,0:3]/norm_pos, spatial_decay, self.A_src_in_edges.x[:,3:4]), dim=-1)
-		# 	Slice = torch.cat((Slice, rel_pos_feat), dim = 1)
-		
-		if self.use_absolute_offset:
-			# Build 7D relative position feature vector
+		A_in_src_slice = self.A_in_src[0] if self.use_expanded else self.A_in_src
+		pos_rel_sta, pos_rel_src = None, None
+
+
+		# 1. Compute relative edge vectors ONLY if offsets are enabled
+		if self.use_absolute_offset: # (or self.use_offsets)
+			pos_rel_sta = torch.cat((
+				(locs_use_cart[self.A_src_in_sta[0][self.A_in_sta[1]]] - locs_use_cart[self.A_src_in_sta[0][self.A_in_sta[0]]]), 
+				1000.0 * self.scale_time * (x_temp_cuda_t[self.A_src_in_sta[1][self.A_in_sta[1]]] - x_temp_cuda_t[self.A_src_in_sta[1][self.A_in_sta[0]]]).view(-1, 1)
+			), dim=1) / self.scale_rel
+
+			pos_rel_src = torch.cat((
+				(x_temp_cuda_cart[self.A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_cart[self.A_src_in_sta[1][A_in_src_slice[0]]]), 
+				1000.0 * self.scale_time * (x_temp_cuda_t[self.A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_t[self.A_src_in_sta[1][A_in_src_slice[0]]]).view(-1, 1)
+			), dim=1) / self.scale_rel
+
+		# 2. Append 7D features ONLY if the Geometric Preconditioner (use_embedding) is active
+		if self.use_embedding:
 			pos_rel_sp = self.A_src_in_edges.x[:, 0:3]
-			pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True) + 1e-8)
-			
+			# pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp**2, dim=1, keepdim=True)).clamp(min = 1e-6)
+			pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim = 1, keepdim = True) # ).clamp(min = 1e-6)
+
 			delta = self.f_gamma(self.embed_context)
 			alpha = delta[:, :1]
 			residuals = 0.2 * torch.tanh(delta[:, 1:])
@@ -3168,43 +3200,47 @@ class GCN_Detection_Network_extended(nn.Module):
 			
 			pos_rel_tm = self.A_src_in_edges.x[:, 3:4]
 
-			rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp, spatial_decay, pos_rel_tm), dim=-1) # 7D
-			Slice = torch.cat((Slice, rel_pos_feat), dim=1)		
+			rel_pos_feat = torch.cat((pos_rel_sp / pos_norm_sp.clamp(min = 1e-6), spatial_decay, pos_rel_tm), dim=-1) # 7D
+			Slice = torch.cat((Slice, rel_pos_feat), dim=1)
 
+		
+		# Runs both Optional Preconditioner (if self.use_embedding=True) AND Main GNN Stack
+		x_latent = self.DataAggregation(
+			tr=Slice, 
+			mask=Mask, 
+			A_in_sta=self.A_in_sta, 
+			A_in_src=self.A_in_src, 
+			embed_context=self.embed_context, 
+			pos_rel_sta=pos_rel_sta,  # Raw 3D + dt coordinates
+			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
+		)
 
-		if self.use_embedding == True:
-			ndim_slice = -1 if (self.attach_time == True)*(self.use_absolute_offset == False) else -8
-			inpt_embedding = torch.cat((torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device),  Slice[:, ndim_slice::]), dim = 1) if ((self.attach_time == True) or (self.use_absolute_offset == True)) else torch.ones(len(Slice),1, dtype = Slice.dtype, device = Slice.device) # .to(Slice.device)
-			# inpt_embedding = torch.cat((inpt_embedding, self.embed_context.expand(n_line_nodes, -1)), dim = 1)
-
-			embedding, pos_rel_sta, pos_rel_src = self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src[0], self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, self.embed_context) if self.use_expanded == True else self.DataAggregationEmbedding(inpt_embedding, self.A_in_sta, self.A_in_src, self.A_src_in_sta, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, self.embed_context)
-			Slice = torch.cat((Slice, embedding), dim = 1)
-
-
-		x_latent = self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context) if self.DataAggregation.use_offsets == False else self.DataAggregation(Slice, Mask, self.A_in_sta, self.A_in_src, self.embed_context, pos_rel_sta = pos_rel_sta, pos_rel_src = pos_rel_src) # note by concatenating to downstream flow, does introduce some sensitivity to these aggregation layers
-		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, n_sta, n_temp)
-		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
-		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, num_target_nodes = n_temp)
+		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda)
 		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			x_expand = self.SpatialAggregation2_expanded(x, embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
 			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, self.embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
 			x = x_local
-			
 		x_spatial = self.SpatialAggregation3(x, self.embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		
 
 		if save_state == True:
 			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
-		
+			
 		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+
+		x_src = []
 		x = self.proj_soln2(x)
+		
 
 		if n_reshape > 1: ## Use this to map (n_reshape) repeated spatial queries (x_temp_cuda_cart) at different origin times, to predictions for fixed coordinates and across time
 			x = x.reshape(-1,n_reshape,1)
 
 		return [], x
-
+		
 
 #### EXTRA
 
