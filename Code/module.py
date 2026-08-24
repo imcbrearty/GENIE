@@ -705,8 +705,9 @@ class SpaceTimeAttention(MessagePassing):
 		edge_index = knn(ctx_4d, qry_4d, k=k).flip(0).to(x_query.device)
 
 		diff_sp = (x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel
-		diff_tm = (1000.0 * self.scale_time * (x_query_t[edge_index[1]] - x_context_t[edge_index[0]])).reshape(-1, 1) / self.scale_rel
-
+		diff_tm = (1000.0 * self.scale_time * (x_query_t[edge_index[1]].view(-1) - x_context_t[edge_index[0]].view(-1))).reshape(-1, 1) / self.scale_rel
+		## Why the view necessary here for diff_tm? in training, x_query_t is shape (-1), in processing it's shape (-1,1)
+		
 		# Edge feature shape: [E, 4] -> (dx^2, dy^2, dz^2, dt^2)
 		edge_attr = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1)
 		return edge_index, edge_attr
@@ -783,7 +784,7 @@ class SpaceTimeAttention(MessagePassing):
 		# Shape: [E, n_heads, n_latent]
 		return alpha_attn.unsqueeze(-1) * value_embed
 
-	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=12):
+	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=20):
 		edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
 		self.fixed_edges = edge_index
 		self.edge_features = edge_attr
