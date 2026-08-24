@@ -489,6 +489,113 @@ class SpatialAggregation(MessagePassing):
 		return self.activate1(self.film(h, embed_context))
 
 
+# class SpatialAggregation(MessagePassing):
+# 	def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel, 
+# 				 n_global=5, n_hidden=30, zero_offsets=False):
+# 		super(SpatialAggregation, self).__init__(aggr='mean')
+
+# 		self.zero_offsets = zero_offsets
+# 		self.scale_rel = scale_rel
+
+# 		if not self.zero_offsets:
+# 			# Predict 1 global scale (alpha) + 5 per-frequency residuals (3 spatial + 2 temporal)
+# 			self.f_gamma = nn.Linear(embed_dim, 1 + 5)
+# 			nn.init.normal_(self.f_gamma.weight, std = 0.01)
+# 			nn.init.zeros_(self.f_gamma.bias)
+			
+# 			# Base gammas: 3 spatial (0.1, 1.0, 5.0) + 2 temporal (0.5 [broad], 10.0 [sharp])
+# 			init_gammas = torch.tensor([0.1, 1.0, 5.0, 0.5, 10.0]).reshape(1, -1)
+# 			self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+
+# 			# Edge dim: 3D dir (3) + Spatial RBF (3) + Temporal RBF (2) + Normalized dt (1) = 9
+# 			edge_dim = 9
+# 		else:
+# 			edge_dim = 0
+
+# 		# Feature transformations
+# 		self.fc1 = nn.Linear(in_channels + edge_dim + n_global, n_hidden)
+# 		self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
+# 		self.fglobal = nn.Linear(in_channels, n_global)
+
+# 		# FiLM Conditioning Block
+# 		self.film = FiLM(embed_dim, n_hidden)
+
+# 		self.activate1 = nn.PReLU()
+# 		self.activate2 = nn.PReLU()
+# 		self.activate3 = nn.PReLU()
+
+# 	def forward(self, tr, embed_context, A_src, pos):
+# 		# Ensure context is at least 2D [1, embed_dim]
+# 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+# 		if not self.zero_offsets:
+# 			# Unified 4D relative position normalized by scale_rel
+# 			pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
+			
+# 			pos_rel_sp = pos_rel[:, 0:3]
+# 			# pos_norm_sp = torch.sqrt(torch.sum(pos_rel_sp ** 2, dim=1, keepdim=True) + 1e-8)
+# 			pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim = 1, keepdim = True) # .clamp(min = 1e-6)
+
+# 			pos_rel_tm = pos_rel[:, 3:4]
+# 			pos_norm_tm = torch.abs(pos_rel_tm)
+
+# 			# print('Norm [2]')
+# 			# print(pos_rel.amin(0))
+# 			# print(pos_rel.amax(0))
+# 			# print(pos_norm_sp.amin(0))
+# 			# print(pos_norm_sp.amax(0))
+
+
+# 			# Decomposed Gammas: Global Alpha + Bounded Residuals
+# 			delta = self.f_gamma(ctx)
+# 			alpha = delta[:, :1]						   # Global zoom/density factor
+# 			residuals = 0.2 * torch.tanh(delta[:, 1:])	 # Bounded shape adjustment [-0.2, +0.2]
+
+# 			# Optional: Cap alpha shift to a max 3x scale factor change (~ exp(1.1))
+# 			# alpha = 1.1 * torch.tanh(delta[:, :1])
+# 			# residuals = 0.2 * torch.tanh(delta[:, 1:])
+
+# 			gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+# 			edge_gammas = gammas[A_src[0]] if gammas.shape[0] > 1 else gammas
+
+# 			# Anisotropic Spatial and Temporal Decays
+# 			spatial_decay = torch.exp(-1.0 * pos_norm_sp * edge_gammas[:, 0:3])
+# 			temporal_decay = torch.exp(-1.0 * pos_norm_tm * edge_gammas[:, 3:5])
+
+# 			# Construct 9D Edge Features
+# 			edge_attr = torch.cat((pos_rel_sp / pos_norm_sp.clamp(min = 1e-6), spatial_decay, temporal_decay, pos_rel_tm), dim=1)
+# 		else:
+# 			edge_attr = torch.zeros((A_src.shape[1], 0), dtype=tr.dtype, device=tr.device)
+
+# 		# Global feature pooling
+# 		global_feat = self.activate3(self.fglobal(tr)).mean(dim=0, keepdim=True)
+
+# 		# Message Passing execution
+# 		aggr_out = self.propagate(
+# 			A_src, 
+# 			x=tr, 
+# 			edge_attr=edge_attr, 
+# 			global_feat=global_feat, 
+# 			embed_context=ctx
+# 		)
+		
+# 		out = torch.cat((tr, aggr_out), dim=-1)
+# 		return self.activate2(self.fc2(out))
+
+# 	def message(self, x_j, edge_attr, global_feat, embed_context):
+# 		if not self.zero_offsets:
+# 			inputs = torch.cat((x_j, edge_attr, global_feat.expand(len(x_j), -1)), dim=-1)
+# 		else:
+# 			inputs = torch.cat((x_j, global_feat.expand(len(x_j), -1)), dim=-1)
+
+# 		h = self.fc1(inputs)
+
+# 		# Apply unified FiLM modulation and activation
+# 		return self.activate1(self.film(h, embed_context))
+
+
+
+
 class SpaceTimeDirect(nn.Module):
 	def __init__(self, inpt_dim, out_channels):
 		super(SpaceTimeDirect, self).__init__() #  "Max" aggregation.
