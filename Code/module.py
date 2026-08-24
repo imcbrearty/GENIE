@@ -3098,10 +3098,10 @@ class GCN_Detection_Network_extended(nn.Module):
 		)
 
 		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, num_target_nodes = n_temp)
-		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
-		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda)
+		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda)
 		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
 			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, self.embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
@@ -3217,10 +3217,10 @@ class GCN_Detection_Network_extended(nn.Module):
 		)
 
 		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, num_target_nodes = n_temp)
-		x = self.SpatialAggregation1(x, embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
-		x_local = self.SpatialAggregation2(x, embed_context, self.A_src, x_temp_cuda)
+		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda)
 		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
 			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, self.embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
