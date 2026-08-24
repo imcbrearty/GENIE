@@ -406,7 +406,7 @@ class SpatialAggregation(MessagePassing):
 			self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
 
 			# Edge dim: 3D dir (3) + Spatial RBF (3) + Temporal RBF (3) + Normalized dt (1) = 10
-			edge_dim = 10
+			edge_dim = 7
 		else:
 			edge_dim = 0
 
@@ -422,6 +422,8 @@ class SpatialAggregation(MessagePassing):
 		self.activate1 = nn.PReLU()
 		self.activate2 = nn.PReLU()
 		self.activate3 = nn.PReLU()
+		self.n_gammas = n_gammas
+
 
 	def forward(self, tr, embed_context, A_src, pos):
 		# Ensure context is at least 2D [1, embed_dim]
@@ -431,7 +433,7 @@ class SpatialAggregation(MessagePassing):
 
 			# Step 1: Normalize spatial-temporal offsets
 			diff_sp = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
-			diff_tm = pos_rel[:,3:4] # / self.scale_rel
+			diff_tm = diff_sp[:,3:4] # / self.scale_rel
 
 			# Unit directional vector for spatial geometry
 			# norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
@@ -446,7 +448,7 @@ class SpatialAggregation(MessagePassing):
 
 			# Step 3: Anisotropic LINEAR distance metric: sqrt( sum_d gamma_d * dr_d^2 )
 			# Linear distance prevents gradient cliffs over long-range global paths
-			r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)	# [E_edges, 1, 4]
+			r_sq = torch.cat((diff_sp[:,0:3] ** 2, diff_tm ** 2), dim=1).unsqueeze(1)	# [E_edges, 1, 4]
 			r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-8)		  # [E_edges, n_gammas]
 
 			# Exponential linear RBF decay: exp(-r_aniso)
