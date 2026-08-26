@@ -120,7 +120,7 @@ class DataAggregationLayer(MessagePassing):
 			self.log_gamma_src_base = nn.Parameter(torch.log(init_src_gammas))
 
 			self.f_gamma_sta = nn.Linear(embed_dim, 1 + 3)
-			self.f_gamma_src = nn.Linear(embed_dim, 1 + 5)
+			self.f_gamma_src = nn.Linear(embed_dim, 3 + 5)
 			nn.init.normal_(self.f_gamma_sta.weight, std = 0.01); nn.init.zeros_(self.f_gamma_sta.bias)
 			nn.init.normal_(self.f_gamma_src.weight, std = 0.01); nn.init.zeros_(self.f_gamma_src.bias)
 
@@ -134,7 +134,7 @@ class DataAggregationLayer(MessagePassing):
 		sta_norm_sp = torch.linalg.vector_norm(sta_sp, dim = 1, keepdim = True)
 
 		d_sta = self.f_gamma_sta(embed_context)
-		gammas_sta = torch.exp(self.log_gamma_sta_base + d_sta[:, :1] + 0.2 * torch.tanh(d_sta[:, 1:]))
+		gammas_sta = torch.exp(self.log_gamma_sta_base + 0.5 * torch.tanh(d_sta[:, :1]) + 0.2 * torch.tanh(d_sta[:, 1:]))
 		# edge_sta = torch.cat((sta_sp / sta_norm_sp, torch.exp(-1.0 * sta_norm_sp * gammas_sta)), dim=1)
 		edge_sta = torch.cat((sta_sp / sta_norm_sp.clamp(min = 1e-6), torch.exp(-1.0 * sta_norm_sp * gammas_sta)), dim=1)
 
@@ -145,7 +145,11 @@ class DataAggregationLayer(MessagePassing):
 
 		src_norm_tm = torch.abs(src_tm)
 		d_src = self.f_gamma_src(embed_context)
-		gammas_src = torch.exp(self.log_gamma_src_base + d_src[:, :1] + 0.2 * torch.tanh(d_src[:, 1:]))
+		alpha_src = 0.5*torch.tanh(d_src[:, 0:1])
+		alpha_src_space = 0.25*torch.tanh(d_src[:, 1:2])
+		alpha_src_time = 0.25*torch.tanh(d_src[:, 2:3])
+		alpha_src = torch.cat([(alpha_src + alpha_src_space).expand(-1,3), (alpha_src + alpha_src_time).expand(-1,2)], dim = 1)
+		gammas_src = torch.exp(self.log_gamma_src_base + alpha_src + 0.2 * torch.tanh(d_src[:, 3:]))
 		
 		sp_decay = torch.exp(-1.0 * src_norm_sp * gammas_src[:, 0:3])
 		tm_decay = torch.exp(-1.0 * src_norm_tm * gammas_src[:, 3:5])
@@ -302,7 +306,7 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
 		# Outputs [1 + n_gammas * 4] -> 1 global zoom factor + 4D directional offsets per gamma
-		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
+		self.f_gamma = nn.Linear(embed_dim, 3 + n_gammas * 4)
 		nn.init.normal_(self.f_gamma.weight, std = 0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
@@ -347,8 +351,13 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# Step 2: Scale-conditioned Anisotropic Gammas
 		delta = self.f_gamma(ctx)
-		alpha = delta[:, :1].unsqueeze(-1)									 # Global scale factor
-		residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))  # Anisotropic variations
+		# alpha = delta[:, :1].unsqueeze(-1)									 # Global scale factor
+		alpha_global = 0.5  * torch.tanh(delta[:, 0:1])
+		alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
+		alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
+		residuals =    0.2 * torch.tanh(delta[:, 3:].view(-1, self.n_gammas, 4))  # Anisotropic variations
+		alpha = torch.cat([(alpha_global + alpha_space).expand(-1,3),
+			(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)			# [E_edges, n_gammas, 4]
 
 		# Step 3: Anisotropic LINEAR distance metric: sqrt( sum_d gamma_d * dr_d^2 )
@@ -382,6 +391,135 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# Step 8: Standardize and Project
 		return self.act_out(self.fc_out(self.norm(stacked_normalized)))
+
+
+# class BipartiteGraphOperator(MessagePassing):
+# 	"""Product Graph to Source Graph Bipartite Projection Operator.
+
+# 	Maps product-space features (Source-Station pairs) onto the target source nodes.
+# 	Uses multi-gamma anisotropic linear RBF attenuation (e^-r), FiLM scale
+# 	conditioning, and variance-stabilized degree normalization.
+# 	"""
+
+# 	def __init__(
+# 		self,
+# 		ndim_in,
+# 		ndim_out,
+# 		ndim_mask=4,
+# 		embed_dim=10,
+# 		n_gammas=3, # 4
+# 		scale_rel=scale_rel,
+# 		scale_time=scale_time,
+# 	):
+# 		super(BipartiteGraphOperator, self).__init__(aggr="add")
+
+# 		self.n_gammas = n_gammas
+# 		self.scale_rel = scale_rel
+# 		self.scale_time = scale_time
+
+# 		# 1. Edge MLP: Evaluates physical features (Inputs + 3D Unit Dir + 1D Time + K Gammas)
+# 		# 3 (unit dir) + 1 (dt) + K (RBF decays) = 4 + n_gammas positional features
+# 		self.fc_edge = nn.Linear(ndim_in + 4 + n_gammas, ndim_in)
+# 		self.film_edge = FiLM(embed_dim, ndim_in)
+# 		self.act_edge = nn.PReLU()
+
+# 		# 2. Low-Rank Mask Gate
+# 		self.mask_gate = nn.Sequential(
+# 			nn.Linear(ndim_mask, 8),
+# 			nn.PReLU(),
+# 			nn.Linear(8, ndim_in),
+# 			nn.Sigmoid(),
+# 		)
+
+# 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
+# 		# Outputs [1 + n_gammas * 4] -> 1 global zoom factor + 4D directional offsets per gamma
+# 		self.f_gamma = nn.Linear(embed_dim, 3 + n_gammas * 4)
+# 		nn.init.normal_(self.f_gamma.weight, std = 0.01)
+# 		nn.init.zeros_(self.f_gamma.bias)
+
+# 		# Log-spaced initialization across spectrum: ~[0.05, 0.3, 0.8, 2.0]
+# 		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).unsqueeze(1).repeat(1, 3) # [n_gammas, 3]
+# 		init_temporal = torch.logspace(-1, 0.7, steps=n_gammas).unsqueeze(1)			# [n_gammas, 1]
+# 		init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)	  # [1, n_gammas, 4]
+# 		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+
+# 		# 4. Normalization and Readout
+# 		self.norm = nn.LayerNorm(ndim_in)
+# 		self.fc_out = nn.Linear(ndim_in, ndim_out)
+# 		self.act_out = nn.PReLU()
+
+# 	def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None): # Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, n_sta, n_temp)
+# 		"""
+# 		Args:
+# 			inpt: [E_edges, ndim_in]
+# 			A_src_in_edges: PyG Data object containing edge_index and spatial-temporal x [E_edges, 4]
+# 			mask: [E_edges, ndim_mask]
+# 			embed_context: [E_edges, embed_dim] or [1, embed_dim] context embedding
+# 		"""
+# 		N = inpt.shape[0]
+# 		if num_target_nodes is not None:
+# 			M = num_target_nodes
+# 		else:
+# 			M = A_src_in_edges.edge_index[1].max().item() + 1 if A_src_in_edges.edge_index.numel() > 0 else 0
+
+# 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+# 		# Step 1: Normalize spatial-temporal offsets
+# 		diff_sp = A_src_in_edges.x[:, 0:3] # / self.scale_rel
+# 		diff_tm = A_src_in_edges.x[:, 3:4] # / self.scale_rel
+
+# 		# Unit directional vector for spatial geometry
+# 		# norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
+# 		norm_pos = torch.linalg.vector_norm(diff_sp, dim = 1, keepdim = True)
+# 		unit_dir = diff_sp / norm_pos.clamp(min = 1e-6)  # [E_edges, 3]
+# 		# print('Norm')
+# 		# print(norm_pos.amin())
+# 		# print(norm_pos.amax())
+
+# 		# Step 2: Scale-conditioned Anisotropic Gammas
+# 		delta = self.f_gamma(ctx)
+# 		# alpha = delta[:, :1].unsqueeze(-1)									 # Global scale factor
+# 		alpha_global = 0.5  * torch.tanh(delta[:, 0:1])
+# 		alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
+# 		alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
+# 		residuals =    0.2 * torch.tanh(delta[:, 3:].view(-1, self.n_gammas, 4))  # Anisotropic variations
+# 		alpha = torch.cat([(alpha_global + alpha_space).expand(-1,3),
+# 			(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
+# 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)			# [E_edges, n_gammas, 4]
+
+# 		# Step 3: Anisotropic LINEAR distance metric: sqrt( sum_d gamma_d * dr_d^2 )
+# 		# Linear distance prevents gradient cliffs over long-range global paths
+# 		r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)	# [E_edges, 1, 4]
+# 		r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-5)		  # [E_edges, n_gammas]
+
+# 		# Exponential linear RBF decay: exp(-r_aniso)
+# 		rbf_decay = torch.exp(-1.0 * r_aniso)								  # [E_edges, n_gammas]
+
+# 		# Step 4: Non-linear geometric feature fusion with FiLM scale conditioning
+# 		rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)			# [E_edges, 4 + n_gammas]
+# 		edge_inpt = torch.cat((inpt, rel_pos), dim=-1)
+# 		# geo_features = self.act_edge(self.film_edge(self.fc_edge(torch.cat((inpt, rel_pos), dim=-1)), ctx))
+# 		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
+
+# 		# Step 5: Gated message composition (Existential gate * Phase routing gate)
+# 		absolute_gate = mask.max(1, keepdims=True)[0]						  # [E_edges, 1]
+# 		phase_routing = self.mask_gate(mask)								   # [E_edges, ndim_in]
+
+# 		msg = absolute_gate * (phase_routing * geo_features)				   # [E_edges, ndim_in]
+
+# 		# Step 6: Perform physical stacking (Sum-aggregate onto target source nodes)
+# 		stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
+
+# 		# Step 7: Variance-stabilized degree normalization (1 / sqrt(Degree))
+# 		target_indices = A_src_in_edges.edge_index[1]
+# 		deg = torch.zeros((M, 1), device=stacked.device, dtype=stacked.dtype)
+# 		deg.index_add_(0, target_indices, absolute_gate)
+# 		stacked_normalized = stacked / torch.sqrt(deg.clamp(min=1.0))
+
+# 		# Step 8: Standardize and Project
+# 		return self.act_out(self.fc_out(self.norm(stacked_normalized)))
+
+
 
 
 use_anisotropic_spatial_aggregation = False
@@ -597,7 +735,7 @@ else:
 
 			if not self.zero_offsets:
 				# Predict 1 global scale (alpha) + 5 per-frequency residuals (3 spatial + 2 temporal)
-				self.f_gamma = nn.Linear(embed_dim, 1 + 5)
+				self.f_gamma = nn.Linear(embed_dim, 3 + 5)
 				nn.init.normal_(self.f_gamma.weight, std = 0.01)
 				nn.init.zeros_(self.f_gamma.bias)
 				
@@ -643,16 +781,18 @@ else:
 				# print(pos_norm_sp.amin(0))
 				# print(pos_norm_sp.amax(0))
 
-
 				# Decomposed Gammas: Global Alpha + Bounded Residuals
 				delta = self.f_gamma(ctx)
-				alpha = delta[:, :1]						   # Global zoom/density factor
-				residuals = 0.2 * torch.tanh(delta[:, 1:])	 # Bounded shape adjustment [-0.2, +0.2]
+				alpha_global = 0.5*torch.tanh(delta[:, 0:1])						   # Global zoom/density factor
+				alpha_space = 0.25*torch.tanh(delta[:, 1:2])						   # Global zoom/density factor
+				alpha_time = 0.25*torch.tanh(delta[:, 2:3])						   # Global zoom/density factor
+				residuals = 0.2 * torch.tanh(delta[:, 3:])	 # Bounded shape adjustment [-0.2, +0.2]
 
 				# Optional: Cap alpha shift to a max 3x scale factor change (~ exp(1.1))
 				# alpha = 1.1 * torch.tanh(delta[:, :1])
 				# residuals = 0.2 * torch.tanh(delta[:, 1:])
 
+				alpha = torch.cat([(alpha_global + alpha_space).expand(-1,3), (alpha_global + alpha_time).expand(-1,2)], dim = 1)
 				gammas = torch.exp(self.log_gamma_base + alpha + residuals)
 				edge_gammas = gammas[A_src[0]] if gammas.shape[0] > 1 else gammas
 
@@ -709,159 +849,338 @@ class SpaceTimeDirect(nn.Module):
 
 
 
-
-
 class SpaceTimeAttention(MessagePassing):
-    """Multi-Resolution Space-Time Interpolator with Local Coherence Super-Resolution Gain."""
+	"""Multi-Resolution Space-Time Interpolator with Local Coherence Super-Resolution Gain."""
 
-    def __init__(
-        self,
-        inpt_dim,
-        out_channels,
-        n_dim=4,
-        n_latent=16,
-        embed_dim=10,
-        n_heads=5,
-        scale_rel=scale_rel,
-        scale_time=scale_time,
-    ):
-        super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
-        self.n_heads = n_heads
-        self.n_latent = n_latent
-        self.out_channels = out_channels
-        self.scale_rel = scale_rel
-        self.scale_time = scale_time
+	def __init__(
+		self,
+		inpt_dim,
+		out_channels,
+		n_dim=4,
+		n_latent=16,
+		embed_dim=10,
+		n_heads=5,
+		scale_rel=scale_rel,
+		scale_time=scale_time,
+	):
+		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
+		self.n_heads = n_heads
+		self.n_latent = n_latent
+		self.out_channels = out_channels
+		self.scale_rel = scale_rel
+		self.scale_time = scale_time
 
-        # 1. Feature Values & Feature Scores
-        self.f_values = nn.Linear(inpt_dim, n_latent)
-        self.film_values = FiLM(embed_dim, n_latent)
-        self.act_values = nn.PReLU()
+		# 1. Feature Values & Feature Scores
+		self.f_values = nn.Linear(inpt_dim, n_latent)
+		self.film_values = FiLM(embed_dim, n_latent)
+		self.act_values = nn.PReLU()
 
-        self.f_feature_score = nn.Linear(inpt_dim, n_heads)
-        self.film_score = FiLM(embed_dim, n_heads)
+		self.f_feature_score = nn.Linear(inpt_dim, n_heads)
+		self.film_score = FiLM(embed_dim, n_heads)
 
-        # 2. Dynamic Gammas
-        self.f_gamma = nn.Linear(embed_dim, 1 + n_heads * 4)
-        nn.init.normal_(self.f_gamma.weight, std=0.01)
-        nn.init.zeros_(self.f_gamma.bias)
+		# 2. Dynamic Gammas
+		self.f_gamma = nn.Linear(embed_dim, 2 + n_heads * 2)
+		nn.init.normal_(self.f_gamma.weight, std=0.01)
+		nn.init.zeros_(self.f_gamma.bias)
 
-        init_spatial = torch.logspace(-1, 0.7, steps=n_heads).unsqueeze(1).repeat(1, 3)
-        init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads).unsqueeze(1)
-        init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)
-        self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+		init_spatial = torch.logspace(-1, 0.7, steps=n_heads) # .unsqueeze(1).repeat(1, 3)
+		init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads) # .unsqueeze(1)
+		init_gammas = torch.stack([init_spatial, init_temporal], dim=1) # .unsqueeze(0)
+		self.log_gamma_base = nn.Parameter(torch.log(init_gammas)).unsqueeze(0)
 
-        # 3. Global Scale Cap for Gain
-        self.f_max_gain_cap = nn.Sequential(
-            nn.Linear(embed_dim, 16),
-            nn.PReLU(),
-            nn.Linear(16, 1),
-            nn.Sigmoid()
-        )
+		# 3. Global Scale Cap for Gain
+		self.f_max_gain_cap = nn.Sequential(
+			nn.Linear(embed_dim, 16),
+			nn.PReLU(),
+			nn.Linear(16, 1),
+			nn.Sigmoid()
+		)
 
-        # 4. Readout Projection
-        self.proj = nn.Linear(n_latent + embed_dim, out_channels)
-        self.activate2 = nn.PReLU()
+		# 4. Readout Projection
+		# self.proj = nn.Linear(n_latent + embed_dim, out_channels)
+		self.proj = nn.Linear(n_latent*n_heads + embed_dim, out_channels)
+		self.activate2 = nn.PReLU()
 
-        self.spatial_gate = nn.Sequential(
-            nn.Linear(n_latent, 1),
-            nn.Sigmoid()
-        )
+		self.spatial_gate = nn.Sequential(
+			nn.Linear(n_latent*n_heads, 1),
+			nn.Sigmoid()
+		)
 
-        self.use_fixed_edges = False
-        self.fixed_edges = None
-        self.edge_features = None
+		self.edge_proj = nn.Sequential(
+		    nn.Linear(4 + 2, n_latent),
+		    nn.PReLU(),
+		    nn.Linear(n_latent, n_latent),
+		)
 
-    def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=16):
-        ctx_4d = torch.cat((x_context / self.scale_rel, (1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel), dim=1)
-        qry_4d = torch.cat((x_query / self.scale_rel, (1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel), dim=1)
+		self.use_fixed_edges = False
+		self.fixed_edges = None
+		self.edge_features = None
 
-        edge_index = knn(ctx_4d, qry_4d, k=k).flip(0).to(x_query.device)
+		self.head_value_scale = nn.Parameter(
+		    torch.zeros(n_heads, n_latent)
+		)
 
-        diff_sp = (x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel
-        diff_tm = (1000.0 * self.scale_time * (x_query_t[edge_index[1]].view(-1) - x_context_t[edge_index[0]].view(-1))).reshape(-1, 1) / self.scale_rel
+	def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=16):
+		ctx_4d = torch.cat((x_context / self.scale_rel, (1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel), dim=1)
+		qry_4d = torch.cat((x_query / self.scale_rel, (1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel), dim=1)
 
-        # Edge feature shape: [E, 4] -> (dx^2, dy^2, dz^2, dt^2)
-        edge_attr = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1)
-        return edge_index, edge_attr
+		edge_index = knn(ctx_4d, qry_4d, k=k).flip(0).to(x_query.device)
 
-    def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=16):
-        edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
-        self.fixed_edges = edge_index
-        self.edge_features = edge_attr
-        self.use_fixed_edges = True
+		diff_sp = (x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel
+		diff_tm = (1000.0 * self.scale_time * (x_query_t[edge_index[1]].view(-1) - x_context_t[edge_index[0]].view(-1))).reshape(-1, 1) / self.scale_rel
+		pos_rel = torch.cat((diff_sp, diff_tm), dim = 1)
 
-    def message(self, x_j, embed_context_j, index, edge_attr):
-        # 1. Feature Values
-        value_embed = self.act_values(self.film_values(self.f_values(x_j), embed_context_j))
+		# Edge feature shape: [E, 4] -> (dx^2, dy^2, dz^2, dt^2)
+		edge_attr = torch.cat((pos_rel**2, pos_rel), dim = 1) # torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1)
 
-        # 2. Dynamic Gammas
-        delta = self.f_gamma(embed_context_j)
-        alpha = delta[:, :1].unsqueeze(-1)
-        residuals = 0.1 * torch.tanh(delta[:, 1:].view(-1, self.n_heads, 4))
-        gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+		return edge_index, edge_attr # , pos_rel
 
-        # 3. Distance & Bounded Score Logits
-        r_sq = edge_attr.unsqueeze(1)
-        distance_logits = -1.0 * torch.sum(gammas * r_sq, dim=-1)
-        
-        raw_score = self.film_score(self.f_feature_score(x_j), embed_context_j)
-        score = 0.2 * torch.tanh(raw_score)
-        
-        logits = distance_logits + score
-        alpha_attn = softmax(logits, index) # [E, n_heads]
+	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=16):
+		edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+		self.fixed_edges = edge_index
+		self.edge_features = edge_attr
+		self.use_fixed_edges = True
 
-        # Mean attention across heads
-        mean_attn = alpha_attn.mean(dim=1, keepdim=True) # [E, 1]
+	def message(self, x_j, embed_context_j, index, edge_attr):
+		# 1. Feature Values
 
-        # Weighted value output
-        weighted_values = mean_attn * value_embed # [E, n_latent]
-        attn_sq = mean_attn ** 2 # [E, 1]
+		spatial_sq = edge_attr[:,0:3].sum(dim = -1, keepdim = True)
+		temporal_sq = edge_attr[:,3:4]
 
-        # Pack into single vector [E, n_latent + 1] for unified aggregation
-        return torch.cat((weighted_values, attn_sq), dim=1)
+		edge_embed = self.edge_proj(torch.cat((edge_attr[:,4:8], torch.sqrt(spatial_sq + 1e-6), torch.sqrt(temporal_sq + 1e-6)), dim = 1))
 
-    def update(self, aggr_out):
-        # PyG automatically aggregated aggr_out via aggr="add" to [N_queries, n_latent + 1]
-        agg_values = aggr_out[:, :self.n_latent]
-        agg_attn_sq = aggr_out[:, self.n_latent:]
+		value_embed = self.act_values(self.film_values(self.f_values(x_j), embed_context_j))
 
-        # Calculate Local Sparsity: 1.0 - sum(alpha^2)
-        local_sparsity = torch.clamp(1.0 - agg_attn_sq, min=0.0, max=1.0)
-        return agg_values, local_sparsity
+		value_embed = value_embed + edge_embed
 
-    def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, embed_context, k=16):
-        if self.use_fixed_edges and self.fixed_edges is not None:
-            edge_index, edge_attr = self.fixed_edges, self.edge_features
-        else:
-            edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+		# 2. Dynamic Gammas
+		delta = self.f_gamma(embed_context_j)
+		# alpha = delta[:, :2].unsqueeze(1)
+		alpha = 0.5 * torch.tanh(delta[:, :2]).unsqueeze(1)
+		residuals = 0.1 * torch.tanh(delta[:, 2:].view(-1, self.n_heads, 2))
+		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
 
-        ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-        ctx_expanded = ctx.expand(x_query.shape[0], -1)
+		# 3. Distance & Bounded Score Logits
+		distance_logits = (
+			-gammas[:, :, 0] * spatial_sq
+			-gammas[:, :, 1] * temporal_sq
+		)
 
-        # Propagate calls message -> aggregate (add) -> update
-        interpolated, local_sparsity = self.propagate(
-            edge_index,
-            x=inpts,
-            embed_context=ctx.expand(len(inpts), -1),
-            edge_attr=edge_attr,
-            size=(x_context.shape[0], x_query.shape[0]),
-        )
+		raw_score = self.film_score(self.f_feature_score(x_j), embed_context_j)
+		score = 0.2 * torch.tanh(raw_score)
+		
+		logits = distance_logits + score
+		alpha_attn = softmax(logits, index) # [E, n_heads]
+		
+		head_values = alpha_attn.unsqueeze(-1) * value_embed.unsqueeze(1)
+		head_values = head_values.reshape(-1, self.n_heads * self.n_latent)
+		# head_values = head_values * (1 + self.head_value_scale)
 
-        # 1. Compute Global Scale Cap
-        max_boost_cap = 1.5 * self.f_max_gain_cap(ctx_expanded)
+		# Weighted value output
+		# weighted_values = mean_attn * value_embed # [E, n_latent]
+		attn_sq = alpha_attn ** 2 # [E, 1]
 
-        # 2. Local Gain
-        local_gain = 1.0 + max_boost_cap * local_sparsity
+		# Pack into single vector [E, n_latent + 1] for unified aggregation
+		return torch.cat((head_values, attn_sq), dim=1)
 
-        # 3. Apply Local Gain
-        interpolated_gated = interpolated * local_gain
+	def update(self, aggr_out):
+		# PyG automatically aggregated aggr_out via aggr="add" to [N_queries, n_latent + 1]
+		agg_values = aggr_out[:, :self.n_latent * self.n_heads]
+		agg_attn_sq = aggr_out[:, self.n_latent * self.n_heads:]
+		local_concentration = agg_attn_sq.mean(dim=1, keepdim=True)
 
-        # 4. Readout
-        gate = self.spatial_gate(interpolated_gated)
-        gated_ctx = ctx_expanded * gate
+		# Calculate Local Sparsity: 1.0 - sum(alpha^2)
+		local_sparsity = torch.clamp(1.0 - local_concentration, min=0.0, max=1.0)
+		return agg_values, local_sparsity
 
-        out = self.proj(torch.cat((interpolated_gated, gated_ctx), dim=1))
-        return self.activate2(out)
+	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, embed_context, k=16):
+		if self.use_fixed_edges and self.fixed_edges is not None:
+			edge_index, edge_attr = self.fixed_edges, self.edge_features
+		else:
+			edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+		ctx_expanded = ctx.expand(x_query.shape[0], -1)
+
+		# Propagate calls message -> aggregate (add) -> update
+		interpolated, local_sparsity = self.propagate(
+			edge_index,
+			x=inpts,
+			embed_context=ctx.expand(len(inpts), -1),
+			edge_attr=edge_attr,
+			size=(x_context.shape[0], x_query.shape[0]),
+		)
+
+		# 1. Compute Global Scale Cap
+		max_boost_cap = 1.5 * self.f_max_gain_cap(ctx_expanded)
+
+		# 2. Local Gain
+		local_gain = 1.0 + max_boost_cap * local_sparsity
+
+		# 3. Apply Local Gain
+		interpolated_gated = interpolated * local_gain
+
+		# 4. Readout
+		gate = self.spatial_gate(interpolated_gated)
+		gated_ctx = ctx_expanded * gate
+
+		out = self.proj(torch.cat((interpolated_gated, gated_ctx), dim=1))
+		return self.activate2(out)
+
+
+
+
+# class SpaceTimeAttention(MessagePassing):
+#	 """Multi-Resolution Space-Time Interpolator with Local Coherence Super-Resolution Gain."""
+
+#	 def __init__(
+#		 self,
+#		 inpt_dim,
+#		 out_channels,
+#		 n_dim=4,
+#		 n_latent=16,
+#		 embed_dim=10,
+#		 n_heads=5,
+#		 scale_rel=scale_rel,
+#		 scale_time=scale_time,
+#	 ):
+#		 super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
+#		 self.n_heads = n_heads
+#		 self.n_latent = n_latent
+#		 self.out_channels = out_channels
+#		 self.scale_rel = scale_rel
+#		 self.scale_time = scale_time
+
+#		 # 1. Feature Values & Feature Scores
+#		 self.f_values = nn.Linear(inpt_dim, n_latent)
+#		 self.film_values = FiLM(embed_dim, n_latent)
+#		 self.act_values = nn.PReLU()
+
+#		 self.f_feature_score = nn.Linear(inpt_dim, n_heads)
+#		 self.film_score = FiLM(embed_dim, n_heads)
+
+#		 # 2. Dynamic Gammas
+#		 self.f_gamma = nn.Linear(embed_dim, 1 + n_heads * 4)
+#		 nn.init.normal_(self.f_gamma.weight, std=0.01)
+#		 nn.init.zeros_(self.f_gamma.bias)
+
+#		 init_spatial = torch.logspace(-1, 0.7, steps=n_heads).unsqueeze(1).repeat(1, 3)
+#		 init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads).unsqueeze(1)
+#		 init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)
+#		 self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+
+#		 # 3. Global Scale Cap for Gain
+#		 self.f_max_gain_cap = nn.Sequential(
+#			 nn.Linear(embed_dim, 16),
+#			 nn.PReLU(),
+#			 nn.Linear(16, 1),
+#			 nn.Sigmoid()
+#		 )
+
+#		 # 4. Readout Projection
+#		 self.proj = nn.Linear(n_latent + embed_dim, out_channels)
+#		 self.activate2 = nn.PReLU()
+
+#		 self.spatial_gate = nn.Sequential(
+#			 nn.Linear(n_latent, 1),
+#			 nn.Sigmoid()
+#		 )
+
+#		 self.use_fixed_edges = False
+#		 self.fixed_edges = None
+#		 self.edge_features = None
+
+#	 def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=16):
+#		 ctx_4d = torch.cat((x_context / self.scale_rel, (1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel), dim=1)
+#		 qry_4d = torch.cat((x_query / self.scale_rel, (1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel), dim=1)
+
+#		 edge_index = knn(ctx_4d, qry_4d, k=k).flip(0).to(x_query.device)
+
+#		 diff_sp = (x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel
+#		 diff_tm = (1000.0 * self.scale_time * (x_query_t[edge_index[1]].view(-1) - x_context_t[edge_index[0]].view(-1))).reshape(-1, 1) / self.scale_rel
+
+#		 # Edge feature shape: [E, 4] -> (dx^2, dy^2, dz^2, dt^2)
+#		 edge_attr = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1)
+#		 return edge_index, edge_attr
+
+#	 def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=16):
+#		 edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+#		 self.fixed_edges = edge_index
+#		 self.edge_features = edge_attr
+#		 self.use_fixed_edges = True
+
+#	 def message(self, x_j, embed_context_j, index, edge_attr):
+#		 # 1. Feature Values
+#		 value_embed = self.act_values(self.film_values(self.f_values(x_j), embed_context_j))
+
+#		 # 2. Dynamic Gammas
+#		 delta = self.f_gamma(embed_context_j)
+#		 alpha = delta[:, :1].unsqueeze(-1)
+#		 residuals = 0.1 * torch.tanh(delta[:, 1:].view(-1, self.n_heads, 4))
+#		 gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+
+#		 # 3. Distance & Bounded Score Logits
+#		 r_sq = edge_attr.unsqueeze(1)
+#		 distance_logits = -1.0 * torch.sum(gammas * r_sq, dim=-1)
+		
+#		 raw_score = self.film_score(self.f_feature_score(x_j), embed_context_j)
+#		 score = 0.2 * torch.tanh(raw_score)
+		
+#		 logits = distance_logits + score
+#		 alpha_attn = softmax(logits, index) # [E, n_heads]
+
+#		 # Mean attention across heads
+#		 mean_attn = alpha_attn.mean(dim=1, keepdim=True) # [E, 1]
+
+#		 # Weighted value output
+#		 weighted_values = mean_attn * value_embed # [E, n_latent]
+#		 attn_sq = mean_attn ** 2 # [E, 1]
+
+#		 # Pack into single vector [E, n_latent + 1] for unified aggregation
+#		 return torch.cat((weighted_values, attn_sq), dim=1)
+
+#	 def update(self, aggr_out):
+#		 # PyG automatically aggregated aggr_out via aggr="add" to [N_queries, n_latent + 1]
+#		 agg_values = aggr_out[:, :self.n_latent]
+#		 agg_attn_sq = aggr_out[:, self.n_latent:]
+
+#		 # Calculate Local Sparsity: 1.0 - sum(alpha^2)
+#		 local_sparsity = torch.clamp(1.0 - agg_attn_sq, min=0.0, max=1.0)
+#		 return agg_values, local_sparsity
+
+#	 def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, embed_context, k=16):
+#		 if self.use_fixed_edges and self.fixed_edges is not None:
+#			 edge_index, edge_attr = self.fixed_edges, self.edge_features
+#		 else:
+#			 edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+
+#		 ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+#		 ctx_expanded = ctx.expand(x_query.shape[0], -1)
+
+#		 # Propagate calls message -> aggregate (add) -> update
+#		 interpolated, local_sparsity = self.propagate(
+#			 edge_index,
+#			 x=inpts,
+#			 embed_context=ctx.expand(len(inpts), -1),
+#			 edge_attr=edge_attr,
+#			 size=(x_context.shape[0], x_query.shape[0]),
+#		 )
+
+#		 # 1. Compute Global Scale Cap
+#		 max_boost_cap = 1.5 * self.f_max_gain_cap(ctx_expanded)
+
+#		 # 2. Local Gain
+#		 local_gain = 1.0 + max_boost_cap * local_sparsity
+
+#		 # 3. Apply Local Gain
+#		 interpolated_gated = interpolated * local_gain
+
+#		 # 4. Readout
+#		 gate = self.spatial_gate(interpolated_gated)
+#		 gated_ctx = ctx_expanded * gate
+
+#		 out = self.proj(torch.cat((interpolated_gated, gated_ctx), dim=1))
+#		 return self.activate2(out)
 
 
 
@@ -1003,7 +1322,7 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		)
 
 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
-		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas * 4)
+		self.f_gamma = nn.Linear(embed_dim, 3 + n_gammas * 4)
 		nn.init.normal_(self.f_gamma.weight, std = 0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
@@ -1060,9 +1379,15 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 
 		# Step 2: Scale-conditioned Anisotropic Gammas
 		delta = self.f_gamma(ctx)
-		alpha = delta[:, :1].unsqueeze(-1)
-		residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))
+		alpha_global = 0.5  * torch.tanh(delta[:, 0:1])
+		alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
+		alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
+		residuals =    0.2. * torch.tanh(delta[:, 3:].view(-1, self.n_gammas, 4))  # Anisotropic variations
+		alpha = torch.cat([(alpha_global + alpha_space).expand(-1,3),
+			(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)  # [E, n_gammas, 4]
+		# alpha = delta[:, :1].unsqueeze(-1)
+		# residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))
 
 		# Step 3: Anisotropic LINEAR distance metric
 		r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)
@@ -3312,7 +3637,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim = 1, keepdim = True) # ).clamp(min = 1e-6)
 
 			delta = self.f_gamma(embed_context)
-			alpha = delta[:, :1]
+			alpha = 0.5*torch.tanh(delta[:, :1])
 			residuals = 0.2 * torch.tanh(delta[:, 1:])
 			gammas = torch.exp(self.log_gamma_base[:, :3] + alpha + residuals)
 			spatial_decay = torch.exp(-1.0 * pos_norm_sp * gammas)
@@ -3535,7 +3860,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim = 1, keepdim = True) # ).clamp(min = 1e-6)
 
 			delta = self.f_gamma(self.embed_context)
-			alpha = delta[:, :1]
+			alpha = 0.5*torch.tanh(delta[:, :1])
 			residuals = 0.2 * torch.tanh(delta[:, 1:])
 			gammas = torch.exp(self.log_gamma_base[:, :3] + alpha + residuals)
 			spatial_decay = torch.exp(-1.0 * pos_norm_sp * gammas)
@@ -3654,7 +3979,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim = 1, keepdim = True) # ).clamp(min = 1e-6)
 
 			delta = self.f_gamma(self.embed_context)
-			alpha = delta[:, :1]
+			alpha = 0.5*torch.tanh(delta[:, :1])
 			residuals = 0.2 * torch.tanh(delta[:, 1:])
 			gammas = torch.exp(self.log_gamma_base[:, :3] + alpha + residuals)
 			spatial_decay = torch.exp(-1.0 * pos_norm_sp * gammas)
@@ -4784,4 +5109,3 @@ class Magnitude(nn.Module):
 
 		## Can directly use torch_scatter to coalesce the data?
 		# mag = (log_amp - self.epicenter_spatial_coef[phase]*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.mag_coef[phase], torch.Tensor([1e-12]).to(self.device))
-
