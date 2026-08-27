@@ -58,11 +58,11 @@ if use_wandb_logging == True:
 
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
-    config = yaml.safe_load(file)
+	config = yaml.safe_load(file)
 
 # Load training configuration from YAML
 with open('train_config.yaml', 'r') as file:
-    train_config = yaml.safe_load(file)
+	train_config = yaml.safe_load(file)
 
 name_of_project = config['name_of_project']
 
@@ -81,8 +81,8 @@ use_sign_input = config.get('use_sign_input', False)
 use_topography = config['use_topography']
 use_station_corrections = config.get('use_station_corrections', False)
 if use_subgraph == True:
-    max_deg_offset = config['max_deg_offset']
-    k_nearest_pairs = config['k_nearest_pairs']	
+	max_deg_offset = config['max_deg_offset']
+	k_nearest_pairs = config['k_nearest_pairs']	
 
 graph_params = [k_sta_edges, k_spc_edges, k_time_edges]
 
@@ -407,7 +407,7 @@ if use_reference_spatial_density == True:
 		
 		if load_reference_density == True:
 			np.savez_compressed(path_to_file + 'Grids' + seperator + 'reference_source_density_ver_%d.npz'%n_reference_ver, srcs_ref = srcs_ref)
-						      
+							  
 ## Training synthic data parameters
 
 ## Training params list 2
@@ -453,691 +453,317 @@ use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
 
 
-# def WGS84_radii_of_curvature(lat_rad, a=6378137.0, f=1.0 / 298.257223563):
-#     """Computes Meridional (M) and Prime Vertical (N) radii of curvature on WGS84."""
-#     e2 = 2 * f - f**2
-#     sin_lat = np.sin(lat_rad)
-#     denom = np.sqrt(1.0 - e2 * sin_lat**2)
-    
-#     M = a * (1.0 - e2) / (denom**3)
-#     N = a / denom
-#     return M, N
-
-# def reflect_bounds(val, low, high):
-#     """Reflects array values seamlessly back into [low, high] bounds."""
-#     span = high - low
-#     if span <= 0:
-#         return np.full_like(val, low)
-#     v = val - low
-#     v = np.abs(v % (2 * span))
-#     v = np.where(v > span, 2 * span - v, v)
-#     return v + low
-
-import numpy as np
-
 def WGS84_radii_of_curvature(lat_rad, a=6378137.0, f=1.0 / 298.257223563):
-    """Computes Meridional (M) and Prime Vertical (N) radii of curvature on WGS84."""
-    e2 = 2 * f - f**2
-    sin_lat = np.sin(lat_rad)
-    denom = np.sqrt(1.0 - e2 * sin_lat**2)
-    
-    M = a * (1.0 - e2) / (denom**3)
-    N = a / denom
-    return M, N
-
-# def reflect_bounds_backup(val, low, high):
-#     """Reflects values seamlessly back into [low, high] bounds."""
-#     span = high - low
-#     if span <= 0:
-#         return np.full_like(np.asarray(val), low)
-    
-#     val_arr = np.asarray(val)
-#     v = (val_arr - low) % (2 * span)
-#     v = np.where(v > span, 2 * span - v, v)
-    
-#     # Return scalar if input was scalar, otherwise return array
-#     return (v + low).item() if np.ndim(val) == 0 else (v + low)
+	"""Computes Meridional (M) and Prime Vertical (N) radii of curvature on WGS84."""
+	e2 = 2 * f - f**2
+	sin_lat = np.sin(lat_rad)
+	denom = np.sqrt(1.0 - e2 * sin_lat**2)
+	
+	M = a * (1.0 - e2) / (denom**3)
+	N = a / denom
+	return M, N
 
 def reflect_bounds(val, low, high):
-    span = high - low
-    if span <= 0:
-        return np.full_like(np.asarray(val), low)
-    val_arr = np.asarray(val)
-    v = (val_arr - low) % (2 * span)
-    v = np.where(v > span, 2 * span - v, v)
-    return (v + low).item() if np.ndim(val) == 0 else (v + low)
-
-# def perturb_wgs84_backup(
-#     base_lat_deg,
-#     base_lon_deg,
-#     base_depth_m,
-#     base_t_s,
-#     src_x_kernel_m,
-#     src_depth_kernel_m,
-#     src_t_kernel,
-#     lat_range,
-#     lon_range,
-#     depth_range,
-#     time_shift_range,
-#     is_global_lon=True,
-# ):
-#   """Core WGS84 ellipsoidal perturbation and boundary reflection logic."""
-#   n_pts = len(base_lat_deg)
-#   if n_pts == 0:
-#     return np.empty(0), np.empty(0), np.empty(0), np.empty(0)
-
-#   half_t_window = time_shift_range / 2.0
-#   base_lat_rad = np.radians(base_lat_deg)
-
-#   # Local ENU 2D spatial perturbations
-#   dE = np.random.normal(0, src_x_kernel_m, size=n_pts)
-#   dN = np.random.normal(0, src_x_kernel_m, size=n_pts)
-
-#   # WGS84 Radii of Curvature
-#   M, N = WGS84_radii_of_curvature(base_lat_rad)
-#   R_lat = M + base_depth_m
-#   R_lon = N + base_depth_m
-
-#   # Ellipsoidal differential displacements
-#   d_lat_rad = dN / R_lat
-#   new_lat_rad = base_lat_rad + d_lat_rad
-
-#   d_lon_rad = dE / (R_lon * np.cos(new_lat_rad))
-#   new_lon_rad = np.radians(base_lon_deg) + d_lon_rad
-
-#   new_lat = np.degrees(new_lat_rad)
-#   new_lon = np.degrees(new_lon_rad)
-
-#   # Boundary handling (Longitude)
-#   if is_global_lon:
-#     new_lon = (new_lon + 180.0) % 360.0 - 180.0
-#   else:
-#     new_lon = reflect_bounds(new_lon, lon_range[0], lon_range[1])
-
-#   # Boundary reflection (Latitude, Depth, Time)
-#   new_lat = reflect_bounds(new_lat, lat_range[0], lat_range[1])
-
-#   dz = np.random.normal(0, src_depth_kernel_m, size=n_pts)
-#   new_depth = reflect_bounds(base_depth_m + dz, depth_range[0], depth_range[1])
-
-#   dt = 2.0 * np.random.randn(n_pts) * src_t_kernel
-#   new_t = reflect_bounds(base_t_s + dt, -half_t_window, half_t_window)
-
-#   return new_lat, new_lon, new_depth, new_t
+	span = high - low
+	if span <= 0:
+		return np.full_like(np.asarray(val), low)
+	val_arr = np.asarray(val)
+	v = (val_arr - low) % (2 * span)
+	v = np.where(v > span, 2 * span - v, v)
+	return (v + low).item() if np.ndim(val) == 0 else (v + low)
 
 
 def perturb_wgs84(
-    base_lat_deg,
-    base_lon_deg,
-    base_depth_m,
-    base_t_s,
-    src_x_kernel_m,
-    src_depth_kernel_m,
-    src_t_kernel,
-    lat_range,
-    lon_range,
-    depth_range,
-    time_shift_range,
-    is_global_lon=True,
-    a=6378137.0,
-    e=8.18191908426215e-2,
+	base_lat_deg,
+	base_lon_deg,
+	base_depth_m,
+	base_t_s,
+	src_x_kernel_m,
+	src_depth_kernel_m,
+	src_t_kernel,
+	lat_range,
+	lon_range,
+	depth_range,
+	time_shift_range,
+	is_global_lon=True,
+	a=6378137.0,
+	e=8.18191908426215e-2,
 ):
-    """Refactored WGS84 perturbation using exact 3D ECEF tangent rotation.
-    
-    Prevents division-by-zero division at poles and seamlessly handles
-    cross-polar meridian crossings.
-    """
-    n_pts = len(base_lat_deg)
-    if n_pts == 0:
-        return np.empty(0), np.empty(0), np.empty(0), np.empty(0)
-
-    half_t_window = time_shift_range / 2.0
-
-    # 1. Convert Base points to ECEF (depth_m acts directly as height in lla2ecef)
-    lla_base = np.column_stack((base_lat_deg, base_lon_deg, base_depth_m))
-    ecef_base = lla2ecef(lla_base, a=a, e=e)
-
-    # 2. Local ENU 2D spatial perturbations
-    dE = np.random.normal(0, src_x_kernel_m, size=n_pts)
-    dN = np.random.normal(0, src_x_kernel_m, size=n_pts)
-
-    # 3. Compute local ENU unit basis vectors in ECEF frame
-    phi = np.radians(base_lat_deg)
-    lam = np.radians(base_lon_deg)
-
-    sin_phi, cos_phi = np.sin(phi), np.cos(phi)
-    sin_lam, cos_lam = np.sin(lam), np.cos(lam)
-
-    # East unit vector (dE)
-    e_x = -sin_lam
-    e_y = cos_lam
-    e_z = np.zeros(n_pts)
-
-    # North unit vector (dN)
-    n_x = -sin_phi * cos_lam
-    n_y = -sin_phi * sin_lam
-    n_z = cos_phi
-
-    # 4. Apply metric displacements in 3D ECEF space
-    ecef_pert = np.empty_like(ecef_base)
-    ecef_pert[:, 0] = ecef_base[:, 0] + dE * e_x + dN * n_x
-    ecef_pert[:, 1] = ecef_base[:, 1] + dE * e_y + dN * n_y
-    ecef_pert[:, 2] = ecef_base[:, 2] + dE * e_z + dN * n_z
-
-    # 5. Convert back to LLA (handles polar singularities & 180 wrapping automatically)
-    lla_pert = ecef2lla(ecef_pert, a=a, e=e)
-    new_lat = lla_pert[:, 0]
-    new_lon = lla_pert[:, 1]
-
-    # 6. Apply Boundary Conditions
-    if is_global_lon:
-        new_lon = (new_lon + 180.0) % 360.0 - 180.0
-    else:
-        new_lon = reflect_bounds(new_lon, lon_range[0], lon_range[1])
-
-    new_lat = reflect_bounds(new_lat, lat_range[0], lat_range[1])
-
-    # Depth & Time Perturbations
-    dz = np.random.normal(0, src_depth_kernel_m, size=n_pts)
-    new_depth = reflect_bounds(base_depth_m + dz, depth_range[0], depth_range[1])
-
-    dt = np.random.normal(0, src_t_kernel, size=n_pts)
-    new_t = reflect_bounds(base_t_s + dt, -half_t_window, half_t_window)
-
-    return new_lat, new_lon, new_depth, new_t
-
-# def sample_random_queries(
-#     lp_srcs,
-#     n_src_query,
-#     n_frac_focused=0.2,
-#     src_x_kernel_m=5000.0,
-#     src_depth_kernel_m=5000.0,
-#     src_t_kernel=1.0,
-#     lat_range=(-90.0, 90.0),
-#     lon_range=(-180.0, 180.0),
-#     depth_range=(-700000.0, 0.0),
-#     time_shift_range=10.0,
-#     is_global_lon=True,
-# ):
-#   """Generates spatial-temporal queries via uniform equal-area sampling and target perturbations."""
-#   half_t_window = time_shift_range / 2.0
-
-#   # 1. Background Equal-Area Sampling
-#   sin_min = np.sin(np.radians(lat_range[0]))
-#   sin_max = np.sin(np.radians(lat_range[1]))
-#   u_lat = np.random.uniform(sin_min, sin_max, size=n_src_query)
-#   bg_lats = np.degrees(np.arcsin(u_lat))
-
-#   bg_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_src_query)
-#   bg_depths = np.random.uniform(
-#       depth_range[0], depth_range[1], size=n_src_query
-#   )
-#   bg_times = np.random.uniform(
-#       -half_t_window, half_t_window, size=n_src_query
-#   )
-
-#   x_src_query = np.column_stack((bg_lats, bg_lons, bg_depths))
-#   tq_sample = bg_times
-
-#   # 2. Focused Source Perturbation Overwrites
-#   n_focused = int(n_frac_focused * n_src_query)
-
-#   if n_focused > 0 and len(lp_srcs) > 0:
-#     ind_overwrite = np.sort(
-#         np.random.choice(n_src_query, size=n_focused, replace=False)
-#     )
-#     ind_sources = np.random.choice(len(lp_srcs), size=n_focused)
-
-#     new_lat, new_lon, new_depth, new_t = perturb_wgs84(
-#         base_lat_deg=lp_srcs[ind_sources, 0],
-#         base_lon_deg=lp_srcs[ind_sources, 1],
-#         base_depth_m=lp_srcs[ind_sources, 2],
-#         base_t_s=lp_srcs[ind_sources, 3],
-#         src_x_kernel_m=src_x_kernel_m,
-#         src_depth_kernel_m=src_depth_kernel_m,
-#         src_t_kernel=src_t_kernel,
-#         lat_range=lat_range,
-#         lon_range=lon_range,
-#         depth_range=depth_range,
-#         time_shift_range=time_shift_range,
-#         is_global_lon=is_global_lon,
-#     )
-
-#     x_src_query[ind_overwrite] = np.column_stack((new_lat, new_lon, new_depth))
-#     tq_sample[ind_overwrite] = new_t
-
-#   return x_src_query, tq_sample
-
-# def sample_random_queries(
-#     lp_srcs,
-#     n_src_query,
-#     n_frac_focused=0.2,
-#     n_frac_random_focused=0.0,  # <-- NEW: Fraction centered on random points
-#     src_x_kernel_m=5000.0,
-#     src_depth_kernel_m=5000.0,
-#     src_t_kernel=1.0,
-#     lat_range=(-90.0, 90.0),
-#     lon_range=(-180.0, 180.0),
-#     depth_range=(-700000.0, 0.0),
-#     time_shift_range=10.0,
-#     is_global_lon=True,
-# ):
-#   """Generates spatial-temporal queries via uniform equal-area sampling and target perturbations."""
-#   half_t_window = time_shift_range / 2.0
-
-#   # If no true catalog sources exist, shift true-focused allocation to random-focused
-#   if len(lp_srcs) == 0 and n_frac_focused > 0:
-#     n_frac_random_focused += n_frac_focused
-#     n_frac_focused = 0.0
+	"""Refactored WGS84 perturbation using exact 3D ECEF tangent rotation.
 	
-#   # 1. Background Equal-Area Sampling (Full Set)
-#   sin_min = np.sin(np.radians(lat_range[0]))
-#   sin_max = np.sin(np.radians(lat_range[1]))
-#   u_lat = np.random.uniform(sin_min, sin_max, size=n_src_query)
-#   bg_lats = np.degrees(np.arcsin(u_lat))
+	Prevents division-by-zero division at poles and seamlessly handles
+	cross-polar meridian crossings.
+	"""
+	n_pts = len(base_lat_deg)
+	if n_pts == 0:
+		return np.empty(0), np.empty(0), np.empty(0), np.empty(0)
 
-#   bg_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_src_query)
-#   bg_depths = np.random.uniform(
-#       depth_range[0], depth_range[1], size=n_src_query
-#   )
-#   bg_times = np.random.uniform(
-#       -half_t_window, half_t_window, size=n_src_query
-#   )
+	half_t_window = time_shift_range / 2.0
 
-#   x_src_query = np.column_stack((bg_lats, bg_lons, bg_depths))
-#   tq_sample = bg_times
+	# 1. Convert Base points to ECEF (depth_m acts directly as height in lla2ecef)
+	lla_base = np.column_stack((base_lat_deg, base_lon_deg, base_depth_m))
+	ecef_base = lla2ecef(lla_base, a=a, e=e)
 
-#   # Calculate number of query slots for each focused type
-#   n_focused_true = int(n_frac_focused * n_src_query)
-#   n_focused_rand = int(n_frac_random_focused * n_src_query)
-#   n_total_focused = n_focused_true + n_focused_rand
+	# 2. Local ENU 2D spatial perturbations
+	dE = np.random.normal(0, src_x_kernel_m, size=n_pts)
+	dN = np.random.normal(0, src_x_kernel_m, size=n_pts)
 
-#   if n_total_focused > 0:
-#     # Pick all indices that will be overwritten at once (without replacement)
-#     ind_overwrite_all = np.random.choice(
-#         n_src_query, size=n_total_focused, replace=False
-#     )
-    
-#     # Split overwrite indices between True and Random-centered
-#     ind_overwrite_true = ind_overwrite_all[:n_focused_true]
-#     ind_overwrite_rand = ind_overwrite_all[n_focused_true:]
+	# 3. Compute local ENU unit basis vectors in ECEF frame
+	phi = np.radians(base_lat_deg)
+	lam = np.radians(base_lon_deg)
 
-#     # -------------------------------------------------------------------------
-#     # 2a. Focused Perturbation around True Sources
-#     # -------------------------------------------------------------------------
-#     if n_focused_true > 0 and len(lp_srcs) > 0:
-#       ind_sources = np.random.choice(len(lp_srcs), size=n_focused_true)
+	sin_phi, cos_phi = np.sin(phi), np.cos(phi)
+	sin_lam, cos_lam = np.sin(lam), np.cos(lam)
 
-#       new_lat, new_lon, new_depth, new_t = perturb_wgs84(
-#           base_lat_deg=lp_srcs[ind_sources, 0],
-#           base_lon_deg=lp_srcs[ind_sources, 1],
-#           base_depth_m=lp_srcs[ind_sources, 2],
-#           base_t_s=lp_srcs[ind_sources, 3],
-#           src_x_kernel_m=src_x_kernel_m,
-#           src_depth_kernel_m=src_depth_kernel_m,
-#           src_t_kernel=src_t_kernel,
-#           lat_range=lat_range,
-#           lon_range=lon_range,
-#           depth_range=depth_range,
-#           time_shift_range=time_shift_range,
-#           is_global_lon=is_global_lon,
-#       )
+	# East unit vector (dE)
+	e_x = -sin_lam
+	e_y = cos_lam
+	e_z = np.zeros(n_pts)
 
-#       x_src_query[ind_overwrite_true] = np.column_stack(
-#           (new_lat, new_lon, new_depth)
-#       )
-#       tq_sample[ind_overwrite_true] = new_t
+	# North unit vector (dN)
+	n_x = -sin_phi * cos_lam
+	n_y = -sin_phi * sin_lam
+	n_z = cos_phi
 
-#     # -------------------------------------------------------------------------
-#     # 2b. Focused Perturbation around Random Background Points
-#     # -------------------------------------------------------------------------
-#     if n_focused_rand > 0:
-#       # Generate random center points (equal-area)
-#       rand_u_lat = np.random.uniform(sin_min, sin_max, size=n_focused_rand)
-#       rand_center_lats = np.degrees(np.arcsin(rand_u_lat))
-#       rand_center_lons = np.random.uniform(
-#           lon_range[0], lon_range[1], size=n_focused_rand
-#       )
-#       rand_center_depths = np.random.uniform(
-#           depth_range[0], depth_range[1], size=n_focused_rand
-#       )
-#       rand_center_times = np.random.uniform(
-#           -half_t_window, half_t_window, size=n_focused_rand
-#       )
+	# 4. Apply metric displacements in 3D ECEF space
+	ecef_pert = np.empty_like(ecef_base)
+	ecef_pert[:, 0] = ecef_base[:, 0] + dE * e_x + dN * n_x
+	ecef_pert[:, 1] = ecef_base[:, 1] + dE * e_y + dN * n_y
+	ecef_pert[:, 2] = ecef_base[:, 2] + dE * e_z + dN * n_z
 
-#       # Perturb around these random centers using the exact same WGS84 kernel
-#       new_lat_r, new_lon_r, new_depth_r, new_t_r = perturb_wgs84(
-#           base_lat_deg=rand_center_lats,
-#           base_lon_deg=rand_center_lons,
-#           base_depth_m=rand_center_depths,
-#           base_t_s=rand_center_times,
-#           src_x_kernel_m=src_x_kernel_m,
-#           src_depth_kernel_m=src_depth_kernel_m,
-#           src_t_kernel=src_t_kernel,
-#           lat_range=lat_range,
-#           lon_range=lon_range,
-#           depth_range=depth_range,
-#           time_shift_range=time_shift_range,
-#           is_global_lon=is_global_lon,
-#       )
+	# 5. Convert back to LLA (handles polar singularities & 180 wrapping automatically)
+	lla_pert = ecef2lla(ecef_pert, a=a, e=e)
+	new_lat = lla_pert[:, 0]
+	new_lon = lla_pert[:, 1]
 
-#       x_src_query[ind_overwrite_rand] = np.column_stack(
-#           (new_lat_r, new_lon_r, new_depth_r)
-#       )
-#       tq_sample[ind_overwrite_rand] = new_t_r
+	# 6. Apply Boundary Conditions
+	if is_global_lon:
+		new_lon = (new_lon + 180.0) % 360.0 - 180.0
+	else:
+		new_lon = reflect_bounds(new_lon, lon_range[0], lon_range[1])
 
-#   return x_src_query, tq_sample
+	new_lat = reflect_bounds(new_lat, lat_range[0], lat_range[1])
 
+	# Depth & Time Perturbations
+	dz = np.random.normal(0, src_depth_kernel_m, size=n_pts)
+	new_depth = reflect_bounds(base_depth_m + dz, depth_range[0], depth_range[1])
+
+	dt = np.random.normal(0, src_t_kernel, size=n_pts)
+	new_t = reflect_bounds(base_t_s + dt, -half_t_window, half_t_window)
+
+	return new_lat, new_lon, new_depth, new_t
 
 
 def sample_random_queries(
-    lp_srcs,
-    n_src_query,
-    n_frac_focused=0.2,
-    n_frac_random_focused=0.0,
-    src_x_kernel_m=5000.0,
-    src_depth_kernel_m=5000.0,
-    src_t_kernel=1.0,
-    lat_range=(-90.0, 90.0),
-    lon_range=(-180.0, 180.0),
-    depth_range=(-700000.0, 0.0),
-    time_shift_range=10.0,
-    is_global_lon=True,
+	lp_srcs,
+	n_src_query,
+	n_frac_focused=0.2,
+	n_frac_random_focused=0.0,
+	src_x_kernel_m=5000.0,
+	src_depth_kernel_m=5000.0,
+	src_t_kernel=1.0,
+	lat_range=(-90.0, 90.0),
+	lon_range=(-180.0, 180.0),
+	depth_range=(-700000.0, 0.0),
+	time_shift_range=10.0,
+	is_global_lon=True,
 ):
-    """Generates spatial-temporal queries via uniform equal-area sampling and target perturbations."""
-    half_t_window = time_shift_range / 2.0
+	"""Generates spatial-temporal queries via uniform equal-area sampling and target perturbations."""
+	half_t_window = time_shift_range / 2.0
 
-    # 1. Fallback: If no true sources exist, reallocate true-focused to random-focused
-    if len(lp_srcs) == 0 and n_frac_focused > 0:
-        n_frac_random_focused += n_frac_focused
-        n_frac_focused = 0.0
+	# 1. Fallback: If no true sources exist, reallocate true-focused to random-focused
+	if len(lp_srcs) == 0 and n_frac_focused > 0:
+		n_frac_random_focused += n_frac_focused
+		n_frac_focused = 0.0
 
-    # Calculate exact allocation counts AFTER updating fractions
-    n_focused_true = int(n_frac_focused * n_src_query)
-    n_focused_rand = int(n_frac_random_focused * n_src_query)
-    n_total_focused = n_focused_true + n_focused_rand
+	# Calculate exact allocation counts AFTER updating fractions
+	n_focused_true = int(n_frac_focused * n_src_query)
+	n_focused_rand = int(n_frac_random_focused * n_src_query)
+	n_total_focused = n_focused_true + n_focused_rand
 
-    # 2. Background Equal-Area Sampling (Full Set)
-    sin_min = np.sin(np.radians(lat_range[0]))
-    sin_max = np.sin(np.radians(lat_range[1]))
-    
-    u_lat = np.random.uniform(sin_min, sin_max, size=n_src_query)
-    bg_lats = np.degrees(np.arcsin(np.clip(u_lat, -1.0, 1.0)))  # Safety clip
+	# 2. Background Equal-Area Sampling (Full Set)
+	sin_min = np.sin(np.radians(lat_range[0]))
+	sin_max = np.sin(np.radians(lat_range[1]))
+	
+	u_lat = np.random.uniform(sin_min, sin_max, size=n_src_query)
+	bg_lats = np.degrees(np.arcsin(np.clip(u_lat, -1.0, 1.0)))  # Safety clip
 
-    bg_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_src_query)
-    bg_depths = np.random.uniform(depth_range[0], depth_range[1], size=n_src_query)
-    bg_times = np.random.uniform(-half_t_window, half_t_window, size=n_src_query)
+	bg_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_src_query)
+	bg_depths = np.random.uniform(depth_range[0], depth_range[1], size=n_src_query)
+	bg_times = np.random.uniform(-half_t_window, half_t_window, size=n_src_query)
 
-    x_src_query = np.column_stack((bg_lats, bg_lons, bg_depths))
-    tq_sample = bg_times
+	x_src_query = np.column_stack((bg_lats, bg_lons, bg_depths))
+	tq_sample = bg_times
 
-    if n_total_focused > 0:
-        # Pick indices to overwrite without replacement
-        ind_overwrite_all = np.random.choice(
-            n_src_query, size=n_total_focused, replace=False
-        )
-        
-        ind_overwrite_true = ind_overwrite_all[:n_focused_true]
-        ind_overwrite_rand = ind_overwrite_all[n_focused_true:]
+	if n_total_focused > 0:
+		# Pick indices to overwrite without replacement
+		ind_overwrite_all = np.random.choice(
+			n_src_query, size=n_total_focused, replace=False
+		)
+		
+		ind_overwrite_true = ind_overwrite_all[:n_focused_true]
+		ind_overwrite_rand = ind_overwrite_all[n_focused_true:]
 
-        # -------------------------------------------------------------------------
-        # 3a. Focused Perturbation around True Sources
-        # -------------------------------------------------------------------------
-        if n_focused_true > 0 and len(lp_srcs) > 0:
-            ind_sources = np.random.choice(len(lp_srcs), size=n_focused_true)
+		# -------------------------------------------------------------------------
+		# 3a. Focused Perturbation around True Sources
+		# -------------------------------------------------------------------------
+		if n_focused_true > 0 and len(lp_srcs) > 0:
+			ind_sources = np.random.choice(len(lp_srcs), size=n_focused_true)
 
-            new_lat, new_lon, new_depth, new_t = perturb_wgs84(
-                base_lat_deg=lp_srcs[ind_sources, 0],
-                base_lon_deg=lp_srcs[ind_sources, 1],
-                base_depth_m=lp_srcs[ind_sources, 2],
-                base_t_s=lp_srcs[ind_sources, 3],
-                src_x_kernel_m=src_x_kernel_m,
-                src_depth_kernel_m=src_depth_kernel_m,
-                src_t_kernel=src_t_kernel,
-                lat_range=lat_range,
-                lon_range=lon_range,
-                depth_range=depth_range,
-                time_shift_range=time_shift_range,
-                is_global_lon=is_global_lon,
-            )
+			new_lat, new_lon, new_depth, new_t = perturb_wgs84(
+				base_lat_deg=lp_srcs[ind_sources, 0],
+				base_lon_deg=lp_srcs[ind_sources, 1],
+				base_depth_m=lp_srcs[ind_sources, 2],
+				base_t_s=lp_srcs[ind_sources, 3],
+				src_x_kernel_m=src_x_kernel_m,
+				src_depth_kernel_m=src_depth_kernel_m,
+				src_t_kernel=src_t_kernel,
+				lat_range=lat_range,
+				lon_range=lon_range,
+				depth_range=depth_range,
+				time_shift_range=time_shift_range,
+				is_global_lon=is_global_lon,
+			)
 
-            x_src_query[ind_overwrite_true] = np.column_stack((new_lat, new_lon, new_depth))
-            tq_sample[ind_overwrite_true] = new_t
+			x_src_query[ind_overwrite_true] = np.column_stack((new_lat, new_lon, new_depth))
+			tq_sample[ind_overwrite_true] = new_t
 
-        # -------------------------------------------------------------------------
-        # 3b. Focused Perturbation around Random Background Points
-        # -------------------------------------------------------------------------
-        if n_focused_rand > 0:
-            rand_u_lat = np.random.uniform(sin_min, sin_max, size=n_focused_rand)
-            rand_center_lats = np.degrees(np.arcsin(np.clip(rand_u_lat, -1.0, 1.0)))
-            rand_center_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_focused_rand)
-            rand_center_depths = np.random.uniform(depth_range[0], depth_range[1], size=n_focused_rand)
-            rand_center_times = np.random.uniform(-half_t_window, half_t_window, size=n_focused_rand)
+		# -------------------------------------------------------------------------
+		# 3b. Focused Perturbation around Random Background Points
+		# -------------------------------------------------------------------------
+		if n_focused_rand > 0:
+			rand_u_lat = np.random.uniform(sin_min, sin_max, size=n_focused_rand)
+			rand_center_lats = np.degrees(np.arcsin(np.clip(rand_u_lat, -1.0, 1.0)))
+			rand_center_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_focused_rand)
+			rand_center_depths = np.random.uniform(depth_range[0], depth_range[1], size=n_focused_rand)
+			rand_center_times = np.random.uniform(-half_t_window, half_t_window, size=n_focused_rand)
 
-            new_lat_r, new_lon_r, new_depth_r, new_t_r = perturb_wgs84(
-                base_lat_deg=rand_center_lats,
-                base_lon_deg=rand_center_lons,
-                base_depth_m=rand_center_depths,
-                base_t_s=rand_center_times,
-                src_x_kernel_m=src_x_kernel_m,
-                src_depth_kernel_m=src_depth_kernel_m,
-                src_t_kernel=src_t_kernel,
-                lat_range=lat_range,
-                lon_range=lon_range,
-                depth_range=depth_range,
-                time_shift_range=time_shift_range,
-                is_global_lon=is_global_lon,
-            )
+			new_lat_r, new_lon_r, new_depth_r, new_t_r = perturb_wgs84(
+				base_lat_deg=rand_center_lats,
+				base_lon_deg=rand_center_lons,
+				base_depth_m=rand_center_depths,
+				base_t_s=rand_center_times,
+				src_x_kernel_m=src_x_kernel_m,
+				src_depth_kernel_m=src_depth_kernel_m,
+				src_t_kernel=src_t_kernel,
+				lat_range=lat_range,
+				lon_range=lon_range,
+				depth_range=depth_range,
+				time_shift_range=time_shift_range,
+				is_global_lon=is_global_lon,
+			)
 
-            x_src_query[ind_overwrite_rand] = np.column_stack((new_lat_r, new_lon_r, new_depth_r))
-            tq_sample[ind_overwrite_rand] = new_t_r
+			x_src_query[ind_overwrite_rand] = np.column_stack((new_lat_r, new_lon_r, new_depth_r))
+			tq_sample[ind_overwrite_rand] = new_t_r
 
-    return x_src_query, tq_sample
-
-
-
-# def sample_dense_queries(
-#     x_query,
-#     x_query_t,
-#     prob,
-#     lat_range=(-90.0, 90.0),
-#     lon_range=(-180.0, 180.0),
-#     depth_range=(-700000.0, 0.0),
-#     src_x_kernel_m=5000.0,
-#     src_depth_kernel_m=5000.0,
-#     src_t_kernel=1.0,
-#     time_shift_range=10.0,
-#     ftrns1=None,
-#     ftrns2=None,
-#     n_frac_focused_queries=0.2,
-#     replace=False,
-#     randomize=False,
-#     baseline=0.2,
-#     is_global_lon=None,
-# ):
-#   """Hard-negative error feedback sampler using WGS84 perturbations weighted by error array 'prob'."""
-#   half_t_window = time_shift_range / 2.0
-#   x_query_sample = np.copy(x_query)
-#   x_query_sample_t = np.copy(x_query_t)
-#   n_spc_query = len(x_query)
-#   ind_overwrite = np.empty(0, dtype=int)
-
-#   if is_global_lon is None:
-#     is_global_lon = (lon_range[1] - lon_range[0]) >= 359.0
-
-#   if (baseline is not None) and (prob.sum() > 0):
-#     prob1 = np.copy(prob)
-#     valid_mask = prob > 0
-#     if np.any(valid_mask):
-#       q_low = np.quantile(prob[valid_mask], baseline)
-#       q_high = np.quantile(prob[valid_mask], 1.0 - baseline)
-#       prob1[(prob <= q_low) & valid_mask] = q_low
-#       prob1[(prob >= q_high) & valid_mask] = q_high
-#       prob = prob1 / prob1.sum()
-
-#   n_focused = int(n_frac_focused_queries * n_spc_query)
-
-#   if (len(prob) > 0) and (n_focused > 0) and (prob.sum() > 0):
-#     ind_overwrite = np.sort(
-#         np.random.choice(n_spc_query, size=n_focused, replace=False)
-#     )
-#     ind_source_focused = np.random.choice(
-#         n_spc_query, p=prob, size=n_focused, replace=True
-#     )
-
-#     new_lat, new_lon, new_depth, new_t = perturb_wgs84(
-#         base_lat_deg=x_query[ind_source_focused, 0],
-#         base_lon_deg=x_query[ind_source_focused, 1],
-#         base_depth_m=x_query[ind_source_focused, 2],
-#         base_t_s=x_query_t[ind_source_focused],
-#         src_x_kernel_m=src_x_kernel_m,
-#         src_depth_kernel_m=src_depth_kernel_m,
-#         src_t_kernel=src_t_kernel,
-#         lat_range=lat_range,
-#         lon_range=lon_range,
-#         depth_range=depth_range,
-#         time_shift_range=time_shift_range,
-#         is_global_lon=is_global_lon,
-#     )
-
-#     x_query_sample[ind_overwrite] = np.column_stack(
-#         (new_lat, new_lon, new_depth)
-#     )
-#     x_query_sample_t[ind_overwrite] = new_t
-
-#     if randomize:
-#       ind_fixed = np.delete(np.arange(n_spc_query), ind_overwrite, axis=0)
-#       sin_min = np.sin(np.radians(lat_range[0]))
-#       sin_max = np.sin(np.radians(lat_range[1]))
-#       u_lat = np.random.uniform(sin_min, sin_max, size=len(ind_fixed))
-#       rand_lats = np.degrees(np.arcsin(u_lat))
-
-#       rand_lons = np.random.uniform(
-#           lon_range[0], lon_range[1], size=len(ind_fixed)
-#       )
-#       rand_depths = np.random.uniform(
-#           depth_range[0], depth_range[1], size=len(ind_fixed)
-#       )
-#       rand_times = np.random.uniform(
-#           -half_t_window, half_t_window, size=len(ind_fixed)
-#       )
-
-#       x_query_sample[ind_fixed] = np.column_stack(
-#           (rand_lats, rand_lons, rand_depths)
-#       )
-#       x_query_sample_t[ind_fixed] = rand_times
-
-#   if replace:
-#     return x_query_sample, x_query_sample_t
-#   else:
-#     return x_query_sample[ind_overwrite], x_query_sample_t[ind_overwrite]
+	return x_src_query, tq_sample
 
 
 def sample_dense_queries(
-    x_query,
-    x_query_t,
-    prob,
-    lat_range=(-90.0, 90.0),
-    lon_range=(-180.0, 180.0),
-    depth_range=(-700000.0, 0.0),
-    src_x_kernel_m=5000.0,
-    src_depth_kernel_m=5000.0,
-    src_t_kernel=1.0,
-    time_shift_range=10.0,
-    ftrns1=None,
-    ftrns2=None,
-    n_frac_focused_queries=0.2,
-    replace=False,
-    randomize=False,
-    baseline=0.2,
-    is_global_lon=None,
+	x_query,
+	x_query_t,
+	prob,
+	lat_range=(-90.0, 90.0),
+	lon_range=(-180.0, 180.0),
+	depth_range=(-700000.0, 0.0),
+	src_x_kernel_m=5000.0,
+	src_depth_kernel_m=5000.0,
+	src_t_kernel=1.0,
+	time_shift_range=10.0,
+	ftrns1=None,
+	ftrns2=None,
+	n_frac_focused_queries=0.2,
+	replace=False,
+	randomize=False,
+	baseline=0.2,
+	is_global_lon=None,
 ):
-    """Hard-negative error feedback sampler using WGS84 perturbations weighted by error array 'prob'."""
-    half_t_window = time_shift_range / 2.0
-    x_query_sample = np.copy(x_query)
-    x_query_sample_t = np.copy(x_query_t)
-    n_spc_query = len(x_query)
-    ind_overwrite = np.empty(0, dtype=int)
+	"""Hard-negative error feedback sampler using WGS84 perturbations weighted by error array 'prob'."""
+	half_t_window = time_shift_range / 2.0
+	x_query_sample = np.copy(x_query)
+	x_query_sample_t = np.copy(x_query_t)
+	n_spc_query = len(x_query)
+	ind_overwrite = np.empty(0, dtype=int)
 
-    if is_global_lon is None:
-        is_global_lon = (lon_range[1] - lon_range[0]) >= 359.0
+	if is_global_lon is None:
+		is_global_lon = (lon_range[1] - lon_range[0]) >= 359.0
 
-    # 1. Safe Probability Normalization & Winsorization
-    prob_sum = prob.sum()
-    if prob_sum > 0:
-        prob1 = np.copy(prob)
-        valid_mask = prob > 0
-        
-        if (baseline is not None) and np.any(valid_mask):
-            q_low = np.quantile(prob[valid_mask], baseline)
-            q_high = np.quantile(prob[valid_mask], 1.0 - baseline)
-            prob1[(prob <= q_low) & valid_mask] = q_low
-            prob1[(prob >= q_high) & valid_mask] = q_high
-            
-        # Ensure prob ALWAYS sums to 1.0 regardless of baseline setting
-        prob_norm = prob1 / prob1.sum()
-    else:
-        prob_norm = np.zeros_like(prob)
+	# 1. Safe Probability Normalization & Winsorization
+	prob_sum = prob.sum()
+	if prob_sum > 0:
+		prob1 = np.copy(prob)
+		valid_mask = prob > 0
+		
+		if (baseline is not None) and np.any(valid_mask):
+			q_low = np.quantile(prob[valid_mask], baseline)
+			q_high = np.quantile(prob[valid_mask], 1.0 - baseline)
+			prob1[(prob <= q_low) & valid_mask] = q_low
+			prob1[(prob >= q_high) & valid_mask] = q_high
+			
+		# Ensure prob ALWAYS sums to 1.0 regardless of baseline setting
+		prob_norm = prob1 / prob1.sum()
+	else:
+		prob_norm = np.zeros_like(prob)
 
-    n_focused = int(n_frac_focused_queries * n_spc_query)
+	n_focused = int(n_frac_focused_queries * n_spc_query)
 
-    # 2. Hard-Negative Sampling & Perturbation
-    if (n_spc_query > 0) and (n_focused > 0) and (prob_sum > 0):
-        ind_overwrite = np.sort(
-            np.random.choice(n_spc_query, size=n_focused, replace=False)
-        )
-        ind_source_focused = np.random.choice(
-            n_spc_query, p=prob_norm, size=n_focused, replace=True
-        )
+	# 2. Hard-Negative Sampling & Perturbation
+	if (n_spc_query > 0) and (n_focused > 0) and (prob_sum > 0):
+		ind_overwrite = np.sort(
+			np.random.choice(n_spc_query, size=n_focused, replace=False)
+		)
+		ind_source_focused = np.random.choice(
+			n_spc_query, p=prob_norm, size=n_focused, replace=True
+		)
 
-        new_lat, new_lon, new_depth, new_t = perturb_wgs84(
-            base_lat_deg=x_query[ind_source_focused, 0],
-            base_lon_deg=x_query[ind_source_focused, 1],
-            base_depth_m=x_query[ind_source_focused, 2],
-            base_t_s=x_query_t[ind_source_focused],
-            src_x_kernel_m=src_x_kernel_m,
-            src_depth_kernel_m=src_depth_kernel_m,
-            src_t_kernel=src_t_kernel,
-            lat_range=lat_range,
-            lon_range=lon_range,
-            depth_range=depth_range,
-            time_shift_range=time_shift_range,
-            is_global_lon=is_global_lon,
-        )
+		new_lat, new_lon, new_depth, new_t = perturb_wgs84(
+			base_lat_deg=x_query[ind_source_focused, 0],
+			base_lon_deg=x_query[ind_source_focused, 1],
+			base_depth_m=x_query[ind_source_focused, 2],
+			base_t_s=x_query_t[ind_source_focused],
+			src_x_kernel_m=src_x_kernel_m,
+			src_depth_kernel_m=src_depth_kernel_m,
+			src_t_kernel=src_t_kernel,
+			lat_range=lat_range,
+			lon_range=lon_range,
+			depth_range=depth_range,
+			time_shift_range=time_shift_range,
+			is_global_lon=is_global_lon,
+		)
 
-        x_query_sample[ind_overwrite] = np.column_stack(
-            (new_lat, new_lon, new_depth)
-        )
-        x_query_sample_t[ind_overwrite] = new_t
+		x_query_sample[ind_overwrite] = np.column_stack(
+			(new_lat, new_lon, new_depth)
+		)
+		x_query_sample_t[ind_overwrite] = new_t
 
-        # 3. Optional Uniform Resampling for Remaining Non-Focused Points
-        if randomize:
-            ind_fixed = np.delete(np.arange(n_spc_query), ind_overwrite, axis=0)
-            sin_min = np.sin(np.radians(lat_range[0]))
-            sin_max = np.sin(np.radians(lat_range[1]))
-            
-            u_lat = np.random.uniform(sin_min, sin_max, size=len(ind_fixed))
-            rand_lats = np.degrees(np.arcsin(np.clip(u_lat, -1.0, 1.0)))
+		# 3. Optional Uniform Resampling for Remaining Non-Focused Points
+		if randomize:
+			ind_fixed = np.delete(np.arange(n_spc_query), ind_overwrite, axis=0)
+			sin_min = np.sin(np.radians(lat_range[0]))
+			sin_max = np.sin(np.radians(lat_range[1]))
+			
+			u_lat = np.random.uniform(sin_min, sin_max, size=len(ind_fixed))
+			rand_lats = np.degrees(np.arcsin(np.clip(u_lat, -1.0, 1.0)))
 
-            rand_lons = np.random.uniform(
-                lon_range[0], lon_range[1], size=len(ind_fixed)
-            )
-            rand_depths = np.random.uniform(
-                depth_range[0], depth_range[1], size=len(ind_fixed)
-            )
-            rand_times = np.random.uniform(
-                -half_t_window, half_t_window, size=len(ind_fixed)
-            )
+			rand_lons = np.random.uniform(
+				lon_range[0], lon_range[1], size=len(ind_fixed)
+			)
+			rand_depths = np.random.uniform(
+				depth_range[0], depth_range[1], size=len(ind_fixed)
+			)
+			rand_times = np.random.uniform(
+				-half_t_window, half_t_window, size=len(ind_fixed)
+			)
 
-            x_query_sample[ind_fixed] = np.column_stack(
-                (rand_lats, rand_lons, rand_depths)
-            )
-            x_query_sample_t[ind_fixed] = rand_times
+			x_query_sample[ind_fixed] = np.column_stack(
+				(rand_lats, rand_lons, rand_depths)
+			)
+			x_query_sample_t[ind_fixed] = rand_times
 
-    if replace:
-        return x_query_sample, x_query_sample_t
-    else:
-        return x_query_sample[ind_overwrite], x_query_sample_t[ind_overwrite]
+	if replace:
+		return x_query_sample, x_query_sample_t
+	else:
+		return x_query_sample[ind_overwrite], x_query_sample_t[ind_overwrite]
 
 
 def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x_grids_trv_pointers_p, x_grids_trv_pointers_s, lat_range, lon_range, lat_range_extend, lon_range_extend, depth_range, training_params, training_params_2, training_params_3, graph_params, pred_params, ftrns1, ftrns2, plot_on = False, verbose = False, skip_graphs = False, use_sign_input = use_sign_input, use_time_shift = use_time_shift, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, Ac = Ac, return_only_data = False):
@@ -1540,18 +1166,18 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		shape1, shape2 = trv_out_pred_base.shape[0], trv_out_pred_base.shape[1]
 
 		sigma_p = generate_travel_time_noise(
-		    trv_out_pred_base[:,:,0].reshape(-1),
-		    phase_input="P",  # String ("P"/"S") OR array of 0s (P) and 1s (S)
-		    event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
-		    distribution="laplace",
-		    return_sigma=True)[2].reshape(shape1, shape2)
+			trv_out_pred_base[:,:,0].reshape(-1),
+			phase_input="P",  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+			event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
+			distribution="laplace",
+			return_sigma=True)[2].reshape(shape1, shape2)
 
 		sigma_s = generate_travel_time_noise(
-		    trv_out_pred_base[:,:,1].reshape(-1),
-		    phase_input="S",  # String ("P"/"S") OR array of 0s (P) and 1s (S)
-		    event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
-		    distribution="laplace",
-		    return_sigma=True)[2].reshape(shape1, shape2)
+			trv_out_pred_base[:,:,1].reshape(-1),
+			phase_input="S",  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+			event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
+			distribution="laplace",
+			return_sigma=True)[2].reshape(shape1, shape2)
 
 
 		# trv_out_pred_base[trv_out_pred_base > max_t] = np.nan
@@ -2577,723 +2203,256 @@ def compute_source_labels(x_query, x_query_t, src_x, src_t, src_spatial_kernel, 
 
 		return (np.exp(-0.5*(((np.expand_dims(ftrns1(x_query), axis = 1) - np.expand_dims(ftrns1(src_x), axis = 0))**2)/(src_spatial_kernel**2)).sum(2))*np.exp(-0.5*((x_query_t.reshape(-1,1) - src_t.reshape(1,-1))**2)/(src_t_kernel**2))).max(1).reshape(-1,1)
 
-
-# # def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2, replace = True, randomize = True, baseline = 0.2):
-# def sample_dense_queries(x_query, x_query_t, prob, lat_range_extend, lon_range_extend, depth_range, src_x_kernel, src_depth_kernel, src_t_kernel, time_shift_range, ftrns1, ftrns2, n_frac_focused_queries = 0.2, replace = False, randomize = False, baseline = 0.2):
-
-# 	# n_frac_focused_queries = 0.2
-# 	# n_concentration_focused_queries = 0.05 # 5% of scale of domain
-
-# 	x_query_sample = np.copy(x_query)
-# 	x_query_sample_t = np.copy(x_query_t)
-# 	n_spc_query = len(x_query)
-
-# 	if (baseline is not None)*(prob.sum() > 0):
-# 		prob1 = np.copy(prob)
-# 		prob1[(prob <= np.quantile(prob[prob > 0], baseline))*(prob > 0)] = np.quantile(prob[prob > 0], baseline)
-# 		prob1[(prob >= np.quantile(prob[prob > 0], 1.0 - baseline))*(prob > 0)] = np.quantile(prob[prob > 0], 1.0 - baseline)
-# 		prob = np.copy(prob)
-
-# 	if (len(prob) > 0)*(n_frac_focused_queries > 0):
-
-# 		n_focused_queries = int(n_frac_focused_queries*n_spc_query)
-# 		ind_overwrite_focused_queries = np.sort(np.random.choice(n_spc_query, size = n_focused_queries, replace = False))
-# 		ind_source_focused = np.random.choice(n_spc_query, p = prob, size = n_focused_queries, replace = True)
-
-# 		# x_query_focused = np.random.randn(n_focused_queries, 3)*scale_x*n_concentration_focused_queries
-# 		# x_query_focused = x_query_focused + lp_srcs[-1][ind_source_focused,0:3]
-# 		x_query_focused = 2.0*np.random.randn(n_focused_queries, 3)*np.mean([src_x_kernel, src_depth_kernel])			
-# 		x_query_focused = ftrns2(x_query_focused + ftrns1(x_query[ind_source_focused,0:3]))
-
-# 		ioutside = np.where(((x_query_focused[:,2] < depth_range[0]) + (x_query_focused[:,2] > depth_range[1])) > 0)[0]
-# 		x_query_focused[ioutside,2] = np.random.rand(len(ioutside))*(depth_range[1] - depth_range[0]) + depth_range[0]			
-# 		x_query_focused = np.maximum(np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1), x_query_focused)
-# 		x_query_focused = np.minimum(np.array([lat_range_extend[1], lon_range_extend[1], depth_range[1]]).reshape(1,-1), x_query_focused)
-# 		x_query_sample[ind_overwrite_focused_queries] = x_query_focused
-
-# 		x_query_focused_t = 2.0*np.random.randn(n_focused_queries)*src_t_kernel			
-# 		x_query_focused_t = x_query_t[ind_source_focused] + x_query_focused_t
-# 		# ioutside = np.where(((x_query_focused_t < min_t) + (x_query_focused_t > max_t)) > 0)[0]
-# 		ioutside = np.where(((x_query_focused_t < (-time_shift_range/2.0)) + (x_query_focused_t > (time_shift_range/2.0))) > 0)[0]
-# 		x_query_focused_t[ioutside] = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ioutside))
-# 		x_query_sample_t[ind_overwrite_focused_queries] = x_query_focused_t
-
-# 		if randomize == True:
-# 			ind_fixed = np.delete(np.arange(n_spc_query), ind_overwrite_focused_queries, axis = 0)
-# 			x_rand_uniform = np.hstack([np.random.uniform(u[0], u[1], size = len(ind_fixed)).reshape(-1,1) for u in [lat_range_extend, lon_range_extend, depth_range]])
-# 			x_rand_t = np.random.uniform(-time_shift_range/2.0, time_shift_range/2.0, size = len(ind_fixed))
-# 			x_query_sample[ind_fixed] = x_rand_uniform
-# 			x_query_sample_t[ind_fixed] = x_rand_t
-
-
-# 	if replace == True:
-
-# 		return x_query_sample, x_query_sample_t
-
-# 	else:
-
-# 		return x_query_sample[ind_overwrite_focused_queries], x_query_sample_t[ind_overwrite_focused_queries]
-
-
-# class GaussianDiceLossL1(nn.Module):
-#     def __init__(self, smooth=1e-5, bg_weight=1.0):
-#         super().__init__()
-#         self.smooth = smooth
-#         self.bg_weight = bg_weight
-
-#     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-#         if pred.numel() == 0 or target.numel() == 0:
-#             return torch.tensor(0.0, device=pred.device, dtype=pred.dtype, requires_grad=True)
-
-#         pred = torch.relu(pred.float())
-#         target = target.float()
-
-#         # Compute overlap across spatial dimensions (keep channels separate if 2D/3D batch)
-#         if pred.ndim > 2:
-#             spatial_dims = tuple(range(2, pred.ndim))
-#             intersection = (pred * target).sum(dim=spatial_dims)
-#             pred_sum = pred.sum(dim=spatial_dims)
-#             target_sum = target.sum(dim=spatial_dims)
-            
-#             dice = 1.0 - ((2.0 * intersection + self.smooth) /
-#                           (pred_sum + self.bg_weight * target_sum + self.smooth))
-#             return dice.mean()
-#         else:
-#             intersection = (pred * target).sum()
-#             pred_sum = pred.sum()
-#             target_sum = target.sum()
-            
-#             return 1.0 - ((2.0 * intersection + self.smooth) /
-#                           (pred_sum + self.bg_weight * target_sum + self.smooth))
-
-
-class GaussianDiceLossL1(nn.Module):
-
-  def __init__(self, smooth: float = 1e-5, negative_slope: float = 0.01):
-    """L1 Soft Dice Loss for continuous Gaussian shape regression.
-
-    Args:
-        smooth: Small constant to prevent division by zero.
-        negative_slope: Small slope for negative predictions (Leaky ReLU)
-          to ensure non-zero gradient flow without distorting positive
-          values.
-    """
-    super().__init__()
-    self.smooth = smooth
-    self.negative_slope = negative_slope
-
-  def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    # 1. Empty mask guard
-    if pred.numel() == 0 or target.numel() == 0:
-      return torch.tensor(
-          0.0, device=pred.device, dtype=pred.dtype, requires_grad=True
-      )
-
-    pred = pred.float()
-    target = target.float()
-
-    # 2. Leaky ReLU:
-    #    - Exact identity for x >= 0 (zero distortion across [0, 1])
-    #    - Non-zero gradient (slope=0.01) for x < 0 to prevent stuck weights
-    pred_pos = torch.clamp(F.leaky_relu(pred, negative_slope=self.negative_slope), max = 2.0)
-
-    # 3. Determine reduction dimensions (reduce spatial/temporal dims, keeping batch & channel)
-    #    Assumes shape: (B, C, N_queries) or (B, N_queries) or similar
-    if pred_pos.ndim > 2:
-      reduce_dims = tuple(range(2, pred_pos.ndim))
-    elif pred_pos.ndim == 2:
-      reduce_dims = (1,)
-    else:
-      reduce_dims = (0,)
-
-    # 4. Per-channel / per-sample L1 overlap and sums
-    intersection = (pred_pos * target).sum(dim=reduce_dims)
-    pred_sum = pred_pos.sum(dim=reduce_dims)
-    target_sum = target.sum(dim=reduce_dims)
-
-    # 5. Continuous Soft Dice
-    dice = 1.0 - (
-        (2.0 * intersection + self.smooth)
-        / (pred_sum + target_sum + self.smooth)
-    )
-
-    # 6. Average across batch and channels independently
-    return dice.mean()
-
-
-## Replacing row wise sum with mean
-class GaussianDiceLoss(nn.Module):
-
-	# Start with bg_weight = 1.0
-	# If too many false positives → increase bg_weight to 1.5–3.0
-	# If missing weak Gaussians → decrease bg_weight to 0.5–0.8
-
-	def __init__(self, smooth=1e-5, bg_weight=1.0):
-		super().__init__()
-		self.smooth = smooth
-		self.bg_weight = bg_weight   # usually 1.0, sometimes 0.5–2.0
-
-	def forward(self, pred, target):
-		# No sigmoid! pred is raw linear output
-		pred = pred.float()
-		target = target.float()
-
-
-		intersection = (pred * target).sum()/pred.shape[1]  # sum over spatial + channel if multi-channel
-		pred_sum = (pred ** 2).sum()/pred.shape[1]
-		target_sum = (target ** 2).sum()/pred.shape[1]
-
-		dice = 1 - ((2.0 * intersection + self.smooth) /
-                    (pred_sum + self.bg_weight * target_sum + self.smooth))
-
-		return dice # .mean()
-
-
-# class GaussianDiceLoss(nn.Module):
-
-#   def __init__(self, smooth: float = 1e-5, bg_weight: float = 1.0):
-#     super().__init__()
-#     self.smooth = smooth
-#     self.bg_weight = bg_weight
-
-#   def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-#     pred = pred.float()
-#     target = target.float()
-
-#     # Quadratic sum over spatial coordinates
-#     intersection = (pred * target).sum() / pred.shape[1]
-#     pred_sum = (pred**2).sum() / pred.shape[1]
-#     target_sum = (target**2).sum() / pred.shape[1]
-
-#     dice = 1.0 - (
-#         (2.0 * intersection + self.smooth)
-#         / (pred_sum + self.bg_weight * target_sum + self.smooth)
-#     )
-
-#     return dice
-
-
-use_updated_heatmap_loss = True
-if use_updated_heatmap_loss == True:
-	
-	def gaussian_heatmap_loss(
-	    pred: torch.Tensor, target: torch.Tensor
-	) -> torch.Tensor:
-	  if pred.numel() == 0 or target.numel() == 0:
-	    return 0.0 * pred.sum()
-	
-	  pos = target >= 0.01
-	  neg = ~pos
-	
-	  loss = 0.0 * pred.sum()
-	  eps = 1e-4
-	
-	  # ==================== POSITIVES ====================
-	  if pos.any():
-	    # Correct clamp with max=2.0 keyword arg + min clamp for log safety
-	    pred_pos_safe = torch.clamp(
-	        F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4,
-	        min=1e-4,
-	        max=2.0,
-	    )
-	
-	    log_pred = torch.log(pred_pos_safe)
-	    log_tgt = torch.log(target[pos] + eps)
-	
-	    diff = log_pred - log_tgt
-	    loss = loss + torch.mean(torch.sqrt(diff * diff + eps))
-	
-	  # ==================== BACKGROUND ====================
-	  if neg.any():
-	    r = pred[neg]
-	    # Symmetric L1 + L2 penalty prevents negative lock-in
-	    loss = loss + 25.0 * r.abs().mean() + 1.0 * r.square().mean()
-	
-	  return loss
-	
-	def gaussian_heatmap_loss_with_cap(
-	    pred: torch.Tensor,
-	    target: torch.Tensor,
-	    cap_threshold: float = 0.7,
-	    cap_huber_weight: float = 10.0,
-	    charb_downweight: float = 0.3,
-	    eps: float = 1e-4,
-	) -> torch.Tensor:
-	  if pred.numel() == 0 or target.numel() == 0:
-	    return 0.0 * pred.sum()
-	
-	  pos = target >= 0.01
-	  cap = target >= cap_threshold
-	  neg = ~pos
-	
-	  loss = 0.0 * pred.sum()
-	
-	  # ==================== POSITIVES + CAP HANDLING ====================
-	  if pos.any():
-	    pred_pos_safe = torch.clamp(
-	        F.leaky_relu(pred[pos], negative_slope=0.01) + 1e-4,
-	        min=1e-4,
-	        max=2.0,
-	    )
-	
-	    log_pred = torch.log(pred_pos_safe)
-	    log_tgt = torch.log(target[pos] + eps)
-	    diff = log_pred - log_tgt
-	    charb = torch.sqrt(diff * diff + eps)
-	
-	    weight = torch.ones_like(charb)
-	    if cap.any():
-	      cap_in_pos = cap[pos]
-	      weight[cap_in_pos] *= charb_downweight
-	
-	    loss = loss + (weight * charb).mean()
-	
-	  # ==================== BACKGROUND ====================
-	  if neg.any():
-	    r = pred[neg]
-	    # Symmetric L1 + L2 penalty prevents negative lock-in
-	    loss = loss + 25.0 * r.abs().mean() + 1.0 * r.square().mean()
-	
-	  # ==================== CAP LOSS ====================
-	  if cap.any():
-	    cap_loss = F.smooth_l1_loss(
-	        pred[cap], target[cap], beta=0.5, reduction="mean"
-	    )
-	    loss = loss + cap_huber_weight * cap_loss
-	
-	  return loss
-
-else:
-	
-	# def gaussian_regression_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-	def gaussian_heatmap_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-	    # pred   = pred.squeeze(-1)
-	    # target = target.squeeze(-1)
-	
-	    pos = target >= 0.01
-	    neg = ~pos
-	
-	    loss = 0.0
-	    eps  = 1e-6                               # ← exact value used everywhere
-	
-	    # === POSITIVES: log-space Charbonnier with clamp (official 4DGaussians version) ===
-	    if pos.any():
-	        # This exact line appears in every top repo:
-	        log_pred = torch.log(pred[pos].clamp(min=eps))
-	        log_tgt  = torch.log(target[pos] + eps)           # target can be exactly 0
-	        diff     = log_pred - log_tgt
-	        loss += torch.mean(torch.sqrt(diff*diff + eps))
-	
-	    # # === NEGATIVES: focal-style background (γ=2.0) ===
-	    # if neg.any():
-	    #     residual = pred[neg]
-	    #     focal_weight = residual.abs().pow(2.0)
-	    #     loss += 15.0 * (focal_weight * residual.square()).mean()
-	
-	    if neg.any():
-	        r = pred[neg]
-	        # This is the exact line in every single top model today
-	        loss += 25.0 * r.abs().mean()          # ← L1: kills any elevation instantly
-	        loss += 1.0 * r.square().mean()        # ← tiny L2: prevents jitter
-	
-	    return loss
-	
-	def gaussian_heatmap_loss_with_cap(
-	    pred: torch.Tensor,
-	    target: torch.Tensor,
-	    cap_threshold: float = 0.7,
-	    cap_huber_weight: float = 10.0,
-	    charb_downweight: float = 0.3,   # ← this is the magic number
-	    eps: float = 1e-6
-	) -> torch.Tensor:
-	    pos = target >= 0.01
-	    cap = target >= cap_threshold    # points where we want perfect amplitude
-	    neg = ~pos
-	
-	    loss = 0.0
-	
-	    # ==================== POSITIVES + CAP HANDLING ====================
-	    if pos.any():
-	        log_pred = torch.log(pred[pos].clamp(min=eps))
-	        log_tgt  = torch.log(target[pos] + eps)
-	        diff     = log_pred - log_tgt
-	        charb    = torch.sqrt(diff*diff + eps)
-	
-	        # ↓↓↓ THIS IS THE CRUCIAL 3-LINE FIX ↓↓↓
-	        weight = torch.ones_like(charb)
-	        if cap.any():
-	            # Find which of the positive points are also in the cap region
-	            cap_in_pos = cap[pos]                 # boolean mask in the pos subspace
-	            weight[cap_in_pos] *= charb_downweight   # ← 0.2–0.4 works; 0.3 is consensus
-	        # ↑↑↑ END OF FIX ↑↑↑
-	
-	        loss += (weight * charb).mean()
-	
-	    # # ==================== BACKGROUND (unchanged) ====================
-	    # if neg.any():
-	    #     r = pred[neg]
-	    #     focal_weight = r.abs().pow(2.0)
-	    #     loss += 15.0 * (focal_weight * r.square()).mean()
-	
-	    if neg.any():
-	        r = pred[neg]
-	        # This is the exact line in every single top model today
-	        loss += 25.0 * r.abs().mean()          # ← L1: kills any elevation instantly
-	        loss += 1.0 * r.square().mean()        # ← tiny L2: prevents jitter
-	
-	    # ==================== CAP LOSS (strong absolute push) ====================
-	    if cap.any():
-	        # Huber with small delta → almost L1 on bright peaks
-	        loss += cap_huber_weight * F.smooth_l1_loss(
-	            pred[cap], target[cap], beta=0.5
-	        )
-	
-	    return loss
-
-
-
-def consistency_loss(pred1: torch.Tensor, pred2: torch.Tensor) -> torch.Tensor:
-    return F.l1_loss(pred1, pred2)
-
+# def consistency_loss(pred1: torch.Tensor, pred2: torch.Tensor) -> torch.Tensor:
+# 	return F.l1_loss(pred1, pred2)
 
 # class LossAccumulationBalancer(nn.Module):
-#     def __init__(
-#         self,
-#         anchor: str = 'loss_dice2',
-#         group_targets: dict = None,
-#         alpha: float = 0.98,
-#         primary_ext: str = 'loss_dice',
-#         device: str = 'cuda'
-#     ):
-#         super().__init__()
-#         self.anchor = anchor
-#         self.alpha = alpha
-#         self.primary_ext = primary_ext
-#         self.device = device
 
-#         if group_targets is None:
-#             group_targets = {'primary': 1.0, 'aux': 0.02}
-#         self.group_targets = group_targets
+#   def __init__(
+# 	  self,
+# 	  anchor: str = 'loss_dice2',
+# 	  group_targets: dict = None,
+# 	  alpha: float = 0.98,
+# 	  primary_ext: str = 'loss_dice',
+# 	  device: str = 'cuda',
+#   ):
+# 	super().__init__()
+# 	self.anchor = anchor
+# 	self.alpha = alpha
+# 	self.primary_ext = primary_ext
+# 	self.device = device
 
-#         # Persistent state
-#         self.primary_ema = {}
-#         self.aux_ema = defaultdict(dict)
-#         self._anchor_ema_current = None
+# 	if group_targets is None:
+# 	  group_targets = {'primary': 1.0, 'loss_regression': 0.5, 'aux': 0.02}
+# 	self.group_targets = group_targets
 
-#         # Accumulation buffers
-#         self._accum_prim = {}
-#         self._accum_aux = defaultdict(dict)
-#         self._participation = {}
-#         self._participation_aux = defaultdict(dict)
+# 	# Persistent state
+# 	self.primary_ema = {}
+# 	self.aux_ema = defaultdict(dict)
+# 	self._anchor_ema_current = None
 
-#         self._step_count = 0
-#         self.accum_steps = None
+# 	# Accumulation buffers
+# 	self._accum_prim = {}
+# 	self._accum_aux = defaultdict(dict)
+# 	self._participation = {}
+# 	self._participation_aux = defaultdict(dict)
 
-#     def _get_group(self, name: str) -> str:
-#         if name.startswith(self.primary_ext):
-#             return 'primary'
-#         for group in sorted(self.group_targets.keys(), key=len, reverse=True):
-#             if group != 'primary' and name.startswith(group):
-#                 return group
-#         return 'aux'
+# 	self._step_count = 0
+# 	self.accum_steps = None
 
-#     def __call__(self, losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False):
-#         if accum_steps is not None:
-#             self.accum_steps = accum_steps
+#   def _get_group(self, name: str) -> str:
+# 	if name.startswith(self.primary_ext):
+# 	  return 'primary'
 
-#         total_loss = 0.0
+# 	# Check for prefix match against all configured group targets
+# 	for group in sorted(self.group_targets.keys(), key=len, reverse=True):
+# 	  if group != 'primary' and (
+# 		  name.startswith(group) or group in name
+# 	  ):  # Robust match
+# 		return group
+# 	return 'aux'
 
-#         # 1. Accumulate values + participation counters
-#         for name, loss in losses_dict.items():
-#             val = loss.detach().mean().item()
-#             group = self._get_group(name)
+#   def __call__(
+# 	  self,
+# 	  losses_dict: dict,
+# 	  accum_steps: int = None,
+# 	  is_last_accum_step: bool = False,
+#   ):
+# 	if accum_steps is not None:
+# 	  self.accum_steps = accum_steps
 
-#             if group == 'primary':
-#                 self._participation[name] = self._participation.get(name, 0) + 1
-#                 self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
-#             else:
-#                 self._participation_aux[group][name] = self._participation_aux[group].get(name, 0) + 1
-#                 self._accum_aux[group][name] = self._accum_aux[group].get(name, 0.0) + val
+# 	total_loss = 0.0
 
-#         self._step_count += 1
+# 	# 1. Accumulate values + participation counters
+# 	for name, loss in losses_dict.items():
+# 	  val = loss.detach().mean().item()
+# 	  group = self._get_group(name)
 
-#         # 2. Final microbatch step → update EMAs
-#         if is_last_accum_step or (self.accum_steps and self._step_count >= self.accum_steps):
-#             anchor_ema_new = None
-            
-#             # Update Primary EMAs
-#             for name, accum_val in self._accum_prim.items():
-#                 n = self._participation.get(name, 1)
-#                 batch_val = accum_val / n
-#                 if name not in self.primary_ema:
-#                     self.primary_ema[name] = batch_val
-#                 else:
-#                     self.primary_ema[name] = self.alpha * self.primary_ema[name] + (1 - self.alpha) * batch_val
-#                 if name == self.anchor:
-#                     anchor_ema_new = self.primary_ema[name]
+# 	  if group == 'primary':
+# 		self._participation[name] = self._participation.get(name, 0) + 1
+# 		self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
+# 	  else:
+# 		self._participation_aux[group][name] = (
+# 			self._participation_aux[group].get(name, 0) + 1
+# 		)
+# 		self._accum_aux[group][name] = (
+# 			self._accum_aux[group].get(name, 0.0) + val
+# 		)
 
-#             # Update Aux EMAs
-#             for group, accum_dict in self._accum_aux.items():
-#                 for name, accum_val in accum_dict.items():
-#                     n = self._participation_aux[group].get(name, 1)
-#                     batch_val = accum_val / n
-#                     ema_dict = self.aux_ema[group]
-#                     if name not in ema_dict:
-#                         ema_dict[name] = batch_val
-#                     else:
-#                         ema_dict[name] = self.alpha * ema_dict[name] + (1 - self.alpha) * batch_val
+# 	self._step_count += 1
 
-#             if anchor_ema_new is not None:
-#                 self._anchor_ema_current = anchor_ema_new
-#             elif self._anchor_ema_current is None and self.primary_ema:
-#                 self._anchor_ema_current = max(self.primary_ema.values())
+# 	# 2. Final microbatch step -> update EMAs
+# 	if is_last_accum_step or (
+# 		self.accum_steps and self._step_count >= self.accum_steps
+# 	):
+# 	  anchor_ema_new = None
 
-#             # Clear state cleanly
-#             self._accum_prim.clear()
-#             self._accum_aux = defaultdict(dict)
-#             self._participation.clear()
-#             self._participation_aux = defaultdict(dict)
-#             self._step_count = 0
+# 	  # Update Primary EMAs
+# 	  for name, accum_val in self._accum_prim.items():
+# 		n = self._participation.get(name, 1)
+# 		batch_val = accum_val / n
+# 		if name not in self.primary_ema:
+# 		  self.primary_ema[name] = batch_val
+# 		else:
+# 		  self.primary_ema[name] = (
+# 			  self.alpha * self.primary_ema[name] + (1 - self.alpha) * batch_val
+# 		  )
+# 		if name == self.anchor:
+# 		  anchor_ema_new = self.primary_ema[name]
 
-#         # 3. Compute scaled total loss
-#         anchor_val = self._anchor_ema_current if self._anchor_ema_current is not None else 0.5
+# 	  # Update Aux EMAs
+# 	  for group, accum_dict in self._accum_aux.items():
+# 		for name, accum_val in accum_dict.items():
+# 		  n = self._participation_aux[group].get(name, 1)
+# 		  batch_val = accum_val / n
+# 		  ema_dict = self.aux_ema[group]
+# 		  if name not in ema_dict:
+# 			ema_dict[name] = batch_val
+# 		  else:
+# 			ema_dict[name] = (
+# 				self.alpha * ema_dict[name] + (1 - self.alpha) * batch_val
+# 			)
 
-#         for name, loss in losses_dict.items():
-#             group = self._get_group(name)
-#             val = loss.detach().mean().item()
+# 	  if anchor_ema_new is not None:
+# 		self._anchor_ema_current = anchor_ema_new
+# 	  elif self._anchor_ema_current is None and self.primary_ema:
+# 		self._anchor_ema_current = max(self.primary_ema.values())
 
-#             if group == 'primary':
-#                 # Safe dynamic initialization if loss appears mid-run
-#                 ema = self.primary_ema.setdefault(name, val if val > 0 else 1.0)
-#                 scale = anchor_val / (ema + 1e-8)
-#             else:
-#                 ema = self.aux_ema[group].setdefault(name, val if val > 0 else 1.0)
-#                 n_losses = max(len(self.aux_ema[group]), 1)
-#                 target = self.group_targets.get(group, 0.02)
-#                 scale = target * anchor_val / (n_losses * (ema + 1e-8))
+# 	  # Clear state cleanly
+# 	  self._accum_prim.clear()
+# 	  self._accum_aux = defaultdict(dict)
+# 	  self._participation.clear()
+# 	  self._participation_aux = defaultdict(dict)
+# 	  self._step_count = 0
 
-#             scale = torch.clamp(
-#                 torch.tensor(scale, device=self.device), 
-#                 min=0.01 if group != 'primary' else 0.1,
-#                 max=100.0 if group != 'primary' else 300.0
-#             )
-#             total_loss = total_loss + scale * loss
+# 	# 3. Compute scaled total loss
+# 	anchor_val = (
+# 		self._anchor_ema_current
+# 		if self._anchor_ema_current is not None
+# 		else 0.5
+# 	)
 
-#         return total_loss
+# 	for name, loss in losses_dict.items():
+# 	  group = self._get_group(name)
+# 	  val = loss.detach().mean().item()
 
-#     # Checkpoint Serialization
-#     def state_dict(self) -> dict:
-#         return {
-#             'anchor': self.anchor,
-#             'group_targets': self.group_targets,
-#             'alpha': self.alpha,
-#             'primary_ext': self.primary_ext,
-#             'accum_steps': self.accum_steps,
-#             'primary_ema': self.primary_ema,
-#             'aux_ema': {k: dict(v) for k, v in self.aux_ema.items()},
-#             '_anchor_ema_current': self._anchor_ema_current,
-#         }
+# 	  if group == 'primary':
+# 		ema = self.primary_ema.setdefault(name, val if val > 0 else 1.0)
+# 		scale = anchor_val / (ema + 1e-8)
+# 		min_clamp, max_clamp = 0.1, 10.0
+# 	  else:
+# 		ema = self.aux_ema[group].setdefault(name, val if val > 0 else 1.0)
+# 		target = self.group_targets.get(group, 0.02)
+# 		# REMOVED division by n_losses here!
+# 		scale = (target * anchor_val) / (ema + 1e-8)
+# 		min_clamp, max_clamp = 0.01, 10.0
 
-#     def load_state_dict(self, state_dict: dict) -> None:
-#         self.anchor = state_dict.get('anchor', self.anchor)
-#         self.group_targets = state_dict.get('group_targets', self.group_targets)
-#         self.alpha = state_dict.get('alpha', self.alpha)
-#         self.primary_ext = state_dict.get('primary_ext', self.primary_ext)
-#         self.accum_steps = state_dict.get('accum_steps', self.accum_steps)
-#         self.primary_ema = state_dict.get('primary_ema', {})
+# 	  # Apply controlled safety clamps
+# 	  scale = torch.clamp(
+# 		  torch.tensor(scale, device=self.device),
+# 		  min=min_clamp,
+# 		  max=max_clamp,
+# 	  )
+# 	  total_loss = total_loss + scale * loss
+
+# 	return total_loss
+
+#   # Checkpoint Serialization
+#   def state_dict(self) -> dict:
+# 	return {
+# 		'anchor': self.anchor,
+# 		'group_targets': self.group_targets,
+# 		'alpha': self.alpha,
+# 		'primary_ext': self.primary_ext,
+# 		'accum_steps': self.accum_steps,
+# 		'primary_ema': self.primary_ema,
+# 		'aux_ema': {k: dict(v) for k, v in self.aux_ema.items()},
+# 		'_anchor_ema_current': self._anchor_ema_current,
+# 	}
+
+#   def load_state_dict(self, state_dict: dict) -> None:
+# 	self.anchor = state_dict.get('anchor', self.anchor)
+# 	self.group_targets = state_dict.get('group_targets', self.group_targets)
+# 	self.alpha = state_dict.get('alpha', self.alpha)
+# 	self.primary_ext = state_dict.get('primary_ext', self.primary_ext)
+# 	self.accum_steps = state_dict.get('accum_steps', self.accum_steps)
+# 	self.primary_ema = state_dict.get('primary_ema', {})
+
+# 	aux_ema_raw = state_dict.get('aux_ema', {})
+# 	self.aux_ema = defaultdict(dict)
+# 	for k, v in aux_ema_raw.items():
+# 	  self.aux_ema[k] = dict(v)
+
+# 	self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
+
+
+class LossLogger:
+    """
+    Lightweight, decoupled loss tracking utility.
+    Tracks raw microbatch losses, computes step averages, and maintains smooth EMAs.
+    Safe for conditional/sparse losses.
+    """
+    def __init__(self, alpha=0.95):
+        self.alpha = alpha
         
-#         aux_ema_raw = state_dict.get('aux_ema', {})
-#         self.aux_ema = defaultdict(dict)
-#         for k, v in aux_ema_raw.items():
-#             self.aux_ema[k] = dict(v)
+        # Accumulation state (resets every gradient step)
+        self._accum_sums = defaultdict(float)
+        self._accum_counts = defaultdict(int)
+        
+        # Smooth persistent state across training steps
+        self.ema_dict = {}
+
+    def update(self, losses_dict: dict):
+        """Accumulate loss values for a single microbatch / sub-step."""
+        for name, loss in losses_dict.items():
+            if loss is None:
+                continue
             
-#         self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
+            # Extract float safely (handles 0D tensors, scalars, or 1D single-element tensors)
+            if isinstance(loss, torch.Tensor):
+                val = loss.detach().mean().item()
+            else:
+                val = float(loss)
+
+            self._accum_sums[name] += val
+            self._accum_counts[name] += 1
+
+    def step(self) -> dict:
+        """
+        Call at the end of a gradient accumulation step (or end of batch).
+        Computes step means, updates global EMAs, and returns current step metrics.
+        """
+        step_means = {}
+        
+        for name, total_sum in self._accum_sums.items():
+            count = self._accum_counts[name]
+            mean_val = total_sum / max(1, count)
+            step_means[name] = mean_val
+            
+            # Update EMA (smooth long-term tracking)
+            if name not in self.ema_dict:
+                self.ema_dict[name] = mean_val
+            else:
+                self.ema_dict[name] = self.alpha * self.ema_dict[name] + (1.0 - self.alpha) * mean_val
+        
+        # Clear step buffers
+        self._accum_sums.clear()
+        self._accum_counts.clear()
+        
+        return step_means
+
+    def get_ema(self) -> dict:
+        """Returns current smoothed EMAs for logging."""
+        return dict(self.ema_dict)
 
 
-# from collections import defaultdict
-# import torch
-# import torch.nn as nn
 
 
-class LossAccumulationBalancer(nn.Module):
 
-  def __init__(
-      self,
-      anchor: str = 'loss_dice2',
-      group_targets: dict = None,
-      alpha: float = 0.98,
-      primary_ext: str = 'loss_dice',
-      device: str = 'cuda',
-  ):
-    super().__init__()
-    self.anchor = anchor
-    self.alpha = alpha
-    self.primary_ext = primary_ext
-    self.device = device
 
-    if group_targets is None:
-      group_targets = {'primary': 1.0, 'loss_regression': 0.5, 'aux': 0.02}
-    self.group_targets = group_targets
 
-    # Persistent state
-    self.primary_ema = {}
-    self.aux_ema = defaultdict(dict)
-    self._anchor_ema_current = None
 
-    # Accumulation buffers
-    self._accum_prim = {}
-    self._accum_aux = defaultdict(dict)
-    self._participation = {}
-    self._participation_aux = defaultdict(dict)
-
-    self._step_count = 0
-    self.accum_steps = None
-
-  def _get_group(self, name: str) -> str:
-    if name.startswith(self.primary_ext):
-      return 'primary'
-
-    # Check for prefix match against all configured group targets
-    for group in sorted(self.group_targets.keys(), key=len, reverse=True):
-      if group != 'primary' and (
-          name.startswith(group) or group in name
-      ):  # Robust match
-        return group
-    return 'aux'
-
-  def __call__(
-      self,
-      losses_dict: dict,
-      accum_steps: int = None,
-      is_last_accum_step: bool = False,
-  ):
-    if accum_steps is not None:
-      self.accum_steps = accum_steps
-
-    total_loss = 0.0
-
-    # 1. Accumulate values + participation counters
-    for name, loss in losses_dict.items():
-      val = loss.detach().mean().item()
-      group = self._get_group(name)
-
-      if group == 'primary':
-        self._participation[name] = self._participation.get(name, 0) + 1
-        self._accum_prim[name] = self._accum_prim.get(name, 0.0) + val
-      else:
-        self._participation_aux[group][name] = (
-            self._participation_aux[group].get(name, 0) + 1
-        )
-        self._accum_aux[group][name] = (
-            self._accum_aux[group].get(name, 0.0) + val
-        )
-
-    self._step_count += 1
-
-    # 2. Final microbatch step -> update EMAs
-    if is_last_accum_step or (
-        self.accum_steps and self._step_count >= self.accum_steps
-    ):
-      anchor_ema_new = None
-
-      # Update Primary EMAs
-      for name, accum_val in self._accum_prim.items():
-        n = self._participation.get(name, 1)
-        batch_val = accum_val / n
-        if name not in self.primary_ema:
-          self.primary_ema[name] = batch_val
-        else:
-          self.primary_ema[name] = (
-              self.alpha * self.primary_ema[name] + (1 - self.alpha) * batch_val
-          )
-        if name == self.anchor:
-          anchor_ema_new = self.primary_ema[name]
-
-      # Update Aux EMAs
-      for group, accum_dict in self._accum_aux.items():
-        for name, accum_val in accum_dict.items():
-          n = self._participation_aux[group].get(name, 1)
-          batch_val = accum_val / n
-          ema_dict = self.aux_ema[group]
-          if name not in ema_dict:
-            ema_dict[name] = batch_val
-          else:
-            ema_dict[name] = (
-                self.alpha * ema_dict[name] + (1 - self.alpha) * batch_val
-            )
-
-      if anchor_ema_new is not None:
-        self._anchor_ema_current = anchor_ema_new
-      elif self._anchor_ema_current is None and self.primary_ema:
-        self._anchor_ema_current = max(self.primary_ema.values())
-
-      # Clear state cleanly
-      self._accum_prim.clear()
-      self._accum_aux = defaultdict(dict)
-      self._participation.clear()
-      self._participation_aux = defaultdict(dict)
-      self._step_count = 0
-
-    # 3. Compute scaled total loss
-    anchor_val = (
-        self._anchor_ema_current
-        if self._anchor_ema_current is not None
-        else 0.5
-    )
-
-    for name, loss in losses_dict.items():
-      group = self._get_group(name)
-      val = loss.detach().mean().item()
-
-      if group == 'primary':
-        ema = self.primary_ema.setdefault(name, val if val > 0 else 1.0)
-        scale = anchor_val / (ema + 1e-8)
-        min_clamp, max_clamp = 0.1, 10.0
-      else:
-        ema = self.aux_ema[group].setdefault(name, val if val > 0 else 1.0)
-        target = self.group_targets.get(group, 0.02)
-        # REMOVED division by n_losses here!
-        scale = (target * anchor_val) / (ema + 1e-8)
-        min_clamp, max_clamp = 0.01, 10.0
-
-      # Apply controlled safety clamps
-      scale = torch.clamp(
-          torch.tensor(scale, device=self.device),
-          min=min_clamp,
-          max=max_clamp,
-      )
-      total_loss = total_loss + scale * loss
-
-    return total_loss
-
-  # Checkpoint Serialization
-  def state_dict(self) -> dict:
-    return {
-        'anchor': self.anchor,
-        'group_targets': self.group_targets,
-        'alpha': self.alpha,
-        'primary_ext': self.primary_ext,
-        'accum_steps': self.accum_steps,
-        'primary_ema': self.primary_ema,
-        'aux_ema': {k: dict(v) for k, v in self.aux_ema.items()},
-        '_anchor_ema_current': self._anchor_ema_current,
-    }
-
-  def load_state_dict(self, state_dict: dict) -> None:
-    self.anchor = state_dict.get('anchor', self.anchor)
-    self.group_targets = state_dict.get('group_targets', self.group_targets)
-    self.alpha = state_dict.get('alpha', self.alpha)
-    self.primary_ext = state_dict.get('primary_ext', self.primary_ext)
-    self.accum_steps = state_dict.get('accum_steps', self.accum_steps)
-    self.primary_ema = state_dict.get('primary_ema', {})
-
-    aux_ema_raw = state_dict.get('aux_ema', {})
-    self.aux_ema = defaultdict(dict)
-    for k, v in aux_ema_raw.items():
-      self.aux_ema[k] = dict(v)
-
-    self._anchor_ema_current = state_dict.get('_anchor_ema_current', None)
-
+# Gradient Norms (GradNorm)
 
 class UncertaintyBalancer(nn.Module):
 	def __init__(self, num_tasks):
@@ -3512,7 +2671,7 @@ class TrainingDataset(Dataset):
 		master_indices = []
 		for _ in range(repeats):
 			master_indices.append(np.random.permutation(num_actual_files))
-        
+		
 		self.index_map = np.concatenate(master_indices)[:self.total_steps]
 
 
@@ -3676,216 +2835,711 @@ class TrainingDataset(Dataset):
 
 
 def reshuffle_subset(input_dir, output_dir, job_idx, files_per_job, n_batch=15):
-    """
-    job_idx: The SLURM_ARRAY_TASK_ID
-    files_per_job: How many HDF5 files this specific task should generate
-    n_batch: Number of samples per output HDF5 file
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # 1. Get and Sort (Essential for consistency across parallel Slurm tasks)
-    all_files = sorted([
-        os.path.join(input_dir, f) 
-        for f in os.listdir(input_dir) 
-        if f.endswith('.h5') or f.endswith('.hdf5')
-    ])
-    
-    # 2. Global Shuffle (Use a fixed seed so all jobs see the same shuffled list)
-    random.seed(42)
-    random.shuffle(all_files)
-    
-    # 3. Consumption Math
-    total_needed = files_per_job * n_batch
-    total_available = len(all_files)
-    
-    # 4. Extract unique pool for this job using Modulo (Wrapping)
-    source_pool = []
-    for i in range(total_needed):
-        global_idx = (job_idx * total_needed + i) % total_available
-        source_pool.append(all_files[global_idx])
+	"""
+	job_idx: The SLURM_ARRAY_TASK_ID
+	files_per_job: How many HDF5 files this specific task should generate
+	n_batch: Number of samples per output HDF5 file
+	"""
+	os.makedirs(output_dir, exist_ok=True)
+	
+	# 1. Get and Sort (Essential for consistency across parallel Slurm tasks)
+	all_files = sorted([
+		os.path.join(input_dir, f) 
+		for f in os.listdir(input_dir) 
+		if f.endswith('.h5') or f.endswith('.hdf5')
+	])
+	
+	# 2. Global Shuffle (Use a fixed seed so all jobs see the same shuffled list)
+	random.seed(42)
+	random.shuffle(all_files)
+	
+	# 3. Consumption Math
+	total_needed = files_per_job * n_batch
+	total_available = len(all_files)
+	
+	# 4. Extract unique pool for this job using Modulo (Wrapping)
+	source_pool = []
+	for i in range(total_needed):
+		global_idx = (job_idx * total_needed + i) % total_available
+		source_pool.append(all_files[global_idx])
 
-    # 5. Set seed once for this job for continuous internal randomness 
-    random.seed(job_idx)
+	# 5. Set seed once for this job for continuous internal randomness 
+	random.seed(job_idx)
 
-    # Grab version number from the first file in our shuffled list
-    first_file_name = os.path.basename(all_files[0])
-    n_ver = int(first_file_name.split('_')[-1].split('.')[0])
-    start_naming_index = job_idx * files_per_job
+	# Grab version number from the first file in our shuffled list
+	first_file_name = os.path.basename(all_files[0])
+	n_ver = int(first_file_name.split('_')[-1].split('.')[0])
+	start_naming_index = job_idx * files_per_job
 
-    print(f"Job {job_idx}: Generating {files_per_job} files starting at ID {start_naming_index}")
+	print(f"Job {job_idx}: Generating {files_per_job} files starting at ID {start_naming_index}")
 
-    # Track an index for extra file draws if we hit an completely dead file
-    fallback_pool_idx = 0
+	# Track an index for extra file draws if we hit an completely dead file
+	fallback_pool_idx = 0
 
-    for f_idx in range(files_per_job):
-        unique_id = start_naming_index + f_idx
-        new_filename = f"training_data_slice_{unique_id}_ver_{n_ver}.hdf5"
-        new_path = os.path.join(output_dir, new_filename)
-        
-        # Slice the pool for this specific output file (n_batch files)
-        current_sources = source_pool[f_idx * n_batch : (f_idx + 1) * n_batch]
-        
-        with h5py.File(new_path, 'w') as f_out:
-            meta_copied = False
-            i_target = 0
-            
-            while i_target < n_batch:
-                # Get the next scheduled source file, or pull a fallback if we exceeded the slice
-                if i_target < len(current_sources):
-                    src_path = current_sources[i_target]
-                else:
-                    # Edge case fallback: Grab next file out of the global pool via wrapping
-                    fallback_idx = (job_idx * total_needed + total_needed + fallback_pool_idx) % total_available
-                    src_path = all_files[fallback_idx]
-                    fallback_pool_idx += 1
+	for f_idx in range(files_per_job):
+		unique_id = start_naming_index + f_idx
+		new_filename = f"training_data_slice_{unique_id}_ver_{n_ver}.hdf5"
+		new_path = os.path.join(output_dir, new_filename)
+		
+		# Slice the pool for this specific output file (n_batch files)
+		current_sources = source_pool[f_idx * n_batch : (f_idx + 1) * n_batch]
+		
+		with h5py.File(new_path, 'w') as f_out:
+			meta_copied = False
+			i_target = 0
+			
+			while i_target < n_batch:
+				# Get the next scheduled source file, or pull a fallback if we exceeded the slice
+				if i_target < len(current_sources):
+					src_path = current_sources[i_target]
+				else:
+					# Edge case fallback: Grab next file out of the global pool via wrapping
+					fallback_idx = (job_idx * total_needed + total_needed + fallback_pool_idx) % total_available
+					src_path = all_files[fallback_idx]
+					fallback_pool_idx += 1
 
-                # Open files sequentially to prevent file descriptor leakage
-                with h5py.File(src_path, 'r') as src_h5:
-                    
-                    # 1. Scan keys to find all available sample indices
-                    source_keys = list(src_h5.keys())
-                    sample_indices = set()
-                    for key in source_keys:
-                        if key.startswith("lp_times_"):
-                            parts = key.rsplit('_', 1)
-                            if len(parts) > 1 and parts[1].isdigit():
-                                sample_indices.add(int(parts[1]))
-                    
-                    # 2. Filter out keys where lp_times_<i> is empty (length 0)
-                    valid_indices = []
-                    for idx in sample_indices:
-                        lp_key = f"lp_times_{idx}"
-                        # Check dataset size/shape cleanly without loading the full data array
-                        if src_h5[lp_key].shape[0] > 0:
-                            valid_indices.append(idx)
-                    
-                    # CRITICAL EDGE CASE: All indices in this file are bad
-                    if not valid_indices:
-                        print(f"Warning: {os.path.basename(src_path)} has 0 valid samples. Skipping file.")
-                        # Do not increment i_target; let the loop retry with a fallback file
-                        # If this was one of the original slice files, append a placeholder to keep index alignment
-                        if i_target < len(current_sources):
-                            current_sources.append(None) 
-                        continue
-                    
-                    # Pick a valid sample index at random
-                    i_src = random.choice(valid_indices)
-                    
-                    suffix_src = f"_{i_src}"
-                    suffix_dst = f"_{i_target}"
-                    
-                    # Copy all datasets belonging to the chosen sample
-                    for key in source_keys:
-                        parts = key.rsplit('_', 1)
-                        if len(parts) > 1 and parts[1] == str(i_src):
-                            base_name = parts[0]
-                            src_h5.copy(key, f_out, name=f"{base_name}{suffix_dst}")
-                    
-                    # Add the per-sample real data flag safely
-                    if 'real_data' in src_h5:
-                        is_real = src_h5['real_data'][()]
-                        # f_out.create_dataset(f'is_real_sample{suffix_dst}', data=is_real)
+				# Open files sequentially to prevent file descriptor leakage
+				with h5py.File(src_path, 'r') as src_h5:
+					
+					# 1. Scan keys to find all available sample indices
+					source_keys = list(src_h5.keys())
+					sample_indices = set()
+					for key in source_keys:
+						if key.startswith("lp_times_"):
+							parts = key.rsplit('_', 1)
+							if len(parts) > 1 and parts[1].isdigit():
+								sample_indices.add(int(parts[1]))
+					
+					# 2. Filter out keys where lp_times_<i> is empty (length 0)
+					valid_indices = []
+					for idx in sample_indices:
+						lp_key = f"lp_times_{idx}"
+						# Check dataset size/shape cleanly without loading the full data array
+						if src_h5[lp_key].shape[0] > 0:
+							valid_indices.append(idx)
+					
+					# CRITICAL EDGE CASE: All indices in this file are bad
+					if not valid_indices:
+						print(f"Warning: {os.path.basename(src_path)} has 0 valid samples. Skipping file.")
+						# Do not increment i_target; let the loop retry with a fallback file
+						# If this was one of the original slice files, append a placeholder to keep index alignment
+						if i_target < len(current_sources):
+							current_sources.append(None) 
+						continue
+					
+					# Pick a valid sample index at random
+					i_src = random.choice(valid_indices)
+					
+					suffix_src = f"_{i_src}"
+					suffix_dst = f"_{i_target}"
+					
+					# Copy all datasets belonging to the chosen sample
+					for key in source_keys:
+						parts = key.rsplit('_', 1)
+						if len(parts) > 1 and parts[1] == str(i_src):
+							base_name = parts[0]
+							src_h5.copy(key, f_out, name=f"{base_name}{suffix_dst}")
+					
+					# Add the per-sample real data flag safely
+					if 'real_data' in src_h5:
+						is_real = src_h5['real_data'][()]
+						# f_out.create_dataset(f'is_real_sample{suffix_dst}', data=is_real)
 
-                    # Copy global metadata from the first successful file in the mix
-                    if not meta_copied:
-                        for global_key in ['real_data', 'srcs', 'srcs_active']:
-                            if global_key in src_h5:
-                                f_out.create_dataset(global_key, data=src_h5[global_key][()])
-                        meta_copied = True
-                
-                # Advance to next target sample inside the output file
-                i_target += 1
+					# Copy global metadata from the first successful file in the mix
+					if not meta_copied:
+						for global_key in ['real_data', 'srcs', 'srcs_active']:
+							if global_key in src_h5:
+								f_out.create_dataset(global_key, data=src_h5[global_key][()])
+						meta_copied = True
+				
+				# Advance to next target sample inside the output file
+				i_target += 1
 
 
 def move_to(obj, device, non_blocking=True):
-    """
-    Recursively move tensors, lists, dicts, PyG Data/Batch/HeteroData to device.
-    Works with any nesting depth.
-    """
-    if isinstance(obj, Tensor):
-        return obj.to(device, non_blocking=non_blocking)
+	"""
+	Recursively move tensors, lists, dicts, PyG Data/Batch/HeteroData to device.
+	Works with any nesting depth.
+	"""
+	if isinstance(obj, Tensor):
+		return obj.to(device, non_blocking=non_blocking)
 
-    # PyTorch Geometric support
-    if Data is not None:
-        if isinstance(obj, Data):
-            return obj.to(device, non_blocking=non_blocking)
-        if isinstance(obj, Batch):
-            return obj.to(device, non_blocking=non_blocking)
-        if isinstance(obj, HeteroData):
-            return obj.to(device, non_blocking=non_blocking)
+	# PyTorch Geometric support
+	if Data is not None:
+		if isinstance(obj, Data):
+			return obj.to(device, non_blocking=non_blocking)
+		if isinstance(obj, Batch):
+			return obj.to(device, non_blocking=non_blocking)
+		if isinstance(obj, HeteroData):
+			return obj.to(device, non_blocking=non_blocking)
 
-    # Containers
-    if isinstance(obj, (list, tuple)):
-        return type(obj)(move_to(x, device, non_blocking) for x in obj)
-    if isinstance(obj, dict):
-        return {k: move_to(v, device, non_blocking) for k, v in obj.items()}
+	# Containers
+	if isinstance(obj, (list, tuple)):
+		return type(obj)(move_to(x, device, non_blocking) for x in obj)
+	if isinstance(obj, dict):
+		return {k: move_to(v, device, non_blocking) for k, v in obj.items()}
 
-    # Scalars, strings, None, etc.
-    return obj
+	# Scalars, strings, None, etc.
+	return obj
 
 
 
 def move_to_inplace(obj, device, non_blocking=True):
-    """
-    In-place version — modifies the object directly.
-    Useful when you want zero allocation overhead.
-    """
-    if isinstance(obj, Tensor):
-        # In-place move (only works if tensor is not a view)
-        obj.data = obj.to(device, non_blocking=non_blocking)
-        if obj.grad is not None:
-            obj.grad.data = obj.grad.to(device, non_blocking=non_blocking)
-        return obj
+	"""
+	In-place version — modifies the object directly.
+	Useful when you want zero allocation overhead.
+	"""
+	if isinstance(obj, Tensor):
+		# In-place move (only works if tensor is not a view)
+		obj.data = obj.to(device, non_blocking=non_blocking)
+		if obj.grad is not None:
+			obj.grad.data = obj.grad.to(device, non_blocking=non_blocking)
+		return obj
 
-    if Data is not None:
-        if isinstance(obj, (Data, Batch, HeteroData)):
-            obj.to(device, non_blocking=non_blocking)  # PyG objects have .to() that does this in-place
-            return obj
+	if Data is not None:
+		if isinstance(obj, (Data, Batch, HeteroData)):
+			obj.to(device, non_blocking=non_blocking)  # PyG objects have .to() that does this in-place
+			return obj
 
-    if isinstance(obj, (list, tuple)):
-        for i in range(len(obj)):
-            obj[i] = move_to_inplace(obj[i], device, non_blocking)
-        return obj
+	if isinstance(obj, (list, tuple)):
+		for i in range(len(obj)):
+			obj[i] = move_to_inplace(obj[i], device, non_blocking)
+		return obj
 
-    if isinstance(obj, dict):
-        for k in obj.keys():
-            obj[k] = move_to_inplace(obj[k], device, non_blocking)
-        return obj
+	if isinstance(obj, dict):
+		for k in obj.keys():
+			obj[k] = move_to_inplace(obj[k], device, non_blocking)
+		return obj
 
-    return obj
+	return obj
 
 def to_float32(x):
-    if isinstance(x, torch.Tensor):
-        # Only convert float64 → float32
-        if x.dtype == torch.float64:
-            return x.float()
-        else:
-            return x   # leave longs, ints, etc.
-    elif isinstance(x, dict):
-        return {k: to_float32(v) for k, v in x.items()}
-    elif isinstance(x, (list, tuple)):
-        return type(x)(to_float32(v) for v in x)
-    else:
-        return x
+	if isinstance(x, torch.Tensor):
+		# Only convert float64 → float32
+		if x.dtype == torch.float64:
+			return x.float()
+		else:
+			return x   # leave longs, ints, etc.
+	elif isinstance(x, dict):
+		return {k: to_float32(v) for k, v in x.items()}
+	elif isinstance(x, (list, tuple)):
+		return type(x)(to_float32(v) for v in x)
+	else:
+		return x
 
 
 def collate_no_batch(batch):
-    # assert batch_size=1 for safety
-    assert len(batch) == 1
-    return to_float32(batch[0]) ## Map to float (could also put this in the data loader if prefered)
+	# assert batch_size=1 for safety
+	assert len(batch) == 1
+	return to_float32(batch[0]) ## Map to float (could also put this in the data loader if prefered)
 
 def get_step_ramp(current_step: int, start_step: int, ramp_steps: int) -> float:
+	"""
+	Returns 0.0 before start_step, smoothly ramps (cosine) to 1.0 over ramp_steps,
+	and stays at 1.0 afterwards.
+	"""
+	if current_step < start_step:
+		return 0.0
+	elif current_step >= start_step + ramp_steps:
+		return 1.0
+	else:
+		progress = (current_step - start_step) / ramp_steps
+		return float(0.5 * (1.0 - np.cos(np.pi * progress)))
+
+
+# ## Replacing row wise sum with mean
+# class GaussianDiceLoss(nn.Module):
+
+# 	# Start with bg_weight = 1.0
+# 	# If too many false positives → increase bg_weight to 1.5–3.0
+# 	# If missing weak Gaussians → decrease bg_weight to 0.5–0.8
+
+# 	def __init__(self, smooth=1e-5, bg_weight=1.0):
+# 		super().__init__()
+# 		self.smooth = smooth
+# 		self.bg_weight = bg_weight   # usually 1.0, sometimes 0.5–2.0
+
+# 	def forward(self, pred, target):
+# 		# No sigmoid! pred is raw linear output
+# 		pred = pred.float()
+# 		target = target.float()
+
+
+# 		intersection = (pred * target).sum()/pred.shape[1]  # sum over spatial + channel if multi-channel
+# 		pred_sum = (pred ** 2).sum()/pred.shape[1]
+# 		target_sum = (target ** 2).sum()/pred.shape[1]
+
+# 		dice = 1 - ((2.0 * intersection + self.smooth) /
+#					 (pred_sum + self.bg_weight * target_sum + self.smooth))
+
+# 		return dice # .mean()
+
+class GaussianDiceLoss(nn.Module):
+	def __init__(self, smooth=1e-5, bg_weight=1.0):
+		super().__init__()
+		self.smooth = smooth
+		self.bg_weight = bg_weight
+
+	def forward(self, pred, target):
+		# 1. Truncate negative values (prevents negative linear outputs 
+		#	from squaring into positive energy in pred_sum)
+		pred = F.relu(pred.float())
+		target = target.float()
+
+		# 2. Target Guard: If target is completely empty, zero out Dice loss.
+		#	Let split_charbonnier_loss handle all zero-target regression.
+		if target.sum() == 0:
+			return 0.0 * pred.sum()  # Keeps PyTorch autograd graph connected
+
+		# 3. Compute Dice on valid foreground regions
+		intersection = (pred * target).sum()
+		pred_sum = (pred ** 2).sum()
+		target_sq_sum = (target ** 2).sum()
+
+		dice = (2.0 * intersection + self.smooth) / (
+			pred_sum + self.bg_weight * target_sq_sum + self.smooth
+		)
+
+		return 1.0 - dice
+
+
+def soft_dice_loss(pred, target, eps=1e-5):
     """
-    Returns 0.0 before start_step, smoothly ramps (cosine) to 1.0 over ramp_steps,
-    and stays at 1.0 afterwards.
+    Continuous Soft Dice Loss for heatmap regression.
+    Safe for float predictions in [0, 1].
     """
-    if current_step < start_step:
-        return 0.0
-    elif current_step >= start_step + ramp_steps:
-        return 1.0
+    pred_flat = pred.reshape(-1)
+    target_flat = target.reshape(-1)
+    
+    intersection = (pred_flat * target_flat).sum()
+    cardinality = (pred_flat ** 2).sum() + (target_flat ** 2).sum()
+    
+    dice_score = (2.0 * intersection + eps) / (cardinality + eps)
+    return 1.0 - dice_score
+
+
+# class GaussianDiceLoss(nn.Module):
+#	 def __init__(self, smooth_eps=1e-3, bg_weight=1.0):
+#		 super().__init__()
+#		 self.smooth_eps = smooth_eps
+#		 self.bg_weight = bg_weight
+
+#	 def forward(self, pred, target):
+#		 pred = pred.float()
+#		 target = target.float()
+
+#		 # Dynamic smooth based on input volume N
+#		 N = pred.numel() / pred.shape[0]  # spatial size per sample
+#		 smooth = self.smooth_eps * N
+
+#		 spatial_dims = tuple(range(1, pred.dim()))
+#		 intersection = (pred * target).sum(dim=spatial_dims)
+#		 pred_sum = (pred ** 2).sum(dim=spatial_dims)
+#		 target_sum = (target ** 2).sum(dim=spatial_dims)
+
+#		 dice = (2.0 * intersection + smooth) / (
+#			 pred_sum + self.bg_weight * target_sum + smooth
+#		 )
+
+#		 return (1.0 - dice).mean()
+
+
+# def split_charbonnier_loss(pred, target, threshold=0.01, eps=1e-4):
+
+# 	pos = target >= threshold
+# 	neg = ~pos
+
+# 	if pos.any():
+# 		pos_loss = torch.sqrt(
+# 			(pred[pos] - target[pos]).square() + eps
+# 		).mean()
+# 	else:
+# 		pos_loss = 0.0 * pred.sum()
+
+# 	if neg.any():
+# 		neg_loss = torch.sqrt(
+# 			(pred[neg] - target[neg]).square() + eps
+# 		).mean()
+# 	else:
+# 		neg_loss = 0.0 * pred.sum()
+
+# 	return 0.5 * pos_loss + 0.5 * neg_loss
+
+# def charbonnier_loss(pred, target, weight = 1.0, eps=1e-4):
+
+# 	loss = torch.sqrt(
+# 		weight*(pred - target).square() + eps
+# 	).mean()
+
+# 	return loss
+
+def split_charbonnier_loss(pred, target, threshold=0.01, pos_weight=0.5, eps=1e-4):
+    """
+    Split Charbonnier Loss.
+    Separates positive and negative target regions into independent mean losses
+    to prevent sparse positive targets from being drowned out by background zeros.
+    """
+    pred = pred.float()
+    target = target.float()
+
+    pos_mask = target >= threshold
+    neg_mask = ~pos_mask
+
+    # 1. Compute Positive Loss (Foreground)
+    if pos_mask.any():
+        pos_diff = pred[pos_mask] - target[pos_mask]
+        pos_loss = torch.sqrt(pos_diff.square() + eps).mean()
     else:
-        progress = (current_step - start_step) / ramp_steps
-        return float(0.5 * (1.0 - np.cos(np.pi * progress)))
+        # Maintain valid autograd node with 0 gradient if no positive points exist
+        pos_loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+
+    # 2. Compute Negative Loss (Background)
+    if neg_mask.any():
+        neg_diff = pred[neg_mask] - target[neg_mask]
+        neg_loss = torch.sqrt(neg_diff.square() + eps).mean()
+    else:
+        neg_loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+
+    # 3. Balance 50/50 (or custom ratio)
+    neg_weight = 1.0 - pos_weight
+    return pos_weight * pos_loss + neg_weight * neg_loss
+
+def weighted_charbonnier_loss(pred, target, peak_weight=5.0, eps=1e-4):
+	"""
+	Continuous Charbonnier loss with smooth foreground weighting.
+	Preserves Gaussian geometry without hard threshold boundaries.
+	"""
+	# Smooth weight map derived continuously from target intensity
+	weight_map = 1.0 + (peak_weight - 1.0) * target
+
+	diff = pred - target
+	loss = torch.sqrt(weight_map * diff.square() + eps)
+	
+	return loss.mean()
+
+
+# class AdaptivePointwiseGaussianLoss(nn.Module):
+#	 def __init__(self, momentum=0.05, min_weight=1.0, max_weight=20.0, eps=1e-4):
+#		 super().__init__()
+#		 self.momentum = momentum
+#		 self.min_weight = min_weight
+#		 self.max_weight = max_weight
+#		 self.eps = eps
+
+#		 # Running buffer for volume imbalance tracking
+#		 self.register_buffer("running_peak_weight", torch.tensor(3.0))
+
+#	 def forward(self, pred, target, update_ema=False):
+#		 pred = pred.float()
+#		 target = target.float()
+
+#		 # 1. Update EMA ONLY when processing the main loss pass in training mode
+#		 if update_ema and self.training:
+#			 fg_mass = target.sum()
+#			 if fg_mass > 0:
+#				 bg_mass = (1.0 - target).sum()
+#				 batch_weight = (bg_mass / (fg_mass + 1e-6)).clamp(self.min_weight, self.max_weight)
+
+#				 with torch.no_grad():
+#					 self.running_peak_weight.copy_(
+#						 (1.0 - self.momentum) * self.running_peak_weight + self.momentum * batch_weight
+#					 )
+
+#		 # 2. Use current running weight for computing loss
+#		 current_weight = self.running_peak_weight
+
+#		 # 3. Continuous point-wise Charbonnier Loss
+#		 weight_map = 1.0 + (current_weight - 1.0) * target
+#		 diff = pred - target
+#		 loss = torch.sqrt(weight_map * (diff ** 2) + self.eps)
+
+#		 return loss.mean()
+
+
+# class AdaptivePointwiseGaussianLoss(nn.Module):
+# 	def __init__(self, momentum=0.05, min_weight=1.0, max_weight=20.0, eps=1e-4):
+# 		super().__init__()
+# 		self.momentum = momentum
+# 		self.min_weight = min_weight
+# 		self.max_weight = max_weight
+# 		self.eps = eps
+# 		self.register_buffer("running_peak_weight", torch.tensor(3.0))
+
+# 	def forward(self, pred, target, sample_weight=None, update_ema=False, apply_peak_weight=True):
+# 		pred = pred.float()
+# 		target = target.float()
+
+# 		# 1. Update EMA on primary absolute passes
+# 		if update_ema and self.training:
+# 			fg_mass = target.sum()
+# 			if fg_mass > 0:
+# 				bg_mass = (1.0 - target).sum()
+# 				batch_weight = (bg_mass / (fg_mass + 1e-6)).clamp(self.min_weight, self.max_weight)
+# 				with torch.no_grad():
+# 					self.running_peak_weight.copy_(
+# 						(1.0 - self.momentum) * self.running_peak_weight + self.momentum * batch_weight
+# 					)
+
+# 		# 2. Build weight map
+# 		if apply_peak_weight:
+# 			current_weight = self.running_peak_weight
+# 			weight_map = 1.0 + (current_weight - 1.0) * torch.abs(target)
+# 		else:
+# 			# For relative losses: baseline weight is 1.0
+# 			weight_map = torch.ones_like(target)
+
+# 		# 3. Apply custom sample weighting (e.g. similarity weight)
+# 		if sample_weight is not None:
+# 			weight_map = weight_map * sample_weight
+
+# 		# 4. Point-wise Charbonnier Loss
+# 		diff = pred - target
+# 		loss = torch.sqrt(weight_map * (diff ** 2) + self.eps)
+
+# 		return loss.mean()
+
+
+class AdaptivePointwiseGaussianLoss(nn.Module):
+    def __init__(self, momentum=0.0001, min_weight=1.0, max_weight=15.0, eps=1e-4): # max_weight 20
+        super().__init__()
+        self.momentum = momentum
+        self.min_weight = min_weight
+        self.max_weight = max_weight
+        self.eps = eps
+        self.register_buffer("running_peak_weight", torch.tensor(3.0))
+
+    def forward(self, pred, target, sample_weight=None, update_ema=False, apply_peak_weight=True):
+        pred = pred.float()
+        target = target.float()
+
+        # 1. Update EMA peak scale on primary absolute ground-truth passes
+        if update_ema and self.training:
+            fg_mass = target.sum()
+            if fg_mass > 0:
+                bg_mass = (1.0 - target).sum()
+                batch_weight = (bg_mass / (fg_mass + 1e-6)).clamp(self.min_weight, self.max_weight)
+                with torch.no_grad():
+                    self.running_peak_weight.copy_(
+                        (1.0 - self.momentum) * self.running_peak_weight + self.momentum * batch_weight
+                    )
+
+        # 2. Construct structural weight map
+        if apply_peak_weight:
+            current_weight = self.running_peak_weight
+            weight_map = 1.0 + (current_weight - 1.0) * torch.abs(target)
+        else:
+            weight_map = torch.ones_like(target)
+
+        # 3. Multiply external sample weights (ensuring strict shape alignment)
+        if sample_weight is not None:
+            sample_weight = sample_weight.float().view_as(target)
+            weight_map = weight_map * sample_weight
+
+        # 4. Point-wise Charbonnier Loss
+        diff = pred - target
+        loss = torch.sqrt(weight_map * (diff ** 2) + self.eps)
+
+        return loss.mean()
+
+
+class UnifiedCharbonnierLoss(nn.Module):
+    """
+    Feature-complete Pointwise Charbonnier Loss.
+    Combines static peak boosting, external sample weighting, and target-mass normalization
+    to prevent zero-collapse while preserving spatial continuous heatmaps.
+    """
+    def __init__(self, peak_boost=10.0, eps=1e-4):
+        super().__init__()
+        self.peak_boost = peak_boost
+        self.eps = eps
+
+    def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
+        pred = pred.float()
+        target = target.float()
+
+        # 1. Structural peak weight map
+        if apply_peak_weight:
+            # Continuous scaling: peak centers get peak_boost weight, background gets 1.0x
+            weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
+        else:
+            weight_map = torch.ones_like(target)
+
+        # 2. External sample weighting (e.g., relative KNN similarity weights)
+        if sample_weight is not None:
+            sample_weight = sample_weight.float().view_as(target)
+            weight_map = weight_map * sample_weight
+
+        # 3. Point-wise Charbonnier error map
+        diff = pred - target
+        pointwise_loss = torch.sqrt(weight_map * (diff ** 2) + self.eps)
+
+        # 4. Mass Normalization (Prevents background drowning & zero-collapse)
+        if apply_peak_weight:
+            # Normalize by total foreground target mass present in batch
+            fg_mass = torch.clamp(torch.abs(target).sum(), min=1.0)
+            return pointwise_loss.sum() / fg_mass
+        else:
+            # For hard negatives or relative pairs (where target ~ 0), use element count mean
+            return pointwise_loss.mean()
+
+
+class EMAMassCharbonnierLoss1(nn.Module):
+    """
+    Charbonnier loss with Exponential Moving Average (EMA) mass normalization.
+    Designed for small batch sizes and sparse continuous target heatmaps.
+    """
+    def __init__(self, peak_boost=10.0, momentum=0.0005, eps=1e-4, default_mass=1.0):
+        super().__init__()
+        self.peak_boost = peak_boost
+        self.momentum = momentum
+        self.eps = eps
+        
+        # Track running average target mass per sample
+        self.register_buffer("running_target_mass", torch.tensor(default_mass, dtype=torch.float32, device = device))
+
+    def forward(self, pred, target, sample_weight=None, apply_peak_weight=True, update_ema = False):
+        pred = pred.float()
+        target = target.float()
+        batch_size = target.shape[0]
+
+        # 1. Structural peak weight map
+        if apply_peak_weight:
+            weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
+        else:
+            weight_map = torch.ones_like(target)
+
+        # 2. External sample weighting (relative KNN, masks, etc.)
+        if sample_weight is not None:
+            weight_map = weight_map * sample_weight.float().view_as(target)
+
+        # 3. Point-wise Charbonnier error
+        diff = pred - target
+        pointwise_loss = torch.sqrt(weight_map * (diff ** 2) + self.eps)
+
+        if apply_peak_weight:
+            # Calculate current batch's average target mass per sample
+            current_mass = torch.abs(target).sum() / max(batch_size, 1)
+
+            # Update EMA state only during training mode
+            if self.training:
+                with torch.no_grad():
+                    # Update running mass if the batch has positive targets
+                    if (current_mass > 0.001)*(update_ema == True):
+                        self.running_target_mass.mul_(1.0 - self.momentum).add_(
+                            self.momentum * current_mass.detach()
+                        )
+
+            # Use clamped EMA mass to prevent division by zero or extreme scaling
+            norm_factor = torch.clamp(self.running_target_mass, min=0.1) * batch_size
+            return pointwise_loss.sum() / norm_factor
+
+        else:
+            # Standard element-wise mean for auxiliary passes (negatives, relative distance)
+            return pointwise_loss.mean()
+
+
+class EMAMassCharbonnierLoss(nn.Module):
+    """
+    Charbonnier loss with Exponential Moving Average (EMA) mass normalization.
+    Designed for small batch sizes and sparse continuous target heatmaps.
+    """
+    def __init__(self, peak_boost=10.0, momentum=0.0005, eps=1e-3, default_mass=1.0):
+        super().__init__()
+        self.peak_boost = peak_boost
+        self.momentum = momentum
+        self.eps_sq = eps ** 2  # Standard Charbonnier eps^2
+
+        # Device-agnostic buffer registration
+        self.register_buffer("running_target_mass", torch.tensor(default_mass, dtype=torch.float32))
+
+    def forward(self, pred, target, sample_weight=None, apply_peak_weight=True, update_ema=False):
+        pred = pred.float()
+        target = target.float()
+        batch_size = target.shape[0]
+
+        # 1. Structural peak weight map
+        if apply_peak_weight:
+            weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
+        else:
+            weight_map = torch.ones_like(target)
+
+        # 2. External sample weighting
+        if sample_weight is not None:
+            weight_map = weight_map * sample_weight.float().view_as(target)
+
+        # 3. Point-wise Charbonnier error (Weight applied OUTSIDE the square root)
+        diff_sq = torch.clamp((pred - target) ** 2, min=0.0, max=1e6)
+        pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
+
+        if apply_peak_weight:
+            current_mass = torch.abs(target).sum() / max(batch_size, 1)
+
+            if self.training and update_ema:
+                with torch.no_grad():
+                    if current_mass > 0.001:
+                        self.running_target_mass.mul_(1.0 - self.momentum).add_(
+                            self.momentum * current_mass.detach()
+                        )
+
+            # Prevent zero or near-zero division safely
+            norm_factor = torch.clamp(self.running_target_mass, min=0.1) * batch_size
+            return pointwise_loss.sum() / norm_factor
+
+        else:
+            return pointwise_loss.mean()
+
+
+class CharbonnierLoss(nn.Module):
+    """
+    Robust Charbonnier Loss with EMA Mass Normalization.
+    Handles both Absolute Spatial Heatmaps and Relative Pair-Graph Losses seamlessly.
+    """
+    def __init__(self, peak_boost=10.0, momentum=0.0005, eps=1e-3, default_mass=1.0):
+        super().__init__()
+        self.peak_boost = peak_boost
+        self.momentum = momentum
+        self.eps_sq = eps ** 2
+
+        # EMA buffer for global dataset target mass
+        self.register_buffer("running_target_mass", torch.tensor(default_mass, dtype=torch.float32, device = device))
+
+    def forward(self, pred, target, sample_weight=None, apply_peak_weight=True, update_ema=False):
+        pred = pred.float()
+        target = target.float()
+        
+        # 1. Structural Peak Weight Map
+        if apply_peak_weight:
+            weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
+        else:
+            weight_map = torch.ones_like(target)
+
+        # 2. External Sample Weighting (e.g., relative slope contrast weight)
+        if sample_weight is not None:
+            weight_map = weight_map * sample_weight.float().view_as(target)
+
+        # 3. Proper Charbonnier Loss (Weight strictly OUTSIDE the square root)
+        diff_sq = (pred - target) ** 2
+        pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
+
+        # 4. EMA Mass Update (only on primary absolute heatmap passes)
+        if self.training and update_ema and apply_peak_weight:
+            with torch.no_grad():
+                current_mass = torch.abs(target).sum() / max(target.shape[0], 1)
+                if current_mass > 0.001:
+                    self.running_target_mass.mul_(1.0 - self.momentum).add_(
+                        self.momentum * current_mass.detach()
+                    )
+
+        # 5. Unified Normalization
+        if apply_peak_weight:
+            # Normalize by global target mass scale across batch size
+            norm_factor = torch.clamp(self.running_target_mass, min=0.1) * target.shape[0]
+            return pointwise_loss.sum() / norm_factor
+        else:
+            # For relative pair graph losses, weight_map already carries graph scale
+            # Weighted sum normalized by effective weight mass prevents gradient exploding on dense kNN
+            weight_sum = weight_map.sum().clamp(min=1e-5)
+            return pointwise_loss.sum() / weight_sum
 
 
 
@@ -4039,7 +3693,7 @@ else:
 
 mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device = device).to(device)
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
-
+logger = LossLogger()
 
 
 np.random.seed() ## randomize seed
@@ -4313,57 +3967,47 @@ if load_training_data == True:
 	dataset = TrainingDataset(np.random.permutation(files_load), n_batch, n_epochs, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded)
 
 
-use_dice_loss = True
-use_negative_loss = True
+use_dice_loss = False
+use_regression_loss = True
 use_consistency_loss = False
-use_cap_loss = True
-use_l1_loss = True
+use_negative_loss = True
+use_relative_loss = True
+use_cap_loss = False
 
 
 # DiceLoss = GaussianDiceLossL1() ## Can change the bg_weight
-DiceLoss = GaussianDiceLoss() ## Can change the bg_weight
+# DiceLoss = GaussianDiceLoss() ## Can change the bg_weight
+# gaussian_heatmap_loss = split_charbonnier_loss
+# gaussian_heatmap_loss_with_cap = split_charbonnier_loss
 
+loss_charbonnier_source = CharbonnierLoss()
+loss_charbonnier_assoc  = CharbonnierLoss()
 
 # LossBalancer = LossAccumulationBalancer(
-#     anchor='loss_dice2',
-#     group_targets={
-#         'primary':    1.0,       # everything starting with loss_dice
-#         'loss_regression': 0.02,      # smooth l1 loss
-#         'loss_consistency': 0.005,    # tiny regularizer
-#         'loss_negative':     0.02,      # loss_negative, loss_cap1, etc.
-#         'aux': 0.02, ## Base loss
-#         # add more whenever you want
-#     },
-#     primary_ext='loss_dice',
-#     alpha=0.98,
-#     device = device
+# 	anchor='loss_dice2',
+# 	group_targets={
+# 		'primary':	1.0,	   # everything starting with loss_dice
+# 		'loss_regression': 0.2,	  # smooth l1 loss
+# 		'loss_consistency': 0.05,	# tiny regularizer
+# 		'loss_negative':	 0.08,	  # loss_negative, loss_cap1, etc.
+# 		'aux': 0.1, ## Base loss
+# 		# add more whenever you want
+# 	},
+# 	primary_ext='loss_dice',
+# 	alpha=0.98,
+# 	device = device
 # )
-
-LossBalancer = LossAccumulationBalancer(
-    anchor='loss_dice2',
-    group_targets={
-        'primary':    1.0,       # everything starting with loss_dice
-        'loss_regression': 0.2,      # smooth l1 loss
-        'loss_consistency': 0.05,    # tiny regularizer
-        'loss_negative':     0.08,      # loss_negative, loss_cap1, etc.
-        'aux': 0.1, ## Base loss
-        # add more whenever you want
-    },
-    primary_ext='loss_dice',
-    alpha=0.98,
-    device = device
-)
 
 
 loader = DataLoader(
-    dataset,
-    batch_size=1,              # ← 64 events at a time → 64 × 10 = 640 sub-samples
-    shuffle=True,
-    num_workers=3,             # ← THIS is what makes it fast
-    pin_memory=True,
-    persistent_workers=True,
-    prefetch_factor=3,          # PyTorch 2.0+: loads 4×batch_size ahead
-    collate_fn=collate_no_batch
+	dataset,
+	batch_size=1,			  # ← 64 events at a time → 64 × 10 = 640 sub-samples
+	shuffle=True,
+	num_workers=3,			 # ← THIS is what makes it fast
+	pin_memory=True,
+	persistent_workers=True,
+	prefetch_factor=3,		  # PyTorch 2.0+: loads 4×batch_size ahead
+	collate_fn=collate_no_batch
 )
 
 ## Set initial counter
@@ -4371,6 +4015,7 @@ loader = DataLoader(
 log_buffer = [] ## Append write operations to here and flush every 10 steps
 len_loader = len(loader) ## Why not loop over data until n_epochs
 out_save = None
+
 
 
 # for i in range(n_restart_step, n_epochs):
@@ -4390,7 +4035,7 @@ for batch_idx, inputs in enumerate(loader):
 		## Load model and optimizer.
 		mz.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
 		optimizer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(n_restart_step, n_ver), map_location = device))
-		LossBalancer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(n_restart_step, n_ver), map_location = device))
+		# LossBalancer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(n_restart_step, n_ver), map_location = device))
 		zlosses = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_restart_step, n_ver))
 		losses[0:n_restart_step] = zlosses['losses'][0:n_restart_step]
 		mx_trgt_1[0:n_restart_step] = zlosses['mx_trgt_1'][0:n_restart_step]; mx_trgt_2[0:n_restart_step] = zlosses['mx_trgt_2'][0:n_restart_step]
@@ -4410,7 +4055,7 @@ for batch_idx, inputs in enumerate(loader):
 		## Add save state of loss balancer so can re load
 		torch.save(mz.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(i, n_ver))
 		torch.save(optimizer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(i, n_ver))
-		torch.save(LossBalancer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(i, n_ver))
+		# torch.save(LossBalancer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(i, n_ver))
 		# torch.save(balancer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(i, n_ver))
 		np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
 		print('saved model %s %d'%(n_ver, i))
@@ -4508,10 +4153,13 @@ for batch_idx, inputs in enumerate(loader):
 	mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4 = 0.0, 0.0, 0.0, 0.0
 	mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4 = 0.0, 0.0, 0.0, 0.0
 
-	loss_src_val = 0.0
-	loss_asc_val = 0.0
+	loss_dice_src_val = 0.0
+	loss_dice_asc_val = 0.0
 	loss_consistency_val = 0.0
+	loss_reg_src_val = 0.0
+	loss_reg_asc_val = 0.0
 	loss_negative_val = 0.0
+	loss_relative_val = 0.0
 
 
 	for inc, i0 in enumerate(range(n_batch)):
@@ -4562,19 +4210,10 @@ for batch_idx, inputs in enumerate(loader):
 
 
 		## Forward pass
-		out = mz(*input_tensors_l[i0], save_state = True) if (use_negative_loss == True)*(np.mod(i, use_negative_loss_step) == 0) else mz(*input_tensors_l[i0])
+		out = mz(*input_tensors_l[i0], save_state = True) if (use_negative_loss == True)*(np.mod(i, use_negative_loss_step) == 0)*(ramp_aux > 0.0) else mz(*input_tensors_l[i0])
 
 
-		# else:
-		# 	# out, grads = mz(*input_tensors)
-		# 	out, grads = mz(*input_tensors_l[i0], save_state = True) if (use_negative_loss == True)*(np.mod(i, use_negative_loss_step) == 0) else mz(*input_tensors_l[i0])
-		# 	grad_grid_src, grad_grid_t, grad_query_src, grad_query_t = grads
-
-
-
-		## Select the specific pick labels (or can re-create above)
 		pick_lbls = pick_lbls_l[i0]
-
 
 
 		## Make plots
@@ -4641,80 +4280,30 @@ for batch_idx, inputs in enumerate(loader):
 
 
 		# ==================== 1. DICE / LOCALIZATION LOSSES ====================
-		if use_dice_loss:
-			loss_base1 = DiceLoss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
-			loss_dice2 = DiceLoss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
-			loss_dice3 = DiceLoss(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0])
-			loss_dice4 = DiceLoss(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1])
+		# if use_dice_loss:
+		# 	loss_base1 = weights[0] * DiceLoss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
+		# 	loss_dice2 = weights[1] * DiceLoss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
+		# 	loss_dice3 = weight_assoc_v[inc] * weights[2] * DiceLoss(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0])
+		# 	loss_dice4 = weight_assoc_v[inc] * weights[3] * DiceLoss(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1])
 
-			loss_src_val += (loss_base1.item() + loss_dice2.item()) / n_batch
-			loss_asc_val += (loss_dice3.item() + loss_dice4.item()) / n_batch
+		# 	loss_dice_src_val += (loss_base1.item() + loss_dice2.item()) / n_batch
+		# 	loss_dice_asc_val += (loss_dice3.item() + loss_dice4.item()) / n_batch
 
 		# ==================== 2. REGRESSION / AMPLITUDE LOSSES ====================
-		if use_l1_loss:
+		if use_regression_loss:
 			# Uncapped baselines
-			l_base_u = weights[0] * gaussian_heatmap_loss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
-			l_query_u = weights[1] * gaussian_heatmap_loss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
-			l_p_u = weight_assoc_v[inc] * weights[2] * gaussian_heatmap_loss(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0])
-			l_s_u = weight_assoc_v[inc] * weights[3] * gaussian_heatmap_loss(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1])
+			loss_reg_query = weights[1] * loss_charbonnier_source(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], update_ema = True)
+			loss_reg_base = weights[0] * loss_charbonnier_source(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
+			loss_reg_assoc_P = weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True)
+			loss_reg_assoc_S = weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True)
 
-			if use_cap_loss and ramp_aux > 0.0:
-				l_base_c = weights[0] * gaussian_heatmap_loss_with_cap(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
-				l_query_c = weights[1] * gaussian_heatmap_loss_with_cap(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
-				l_p_c = weight_assoc_v[inc] * weights[2] * gaussian_heatmap_loss_with_cap(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0])
-				l_s_c = weight_assoc_v[inc] * weights[3] * gaussian_heatmap_loss_with_cap(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1])
+			loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch
+			loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch
 
-				loss_reg_base = (1.0 - ramp_aux) * l_base_u + ramp_aux * l_base_c
-				loss_reg_query = (1.0 - ramp_aux) * l_query_u + ramp_aux * l_query_c
-				loss_reg_assoc_P = (1.0 - ramp_aux) * l_p_u + ramp_aux * l_p_c
-				loss_reg_assoc_S = (1.0 - ramp_aux) * l_s_u + ramp_aux * l_s_c
-			else:
-				loss_reg_base, loss_reg_query = l_base_u, l_query_u
-				loss_reg_assoc_P, loss_reg_assoc_S = l_p_u, l_s_u
-
-		# # ==================== 3. NEGATIVE SAMPLING LOSS ====================
-		# computed_negative_loss = False
-		# rand_use_negative = (use_real_data_sample_v[inc] == False) or (np.random.rand() < rand_mask_ratio)
-
-		# if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
-
-		# 	min_up_sample = 0.1
-		# 	prob_up_sample = np.maximum((out[1][:, 0].cpu().detach()
-		# 			* (out[1][:, 0].cpu().detach() > min_up_sample)
-		# 			* (Lbls_query[i0][:, 0].detach() < min_up_sample)).cpu().detach().numpy(), 0.0)
-
-		# 	if prob_up_sample.sum() == 0:
-		# 		prob_up_sample = np.ones(len(prob_up_sample))
-		# 	prob_up_sample = prob_up_sample / prob_up_sample.sum()
-
-		# 	is_global_lon = (lon_range_extend[1] - lon_range_extend[0]) >= 359.0
-
-		# 	# Calling sample_dense_queries with standardized parameter names
-		# 	x_query_sample, x_query_sample_t = sample_dense_queries(
-		# 		x_query=X_query[i0][:, 0:3].cpu().detach().numpy(),
-		# 		x_query_t=X_query[i0][:, 3].cpu().detach().numpy(),
-		# 		prob=prob_up_sample,
-		# 		lat_range=lat_range_extend,
-		# 		lon_range=lon_range_extend,
-		# 		depth_range=depth_range,
-		# 		src_x_kernel_m=src_x_kernel,
-		# 		src_depth_kernel_m=src_depth_kernel,
-		# 		src_t_kernel=src_t_kernel,
-		# 		time_shift_range=time_shift_range,
-		# 		replace=False,
-		# 		randomize=False,
-		# 		is_global_lon=is_global_lon,
-		# 	)
-
-		# 	out_query = mz.forward_queries(torch.Tensor(ftrns1(x_query_sample)).to(device), torch.Tensor(x_query_sample_t).to(device), train=True)
-		# 	lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, lp_srcs[i0][:, 0:3].cpu().detach().numpy(), lp_srcs[i0][:, 3].cpu().detach().numpy(), src_spatial_kernel, src_t_kernel, ftrns1)
-
-		# 	raw_loss_negative = gaussian_heatmap_loss(out_query, torch.Tensor(lbls_query).to(device))
-		# 	loss_negative_val += raw_loss_negative.item()
-		# 	computed_negative_loss = True
 
 		# ==================== 3. NEGATIVE SAMPLING LOSS ====================
 		computed_negative_loss = False
+		loss_negative = torch.Tensor([0.0]).to(device)
 		rand_use_negative = (use_real_data_sample_v[inc] == False) or (np.random.rand() < rand_mask_ratio)
 
 		if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
@@ -4777,15 +4366,77 @@ for batch_idx, inputs in enumerate(loader):
 			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, sources_np[:, 0:3], sources_np[:, 3], src_spatial_kernel, src_t_kernel, ftrns1)
 
 			# Final Safety Gate: Strip any perturbed point that bounced back onto a non-zero label
-			lbls_query_tensor = torch.Tensor(lbls_query).to(device)
+			lbls_query_tensor = torch.tensor(lbls_query, dtype=torch.float32, device = device) # .to(device)
 			neg_mask_final = (lbls_query_tensor[:, 0] < 0.01)
 
 			if neg_mask_final.any():
-				raw_loss_negative = gaussian_heatmap_loss(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final])
-				loss_negative_val += raw_loss_negative.item()
+				# raw_loss_negative = gaussian_heatmap_loss(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final])
+				# loss_negative = weights[1] * charbonnier_loss(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final])
+				loss_negative = weights[1] * loss_charbonnier_source(out_query[neg_mask_final].squeeze(), lbls_query_tensor[neg_mask_final].squeeze(), apply_peak_weight = False)
+				loss_negative_val += loss_negative.item() / n_batch
 				computed_negative_loss = True
 		
-		# ==================== 4. CONSISTENCY LOSS ====================
+
+		# # ==================== 4. RELATIVE LOSS ===================== #
+		# loss_rel = torch.Tensor([0.0]).to(device)
+		# computed_relative_loss = False
+		# # if (use_relative_loss == True)*(ramp_aux > 0):
+		# if use_relative_loss and (ramp_aux > 0.0):
+		# 	k_nearest_query = 150
+		# 	lbls_query_cuda = Lbls_query[i0].to(device)
+		# 	active_mask = torch.where(lbls_query_cuda[:,0] > 0.01)[0]
+
+		# 	if len(active_mask) > 1:
+		# 		edges_query = active_mask[knn(ftrns1_diff(X_query[i0][active_mask].to(device))/1000.0, ftrns1_diff(X_query[i0][active_mask].to(device))/1000.0, k = min(len(active_mask) - 1, k_nearest_query))] #] # .flip(0).contiguous()
+		# 		trgt_rel = lbls_query_cuda[edges_query[0]] - lbls_query_cuda[edges_query[1]]
+		# 		pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
+		# 		weight_rel = torch.maximum(lbls_query_cuda[edges_query[0]], lbls_query_cuda[edges_query[1]])*(1.0 - torch.exp(-torch.abs(trgt_rel)/0.25))
+		# 		# loss_rel = weights[1] * charbonnier_loss(pred_rel, trgt_rel, weight = weight_rel)
+		# 		loss_rel = weights[1] * loss_charbonnier_source(pred_rel, trgt_rel, sample_weight = weight_rel, apply_peak_weight = False)
+		# 		loss_relative_val += loss_rel.item() / n_batch
+		# 		computed_relative_loss = True
+
+
+		# ==================== 4. RELATIVE LOSS ===================== #
+		loss_rel = torch.tensor([0.0], device=device)
+		computed_relative_loss = False
+
+		if use_relative_loss and (ramp_aux > 0.0):
+		    k_nearest_query = 150
+		    # Enforce 1D tensors [N] to avoid [M, 1] vs [M] matrix broadcasting
+		    lbls_query_cuda = Lbls_query[i0][:, 0].to(device)
+		    pred_query_cuda = out[1][:, 0] if out[1].ndim > 1 else out[1]
+		    
+		    active_mask = torch.where(lbls_query_cuda > 0.01)[0]
+		    
+		    if len(active_mask) > 1:
+		        # 1. kNN on active point coordinates
+		        x_active = ftrns1_diff(X_query[i0][active_mask].to(device)) / 1000.0
+		        k_actual = min(len(active_mask) - 1, k_nearest_query)
+		        
+		        # 2. Global index mapping via active_mask
+		        edges_query = active_mask[knn(x_active, x_active, k=k_actual)]
+		        
+		        # 3. Gather targets & predictions (strictly 1D)
+		        trgt_i, trgt_j = lbls_query_cuda[edges_query[0]], lbls_query_cuda[edges_query[1]]
+		        pred_i, pred_j = pred_query_cuda[edges_query[0]], pred_query_cuda[edges_query[1]]
+		        
+		        trgt_rel = trgt_i - trgt_j
+		        pred_rel = pred_i - pred_j
+		        
+		        # 4. Max Amplitude * Slope Contrast weighting
+		        weight_rel = torch.maximum(trgt_i, trgt_j) * (1.0 - torch.exp(-torch.abs(trgt_rel) / 0.25))
+		        
+		        # 5. Charbonnier Relative Loss
+		        loss_rel = weights[1] * loss_charbonnier_source(
+		            pred_rel, trgt_rel, sample_weight=weight_rel, apply_peak_weight=False
+		        )
+		        loss_relative_val += loss_rel.item() / n_batch
+		        computed_relative_loss = True
+
+
+
+		# ==================== 5. CONSISTENCY LOSS ====================
 		loss_consistency_flag = False
 		if use_consistency_loss and (ramp_aux > 0.0) and (out_save is not None):
 			ilen = int(np.floor(n_batch / 2 / 2))
@@ -4808,28 +4459,37 @@ for batch_idx, inputs in enumerate(loader):
 		pre_scale_weights1 = [0.5, 2.0]
 		pre_scale_weights2 = [5.0, 50.0]
 
+
+		# Build loss dict for logging (unscaled raw losses)
 		loss_dict = {
-			'loss_base1': loss_base1,
-			'loss_dice2': loss_dice2,
-			'loss_dice3_P': loss_dice3,
-			'loss_dice4_S': loss_dice4,
-			'loss_base1_reg': loss_reg_base,
-			'loss_regression2': loss_reg_query,
-			'loss_regression3_P': loss_reg_assoc_P,
-			'loss_regression4_S': loss_reg_assoc_S,
+			'reg_query': loss_reg_query,
+			'reg_base': loss_reg_base,
+			'reg_assoc_P': loss_reg_assoc_P,
+			'reg_assoc_S': loss_reg_assoc_S,
 		}
 
+		# Add conditional losses safely (if not computed, simply don't pass them)
 		if computed_negative_loss:
-			loss_dict['aux_negative'] = ramp_aux * raw_loss_negative
+			loss_dict['aux_negative'] = loss_negative
 
-		if loss_consistency_flag:
-			loss_dict['aux_consistency'] = ramp_aux * raw_loss_consistency
+		if computed_relative_loss:
+			loss_dict['aux_relative'] = loss_rel
 
 
+		loss = 1.0*(loss_reg_query + loss_reg_base + loss_reg_assoc_P + loss_reg_assoc_S)
+		# loss += 0.1*(loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
 
-		loss = LossBalancer(loss_dict, accum_steps = n_batch, is_last_accum_step = (inc == (n_batch - 1))) # losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False
+		if computed_negative_loss == True:
+			loss += 0.3*ramp_aux*loss_negative
+
+		if computed_relative_loss == True:
+			loss += 0.2*ramp_aux*loss_rel
+
+		# print(f"Query: {loss_reg_query.item():.4f} | Neg: {loss_negative.item():.4f} | Rel: {loss_rel.item():.4f}")
+
+		# loss = LossBalancer(loss_dict, accum_steps = n_batch, is_last_accum_step = (inc == (n_batch - 1))) # losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False
 		loss = loss/n_batch
-
+		loss.backward(retain_graph = False)
 
 
 		n_visualize_step = 1000
@@ -4841,12 +4501,6 @@ for batch_idx, inputs in enumerate(loader):
 			visualize_predictions(out_plot, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
 
 
-		if inc != (n_batch - 1):
-			loss.backward(retain_graph = False)
-		else:
-			loss.backward(retain_graph = False)
-
-
 		loss_val += loss.item()
 		mx_trgt_val_1 += Lbls[i0].max()
 		mx_trgt_val_2 += Lbls_query[i0].max()
@@ -4856,6 +4510,24 @@ for batch_idx, inputs in enumerate(loader):
 		mx_pred_val_2 += out[1].max().item()
 		mx_pred_val_3 += out[2].max().item()
 		mx_pred_val_4 += out[3].max().item()
+
+
+        # # 1. Zero gradients, compute primary loss backward
+        # optimizer.zero_grad()
+        # (loss_reg_query + loss_reg_base + loss_reg_assoc_P + loss_reg_assoc_S).backward(retain_graph=True)
+        # primary_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
+
+        # # 2. Compute relative loss backward independently
+        # if computed_relative_loss:
+        #     optimizer.zero_grad()
+        #     (0.2 * loss_rel).backward(retain_graph=True)
+        #     rel_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
+            
+        #     print(f"[Grad Ratio] Primary: {primary_grad_norm:.4f} | Relative (x0.2): {rel_grad_norm:.4f} | Ratio: {rel_grad_norm / (primary_grad_norm + 1e-8):.4f}")
+
+        # # 3. Clear and do the real combined backward step
+        # optimizer.zero_grad()
+
 
 
 	use_grad_norm = False
@@ -4876,13 +4548,13 @@ for batch_idx, inputs in enumerate(loader):
 	mx_pred_4[i] = mx_pred_val_4/n_batch
 	# loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
-	print('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_negative_val, loss_consistency_val))
+	print('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_dice_src_val, loss_dice_asc_val, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val))
 
 	# Log losses
 	if use_wandb_logging == True:
 		wandb.log({"loss": loss_val})
 
-	log_buffer.append('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_negative_val, loss_consistency_val))
+	log_buffer.append('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_dice_src_val, loss_dice_asc_val, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val))
 
 	if np.mod(i, 10) == 0:
 		with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
@@ -4890,6 +4562,94 @@ for batch_idx, inputs in enumerate(loader):
 				# text_file.write('%d loss %0.9f, trgts: %0.5f, %0.5f, %0.5f, %0.5f, preds: %0.5f, %0.5f, %0.5f, %0.5f [%0.5f, %0.5f, %0.5f, %0.5f, %0.5f] (reg %0.8f) \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_src_val, loss_asc_val, loss_negative_val, loss_cap_val, loss_consistency_val, (10e4)*loss_regularize_val))
 				text_file.write(log)
 		log_buffer.clear()
+
+
+
+
+# # ==================== 2. REGRESSION / AMPLITUDE LOSSES ====================
+# if use_regression_loss:
+#     # GT Heatmap pass: Update EMA and apply dynamic peak weighting
+#     loss_reg_query = weights[1] * loss_charbonnier_source(
+#         out[1][mask_lbls_query_l[i0]], 
+#         torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], 
+#         update_ema=True, 
+#         apply_peak_weight=True
+#     )
+#     loss_reg_base = weights[0] * loss_charbonnier_source(
+#         out[0][mask_lbls_l[i0]], 
+#         torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]],
+#         update_ema=False,
+#         apply_peak_weight=True
+#     )
+#     loss_reg_assoc_P = weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(
+#         out[2][mask_lbls_assoc_query_l[i0], :, 0], 
+#         pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], 
+#         update_ema=True, 
+#         apply_peak_weight=True
+#     )
+#     loss_reg_assoc_S = weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(
+#         out[3][mask_lbls_assoc_query_l[i0], :, 0], 
+#         pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], 
+#         update_ema=True, 
+#         apply_peak_weight=True
+#     )
+
+#     loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch
+#     loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch
+
+
+# # ==================== 3. NEGATIVE SAMPLING LOSS ====================
+# computed_negative_loss = False
+# loss_negative = torch.tensor([0.0], device=device)
+# rand_use_negative = (use_real_data_sample_v[inc] == False) or (np.random.rand() < rand_mask_ratio)
+
+# if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
+#     # [... negative sampling logic ...]
+
+#     if neg_mask_final.any():
+#         # Baseline weight = 1.0 (apply_peak_weight=False avoids evaluating target * peak_weight)
+#         loss_negative = weights[1] * loss_charbonnier_source(
+#             out_query[neg_mask_final], 
+#             lbls_query_tensor[neg_mask_final],
+#             update_ema=False,
+#             apply_peak_weight=False
+#         )
+#         loss_negative_val += loss_negative.item() / n_batch
+#         computed_negative_loss = True
+
+
+# # ==================== 4. RELATIVE LOSS ===================== #
+# loss_rel = torch.tensor([0.0], device=device)
+# computed_relative_loss = False
+
+# if use_relative_loss and (ramp_aux > 0.0):
+#     k_nearest_query = 50
+#     edges_query = knn(
+#         ftrns1_diff(X_query[i0].to(device)) / 1000.0, 
+#         ftrns1_diff(X_query[i0].to(device)) / 1000.0, 
+#         k=k_nearest_query
+#     )
+#     trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
+#     pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
+    
+#     # Gaussian similarity weighting focused strictly on similar points (|trgt_rel| -> 0)
+#     weight_rel = torch.exp(-torch.abs(trgt_rel) / 0.35)
+    
+#     # Bypasses peak weighting to prevent weight cancellation conflict
+#     loss_rel = weights[1] * loss_charbonnier_source(
+#         pred_rel, 
+#         trgt_rel, 
+#         sample_weight=weight_rel, 
+#         update_ema=False,
+#         apply_peak_weight=False
+#     )
+#     loss_relative_val += loss_rel.item() / n_batch
+#     computed_relative_loss = True
+
+
+
+
+
 
 
 def compute_loss(x, n_repeat = 10, return_metrics = False):
