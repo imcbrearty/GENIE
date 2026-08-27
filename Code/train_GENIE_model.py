@@ -229,10 +229,8 @@ if use_teleseisim_noise == True:
 	trv_teleseism = trv_teleseism[ipos]
 
 
-
 if use_negative_loss == True:
 	assert(use_gradient_loss == False) ## Right now might not be compatible with gradient loss due to the query layer not re-computing gradients
-
 
 
 ## Load specific subsets of stations to train on in addition to random
@@ -3136,10 +3134,67 @@ def split_charbonnier_loss(pred, target, threshold=0.01, pos_weight=0.5, eps=1e-
     return pos_weight * pos_loss + (1.0 - pos_weight) * neg_loss
 
 
+# class RobustCharbonnierLoss(nn.Module):
+#     def __init__(self, peak_boost=10.0, eps=1e-3):
+#         super().__init__()
+#         self.peak_boost = peak_boost
+#         self.eps_sq = eps ** 2
+
+#     def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
+#         if pred.numel() == 0 or target.numel() == 0:
+#             return pred.sum() * 0.0
+
+#         pred = pred.float()
+#         target = target.float()
+
+#         if apply_peak_weight:
+#             weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
+#         else:
+#             weight_map = torch.ones_like(target)
+
+#         if sample_weight is not None:
+#             weight_map = weight_map * sample_weight.float().view_as(target)
+
+#         diff_sq = (pred - target).pow(2)
+#         pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
+
+#         # Self-normalizing per-batch average keeping global semantics consistent
+#         return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
+
+
+# class RobustCharbonnierLoss(nn.Module):
+#     def __init__(self, peak_boost=10.0, eps=1e-3):
+#         super().__init__()
+#         self.peak_boost = peak_boost
+#         self.eps_sq = eps ** 2
+
+#     def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
+#         if pred.numel() == 0 or target.numel() == 0:
+#             return pred.sum() * 0.0
+
+#         pred = pred.float()
+#         target = target.float()
+
+#         if apply_peak_weight:
+#             # Fixed global linear boost scaling
+#             weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
+#         else:
+#             weight_map = torch.ones_like(target)
+
+#         if sample_weight is not None:
+#             weight_map = weight_map * sample_weight.float().view_as(target)
+
+#         diff_sq = (pred - target).pow(2)
+#         pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
+
+#         # Standard self-normalization keeps loss magnitudes consistent and stable
+#         return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
+
+
 class RobustCharbonnierLoss(nn.Module):
     def __init__(self, peak_boost=10.0, eps=1e-3):
         super().__init__()
-        self.peak_boost = peak_boost
+        self.peak_boost = float(peak_boost)
         self.eps_sq = eps ** 2
 
     def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
@@ -3150,18 +3205,20 @@ class RobustCharbonnierLoss(nn.Module):
         target = target.float()
 
         if apply_peak_weight:
+            # Linear scaling tied directly to Gaussian target amplitude
             weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
         else:
             weight_map = torch.ones_like(target)
 
         if sample_weight is not None:
-            weight_map = weight_map * sample_weight.float().view_as(target)
+            weight_map = weight_map * sample_weight.float().expand_as(target)
 
         diff_sq = (pred - target).pow(2)
         pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
 
-        # Self-normalizing per-batch average keeping global semantics consistent
+        # Self-normalization preserves identical gradient scale across all heads
         return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
+
 
 
 if use_station_corrections == True:
@@ -3599,6 +3656,7 @@ use_consistency_loss = False
 use_negative_loss = True
 use_relative_loss = True
 use_cap_loss = False
+use_grad_norm = False
 
 
 # LossBalancer = LossAccumulationBalancer(
@@ -3635,50 +3693,66 @@ len_loader = len(loader) ## Why not loop over data until n_epochs
 out_save = None
 
 
-pre_compute_peak_boost = True
 if pre_compute_peak_boost:
-    n_check_files = min(n_files, len(files_load))
+    n_check_files = min(100, len(loader))
 
-    points_base, points_query, points_assoc = 0.0, 0.0, 0.0
-    signal_base, signal_query, signal_assoc = 0.0, 0.0, 0.0
+    bg_weight_base, sig_weight_base = 0.0, 0.0
+    bg_weight_query, sig_weight_query = 0.0, 0.0
+    bg_weight_assoc, sig_weight_assoc = 0.0, 0.0
 
-    print("Pre-computing dynamic dataset peak boost factors...")
+    print("Pre-computing continuous 4D Gaussian peak boost factors...")
     for batch_idx, inputs in enumerate(loader):
         if batch_idx >= n_check_files:
             break
 
-        # Unpack inputs safely
         if not use_gradient_loss:
             _, _, _, _, _, Lbls, Lbls_query, _, pick_lbls_l, _, _ = inputs[1]
         else:
             _, _, _, _, _, Lbls, Lbls_query, _, pick_lbls_l, _, _, _, _, _, _ = inputs[1]
 
         for i0 in range(len(Lbls)):
-            # Conversion to tensor + .item() prevents memory graph retention
-            lbl_base = torch.as_tensor(Lbls[i0], dtype=torch.float32)
-            lbl_query = torch.as_tensor(Lbls_query[i0], dtype=torch.float32)
-            lbl_assoc = torch.as_tensor(pick_lbls_l[i0], dtype=torch.float32)
+            lbl_base = torch.abs(torch.as_tensor(Lbls[i0], dtype=torch.float32))
+            lbl_query = torch.abs(torch.as_tensor(Lbls_query[i0], dtype=torch.float32))
+            
+            # Extract P and S pick maps separately (matching 2D training shape)
+            lbl_assoc_raw = torch.abs(torch.as_tensor(pick_lbls_l[i0], dtype=torch.float32))
+            lbl_assoc_p = lbl_assoc_raw[..., 0]
+            lbl_assoc_s = lbl_assoc_raw[..., 1]
 
-            points_base += float(lbl_base.numel())
-            signal_base += torch.abs(lbl_base).sum().item()
+            # 1. Base Grid (Continuous Gaussian integration)
+            sig_mask_b = lbl_base > 0.01
+            bg_weight_base += (~sig_mask_b).sum().item()
+            sig_weight_base += lbl_base[sig_mask_b].sum().item()
 
-            points_query += float(lbl_query.numel())
-            signal_query += torch.abs(lbl_query).sum().item()
+            # 2. Query Grid (Focused 4D sampling)
+            sig_mask_q = lbl_query > 0.01
+            bg_weight_query += (~sig_mask_q).sum().item()
+            sig_weight_query += lbl_query[sig_mask_q].sum().item()
 
-            points_assoc += float(lbl_assoc.numel())
-            signal_assoc += torch.abs(lbl_assoc).sum().item()
+            # 3. Association Matrix (Average across P and S channels)
+            sig_mask_ap = lbl_assoc_p > 0.01
+            sig_mask_as = lbl_assoc_s > 0.01
+            bg_weight_assoc += ((~sig_mask_ap).sum().item() + (~sig_mask_as).sum().item()) / 2.0
+            sig_weight_assoc += (lbl_assoc_p[sig_mask_ap].sum().item() + lbl_assoc_s[sig_mask_as].sum().item()) / 2.0
 
-    # Calculate optimal analytical dataset ratios
-    peak_boost_base = (points_base - signal_base) / (signal_base + 1e-6)
-    peak_boost_query = (points_query - signal_query) / (signal_query + 1e-6)
-    peak_boost_assoc = (points_assoc - signal_assoc) / (signal_assoc + 1e-6)
+    # 4. Raw Unconstrained Ratios
+    raw_boost_base  = bg_weight_base / (sig_weight_base + 1e-6)
+    raw_boost_query = bg_weight_query / (sig_weight_query + 1e-6)
+    raw_boost_assoc = bg_weight_assoc / (sig_weight_assoc + 1e-6)
 
-    # Upper bound clamp (e.g. max 100.0) to prevent extreme gradient spikes on ultra-sparse targets
-    peak_boost_base = min(max(peak_boost_base, 1.0), 100.0)
-    peak_boost_query = min(max(peak_boost_query, 1.0), 100.0)
-    peak_boost_assoc = min(max(peak_boost_assoc, 1.0), 100.0)
+    # 5. Relative Normalization to Target Peak Boost Range (e.g. Min 5.0, Max 25.0)
+    MAX_TARGET_BOOST = 25.0
+    MIN_TARGET_BOOST = 5.0
 
-    print(f"Computed Peak Boosts -> Base: {peak_boost_base:.2f} | Query: {peak_boost_query:.2f} | Assoc: {peak_boost_assoc:.2f}")
+    raw_max = max(raw_boost_base, raw_boost_query, raw_boost_assoc, 1e-6)
+
+    # Scale relative to the maximum sparse head, keeping ratios intact
+    peak_boost_base  = max(MIN_TARGET_BOOST, (raw_boost_base / raw_max) * MAX_TARGET_BOOST)
+    peak_boost_query = max(MIN_TARGET_BOOST, (raw_boost_query / raw_max) * MAX_TARGET_BOOST)
+    peak_boost_assoc = max(MIN_TARGET_BOOST, (raw_boost_assoc / raw_max) * MAX_TARGET_BOOST)
+
+    print(f"Raw Continuous Ratios -> Base: {raw_boost_base:.1f} | Query: {raw_boost_query:.1f} | Assoc: {raw_boost_assoc:.1f}")
+    print(f"Scaled Peak Boosts   -> Base: {peak_boost_base:.2f} | Query: {peak_boost_query:.2f} | Assoc: {peak_boost_assoc:.2f}")
 
 
 
@@ -3973,7 +4047,7 @@ for batch_idx, inputs in enumerate(loader):
 		    loss_p_charb = loss_charb_assoc(pred_assoc_p[mask_assoc], pick_p_cuda[mask_assoc])
 		    loss_s_charb = loss_charb_assoc(pred_assoc_s[mask_assoc], pick_s_cuda[mask_assoc])
 
-		    if use_dice:
+		    if use_dice_loss:
 		        loss_p_dice = loss_dice_assoc(pred_assoc_p[mask_assoc], pick_p_cuda[mask_assoc])
 		        loss_s_dice = loss_dice_assoc(pred_assoc_s[mask_assoc], pick_s_cuda[mask_assoc])
 		        
