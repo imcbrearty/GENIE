@@ -939,7 +939,7 @@ def generate_travel_time_noise(
     gamma_path=0.15,  # Path noise growth coefficient (sec / sqrt(sec))
     scale_extra=1.0,
     s_wave_multiplier=2.2,
-    excess_threshold_sigma=2.0,
+    excess_threshold_sigma=2.2, # 2.0
     apply_systemic_bias=False,
     total_bias=0.03,
     frac_bias_s_ratio=0.3,
