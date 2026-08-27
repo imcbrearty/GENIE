@@ -3693,6 +3693,7 @@ len_loader = len(loader) ## Why not loop over data until n_epochs
 out_save = None
 
 
+pre_compute_peak_boost = True
 if pre_compute_peak_boost:
 	n_check_files = min(100, len(loader))
 
@@ -4147,14 +4148,14 @@ for batch_idx, inputs in enumerate(loader):
 		computed_relative_loss = False
 
 		if use_relative_loss and (ramp_aux > 0.0):
-			k_nearest_query = 150
+			k_nearest_query = 100 - 1
 			lbls_query_cuda = torch.as_tensor(Lbls_query[i0], device=device, dtype=torch.float32).squeeze()
 			pred_query_cuda = out[1][:, 0] if out[1].ndim > 1 else out[1]
 			
 			active_mask = torch.where(lbls_query_cuda > 0.01)[0]
 			
 			if len(active_mask) > 1:
-				x_active = torch.cat((ftrns1_diff(X_query[i0][active_mask].to(device)) / 1000.0, scale_time*X_query[i0][active_mask,3:4].to(device)), dim = 1)
+				x_active = torch.cat((ftrns1_diff(X_query[i0][active_mask.cpu()].to(device)) / 1000.0, scale_time*X_query[i0][active_mask.cpu(),3:4].to(device)), dim = 1)
 				k_actual = min(len(active_mask) - 1, k_nearest_query)
 				
 				edges_query = active_mask[knn(x_active, x_active, k=k_actual)]
@@ -4273,6 +4274,14 @@ for batch_idx, inputs in enumerate(loader):
 	# step_metrics = logger.step() # Computes step means and updates EMAs
 
 	# Per-step micro-log (Fixed: removed valid_n_batch multiplier on amplitudes)
+	# log_str = (
+	# 	f"Step {i:05d} | Loss: {step_metrics['loss_total']:.5f} | "
+	# 	f"MaxTrgt: [{valid_n_batch*step_metrics['mx_trgt_1']:.2f}, {valid_n_batch*step_metrics['mx_trgt_2']:.2f}, {valid_n_batch*step_metrics['mx_trgt_3']:.2f}, {valid_n_batch*step_metrics['mx_trgt_4']:.2f}] | "
+	# 	f"MaxPred: [{valid_n_batch*step_metrics['mx_pred_1']:.2f}, {valid_n_batch*step_metrics['mx_pred_2']:.2f}, {valid_n_batch*step_metrics['mx_pred_3']:.2f}, {valid_n_batch*step_metrics['mx_pred_4']:.2f}] | "
+	# 	f"Losses: [{step_metrics['reg_query']:.4f}, {step_metrics['reg_base']:.4f}, {step_metrics['reg_assoc_P']:.4f}, {step_metrics['reg_assoc_S']:.4f}, "
+	# 	f"{step_metrics.get('aux_negative', 0.0):.4f}, {step_metrics.get('aux_relative', 0.0):.4f}]\n"
+	# )
+
 	log_str = (
 		f"Step {i:05d} | Loss: {step_metrics['loss_total']:.5f} | "
 		f"MaxTrgt: [{valid_n_batch*step_metrics['mx_trgt_1']:.2f}, {valid_n_batch*step_metrics['mx_trgt_2']:.2f}, {valid_n_batch*step_metrics['mx_trgt_3']:.2f}, {valid_n_batch*step_metrics['mx_trgt_4']:.2f}] | "
