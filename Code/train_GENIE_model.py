@@ -2385,63 +2385,63 @@ def compute_source_labels(x_query, x_query_t, src_x, src_t, src_spatial_kernel, 
 
 
 class LossLogger:
-    """
-    Lightweight, decoupled loss tracking utility.
-    Tracks raw microbatch losses, computes step averages, and maintains smooth EMAs.
-    Safe for conditional/sparse losses.
-    """
-    def __init__(self, alpha=0.95):
-        self.alpha = alpha
-        
-        # Accumulation state (resets every gradient step)
-        self._accum_sums = defaultdict(float)
-        self._accum_counts = defaultdict(int)
-        
-        # Smooth persistent state across training steps
-        self.ema_dict = {}
+	"""
+	Lightweight, decoupled loss tracking utility.
+	Tracks raw microbatch losses, computes step averages, and maintains smooth EMAs.
+	Safe for conditional/sparse losses.
+	"""
+	def __init__(self, alpha=0.95):
+		self.alpha = alpha
+		
+		# Accumulation state (resets every gradient step)
+		self._accum_sums = defaultdict(float)
+		self._accum_counts = defaultdict(int)
+		
+		# Smooth persistent state across training steps
+		self.ema_dict = {}
 
-    def update(self, losses_dict: dict):
-        """Accumulate loss values for a single microbatch / sub-step."""
-        for name, loss in losses_dict.items():
-            if loss is None:
-                continue
-            
-            # Extract float safely (handles 0D tensors, scalars, or 1D single-element tensors)
-            if isinstance(loss, torch.Tensor):
-                val = loss.detach().mean().item()
-            else:
-                val = float(loss)
+	def update(self, losses_dict: dict):
+		"""Accumulate loss values for a single microbatch / sub-step."""
+		for name, loss in losses_dict.items():
+			if loss is None:
+				continue
+			
+			# Extract float safely (handles 0D tensors, scalars, or 1D single-element tensors)
+			if isinstance(loss, torch.Tensor):
+				val = loss.detach().mean().item()
+			else:
+				val = float(loss)
 
-            self._accum_sums[name] += val
-            self._accum_counts[name] += 1
+			self._accum_sums[name] += val
+			self._accum_counts[name] += 1
 
-    def step(self) -> dict:
-        """
-        Call at the end of a gradient accumulation step (or end of batch).
-        Computes step means, updates global EMAs, and returns current step metrics.
-        """
-        step_means = {}
-        
-        for name, total_sum in self._accum_sums.items():
-            count = self._accum_counts[name]
-            mean_val = total_sum / max(1, count)
-            step_means[name] = mean_val
-            
-            # Update EMA (smooth long-term tracking)
-            if name not in self.ema_dict:
-                self.ema_dict[name] = mean_val
-            else:
-                self.ema_dict[name] = self.alpha * self.ema_dict[name] + (1.0 - self.alpha) * mean_val
-        
-        # Clear step buffers
-        self._accum_sums.clear()
-        self._accum_counts.clear()
-        
-        return step_means
+	def step(self) -> dict:
+		"""
+		Call at the end of a gradient accumulation step (or end of batch).
+		Computes step means, updates global EMAs, and returns current step metrics.
+		"""
+		step_means = {}
+		
+		for name, total_sum in self._accum_sums.items():
+			count = self._accum_counts[name]
+			mean_val = total_sum / max(1, count)
+			step_means[name] = mean_val
+			
+			# Update EMA (smooth long-term tracking)
+			if name not in self.ema_dict:
+				self.ema_dict[name] = mean_val
+			else:
+				self.ema_dict[name] = self.alpha * self.ema_dict[name] + (1.0 - self.alpha) * mean_val
+		
+		# Clear step buffers
+		self._accum_sums.clear()
+		self._accum_counts.clear()
+		
+		return step_means
 
-    def get_ema(self) -> dict:
-        """Returns current smoothed EMAs for logging."""
-        return dict(self.ema_dict)
+	def get_ema(self) -> dict:
+		"""Returns current smoothed EMAs for logging."""
+		return dict(self.ema_dict)
 
 
 
@@ -3074,150 +3074,150 @@ class GaussianDiceLoss(nn.Module):
 		return 1.0 - dice
 
 class GaussianDiceAssoc(nn.Module):
-    """
-    Continuous Soft Dice Loss for 2D Pick Association Maps with continuous Gaussian labels.
-    Prevents spatial mismatch and improves convergence on sparse matrix structures.
-    """
-    def __init__(self, smooth=1e-5):
-        super().__init__()
-        self.smooth = smooth
+	"""
+	Continuous Soft Dice Loss for 2D Pick Association Maps with continuous Gaussian labels.
+	Prevents spatial mismatch and improves convergence on sparse matrix structures.
+	"""
+	def __init__(self, smooth=1e-5):
+		super().__init__()
+		self.smooth = smooth
 
-    def forward(self, pred, target):
-        if pred.numel() == 0 or target.numel() == 0:
-            return pred.sum() * 0.0
+	def forward(self, pred, target):
+		if pred.numel() == 0 or target.numel() == 0:
+			return pred.sum() * 0.0
 
-        # Enforce positive predictions without squaring negative raw linear logits
-        pred = F.relu(pred.float())
-        target = target.float()
+		# Enforce positive predictions without squaring negative raw linear logits
+		pred = F.relu(pred.float())
+		target = target.float()
 
-        # Target Guard: If target is completely empty, zero out Dice safely
-        if target.sum() == 0:
-            return pred.sum() * 0.0
+		# Target Guard: If target is completely empty, zero out Dice safely
+		if target.sum() == 0:
+			return pred.sum() * 0.0
 
-        # Continuous Dice formulation for spatial heatmaps
-        intersection = (pred * target).sum()
-        cardinality = (pred ** 2).sum() + (target ** 2).sum()
+		# Continuous Dice formulation for spatial heatmaps
+		intersection = (pred * target).sum()
+		cardinality = (pred ** 2).sum() + (target ** 2).sum()
 
-        dice_score = (2.0 * intersection + self.smooth) / (cardinality + self.smooth)
-        return 1.0 - dice_score
+		dice_score = (2.0 * intersection + self.smooth) / (cardinality + self.smooth)
+		return 1.0 - dice_score
 
 
 def split_charbonnier_loss(pred, target, threshold=0.01, pos_weight=0.5, eps=1e-6):
-    """
-    Splits loss calculation into positive (signal) and negative (background) masks
-    to prevent background zeros from drowning out sparse signals.
-    """
-    if pred.numel() == 0 or target.numel() == 0:
-        return pred.sum() * 0.0  # Retains autograd graph cleanly
+	"""
+	Splits loss calculation into positive (signal) and negative (background) masks
+	to prevent background zeros from drowning out sparse signals.
+	"""
+	if pred.numel() == 0 or target.numel() == 0:
+		return pred.sum() * 0.0  # Retains autograd graph cleanly
 
-    pred = pred.float()
-    target = target.float()
+	pred = pred.float()
+	target = target.float()
 
-    pos_mask = target >= threshold
-    neg_mask = ~pos_mask
+	pos_mask = target >= threshold
+	neg_mask = ~pos_mask
 
-    # Charbonnier distance over all elements
-    diff_sq = (pred - target).pow(2)
-    pointwise_loss = torch.sqrt(diff_sq + eps)
+	# Charbonnier distance over all elements
+	diff_sq = (pred - target).pow(2)
+	pointwise_loss = torch.sqrt(diff_sq + eps)
 
-    # Calculate mean separately for positive and negative regions
-    if pos_mask.any():
-        pos_loss = pointwise_loss[pos_mask].mean()
-    else:
-        pos_loss = pred.sum() * 0.0
+	# Calculate mean separately for positive and negative regions
+	if pos_mask.any():
+		pos_loss = pointwise_loss[pos_mask].mean()
+	else:
+		pos_loss = pred.sum() * 0.0
 
-    if neg_mask.any():
-        neg_loss = pointwise_loss[neg_mask].mean()
-    else:
-        neg_loss = pred.sum() * 0.0
+	if neg_mask.any():
+		neg_loss = pointwise_loss[neg_mask].mean()
+	else:
+		neg_loss = pred.sum() * 0.0
 
-    return pos_weight * pos_loss + (1.0 - pos_weight) * neg_loss
-
-
-# class RobustCharbonnierLoss(nn.Module):
-#     def __init__(self, peak_boost=10.0, eps=1e-3):
-#         super().__init__()
-#         self.peak_boost = peak_boost
-#         self.eps_sq = eps ** 2
-
-#     def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
-#         if pred.numel() == 0 or target.numel() == 0:
-#             return pred.sum() * 0.0
-
-#         pred = pred.float()
-#         target = target.float()
-
-#         if apply_peak_weight:
-#             weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
-#         else:
-#             weight_map = torch.ones_like(target)
-
-#         if sample_weight is not None:
-#             weight_map = weight_map * sample_weight.float().view_as(target)
-
-#         diff_sq = (pred - target).pow(2)
-#         pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
-
-#         # Self-normalizing per-batch average keeping global semantics consistent
-#         return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
+	return pos_weight * pos_loss + (1.0 - pos_weight) * neg_loss
 
 
 # class RobustCharbonnierLoss(nn.Module):
-#     def __init__(self, peak_boost=10.0, eps=1e-3):
-#         super().__init__()
-#         self.peak_boost = peak_boost
-#         self.eps_sq = eps ** 2
+#	 def __init__(self, peak_boost=10.0, eps=1e-3):
+#		 super().__init__()
+#		 self.peak_boost = peak_boost
+#		 self.eps_sq = eps ** 2
 
-#     def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
-#         if pred.numel() == 0 or target.numel() == 0:
-#             return pred.sum() * 0.0
+#	 def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
+#		 if pred.numel() == 0 or target.numel() == 0:
+#			 return pred.sum() * 0.0
 
-#         pred = pred.float()
-#         target = target.float()
+#		 pred = pred.float()
+#		 target = target.float()
 
-#         if apply_peak_weight:
-#             # Fixed global linear boost scaling
-#             weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
-#         else:
-#             weight_map = torch.ones_like(target)
+#		 if apply_peak_weight:
+#			 weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
+#		 else:
+#			 weight_map = torch.ones_like(target)
 
-#         if sample_weight is not None:
-#             weight_map = weight_map * sample_weight.float().view_as(target)
+#		 if sample_weight is not None:
+#			 weight_map = weight_map * sample_weight.float().view_as(target)
 
-#         diff_sq = (pred - target).pow(2)
-#         pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
+#		 diff_sq = (pred - target).pow(2)
+#		 pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
 
-#         # Standard self-normalization keeps loss magnitudes consistent and stable
-#         return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
+#		 # Self-normalizing per-batch average keeping global semantics consistent
+#		 return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
+
+
+# class RobustCharbonnierLoss(nn.Module):
+#	 def __init__(self, peak_boost=10.0, eps=1e-3):
+#		 super().__init__()
+#		 self.peak_boost = peak_boost
+#		 self.eps_sq = eps ** 2
+
+#	 def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
+#		 if pred.numel() == 0 or target.numel() == 0:
+#			 return pred.sum() * 0.0
+
+#		 pred = pred.float()
+#		 target = target.float()
+
+#		 if apply_peak_weight:
+#			 # Fixed global linear boost scaling
+#			 weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
+#		 else:
+#			 weight_map = torch.ones_like(target)
+
+#		 if sample_weight is not None:
+#			 weight_map = weight_map * sample_weight.float().view_as(target)
+
+#		 diff_sq = (pred - target).pow(2)
+#		 pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
+
+#		 # Standard self-normalization keeps loss magnitudes consistent and stable
+#		 return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
 
 
 class RobustCharbonnierLoss(nn.Module):
-    def __init__(self, peak_boost=10.0, eps=1e-3):
-        super().__init__()
-        self.peak_boost = float(peak_boost)
-        self.eps_sq = eps ** 2
+	def __init__(self, peak_boost=10.0, eps=1e-3):
+		super().__init__()
+		self.peak_boost = float(peak_boost)
+		self.eps_sq = eps ** 2
 
-    def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
-        if pred.numel() == 0 or target.numel() == 0:
-            return pred.sum() * 0.0
+	def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
+		if pred.numel() == 0 or target.numel() == 0:
+			return pred.sum() * 0.0
 
-        pred = pred.float()
-        target = target.float()
+		pred = pred.float()
+		target = target.float()
 
-        if apply_peak_weight:
-            # Linear scaling tied directly to Gaussian target amplitude
-            weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
-        else:
-            weight_map = torch.ones_like(target)
+		if apply_peak_weight:
+			# Linear scaling tied directly to Gaussian target amplitude
+			weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
+		else:
+			weight_map = torch.ones_like(target)
 
-        if sample_weight is not None:
-            weight_map = weight_map * sample_weight.float().expand_as(target)
+		if sample_weight is not None:
+			weight_map = weight_map * sample_weight.float().expand_as(target)
 
-        diff_sq = (pred - target).pow(2)
-        pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
+		diff_sq = (pred - target).pow(2)
+		pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
 
-        # Self-normalization preserves identical gradient scale across all heads
-        return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
+		# Self-normalization preserves identical gradient scale across all heads
+		return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
 
 
 
@@ -3694,65 +3694,65 @@ out_save = None
 
 
 if pre_compute_peak_boost:
-    n_check_files = min(100, len(loader))
+	n_check_files = min(100, len(loader))
 
-    bg_weight_base, sig_weight_base = 0.0, 0.0
-    bg_weight_query, sig_weight_query = 0.0, 0.0
-    bg_weight_assoc, sig_weight_assoc = 0.0, 0.0
+	bg_weight_base, sig_weight_base = 0.0, 0.0
+	bg_weight_query, sig_weight_query = 0.0, 0.0
+	bg_weight_assoc, sig_weight_assoc = 0.0, 0.0
 
-    print("Pre-computing continuous 4D Gaussian peak boost factors...")
-    for batch_idx, inputs in enumerate(loader):
-        if batch_idx >= n_check_files:
-            break
+	print("Pre-computing continuous 4D Gaussian peak boost factors...")
+	for batch_idx, inputs in enumerate(loader):
+		if batch_idx >= n_check_files:
+			break
 
-        if not use_gradient_loss:
-            _, _, _, _, _, Lbls, Lbls_query, _, pick_lbls_l, _, _ = inputs[1]
-        else:
-            _, _, _, _, _, Lbls, Lbls_query, _, pick_lbls_l, _, _, _, _, _, _ = inputs[1]
+		if not use_gradient_loss:
+			_, _, _, _, _, Lbls, Lbls_query, _, pick_lbls_l, _, _ = inputs[1]
+		else:
+			_, _, _, _, _, Lbls, Lbls_query, _, pick_lbls_l, _, _, _, _, _, _ = inputs[1]
 
-        for i0 in range(len(Lbls)):
-            lbl_base = torch.abs(torch.as_tensor(Lbls[i0], dtype=torch.float32))
-            lbl_query = torch.abs(torch.as_tensor(Lbls_query[i0], dtype=torch.float32))
-            
-            # Extract P and S pick maps separately (matching 2D training shape)
-            lbl_assoc_raw = torch.abs(torch.as_tensor(pick_lbls_l[i0], dtype=torch.float32))
-            lbl_assoc_p = lbl_assoc_raw[..., 0]
-            lbl_assoc_s = lbl_assoc_raw[..., 1]
+		for i0 in range(len(Lbls)):
+			lbl_base = torch.abs(torch.as_tensor(Lbls[i0], dtype=torch.float32))
+			lbl_query = torch.abs(torch.as_tensor(Lbls_query[i0], dtype=torch.float32))
+			
+			# Extract P and S pick maps separately (matching 2D training shape)
+			lbl_assoc_raw = torch.abs(torch.as_tensor(pick_lbls_l[i0], dtype=torch.float32))
+			lbl_assoc_p = lbl_assoc_raw[..., 0]
+			lbl_assoc_s = lbl_assoc_raw[..., 1]
 
-            # 1. Base Grid (Continuous Gaussian integration)
-            sig_mask_b = lbl_base > 0.01
-            bg_weight_base += (~sig_mask_b).sum().item()
-            sig_weight_base += lbl_base[sig_mask_b].sum().item()
+			# 1. Base Grid (Continuous Gaussian integration)
+			sig_mask_b = lbl_base > 0.01
+			bg_weight_base += (~sig_mask_b).sum().item()
+			sig_weight_base += lbl_base[sig_mask_b].sum().item()
 
-            # 2. Query Grid (Focused 4D sampling)
-            sig_mask_q = lbl_query > 0.01
-            bg_weight_query += (~sig_mask_q).sum().item()
-            sig_weight_query += lbl_query[sig_mask_q].sum().item()
+			# 2. Query Grid (Focused 4D sampling)
+			sig_mask_q = lbl_query > 0.01
+			bg_weight_query += (~sig_mask_q).sum().item()
+			sig_weight_query += lbl_query[sig_mask_q].sum().item()
 
-            # 3. Association Matrix (Average across P and S channels)
-            sig_mask_ap = lbl_assoc_p > 0.01
-            sig_mask_as = lbl_assoc_s > 0.01
-            bg_weight_assoc += ((~sig_mask_ap).sum().item() + (~sig_mask_as).sum().item()) / 2.0
-            sig_weight_assoc += (lbl_assoc_p[sig_mask_ap].sum().item() + lbl_assoc_s[sig_mask_as].sum().item()) / 2.0
+			# 3. Association Matrix (Average across P and S channels)
+			sig_mask_ap = lbl_assoc_p > 0.01
+			sig_mask_as = lbl_assoc_s > 0.01
+			bg_weight_assoc += ((~sig_mask_ap).sum().item() + (~sig_mask_as).sum().item()) / 2.0
+			sig_weight_assoc += (lbl_assoc_p[sig_mask_ap].sum().item() + lbl_assoc_s[sig_mask_as].sum().item()) / 2.0
 
-    # 4. Raw Unconstrained Ratios
-    raw_boost_base  = bg_weight_base / (sig_weight_base + 1e-6)
-    raw_boost_query = bg_weight_query / (sig_weight_query + 1e-6)
-    raw_boost_assoc = bg_weight_assoc / (sig_weight_assoc + 1e-6)
+	# 4. Raw Unconstrained Ratios
+	raw_boost_base  = bg_weight_base / (sig_weight_base + 1e-6)
+	raw_boost_query = bg_weight_query / (sig_weight_query + 1e-6)
+	raw_boost_assoc = bg_weight_assoc / (sig_weight_assoc + 1e-6)
 
-    # 5. Relative Normalization to Target Peak Boost Range (e.g. Min 5.0, Max 25.0)
-    MAX_TARGET_BOOST = 25.0
-    MIN_TARGET_BOOST = 5.0
+	# 5. Relative Normalization to Target Peak Boost Range (e.g. Min 5.0, Max 25.0)
+	MAX_TARGET_BOOST = 25.0
+	MIN_TARGET_BOOST = 5.0
 
-    raw_max = max(raw_boost_base, raw_boost_query, raw_boost_assoc, 1e-6)
+	raw_max = max(raw_boost_base, raw_boost_query, raw_boost_assoc, 1e-6)
 
-    # Scale relative to the maximum sparse head, keeping ratios intact
-    peak_boost_base  = max(MIN_TARGET_BOOST, (raw_boost_base / raw_max) * MAX_TARGET_BOOST)
-    peak_boost_query = max(MIN_TARGET_BOOST, (raw_boost_query / raw_max) * MAX_TARGET_BOOST)
-    peak_boost_assoc = max(MIN_TARGET_BOOST, (raw_boost_assoc / raw_max) * MAX_TARGET_BOOST)
+	# Scale relative to the maximum sparse head, keeping ratios intact
+	peak_boost_base  = max(MIN_TARGET_BOOST, (raw_boost_base / raw_max) * MAX_TARGET_BOOST)
+	peak_boost_query = max(MIN_TARGET_BOOST, (raw_boost_query / raw_max) * MAX_TARGET_BOOST)
+	peak_boost_assoc = max(MIN_TARGET_BOOST, (raw_boost_assoc / raw_max) * MAX_TARGET_BOOST)
 
-    print(f"Raw Continuous Ratios -> Base: {raw_boost_base:.1f} | Query: {raw_boost_query:.1f} | Assoc: {raw_boost_assoc:.1f}")
-    print(f"Scaled Peak Boosts   -> Base: {peak_boost_base:.2f} | Query: {peak_boost_query:.2f} | Assoc: {peak_boost_assoc:.2f}")
+	print(f"Raw Continuous Ratios -> Base: {raw_boost_base:.1f} | Query: {raw_boost_query:.1f} | Assoc: {raw_boost_assoc:.1f}")
+	print(f"Scaled Peak Boosts   -> Base: {peak_boost_base:.2f} | Query: {peak_boost_query:.2f} | Assoc: {peak_boost_assoc:.2f}")
 
 
 
@@ -4010,7 +4010,7 @@ for batch_idx, inputs in enumerate(loader):
 
 		### Initialize losses
 		loss_reg_query   = torch.tensor(0.0, device=device)
-		loss_reg_base    = torch.tensor(0.0, device=device)
+		loss_reg_base	= torch.tensor(0.0, device=device)
 		loss_reg_assoc_P = torch.tensor(0.0, device=device)
 		loss_reg_assoc_S = torch.tensor(0.0, device=device)
 		loss_negative = torch.tensor(0.0, device=device)
@@ -4019,51 +4019,51 @@ for batch_idx, inputs in enumerate(loader):
 
 		# ==================== 1. REGRESSION / AMPLITUDE LOSSES ====================
 		if use_regression_loss:
-		    # 1. Prepare 1D target and prediction tensors safely
-		    lbl_query_cuda = torch.as_tensor(Lbls_query[i0], device=device, dtype=torch.float32).squeeze()
-		    lbl_base_cuda  = torch.as_tensor(Lbls[i0], device=device, dtype=torch.float32).squeeze()
-		    pick_p_cuda    = torch.as_tensor(pick_lbls[:, :, 0], device=device, dtype=torch.float32).squeeze()
-		    pick_s_cuda    = torch.as_tensor(pick_lbls[:, :, 1], device=device, dtype=torch.float32).squeeze()
+			# 1. Prepare 1D target and prediction tensors safely
+			lbl_query_cuda = torch.as_tensor(Lbls_query[i0], device=device, dtype=torch.float32).squeeze()
+			lbl_base_cuda  = torch.as_tensor(Lbls[i0], device=device, dtype=torch.float32).squeeze()
+			pick_p_cuda	= torch.as_tensor(pick_lbls[:, :, 0], device=device, dtype=torch.float32).squeeze()
+			pick_s_cuda	= torch.as_tensor(pick_lbls[:, :, 1], device=device, dtype=torch.float32).squeeze()
 
-		    pred_base    = out[0][:, 0]
-		    pred_query   = out[1][:, 0]
-		    pred_assoc_p = out[2][:, :, 0]
-		    pred_assoc_s = out[3][:, :, 0]
+			pred_base	= out[0][:, 0]
+			pred_query   = out[1][:, 0]
+			pred_assoc_p = out[2][:, :, 0]
+			pred_assoc_s = out[3][:, :, 0]
 
-		    # 2. Compute Main Energy Regression Losses
-		    loss_reg_query = weights[1] * loss_charb_query(
-		        pred_query[mask_lbls_query_l[i0]], 
-		        lbl_query_cuda[mask_lbls_query_l[i0]]
-		    )
-		    loss_reg_base = weights[0] * loss_charb_base(
-		        pred_base[mask_lbls_l[i0]], 
-		        lbl_base_cuda[mask_lbls_l[i0]]
-		    )
+			# 2. Compute Main Energy Regression Losses
+			loss_reg_query = weights[1] * loss_charb_query(
+				pred_query[mask_lbls_query_l[i0]], 
+				lbl_query_cuda[mask_lbls_query_l[i0]]
+			)
+			loss_reg_base = weights[0] * loss_charb_base(
+				pred_base[mask_lbls_l[i0]], 
+				lbl_base_cuda[mask_lbls_l[i0]]
+			)
 
-		    # 3. Compute Association Map Losses (Charbonnier + optional Dice Hybrid)
-		    mask_assoc = mask_lbls_assoc_query_l[i0]
-		    
-		    # Pure Charbonnier loss component
-		    loss_p_charb = loss_charb_assoc(pred_assoc_p[mask_assoc], pick_p_cuda[mask_assoc])
-		    loss_s_charb = loss_charb_assoc(pred_assoc_s[mask_assoc], pick_s_cuda[mask_assoc])
+			# 3. Compute Association Map Losses (Charbonnier + optional Dice Hybrid)
+			mask_assoc = mask_lbls_assoc_query_l[i0]
+			
+			# Pure Charbonnier loss component
+			loss_p_charb = loss_charb_assoc(pred_assoc_p[mask_assoc], pick_p_cuda[mask_assoc])
+			loss_s_charb = loss_charb_assoc(pred_assoc_s[mask_assoc], pick_s_cuda[mask_assoc])
 
-		    if use_dice_loss:
-		        loss_p_dice = loss_dice_assoc(pred_assoc_p[mask_assoc], pick_p_cuda[mask_assoc])
-		        loss_s_dice = loss_dice_assoc(pred_assoc_s[mask_assoc], pick_s_cuda[mask_assoc])
-		        
-		        # 50/50 Hybrid formulation ## Can add moving adaptive weighting
-		        loss_assoc_p_total = 1.0 * loss_p_charb + 0.1 * loss_p_dice
-		        loss_assoc_s_total = 1.0 * loss_s_charb + 0.1 * loss_s_dice
-		    else:
-		        loss_assoc_p_total = loss_p_charb
-		        loss_assoc_s_total = loss_s_charb
+			if use_dice_loss:
+				loss_p_dice = loss_dice_assoc(pred_assoc_p[mask_assoc], pick_p_cuda[mask_assoc])
+				loss_s_dice = loss_dice_assoc(pred_assoc_s[mask_assoc], pick_s_cuda[mask_assoc])
+				
+				# 50/50 Hybrid formulation ## Can add moving adaptive weighting
+				loss_assoc_p_total = 1.0 * loss_p_charb + 0.1 * loss_p_dice
+				loss_assoc_s_total = 1.0 * loss_s_charb + 0.1 * loss_s_dice
+			else:
+				loss_assoc_p_total = loss_p_charb
+				loss_assoc_s_total = loss_s_charb
 
-		    loss_reg_assoc_P = weight_assoc_v[i0] * weights[2] * loss_assoc_p_total
-		    loss_reg_assoc_S = weight_assoc_v[i0] * weights[3] * loss_assoc_s_total
+			loss_reg_assoc_P = weight_assoc_v[i0] * weights[2] * loss_assoc_p_total
+			loss_reg_assoc_S = weight_assoc_v[i0] * weights[3] * loss_assoc_s_total
 
-		    # Accumulate metrics safely
-		    # loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / valid_n_batch
-		    # loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / valid_n_batch
+			# Accumulate metrics safely
+			# loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / valid_n_batch
+			# loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / valid_n_batch
 
 
 		# ==================== 2. NEGATIVE SAMPLING LOSS ====================
@@ -4071,110 +4071,110 @@ for batch_idx, inputs in enumerate(loader):
 		rand_use_negative = (use_real_data_sample_v[i0] == False) or (np.random.rand() < rand_mask_ratio)
 
 		if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
-		    min_up_sample = 0.1
-		    min_safe_dist_m = 3.0 * src_x_kernel
-		    min_safe_t_s = 3.0 * src_t_kernel
+			min_up_sample = 0.1
+			min_safe_dist_m = 3.0 * src_x_kernel
+			min_safe_t_s = 3.0 * src_t_kernel
 
-		    queries_np = X_query[i0].cpu().detach().numpy()
-		    sources_np = lp_srcs[i0].cpu().detach().numpy()
+			queries_np = X_query[i0].cpu().detach().numpy()
+			sources_np = lp_srcs[i0].cpu().detach().numpy()
 
-		    if len(sources_np) > 0 and len(queries_np) > 0:
-		        ecef_q = lla2ecef(queries_np[:, 0:3])
-		        ecef_s = lla2ecef(sources_np[:, 0:3])
-		        dist_3d = np.linalg.norm(ecef_q[:, None, :] - ecef_s[None, :, :], axis=-1)
-		        dist_t = np.abs(queries_np[:, 3:4] - sources_np[:, 3:4].T)
-		        
-		        is_close = (dist_3d < min_safe_dist_m) & (dist_t < min_safe_t_s)
-		        is_far_enough = ~np.any(is_close, axis=1)
-		    else:
-		        is_far_enough = np.ones(len(queries_np), dtype=bool)
+			if len(sources_np) > 0 and len(queries_np) > 0:
+				ecef_q = lla2ecef(queries_np[:, 0:3])
+				ecef_s = lla2ecef(sources_np[:, 0:3])
+				dist_3d = np.linalg.norm(ecef_q[:, None, :] - ecef_s[None, :, :], axis=-1)
+				dist_t = np.abs(queries_np[:, 3:4] - sources_np[:, 3:4].T)
+				
+				is_close = (dist_3d < min_safe_dist_m) & (dist_t < min_safe_t_s)
+				is_far_enough = ~np.any(is_close, axis=1)
+			else:
+				is_far_enough = np.ones(len(queries_np), dtype=bool)
 
-		    pred_val = out[1][:, 0].cpu().detach().numpy()
-		    true_val = Lbls_query[i0][:, 0].cpu().detach().numpy()
+			pred_val = out[1][:, 0].cpu().detach().numpy()
+			true_val = Lbls_query[i0][:, 0].cpu().detach().numpy()
 
-		    valid_neg_mask = (pred_val > min_up_sample) & (true_val < 0.01) & is_far_enough
-		    prob_up_sample = np.where(valid_neg_mask, pred_val, 0.0)
+			valid_neg_mask = (pred_val > min_up_sample) & (true_val < 0.01) & is_far_enough
+			prob_up_sample = np.where(valid_neg_mask, pred_val, 0.0)
 
-		    if prob_up_sample.sum() == 0:
-		        prob_up_sample = np.where(is_far_enough, 1.0, 0.0)
-		    if prob_up_sample.sum() == 0:
-		        prob_up_sample = np.ones(len(queries_np))
+			if prob_up_sample.sum() == 0:
+				prob_up_sample = np.where(is_far_enough, 1.0, 0.0)
+			if prob_up_sample.sum() == 0:
+				prob_up_sample = np.ones(len(queries_np))
 
-		    prob_up_sample = prob_up_sample / prob_up_sample.sum()
-		    is_global_lon = (lon_range_extend[1] - lon_range_extend[0]) >= 359.0
+			prob_up_sample = prob_up_sample / prob_up_sample.sum()
+			is_global_lon = (lon_range_extend[1] - lon_range_extend[0]) >= 359.0
 
-		    x_query_sample, x_query_sample_t = sample_dense_queries(
-		        x_query=queries_np[:, 0:3],
-		        x_query_t=queries_np[:, 3],
-		        prob=prob_up_sample,
-		        lat_range=lat_range_extend,
-		        lon_range=lon_range_extend,
-		        depth_range=depth_range,
-		        src_x_kernel_m=src_x_kernel,
-		        src_depth_kernel_m=src_depth_kernel,
-		        src_t_kernel=src_t_kernel,
-		        time_shift_range=time_shift_range,
-		        replace=False,
-		        randomize=False,
-		        is_global_lon=is_global_lon,
-		    )
+			x_query_sample, x_query_sample_t = sample_dense_queries(
+				x_query=queries_np[:, 0:3],
+				x_query_t=queries_np[:, 3],
+				prob=prob_up_sample,
+				lat_range=lat_range_extend,
+				lon_range=lon_range_extend,
+				depth_range=depth_range,
+				src_x_kernel_m=src_x_kernel,
+				src_depth_kernel_m=src_depth_kernel,
+				src_t_kernel=src_t_kernel,
+				time_shift_range=time_shift_range,
+				replace=False,
+				randomize=False,
+				is_global_lon=is_global_lon,
+			)
 
-		    out_query = mz.forward_queries(
-		        torch.as_tensor(ftrns1(x_query_sample), dtype=torch.float32, device=device),
-		        torch.as_tensor(x_query_sample_t, dtype=torch.float32, device=device),
-		        train=True
-		    )
-		    lbls_query = compute_source_labels(
-		        x_query_sample, x_query_sample_t, sources_np[:, 0:3], sources_np[:, 3],
-		        src_spatial_kernel, src_t_kernel, ftrns1
-		    )
+			out_query = mz.forward_queries(
+				torch.as_tensor(ftrns1(x_query_sample), dtype=torch.float32, device=device),
+				torch.as_tensor(x_query_sample_t, dtype=torch.float32, device=device),
+				train=True
+			)
+			lbls_query = compute_source_labels(
+				x_query_sample, x_query_sample_t, sources_np[:, 0:3], sources_np[:, 3],
+				src_spatial_kernel, src_t_kernel, ftrns1
+			)
 
-		    lbls_query_tensor = torch.as_tensor(lbls_query, dtype=torch.float32, device=device).squeeze()
-		    pred_query_neg = out_query[:, 0] if out_query.ndim > 1 else out_query
-		    neg_mask_final = (lbls_query_tensor < 0.01)
+			lbls_query_tensor = torch.as_tensor(lbls_query, dtype=torch.float32, device=device).squeeze()
+			pred_query_neg = out_query[:, 0] if out_query.ndim > 1 else out_query
+			neg_mask_final = (lbls_query_tensor < 0.01)
 
-		    if neg_mask_final.any():
-		        loss_negative = loss_charb_query(
-		            pred_query_neg[neg_mask_final], 
-		            lbls_query_tensor[neg_mask_final], 
-		            apply_peak_weight=False
-		        )
-		        # loss_negative_val += loss_negative.item() / valid_n_batch
-		        computed_negative_loss = True
+			if neg_mask_final.any():
+				loss_negative = loss_charb_query(
+					pred_query_neg[neg_mask_final], 
+					lbls_query_tensor[neg_mask_final], 
+					apply_peak_weight=False
+				)
+				# loss_negative_val += loss_negative.item() / valid_n_batch
+				computed_negative_loss = True
 
 
 		# ==================== 3. RELATIVE LOSS ===================== #
 		computed_relative_loss = False
 
 		if use_relative_loss and (ramp_aux > 0.0):
-		    k_nearest_query = 150
-		    lbls_query_cuda = torch.as_tensor(Lbls_query[i0], device=device, dtype=torch.float32).squeeze()
-		    pred_query_cuda = out[1][:, 0] if out[1].ndim > 1 else out[1]
-		    
-		    active_mask = torch.where(lbls_query_cuda > 0.01)[0]
-		    
-		    if len(active_mask) > 1:
-		        x_active = torch.cat((ftrns1_diff(X_query[i0][active_mask].to(device)) / 1000.0, scale_time*X_query[i0][active_mask,3:4].to(device)), dim = 1)
-		        k_actual = min(len(active_mask) - 1, k_nearest_query)
-		        
-		        edges_query = active_mask[knn(x_active, x_active, k=k_actual)]
-		        
-		        trgt_i, trgt_j = lbls_query_cuda[edges_query[0]], lbls_query_cuda[edges_query[1]]
-		        pred_i, pred_j = pred_query_cuda[edges_query[0]], pred_query_cuda[edges_query[1]]
-		        
-		        trgt_rel = trgt_i - trgt_j
-		        pred_rel = pred_i - pred_j
-		        
-		        weight_rel = torch.maximum(trgt_i, trgt_j) * (1.0 - torch.exp(-torch.abs(trgt_rel) / 0.25))
-		        
-		        loss_relative = loss_charb_query(
-		            pred_rel, 
-		            trgt_rel, 
-		            sample_weight=weight_rel, 
-		            apply_peak_weight=False
-		        )
-		        # loss_relative_val += loss_relative.item() / valid_n_batch
-		        computed_relative_loss = True
+			k_nearest_query = 150
+			lbls_query_cuda = torch.as_tensor(Lbls_query[i0], device=device, dtype=torch.float32).squeeze()
+			pred_query_cuda = out[1][:, 0] if out[1].ndim > 1 else out[1]
+			
+			active_mask = torch.where(lbls_query_cuda > 0.01)[0]
+			
+			if len(active_mask) > 1:
+				x_active = torch.cat((ftrns1_diff(X_query[i0][active_mask].to(device)) / 1000.0, scale_time*X_query[i0][active_mask,3:4].to(device)), dim = 1)
+				k_actual = min(len(active_mask) - 1, k_nearest_query)
+				
+				edges_query = active_mask[knn(x_active, x_active, k=k_actual)]
+				
+				trgt_i, trgt_j = lbls_query_cuda[edges_query[0]], lbls_query_cuda[edges_query[1]]
+				pred_i, pred_j = pred_query_cuda[edges_query[0]], pred_query_cuda[edges_query[1]]
+				
+				trgt_rel = trgt_i - trgt_j
+				pred_rel = pred_i - pred_j
+				
+				weight_rel = torch.maximum(trgt_i, trgt_j) * (1.0 - torch.exp(-torch.abs(trgt_rel) / 0.25))
+				
+				loss_relative = loss_charb_query(
+					pred_rel, 
+					trgt_rel, 
+					sample_weight=weight_rel, 
+					apply_peak_weight=False
+				)
+				# loss_relative_val += loss_relative.item() / valid_n_batch
+				computed_relative_loss = True
 
 
 		# ==================== 5. CONSTRUCT LOSS DICT & BACKPROP ====================
@@ -4185,64 +4185,65 @@ for batch_idx, inputs in enumerate(loader):
 
 		# 1. Store losses in dictionary
 		loss_dict = {
-		    'reg_query': loss_reg_query,
-		    'reg_base': loss_reg_base,
-		    'reg_assoc_P': loss_reg_assoc_P,
-		    'reg_assoc_S': loss_reg_assoc_S,
+			'reg_query': loss_reg_query,
+			'reg_base': loss_reg_base,
+			'reg_assoc_P': loss_reg_assoc_P,
+			'reg_assoc_S': loss_reg_assoc_S,
 		}
 
 		if computed_negative_loss:
-		    loss_aux = loss_aux + 0.1 * ramp_aux * weight_aux * loss_negative
-		    loss_dict['aux_negative'] = loss_negative
+			loss_aux = loss_aux + 0.1 * ramp_aux * weight_aux * loss_negative
+			loss_dict['aux_negative'] = loss_negative
 
 		if computed_relative_loss:
-		    loss_aux = loss_aux + 0.2 * ramp_aux * weight_aux * loss_relative
-		    loss_dict['aux_relative'] = loss_relative
+			loss_aux = loss_aux + 0.2 * ramp_aux * weight_aux * loss_relative
+			loss_dict['aux_relative'] = loss_relative
 
 		loss_total = loss_primary + loss_aux
 		loss_dict['loss_total'] = loss_total
 
-		# 2. Add Target & Prediction Max Metrics to the dict
+		# 2. Add Target & Prediction Max Metrics (Pure Amplitudes, detach safe)
 		loss_dict.update({
-		    'mx_trgt_1': Lbls[i0].max().item(),
-		    'mx_trgt_2': Lbls_query[i0].max().item(),
-		    'mx_trgt_3': pick_lbls[:, :, 0].max().item(),
-		    'mx_trgt_4': pick_lbls[:, :, 1].max().item(),
-		    'mx_pred_1': out[0].detach().max().item(),
-		    'mx_pred_2': out[1].detach().max().item(),
-		    'mx_pred_3': out[2].detach().max().item(),
-		    'mx_pred_4': out[3].detach().max().item(),
+			'mx_trgt_1': Lbls[i0].detach().max().item(),
+			'mx_trgt_2': Lbls_query[i0].detach().max().item(),
+			'mx_trgt_3': pick_lbls[:, :, 0].detach().max().item(),
+			'mx_trgt_4': pick_lbls[:, :, 1].detach().max().item(),
+			'mx_pred_1': out[0].detach().max().item(),
+			'mx_pred_2': out[1].detach().max().item(),
+			'mx_pred_3': out[2].detach().max().item(),
+			'mx_pred_4': out[3].detach().max().item(),
 		})
 
-		# 3. Gradient accumulation & backward pass
+		# 3. Backward pass
 		loss = loss_total / valid_n_batch
 		loss.backward(retain_graph=False)
 
-		# 4. Update logger once per microbatch
+		# 4. Update logger for this microbatch
 		logger.update(loss_dict)
+
 
 		# Visualization hook (unchanged)
 		if make_visualize_predictions and (np.mod(i, n_visualize_step) == 0) and (i0 == 0):
-		    save_plots_path = f"{path_to_file}{seperator}Plots{seperator}"
-		    out_plot = [out[0], out[1], out[2], out[3]]
-		    visualize_predictions(out_plot, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step=i, n_ver=n_ver)
+			save_plots_path = f"{path_to_file}{seperator}Plots{seperator}"
+			out_plot = [out[0], out[1], out[2], out[3]]
+			visualize_predictions(out_plot, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step=i, n_ver=n_ver)
 
 
-        # # 1. Zero gradients, compute primary loss backward
-        # optimizer.zero_grad()
-        # (loss_reg_query + loss_reg_base + loss_reg_assoc_P + loss_reg_assoc_S).backward(retain_graph=True)
-        # primary_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
+		# # 1. Zero gradients, compute primary loss backward
+		# optimizer.zero_grad()
+		# (loss_reg_query + loss_reg_base + loss_reg_assoc_P + loss_reg_assoc_S).backward(retain_graph=True)
+		# primary_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
 
-        # # 2. Compute relative loss backward independently
-        # if computed_relative_loss:
-        #     optimizer.zero_grad()
-        #     (0.2 * loss_rel).backward(retain_graph=True)
-        #     rel_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
-            
-        #     print(f"[Grad Ratio] Primary: {primary_grad_norm:.4f} | Relative (x0.2): {rel_grad_norm:.4f} | Ratio: {rel_grad_norm / (primary_grad_norm + 1e-8):.4f}")
+		# # 2. Compute relative loss backward independently
+		# if computed_relative_loss:
+		#	 optimizer.zero_grad()
+		#	 (0.2 * loss_rel).backward(retain_graph=True)
+		#	 rel_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
+			
+		#	 print(f"[Grad Ratio] Primary: {primary_grad_norm:.4f} | Relative (x0.2): {rel_grad_norm:.4f} | Ratio: {rel_grad_norm / (primary_grad_norm + 1e-8):.4f}")
 
-        # # 3. Clear and do the real combined backward step
-        # optimizer.zero_grad()
+		# # 3. Clear and do the real combined backward step
+		# optimizer.zero_grad()
 
 
 	# Optional Gradient Clipping
@@ -4254,7 +4255,7 @@ for batch_idx, inputs in enumerate(loader):
 
 	# Retrieve step-averaged metrics and global EMAs
 	step_metrics = logger.step()
-	ema_metrics = logger.get_ema()
+	# ema_metrics = logger.get_ema()
 
 	# Populate global arrays for checkpoint saving (.npz)
 	losses[i] = step_metrics['loss_total']
@@ -4268,22 +4269,43 @@ for batch_idx, inputs in enumerate(loader):
 	mx_pred_3[i] = step_metrics['mx_pred_3']
 	mx_pred_4[i] = step_metrics['mx_pred_4']
 
-	# Clean log string
+	# --- AT THE END OF THE GRADIENT STEP (after optimizer.step()) ---
+	# step_metrics = logger.step() # Computes step means and updates EMAs
+
+	# Per-step micro-log (Fixed: removed valid_n_batch multiplier on amplitudes)
 	log_str = (
-		f"{i} loss {step_metrics['loss_total']:.5f}, "
-		f"trgts: {step_metrics['mx_trgt_1']:.4f}, {step_metrics['mx_trgt_2']:.4f}, {step_metrics['mx_trgt_3']:.4f}, {step_metrics['mx_trgt_4']:.4f}, "
-		f"preds: {step_metrics['mx_pred_1']:.4f}, {step_metrics['mx_pred_2']:.4f}, {step_metrics['mx_pred_3']:.4f}, {step_metrics['mx_pred_4']:.4f} "
-		f"[{step_metrics['reg_query']:.4f}, {step_metrics['reg_base']:.4f}, {step_metrics['reg_assoc_P']:.4f}, {step_metrics['reg_assoc_S']:.4f}, "
+		f"Step {i:05d} | Loss: {step_metrics['loss_total']:.5f} | "
+		f"MaxTrgt: [{valid_n_batch*step_metrics['mx_trgt_1']:.2f}, {valid_n_batch*step_metrics['mx_trgt_2']:.2f}, {valid_n_batch*step_metrics['mx_trgt_3']:.2f}, {valid_n_batch*step_metrics['mx_trgt_4']:.2f}] | "
+		f"MaxPred: [{valid_n_batch*step_metrics['mx_pred_1']:.2f}, {valid_n_batch*step_metrics['mx_pred_2']:.2f}, {valid_n_batch*step_metrics['mx_pred_3']:.2f}, {valid_n_batch*step_metrics['mx_pred_4']:.2f}] | "
+		f"Losses: [{step_metrics['reg_query']:.4f}, {step_metrics['reg_base']:.4f}, {step_metrics['reg_assoc_P']:.4f}, {step_metrics['reg_assoc_S']:.4f}, "
 		f"{step_metrics.get('aux_negative', 0.0):.4f}, {step_metrics.get('aux_relative', 0.0):.4f}]\n"
 	)
 
 	print(log_str, end='')
-
-	if use_wandb_logging:
-		wandb.log(step_metrics, step=i)
-
 	log_buffer.append(log_str)
-	if np.mod(i, 10) == 0:
+
+	# 5. Every 50 steps: Print EMA Summary Block
+	if i > 0 and i % 50 == 0:
+		ema = logger.get_ema()
+		ema_str = (
+			f"\n{'='*25} EMA SUMMARY (Step {i}) {'='*25}\n"
+			f"  Total Loss (EMA) : {ema.get('loss_total', 0.0):.5f}\n"
+			f"  Reg Base  (EMA)  : {ema.get('reg_base', 0.0):.5f} | Reg Query (EMA): {ema.get('reg_query', 0.0):.5f}\n"
+			f"  Assoc P   (EMA)  : {ema.get('reg_assoc_P', 0.0):.5f} | Assoc S   (EMA): {ema.get('reg_assoc_S', 0.0):.5f}\n"
+			f"  Aux Neg   (EMA)  : {ema.get('aux_negative', 0.0):.5f} | Aux Rel   (EMA): {ema.get('aux_relative', 0.0):.5f}\n"
+			f"{'='*68}\n\n"
+		)
+		print(ema_str)
+		log_buffer.append(ema_str)
+
+	# 6. WandB Logging (Includes EMAs automatically under an 'ema/' prefix)
+	if use_wandb_logging:
+		log_payload = {**step_metrics}
+		log_payload.update({f"ema/{k}": v for k, v in logger.get_ema().items()})
+		wandb.log(log_payload, step=i)
+
+	# 7. Write buffer to disk every 10 steps
+	if i % 10 == 0:
 		with open(f"{write_training_file}output_{n_ver}.txt", 'a') as text_file:
 			for log in log_buffer:
 				text_file.write(log)
@@ -4440,34 +4462,34 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 
 # # ==================== 2. REGRESSION / AMPLITUDE LOSSES ====================
 # if use_regression_loss:
-#     # GT Heatmap pass: Update EMA and apply dynamic peak weighting
-#     loss_reg_query = weights[1] * loss_charbonnier_source(
-#         out[1][mask_lbls_query_l[i0]], 
-#         torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], 
-#         update_ema=True, 
-#         apply_peak_weight=True
-#     )
-#     loss_reg_base = weights[0] * loss_charbonnier_source(
-#         out[0][mask_lbls_l[i0]], 
-#         torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]],
-#         update_ema=False,
-#         apply_peak_weight=True
-#     )
-#     loss_reg_assoc_P = weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(
-#         out[2][mask_lbls_assoc_query_l[i0], :, 0], 
-#         pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], 
-#         update_ema=True, 
-#         apply_peak_weight=True
-#     )
-#     loss_reg_assoc_S = weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(
-#         out[3][mask_lbls_assoc_query_l[i0], :, 0], 
-#         pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], 
-#         update_ema=True, 
-#         apply_peak_weight=True
-#     )
+#	 # GT Heatmap pass: Update EMA and apply dynamic peak weighting
+#	 loss_reg_query = weights[1] * loss_charbonnier_source(
+#		 out[1][mask_lbls_query_l[i0]], 
+#		 torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], 
+#		 update_ema=True, 
+#		 apply_peak_weight=True
+#	 )
+#	 loss_reg_base = weights[0] * loss_charbonnier_source(
+#		 out[0][mask_lbls_l[i0]], 
+#		 torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]],
+#		 update_ema=False,
+#		 apply_peak_weight=True
+#	 )
+#	 loss_reg_assoc_P = weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(
+#		 out[2][mask_lbls_assoc_query_l[i0], :, 0], 
+#		 pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], 
+#		 update_ema=True, 
+#		 apply_peak_weight=True
+#	 )
+#	 loss_reg_assoc_S = weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(
+#		 out[3][mask_lbls_assoc_query_l[i0], :, 0], 
+#		 pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], 
+#		 update_ema=True, 
+#		 apply_peak_weight=True
+#	 )
 
-#     loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch
-#     loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch
+#	 loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch
+#	 loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch
 
 
 # # ==================== 3. NEGATIVE SAMPLING LOSS ====================
@@ -4476,18 +4498,18 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 # rand_use_negative = (use_real_data_sample_v[inc] == False) or (np.random.rand() < rand_mask_ratio)
 
 # if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
-#     # [... negative sampling logic ...]
+#	 # [... negative sampling logic ...]
 
-#     if neg_mask_final.any():
-#         # Baseline weight = 1.0 (apply_peak_weight=False avoids evaluating target * peak_weight)
-#         loss_negative = weights[1] * loss_charbonnier_source(
-#             out_query[neg_mask_final], 
-#             lbls_query_tensor[neg_mask_final],
-#             update_ema=False,
-#             apply_peak_weight=False
-#         )
-#         loss_negative_val += loss_negative.item() / n_batch
-#         computed_negative_loss = True
+#	 if neg_mask_final.any():
+#		 # Baseline weight = 1.0 (apply_peak_weight=False avoids evaluating target * peak_weight)
+#		 loss_negative = weights[1] * loss_charbonnier_source(
+#			 out_query[neg_mask_final], 
+#			 lbls_query_tensor[neg_mask_final],
+#			 update_ema=False,
+#			 apply_peak_weight=False
+#		 )
+#		 loss_negative_val += loss_negative.item() / n_batch
+#		 computed_negative_loss = True
 
 
 # # ==================== 4. RELATIVE LOSS ===================== #
@@ -4495,64 +4517,64 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 # computed_relative_loss = False
 
 # if use_relative_loss and (ramp_aux > 0.0):
-#     k_nearest_query = 50
-#     edges_query = knn(
-#         ftrns1_diff(X_query[i0].to(device)) / 1000.0, 
-#         ftrns1_diff(X_query[i0].to(device)) / 1000.0, 
-#         k=k_nearest_query
-#     )
-#     trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
-#     pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
-    
-#     # Gaussian similarity weighting focused strictly on similar points (|trgt_rel| -> 0)
-#     weight_rel = torch.exp(-torch.abs(trgt_rel) / 0.35)
-    
-#     # Bypasses peak weighting to prevent weight cancellation conflict
-#     loss_rel = weights[1] * loss_charbonnier_source(
-#         pred_rel, 
-#         trgt_rel, 
-#         sample_weight=weight_rel, 
-#         update_ema=False,
-#         apply_peak_weight=False
-#     )
-#     loss_relative_val += loss_rel.item() / n_batch
-#     computed_relative_loss = True
+#	 k_nearest_query = 50
+#	 edges_query = knn(
+#		 ftrns1_diff(X_query[i0].to(device)) / 1000.0, 
+#		 ftrns1_diff(X_query[i0].to(device)) / 1000.0, 
+#		 k=k_nearest_query
+#	 )
+#	 trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
+#	 pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
+	
+#	 # Gaussian similarity weighting focused strictly on similar points (|trgt_rel| -> 0)
+#	 weight_rel = torch.exp(-torch.abs(trgt_rel) / 0.35)
+	
+#	 # Bypasses peak weighting to prevent weight cancellation conflict
+#	 loss_rel = weights[1] * loss_charbonnier_source(
+#		 pred_rel, 
+#		 trgt_rel, 
+#		 sample_weight=weight_rel, 
+#		 update_ema=False,
+#		 apply_peak_weight=False
+#	 )
+#	 loss_relative_val += loss_rel.item() / n_batch
+#	 computed_relative_loss = True
 
 
 
 
 		# # ==================== 2. REGRESSION / AMPLITUDE LOSSES ====================
 		# if use_regression_loss:
-		#     # 1. Prepare 1D target and prediction tensors safely
-		#     lbl_query_cuda = torch.as_tensor(Lbls_query[i0], device=device, dtype=torch.float32).squeeze()
-		#     lbl_base_cuda  = torch.as_tensor(Lbls[i0], device=device, dtype=torch.float32).squeeze()
-		#     pick_p_cuda    = torch.as_tensor(pick_lbls[:, :, 0], device=device, dtype=torch.float32).squeeze()
-		#     pick_s_cuda    = torch.as_tensor(pick_lbls[:, :, 1], device=device, dtype=torch.float32).squeeze()
+		#	 # 1. Prepare 1D target and prediction tensors safely
+		#	 lbl_query_cuda = torch.as_tensor(Lbls_query[i0], device=device, dtype=torch.float32).squeeze()
+		#	 lbl_base_cuda  = torch.as_tensor(Lbls[i0], device=device, dtype=torch.float32).squeeze()
+		#	 pick_p_cuda	= torch.as_tensor(pick_lbls[:, :, 0], device=device, dtype=torch.float32).squeeze()
+		#	 pick_s_cuda	= torch.as_tensor(pick_lbls[:, :, 1], device=device, dtype=torch.float32).squeeze()
 
-		#     pred_base  = out[0][:, 0] # if out[0].ndim > 1 else out[0]
-		#     pred_query = out[1][:, 0] # if out[1].ndim > 1 else out[1]
-		#     pred_assoc_p = out[2][:, :, 0] # if out[2].ndim > 2 else out[2].squeeze()
-		#     pred_assoc_s = out[3][:, :, 0] # if out[3].ndim > 2 else out[3].squeeze()
+		#	 pred_base  = out[0][:, 0] # if out[0].ndim > 1 else out[0]
+		#	 pred_query = out[1][:, 0] # if out[1].ndim > 1 else out[1]
+		#	 pred_assoc_p = out[2][:, :, 0] # if out[2].ndim > 2 else out[2].squeeze()
+		#	 pred_assoc_s = out[3][:, :, 0] # if out[3].ndim > 2 else out[3].squeeze()
 
-		#     # 2. Compute Main Regression Losses
-		#     loss_reg_query = weights[1] * loss_charb_query(
-		#         pred_query[mask_lbls_query_l[i0]], 
-		#         lbl_query_cuda[mask_lbls_query_l[i0]], 
-		#         # update_ema=True
-		#     )
-		#     loss_reg_base = weights[0] * loss_charb_base(
-		#         pred_base[mask_lbls_l[i0]], 
-		#         lbl_base_cuda[mask_lbls_l[i0]]
-		#     )
-		#     # loss_reg_assoc_P = weight_assoc_v[i0] * weights[2] * loss_charb_assoc(
-		#     #     pred_assoc_p[mask_lbls_assoc_query_l[i0]], 
-		#     #     pick_p_cuda[mask_lbls_assoc_query_l[i0]], 
-		#     #     # update_ema=True
-		#     # )
-		#     # loss_reg_assoc_S = weight_assoc_v[i0] * weights[3] * loss_charb_assoc(
-		#     #     pred_assoc_s[mask_lbls_assoc_query_l[i0]], 
-		#     #     pick_s_cuda[mask_lbls_assoc_query_l[i0]]
-		#     # )
+		#	 # 2. Compute Main Regression Losses
+		#	 loss_reg_query = weights[1] * loss_charb_query(
+		#		 pred_query[mask_lbls_query_l[i0]], 
+		#		 lbl_query_cuda[mask_lbls_query_l[i0]], 
+		#		 # update_ema=True
+		#	 )
+		#	 loss_reg_base = weights[0] * loss_charb_base(
+		#		 pred_base[mask_lbls_l[i0]], 
+		#		 lbl_base_cuda[mask_lbls_l[i0]]
+		#	 )
+		#	 # loss_reg_assoc_P = weight_assoc_v[i0] * weights[2] * loss_charb_assoc(
+		#	 #	 pred_assoc_p[mask_lbls_assoc_query_l[i0]], 
+		#	 #	 pick_p_cuda[mask_lbls_assoc_query_l[i0]], 
+		#	 #	 # update_ema=True
+		#	 # )
+		#	 # loss_reg_assoc_S = weight_assoc_v[i0] * weights[3] * loss_charb_assoc(
+		#	 #	 pred_assoc_s[mask_lbls_assoc_query_l[i0]], 
+		#	 #	 pick_s_cuda[mask_lbls_assoc_query_l[i0]]
+		#	 # )
 
 		# 	# Pure Charbonnier + Dice Hybrid for Association Maps
 		# 	loss_reg_assoc_P = weight_assoc_v[i0] * weights[2] * (
@@ -4565,8 +4587,8 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 		# 		0.5 * loss_dice_assoc(pred_assoc_s[mask_lbls_assoc_query_l[i0]], pick_s_cuda[mask_lbls_assoc_query_l[i0]]) use_dice else 0.0
 		# 	)
 
-		#     loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / valid_n_batch
-		#     loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / valid_n_batch
+		#	 loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / valid_n_batch
+		#	 loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / valid_n_batch
 
 
 
@@ -4695,37 +4717,37 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 		# computed_relative_loss = False
 
 		# if use_relative_loss and (ramp_aux > 0.0):
-		#     k_nearest_query = 150
-		#     # Enforce 1D tensors [N] to avoid [M, 1] vs [M] matrix broadcasting
-		#     lbls_query_cuda = Lbls_query[i0][:, 0].to(device)
-		#     pred_query_cuda = out[1][:, 0] if out[1].ndim > 1 else out[1]
-		    
-		#     active_mask = torch.where(lbls_query_cuda > 0.01)[0]
-		    
-		#     if len(active_mask) > 1:
-		#         # 1. kNN on active point coordinates
-		#         x_active = ftrns1_diff(X_query[i0][active_mask].to(device)) / 1000.0
-		#         k_actual = min(len(active_mask) - 1, k_nearest_query)
-		        
-		#         # 2. Global index mapping via active_mask
-		#         edges_query = active_mask[knn(x_active, x_active, k=k_actual)]
-		        
-		#         # 3. Gather targets & predictions (strictly 1D)
-		#         trgt_i, trgt_j = lbls_query_cuda[edges_query[0]], lbls_query_cuda[edges_query[1]]
-		#         pred_i, pred_j = pred_query_cuda[edges_query[0]], pred_query_cuda[edges_query[1]]
-		        
-		#         trgt_rel = trgt_i - trgt_j
-		#         pred_rel = pred_i - pred_j
-		        
-		#         # 4. Max Amplitude * Slope Contrast weighting
-		#         weight_rel = torch.maximum(trgt_i, trgt_j) * (1.0 - torch.exp(-torch.abs(trgt_rel) / 0.25))
-		        
-		#         # 5. Charbonnier Relative Loss
-		#         loss_rel = weights[1] * loss_charbonnier_source(
-		#             pred_rel, trgt_rel, sample_weight=weight_rel, apply_peak_weight=False
-		#         )
-		#         loss_relative_val += loss_rel.item() / n_batch
-		#         computed_relative_loss = True
+		#	 k_nearest_query = 150
+		#	 # Enforce 1D tensors [N] to avoid [M, 1] vs [M] matrix broadcasting
+		#	 lbls_query_cuda = Lbls_query[i0][:, 0].to(device)
+		#	 pred_query_cuda = out[1][:, 0] if out[1].ndim > 1 else out[1]
+			
+		#	 active_mask = torch.where(lbls_query_cuda > 0.01)[0]
+			
+		#	 if len(active_mask) > 1:
+		#		 # 1. kNN on active point coordinates
+		#		 x_active = ftrns1_diff(X_query[i0][active_mask].to(device)) / 1000.0
+		#		 k_actual = min(len(active_mask) - 1, k_nearest_query)
+				
+		#		 # 2. Global index mapping via active_mask
+		#		 edges_query = active_mask[knn(x_active, x_active, k=k_actual)]
+				
+		#		 # 3. Gather targets & predictions (strictly 1D)
+		#		 trgt_i, trgt_j = lbls_query_cuda[edges_query[0]], lbls_query_cuda[edges_query[1]]
+		#		 pred_i, pred_j = pred_query_cuda[edges_query[0]], pred_query_cuda[edges_query[1]]
+				
+		#		 trgt_rel = trgt_i - trgt_j
+		#		 pred_rel = pred_i - pred_j
+				
+		#		 # 4. Max Amplitude * Slope Contrast weighting
+		#		 weight_rel = torch.maximum(trgt_i, trgt_j) * (1.0 - torch.exp(-torch.abs(trgt_rel) / 0.25))
+				
+		#		 # 5. Charbonnier Relative Loss
+		#		 loss_rel = weights[1] * loss_charbonnier_source(
+		#			 pred_rel, trgt_rel, sample_weight=weight_rel, apply_peak_weight=False
+		#		 )
+		#		 loss_relative_val += loss_rel.item() / n_batch
+		#		 computed_relative_loss = True
 
 
 
