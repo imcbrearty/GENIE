@@ -985,7 +985,6 @@ class SpaceTimeDirect(nn.Module):
 		return self.activate(self.f_direct(inpts))
 
 
-
 class SpaceTimeAttention(MessagePassing):
     """Multi-Resolution Space-Time Interpolator with Dynamic RBF Edge Embeddings."""
 
@@ -1187,7 +1186,6 @@ class SpaceTimeAttention(MessagePassing):
 
         out = self.proj(torch.cat((interpolated_gated, gated_ctx), dim=1))
         return self.activate2(out)
-
 
 
 
