@@ -1055,9 +1055,9 @@ class SpaceTimeAttention(MessagePassing):
 		self.fixed_edges = None
 		self.edge_features = None
 
-		self.head_value_scale = nn.Parameter(
-		    torch.zeros(n_heads, n_latent)
-		)
+		# self.head_value_scale = nn.Parameter(
+		#     torch.zeros(n_heads, n_latent)
+		# )
 
 	def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=16):
 		ctx_4d = torch.cat((x_context / self.scale_rel, (1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel), dim=1)
@@ -1098,10 +1098,7 @@ class SpaceTimeAttention(MessagePassing):
 		alpha = 0.5 * torch.tanh(delta[:, :2]).unsqueeze(1)
 		residuals = 0.1 * torch.tanh(delta[:, 2:].view(-1, self.n_heads, 2))
 
-
-
 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
-
 
 		# 3. Distance & Bounded Score Logits
 		distance_logits = (
@@ -1144,15 +1141,6 @@ class SpaceTimeAttention(MessagePassing):
 
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 		# ctx_expanded = ctx.expand(x_query.shape[0], -1)
-
-		# # Propagate calls message -> aggregate (add) -> update
-		# interpolated, local_sparsity = self.propagate(
-		# 	edge_index,
-		# 	x=inpts,
-		# 	embed_context=ctx.expand(len(inpts), -1),
-		# 	edge_attr=edge_attr,
-		# 	size=(x_context.shape[0], x_query.shape[0]),
-		# )
 
 		# Propagate calls message -> aggregate (add) -> update
 		interpolated, local_sparsity = self.propagate(
