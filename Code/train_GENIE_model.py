@@ -3978,8 +3978,8 @@ for batch_idx, inputs in enumerate(loader):
 		        loss_s_dice = loss_dice_assoc(pred_assoc_s[mask_assoc], pick_s_cuda[mask_assoc])
 		        
 		        # 50/50 Hybrid formulation ## Can add moving adaptive weighting
-		        loss_assoc_p_total = 1.0 * loss_p_charb + 0.05 * loss_p_dice
-		        loss_assoc_s_total = 1.0 * loss_s_charb + 0.05 * loss_s_dice
+		        loss_assoc_p_total = 1.0 * loss_p_charb + 0.1 * loss_p_dice
+		        loss_assoc_s_total = 1.0 * loss_s_charb + 0.1 * loss_s_dice
 		    else:
 		        loss_assoc_p_total = loss_p_charb
 		        loss_assoc_s_total = loss_s_charb
@@ -4080,7 +4080,7 @@ for batch_idx, inputs in enumerate(loader):
 		    active_mask = torch.where(lbls_query_cuda > 0.01)[0]
 		    
 		    if len(active_mask) > 1:
-		        x_active = ftrns1_diff(X_query[i0][active_mask].to(device)) / 1000.0
+		        x_active = torch.cat((ftrns1_diff(X_query[i0][active_mask].to(device)) / 1000.0, scale_time*X_query[i0][active_mask,3:4].to(device)), dim = 1)
 		        k_actual = min(len(active_mask) - 1, k_nearest_query)
 		        
 		        edges_query = active_mask[knn(x_active, x_active, k=k_actual)]
@@ -4118,7 +4118,7 @@ for batch_idx, inputs in enumerate(loader):
 		}
 
 		if computed_negative_loss:
-		    loss_aux = loss_aux + 0.3 * ramp_aux * weight_aux * loss_negative
+		    loss_aux = loss_aux + 0.1 * ramp_aux * weight_aux * loss_negative
 		    loss_dict['aux_negative'] = loss_negative
 
 		if computed_relative_loss:
