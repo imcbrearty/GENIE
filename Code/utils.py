@@ -934,7 +934,7 @@ def generate_travel_time_noise(
     phase_input="P",
     event_idx=None,
     distribution="laplace",
-    sigma_pick=0.08,
+    sigma_pick=0.1, # 0.08
     # gamma_path=0.12,  # Path noise growth coefficient (sec / sqrt(sec))
     gamma_path=0.15,  # Path noise growth coefficient (sec / sqrt(sec))
     scale_extra=1.0,
