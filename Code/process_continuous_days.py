@@ -273,7 +273,7 @@ else:
 	if min_spc_allowed is not None:
 		print(f"Using minimum spacing stations: {min_spc_allowed:0.4f}")
 		P_keep, P_remove, ind_keep, locs_keep = merge_nearby_stations(
-			P, locs, spatial_win=min_spc_allowed, merge_picks=False, merge_ratio=0.5, use_depths=True, merge_window=1.5, verbose=True
+			P, locs, ftrns1, spatial_win=min_spc_allowed, merge_picks=False, merge_ratio=0.5, use_depths=True, merge_window=1.5, verbose=True
 		)
 		P = np.copy(P_keep)
 
