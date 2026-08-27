@@ -1021,10 +1021,11 @@ class SpaceTimeAttention(MessagePassing):
 		nn.init.normal_(self.f_gamma.weight, std=0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
-		init_spatial = torch.logspace(-1, 0.7, steps=n_heads) # .unsqueeze(1).repeat(1, 3)
-		init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads) # .unsqueeze(1)
-		init_gammas = torch.stack([init_spatial, init_temporal], dim=1) # .unsqueeze(0)
-		self.log_gamma_base = nn.Parameter(torch.log(init_gammas)).unsqueeze(0)
+		init_spatial = torch.logspace(-1, 0.7, steps=n_heads).unsqueeze(1) # .repeat(1, 3)
+		init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads).unsqueeze(1)
+		init_gammas = torch.cat([init_spatial, init_temporal], dim=1).unsqueeze(0)
+		# self.log_gamma_base = nn.Parameter(torch.log(init_gammas)).unsqueeze(0)
+		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
 
 		# 3. Global Scale Cap for Gain
 		self.f_max_gain_cap = nn.Sequential(
@@ -1079,7 +1080,7 @@ class SpaceTimeAttention(MessagePassing):
 		self.edge_features = edge_attr
 		self.use_fixed_edges = True
 
-	def message(self, x_j, embed_context_j, index, edge_attr):
+	def message(self, x_j, embed_context, index, edge_attr):
 		# 1. Feature Values
 
 		spatial_sq = edge_attr[:,0:3].sum(dim = -1, keepdim = True)
@@ -1087,16 +1088,20 @@ class SpaceTimeAttention(MessagePassing):
 
 		edge_embed = self.edge_proj(torch.cat((edge_attr[:,4:8], torch.sqrt(spatial_sq + 1e-6), torch.sqrt(temporal_sq + 1e-6)), dim = 1))
 
-		value_embed = self.act_values(self.film_values(self.f_values(x_j), embed_context_j))
+		value_embed = self.act_values(self.film_values(self.f_values(x_j), embed_context))
 
 		value_embed = value_embed + edge_embed
 
 		# 2. Dynamic Gammas
-		delta = self.f_gamma(embed_context_j)
+		delta = self.f_gamma(embed_context)
 		# alpha = delta[:, :2].unsqueeze(1)
 		alpha = 0.5 * torch.tanh(delta[:, :2]).unsqueeze(1)
 		residuals = 0.1 * torch.tanh(delta[:, 2:].view(-1, self.n_heads, 2))
+
+
+
 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+
 
 		# 3. Distance & Bounded Score Logits
 		distance_logits = (
@@ -1104,7 +1109,7 @@ class SpaceTimeAttention(MessagePassing):
 			-gammas[:, :, 1] * temporal_sq
 		)
 
-		raw_score = self.film_score(self.f_feature_score(x_j), embed_context_j)
+		raw_score = self.film_score(self.f_feature_score(x_j), embed_context)
 		score = 0.2 * torch.tanh(raw_score)
 		
 		logits = distance_logits + score
@@ -1138,19 +1143,29 @@ class SpaceTimeAttention(MessagePassing):
 			edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
 
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-		ctx_expanded = ctx.expand(x_query.shape[0], -1)
+		# ctx_expanded = ctx.expand(x_query.shape[0], -1)
+
+		# # Propagate calls message -> aggregate (add) -> update
+		# interpolated, local_sparsity = self.propagate(
+		# 	edge_index,
+		# 	x=inpts,
+		# 	embed_context=ctx.expand(len(inpts), -1),
+		# 	edge_attr=edge_attr,
+		# 	size=(x_context.shape[0], x_query.shape[0]),
+		# )
 
 		# Propagate calls message -> aggregate (add) -> update
 		interpolated, local_sparsity = self.propagate(
 			edge_index,
 			x=inpts,
-			embed_context=ctx.expand(len(inpts), -1),
+			embed_context=ctx, # .expand(len(inpts), -1),
 			edge_attr=edge_attr,
 			size=(x_context.shape[0], x_query.shape[0]),
 		)
 
 		# 1. Compute Global Scale Cap
-		max_boost_cap = 1.5 * self.f_max_gain_cap(ctx_expanded)
+		# max_boost_cap = 1.5 * self.f_max_gain_cap(ctx_expanded)
+		max_boost_cap = 1.5 * self.f_max_gain_cap(ctx)
 
 		# 2. Local Gain
 		local_gain = 1.0 + max_boost_cap * local_sparsity
@@ -1160,7 +1175,7 @@ class SpaceTimeAttention(MessagePassing):
 
 		# 4. Readout
 		gate = self.spatial_gate(interpolated_gated)
-		gated_ctx = ctx_expanded * gate
+		gated_ctx = ctx * gate
 
 		out = self.proj(torch.cat((interpolated_gated, gated_ctx), dim=1))
 		return self.activate2(out)
