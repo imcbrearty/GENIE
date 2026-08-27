@@ -292,7 +292,7 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# 1. Edge MLP: Evaluates physical features (Inputs + 3D Unit Dir + 1D Time + K Gammas)
 		# 3 (unit dir) + 1 (dt) + K (RBF decays) = 4 + n_gammas positional features
-		self.fc_edge = nn.Linear(ndim_in + 4 + n_gammas, ndim_in)
+		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
 		self.film_edge = FiLM(embed_dim, ndim_in)
 		self.act_edge = nn.PReLU()
 
@@ -306,15 +306,15 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
 		# Outputs [1 + n_gammas * 4] -> 1 global zoom factor + 4D directional offsets per gamma
-		self.f_gamma = nn.Linear(embed_dim, 3 + n_gammas * 2)
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
 		nn.init.normal_(self.f_gamma.weight, std = 0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
 		# Log-spaced initialization across spectrum: ~[0.05, 0.3, 0.8, 2.0]
-		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).unsqueeze(1) # .repeat(1, 3) # [n_gammas, 3]
-		init_temporal = torch.logspace(-1, 0.7, steps=n_gammas).unsqueeze(1)			# [n_gammas, 1]
-		init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)	  # [1, n_gammas, 4]
-		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1,-1) # .unsqueeze(1) # .repeat(1, 3) # [n_gammas, 3]
+		# init_temporal = torch.logspace(-1, 0.7, steps=n_gammas) # .unsqueeze(1)			# [n_gammas, 1]
+		# init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)	  # [1, n_gammas, 4]
+		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
 
 		# 4. Normalization and Readout
 		self.norm = nn.LayerNorm(ndim_in)
@@ -352,12 +352,12 @@ class BipartiteGraphOperator(MessagePassing):
 		# Step 2: Scale-conditioned Anisotropic Gammas
 		delta = self.f_gamma(ctx)
 		# alpha = delta[:, :1].unsqueeze(-1)									 # Global scale factor
-		alpha_global = 0.5  * torch.tanh(delta[:, 0:1])
-		alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
-		alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
-		residuals =    0.2  * torch.tanh(delta[:, 3:].view(-1, self.n_gammas, 2))  # Anisotropic variations
-		alpha = torch.cat([(alpha_global + alpha_space).expand(-1,1),
-			(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
+		alpha = 0.5  * torch.tanh(delta[:, 0:1])
+		# alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
+		# alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
+		residuals =    0.2  * torch.tanh(delta[:, 3:])  # Anisotropic variations
+		# alpha = torch.cat([(alpha_global + alpha_space).expand(-1,1),
+		# 	(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)			# [E_edges, n_gammas, 4]
 
 		# Step 3: Anisotropic LINEAR distance metric: sqrt( sum_d gamma_d * dr_d^2 )
@@ -366,12 +366,12 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# Compute isotropic 3D spatial distance squared and 1D temporal distance squared
 		r_sp_sq = norm_pos ** 2                                       # [E_edges, 1]
-		r_tm_sq = diff_tm ** 2                                        # [E_edges, 1]
-		r_sq = torch.cat((r_sp_sq, r_tm_sq), dim=1).unsqueeze(1)      # [E_edges, 1, 2]
+		# r_tm_sq = diff_tm ** 2                                        # [E_edges, 1]
+		# r_sq = torch.cat((r_sp_sq, r_tm_sq), dim=1).unsqueeze(1)      # [E_edges, 1, 2]
 
 		# gammas is [E_edges, n_gammas, 2]
 		# Dot product across the 2 components (Space, Time):
-		r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-5) # [E_edges, n_gammas]
+		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5) # [E_edges, n_gammas]
 
 		# r_aniso = torch.sqrt(torch.sum(gammas[:,:,0:1] * r_sq[:,:,0:3] + gammas[:,:,1:2] * r_sq[:,:,3:4], dim=-1) + 1e-5)		  # [E_edges, n_gammas]
 
@@ -379,7 +379,8 @@ class BipartiteGraphOperator(MessagePassing):
 		rbf_decay = torch.exp(-1.0 * r_aniso)								  # [E_edges, n_gammas]
 
 		# Step 4: Non-linear geometric feature fusion with FiLM scale conditioning
-		rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)			# [E_edges, 4 + n_gammas]
+		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)			# [E_edges, 4 + n_gammas]
+		# rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)			# [E_edges, 4 + n_gammas]
 		edge_inpt = torch.cat((inpt, rel_pos), dim=-1)
 		# geo_features = self.act_edge(self.film_edge(self.fc_edge(torch.cat((inpt, rel_pos), dim=-1)), ctx))
 		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
@@ -1450,7 +1451,7 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 
 		# 1. Edge Feature Evaluator
 		# Inputs: Source feature (ndim_in) + Unit dir (3) + 1D Time (1) + n_gammas RBFs
-		self.fc_edge = nn.Linear(ndim_in + 4 + n_gammas, ndim_in)
+		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
 		self.film_edge = FiLM(embed_dim, ndim_in)
 		self.act_edge = nn.PReLU()
 
@@ -1463,15 +1464,15 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		)
 
 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
-		self.f_gamma = nn.Linear(embed_dim, 3 + n_gammas * 2)
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
 		nn.init.normal_(self.f_gamma.weight, std = 0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
 		# Multi-scale log-spaced initialization
-		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).unsqueeze(1) # .repeat(1, 3)
-		init_temporal = torch.logspace(-1, 0.7, steps=n_gammas).unsqueeze(1)
-		init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)
-		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1,-1) # .unsqueeze(1) # .repeat(1, 3)
+		# init_temporal = torch.logspace(-1, 0.7, steps=n_gammas) # .unsqueeze(1)
+		# init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)
+		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
 
 		# 4. Readout Normalization and Output Projection
 		self.norm = nn.LayerNorm(ndim_in)
@@ -1520,31 +1521,31 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 
 		# Step 2: Scale-conditioned Anisotropic Gammas
 		delta = self.f_gamma(ctx)
-		alpha_global = 0.5  * torch.tanh(delta[:, 0:1])
-		alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
-		alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
-		residuals =    0.2 * torch.tanh(delta[:, 3:].view(-1, self.n_gammas, 2))  # Anisotropic variations
-		alpha = torch.cat([(alpha_global + alpha_space).expand(-1,1),
-			(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
+		alpha = 0.5  * torch.tanh(delta[:, 0:1])
+		# alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
+		# alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
+		residuals =    0.2 * torch.tanh(delta[:, 3:])  # Anisotropic variations
+		# alpha = torch.cat([(alpha_global + alpha_space).expand(-1,1),
+		# 	(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)  # [E, n_gammas, 4]
 		# alpha = delta[:, :1].unsqueeze(-1)
 		# residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))
 
 		# Compute isotropic 3D spatial distance squared and 1D temporal distance squared
 		r_sp_sq = norm_pos ** 2                                       # [E_edges, 1]
-		r_tm_sq = diff_tm ** 2                                        # [E_edges, 1]
-		r_sq = torch.cat((r_sp_sq, r_tm_sq), dim=1).unsqueeze(1)      # [E_edges, 1, 2]
+		# r_tm_sq = diff_tm ** 2                                        # [E_edges, 1]
+		# r_sq = torch.cat((r_sp_sq, r_tm_sq), dim=1).unsqueeze(1)      # [E_edges, 1, 2]
 
 		# gammas is [E_edges, n_gammas, 2]
 		# Dot product across the 2 components (Space, Time):
-		r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-5) # [E_edges, n_gammas]
+		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5) # [E_edges, n_gammas]
 
 		# Step 3: Anisotropic LINEAR distance metric
 		# r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)
 		# r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-5)
 		rbf_decay = torch.exp(-1.0 * r_aniso)  # [E, n_gammas]
 
-		rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)
+		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)
 
 		# Step 4: Map source mask to edge indexing if passed as node mask
 		if mask.dim() > 1 and mask.shape[0] == N:
