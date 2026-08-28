@@ -5283,7 +5283,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
         w_t_sec = domain_scale.get('W_t_s', 3.0)
         
         # Minimum window floor: at least 1 inter-station hop or 1.5x kernel scale
-        min_time_range = max(1.5 * w_t_sec, 1.0 * t_interstation_median)
+        min_time_range = max(min_time_range, max(1.5 * w_t_sec, 1.0 * t_interstation_median))
     
         # 3. Maximum Cap:
         # Use max() so ultra-dense networks (like DAS with ~0.01s station transit) 
