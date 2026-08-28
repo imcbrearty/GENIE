@@ -3134,6 +3134,68 @@ def split_charbonnier_loss(pred, target, threshold=0.01, pos_weight=0.5, eps=1e-
 	return pos_weight * pos_loss + (1.0 - pos_weight) * neg_loss
 
 
+class EMAMassCharbonnierLoss(nn.Module):
+	"""
+	Charbonnier loss with Exponential Moving Average (EMA) mass normalization.
+	Designed to be instantiated individually per prediction head.
+	"""
+	def __init__(self, peak_boost=10.0, momentum=0.0005, eps=1e-3, default_mass=1.0):
+		super().__init__()
+		self.peak_boost = float(peak_boost)
+		self.momentum = float(momentum)
+		self.eps = float(eps)
+		self.eps_sq = self.eps ** 2
+
+		# Device-agnostic buffer registration
+		self.register_buffer("running_target_mass", torch.tensor(default_mass, dtype=torch.float32))
+
+	def forward(self, pred, target, sample_weight=None, apply_peak_weight=True, update_ema=True):
+
+		if pred.numel() == 0 or target.numel() == 0:
+				return pred.sum() * 0.0
+
+		pred = pred.float()
+		target = target.float()
+		batch_size = target.shape[0]
+
+		# 1. Structural peak weight map
+		if apply_peak_weight:
+			weight_map = 1.0 + (self.peak_boost - 1.0) * torch.abs(target)
+		else:
+			weight_map = torch.ones_like(target)
+
+		if sample_weight is not None:
+			weight_map = weight_map * sample_weight.float().view_as(target)
+
+		# 2. Point-wise Charbonnier residual (weight_map applied OUTSIDE square root)
+		diff_sq = (pred - target).pow(2)
+		charbonnier_residual = torch.sqrt(diff_sq + self.eps_sq) - self.eps
+		pointwise_loss = charbonnier_residual * weight_map
+
+		if apply_peak_weight:
+			# Calculate current batch's average target mass per sample for THIS head
+			current_mass = torch.abs(target).sum() / max(batch_size, 1)
+
+			# Update EMA state for this specific loss instance
+			if self.training and update_ema:
+				with torch.no_grad():
+					if current_mass > 0.001:
+						# Ensure buffer matches target device automatically
+						if self.running_target_mass.device != target.device:
+							self.running_target_mass = self.running_target_mass.to(target.device)
+							
+						self.running_target_mass.mul_(1.0 - self.momentum).add_(
+							self.momentum * current_mass.detach()
+						)
+
+			# Standardized normalization for this head
+			norm_factor = torch.clamp(self.running_target_mass, min=0.1) * batch_size
+			return pointwise_loss.sum() / norm_factor
+
+		else:
+			return pointwise_loss.mean()
+
+
 # class RobustCharbonnierLoss(nn.Module):
 #	 def __init__(self, peak_boost=10.0, eps=1e-3):
 #		 super().__init__()
@@ -3191,7 +3253,28 @@ def split_charbonnier_loss(pred, target, threshold=0.01, pos_weight=0.5, eps=1e-
 #		 return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
 
 
-class RobustCharbonnierLoss(nn.Module):
+
+
+class MultiTaskLossBalancer(nn.Module):
+	"""
+	Adaptive loss balancer based on Homoscedastic Uncertainty.
+	Automatically balances Charbonnier reconstruction with auxiliary losses.
+	"""
+	def __init__(self, num_losses=2):
+		super().__init__()
+		# log(sigma^2) parameters for numerical stability
+		self.log_vars = nn.Parameter(torch.zeros(num_losses))
+
+	def forward(self, *losses):
+		total_loss = 0.0
+		for i, loss in enumerate(losses):
+			precision = torch.exp(-self.log_vars[i])
+			# L_balanced = 0.5 * exp(-s_i) * L_i + 0.5 * s_i
+			total_loss = total_loss + 0.5 * precision * loss + 0.5 * self.log_vars[i]
+		return total_loss
+
+
+class RobustCharbonnierLoss1(nn.Module):
 	def __init__(self, peak_boost=10.0, eps=1e-3):
 		super().__init__()
 		self.peak_boost = float(peak_boost)
@@ -3219,6 +3302,38 @@ class RobustCharbonnierLoss(nn.Module):
 		# Self-normalization preserves identical gradient scale across all heads
 		return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
 
+
+class RobustCharbonnierLoss(nn.Module):
+	def __init__(self, peak_boost=3.0, eps=1e-3):
+		super().__init__()
+		self.peak_boost = float(peak_boost)
+		self.eps_sq = eps ** 2
+
+	def forward(self, pred, target, sample_weight=None, apply_peak_weight=True):
+		if pred.numel() == 0 or target.numel() == 0:
+			return pred.sum() * 0.0
+
+		pred = pred.float()
+		target = target.float()
+
+		if apply_peak_weight:
+			# 1. Clamp target amplitude to [0, 1] bounds (handles overlapping Gaussians > 1.0)
+			target_amp = torch.clamp(torch.abs(target), max=1.0)
+			
+			# 2. Linear weighting bounded strictly between 1.0 and peak_boost
+			weight_map = 1.0 + (self.peak_boost - 1.0) * target_amp
+		else:
+			weight_map = torch.ones_like(target)
+
+		if sample_weight is not None:
+			weight_map = weight_map * sample_weight.float().expand_as(target)
+
+		# 3. Charbonnier Residual
+		diff_sq = (pred - target).pow(2)
+		pointwise_loss = torch.sqrt(diff_sq + self.eps_sq) * weight_map
+
+		# 4. Self-normalization preserves identical gradient scale across all heads
+		return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
 
 
 if use_station_corrections == True:
@@ -3650,7 +3765,7 @@ if load_training_data == True:
 	dataset = TrainingDataset(np.random.permutation(files_load), n_batch, n_epochs, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded)
 
 
-use_dice_loss = True
+use_dice_loss = False
 use_regression_loss = True
 use_consistency_loss = False
 use_negative_loss = True
@@ -3693,9 +3808,13 @@ len_loader = len(loader) ## Why not loop over data until n_epochs
 out_save = None
 
 
-pre_compute_peak_boost = True
+peak_boost_base = 3.0
+peak_boost_query = 10.0
+peak_boost_assoc = 2.0
+
+pre_compute_peak_boost = False
 if pre_compute_peak_boost:
-	n_check_files = min(100, len(loader))
+	n_check_files = min(30, len(loader))
 
 	bg_weight_base, sig_weight_base = 0.0, 0.0
 	bg_weight_query, sig_weight_query = 0.0, 0.0
@@ -3757,9 +3876,14 @@ if pre_compute_peak_boost:
 
 
 
-loss_charb_base = RobustCharbonnierLoss(peak_boost = peak_boost_base)
-loss_charb_query = RobustCharbonnierLoss(peak_boost = peak_boost_query)
-loss_charb_assoc = RobustCharbonnierLoss(peak_boost = peak_boost_assoc)
+# loss_charb_base = RobustCharbonnierLoss(peak_boost = peak_boost_base)
+# loss_charb_query = RobustCharbonnierLoss(peak_boost = peak_boost_query)
+# loss_charb_assoc = RobustCharbonnierLoss(peak_boost = peak_boost_assoc)
+
+loss_charb_base = EMAMassCharbonnierLoss(peak_boost = peak_boost_base)
+loss_charb_query = EMAMassCharbonnierLoss(peak_boost = peak_boost_query)
+loss_charb_assoc = EMAMassCharbonnierLoss(peak_boost = peak_boost_assoc)
+
 loss_dice_assoc = GaussianDiceAssoc()
 
 
@@ -4034,27 +4158,30 @@ for batch_idx, inputs in enumerate(loader):
 			# 2. Compute Main Energy Regression Losses
 			loss_reg_query = weights[1] * loss_charb_query(
 				pred_query[mask_lbls_query_l[i0]], 
-				lbl_query_cuda[mask_lbls_query_l[i0]]
-			)
+				lbl_query_cuda[mask_lbls_query_l[i0]],
+				apply_peak_weight = True, update_ema = True
+			) # sample_weight=None, apply_peak_weight=True, update_ema=True)
+
 			loss_reg_base = weights[0] * loss_charb_base(
 				pred_base[mask_lbls_l[i0]], 
-				lbl_base_cuda[mask_lbls_l[i0]]
+				lbl_base_cuda[mask_lbls_l[i0]],
+				apply_peak_weight = True, update_ema = True
 			)
 
 			# 3. Compute Association Map Losses (Charbonnier + optional Dice Hybrid)
 			mask_assoc = mask_lbls_assoc_query_l[i0]
 			
 			# Pure Charbonnier loss component
-			loss_p_charb = loss_charb_assoc(pred_assoc_p[mask_assoc], pick_p_cuda[mask_assoc])
-			loss_s_charb = loss_charb_assoc(pred_assoc_s[mask_assoc], pick_s_cuda[mask_assoc])
+			loss_p_charb = loss_charb_assoc(pred_assoc_p[mask_assoc], pick_p_cuda[mask_assoc], apply_peak_weight = True, update_ema = True)
+			loss_s_charb = loss_charb_assoc(pred_assoc_s[mask_assoc], pick_s_cuda[mask_assoc], apply_peak_weight = True, update_ema = True)
 
 			if use_dice_loss:
 				loss_p_dice = loss_dice_assoc(pred_assoc_p[mask_assoc], pick_p_cuda[mask_assoc])
 				loss_s_dice = loss_dice_assoc(pred_assoc_s[mask_assoc], pick_s_cuda[mask_assoc])
 				
 				# 50/50 Hybrid formulation ## Can add moving adaptive weighting
-				loss_assoc_p_total = 1.0 * loss_p_charb + 0.1 * loss_p_dice
-				loss_assoc_s_total = 1.0 * loss_s_charb + 0.1 * loss_s_dice
+				loss_assoc_p_total = 1.0 * loss_p_charb + 0.02 * loss_p_dice
+				loss_assoc_s_total = 1.0 * loss_s_charb + 0.02 * loss_s_dice
 			else:
 				loss_assoc_p_total = loss_p_charb
 				loss_assoc_s_total = loss_s_charb
@@ -4136,9 +4263,9 @@ for batch_idx, inputs in enumerate(loader):
 
 			if neg_mask_final.any():
 				loss_negative = loss_charb_query(
-					pred_query_neg[neg_mask_final], 
-					lbls_query_tensor[neg_mask_final], 
-					apply_peak_weight=False
+					pred_query_neg[neg_mask_final].view(-1), 
+					lbls_query_tensor[neg_mask_final].view(-1), 
+					apply_peak_weight = False, update_ema = False ## Ensure shapes 1d
 				)
 				# loss_negative_val += loss_negative.item() / valid_n_batch
 				computed_negative_loss = True
@@ -4169,10 +4296,11 @@ for batch_idx, inputs in enumerate(loader):
 				weight_rel = torch.maximum(trgt_i, trgt_j) * (1.0 - torch.exp(-torch.abs(trgt_rel) / 0.25))
 				
 				loss_relative = loss_charb_query(
-					pred_rel, 
-					trgt_rel, 
-					sample_weight=weight_rel, 
-					apply_peak_weight=False
+					pred_rel.view(-1), 
+					trgt_rel.view(-1), 
+					sample_weight = weight_rel.view(-1), 
+					apply_peak_weight = False, 
+					update_ema = False ## Ensure shapes 1d (including weight)
 				)
 				# loss_relative_val += loss_relative.item() / valid_n_batch
 				computed_relative_loss = True
