@@ -3336,6 +3336,31 @@ class RobustCharbonnierLoss(nn.Module):
 		return pointwise_loss.sum() / weight_map.sum().clamp(min=1e-5)
 
 
+def map_ratios_to_peak_boost(raw_ratios, min_boost=3.0, max_boost=12.0):
+    """
+    Maps arbitrary positive dataset target ratios [e.g. 1, 30, 200]
+    into a bounded peak_boost range [min_boost, max_boost] via log scaling.
+    """
+    raw_ratios = np.array(raw_ratios, dtype=np.float32)
+    
+    # 1. Log-transform (adding 1.0 safely handles zero or near-zero edge cases)
+    log_ratios = np.log1p(raw_ratios)
+    
+    # 2. Min-Max normalize log values to [0, 1]
+    min_log = log_ratios.min()
+    max_log = log_ratios.max()
+    
+    if max_log == min_log:  # Handle single-head or identical ratios
+        return np.full_like(raw_ratios, min_boost)
+        
+    norm_log = (log_ratios - min_log) / (max_log - min_log)
+    
+    # 3. Rescale to target range [min_boost, max_boost]
+    mapped_boosts = min_boost + norm_log * (max_boost - min_boost)
+    
+    return np.round(mapped_boosts, 2).tolist()
+
+
 if use_station_corrections == True:
 	n_ver_corrections = 1
 	path_station_corrections = path_to_file + 'Grids' + seperator + 'station_corrections_ver_%d.npz'%n_ver_corrections
@@ -3729,7 +3754,8 @@ mx_pred_1, mx_pred_2, mx_pred_3, mx_pred_4 = np.zeros(n_epochs), np.zeros(n_epoc
 mz.set_scale_coefficients(src_x_kernel*2.0, scale_time, kernel_sig_t, kernel_sig_t*3.0, src_x_kernel, src_t_kernel, time_shift_range)
 
 
-weights = torch.Tensor([0.1, 0.4, 0.25, 0.25]).to(device)
+# weights = torch.Tensor([0.1, 0.4, 0.25, 0.25]).to(device)
+weights = torch.Tensor([1.0, 1.0, 0.5, 0.5]).to(device)
 
 lat_range_interior = [lat_range[0], lat_range[1]]
 lon_range_interior = [lon_range[0], lon_range[1]]
@@ -3812,7 +3838,8 @@ peak_boost_base = 3.0
 peak_boost_query = 10.0
 peak_boost_assoc = 2.0
 
-pre_compute_peak_boost = False
+
+pre_compute_peak_boost = True
 if pre_compute_peak_boost:
 	n_check_files = min(30, len(loader))
 
@@ -3861,15 +3888,17 @@ if pre_compute_peak_boost:
 	raw_boost_assoc = bg_weight_assoc / (sig_weight_assoc + 1e-6)
 
 	# 5. Relative Normalization to Target Peak Boost Range (e.g. Min 5.0, Max 25.0)
-	MAX_TARGET_BOOST = 25.0
-	MIN_TARGET_BOOST = 5.0
+	# MAX_TARGET_BOOST = 25.0
+	# MIN_TARGET_BOOST = 5.0
 
-	raw_max = max(raw_boost_base, raw_boost_query, raw_boost_assoc, 1e-6)
+	# raw_max = max(raw_boost_base, raw_boost_query, raw_boost_assoc, 1e-6)
+
+	peak_boost_base, peak_boost_query, peak_boost_assoc = map_ratios_to_peak_boost([raw_boost_base, raw_boost_query, raw_boost_assoc])
 
 	# Scale relative to the maximum sparse head, keeping ratios intact
-	peak_boost_base  = max(MIN_TARGET_BOOST, (raw_boost_base / raw_max) * MAX_TARGET_BOOST)
-	peak_boost_query = max(MIN_TARGET_BOOST, (raw_boost_query / raw_max) * MAX_TARGET_BOOST)
-	peak_boost_assoc = max(MIN_TARGET_BOOST, (raw_boost_assoc / raw_max) * MAX_TARGET_BOOST)
+	# peak_boost_base  = max(MIN_TARGET_BOOST, (raw_boost_base / raw_max) * MAX_TARGET_BOOST)
+	# peak_boost_query = max(MIN_TARGET_BOOST, (raw_boost_query / raw_max) * MAX_TARGET_BOOST)
+	# peak_boost_assoc = max(MIN_TARGET_BOOST, (raw_boost_assoc / raw_max) * MAX_TARGET_BOOST)
 
 	print(f"Raw Continuous Ratios -> Base: {raw_boost_base:.1f} | Query: {raw_boost_query:.1f} | Assoc: {raw_boost_assoc:.1f}")
 	print(f"Scaled Peak Boosts   -> Base: {peak_boost_base:.2f} | Query: {peak_boost_query:.2f} | Assoc: {peak_boost_assoc:.2f}")
