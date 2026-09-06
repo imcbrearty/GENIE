@@ -61,7 +61,7 @@ with open('config.yaml', 'r') as file:
 	config = yaml.safe_load(file)
 
 # Load training configuration from YAML
-with open('train_config1.yaml', 'r') as file:
+with open('train_config.yaml', 'r') as file:
 
 	train_config = yaml.safe_load(file)
 
