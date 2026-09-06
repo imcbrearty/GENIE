@@ -531,7 +531,7 @@ class BipartiteGraphOperator(MessagePassing):
 		hard_support = (evidence > 0).to(out.dtype)
 		out = out * learned_support * hard_support
 
-		return out
+		return out, torch.cat((support_features, learned_support), dim = 1)
 
 
 # class BipartiteGraphOperator(MessagePassing):
@@ -994,10 +994,10 @@ if use_anisotropic_spatial_aggregation == True:
 
 else:
 
-	class SpatialAggregation(MessagePassing):
+	class SpatialAggregation1(MessagePassing):
 		def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel, 
 					 n_global=5, n_hidden=30, zero_offsets=False):
-			super(SpatialAggregation, self).__init__(aggr='mean')
+			super(SpatialAggregation1, self).__init__(aggr='mean')
 
 			self.zero_offsets = zero_offsets
 			self.scale_rel = scale_rel
@@ -1100,7 +1100,130 @@ else:
 			# Apply unified FiLM modulation and activation
 			return self.activate1(self.film(h, embed_context))
 
-
+	
+	class SpatialAggregation(MessagePassing):
+		def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel,
+					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=4):
+			super(SpatialAggregation, self).__init__(aggr='mean')
+	
+			self.zero_offsets = zero_offsets
+			self.scale_rel = scale_rel
+			self.support_dim = support_dim
+	
+			if not self.zero_offsets:
+				# Global + spatial/temporal scale adjustments + per-frequency residuals
+				self.f_gamma = nn.Linear(embed_dim, 3 + 5)
+				nn.init.normal_(self.f_gamma.weight, std=0.01)
+				nn.init.zeros_(self.f_gamma.bias)
+	
+				# 3 spatial + 2 temporal base scales
+				init_gammas = torch.tensor([0.1, 1.0, 5.0, 0.5, 10.0]).reshape(1, -1)
+				self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+	
+				# 3D direction + 3 spatial RBFs + 2 temporal RBFs + normalized dt
+				edge_dim = 9
+			else:
+				edge_dim = 0
+	
+			# Feature transformations
+			self.fc1 = nn.Linear(in_channels + support_dim + edge_dim + n_global, n_hidden)
+			self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
+			self.fglobal = nn.Linear(in_channels, n_global)
+	
+			# FiLM conditioning
+			self.film = FiLM(embed_dim, n_hidden)
+	
+			self.activate1 = nn.PReLU()
+			self.activate2 = nn.PReLU()
+			self.activate3 = nn.PReLU()
+	
+		def forward(self, tr, embed_context, A_src, pos, support=None):
+			"""
+			support: [N_source, 4] =
+				[log_coverage, log_evidence, match_fraction, support_score]
+			"""
+			ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+	
+			if support is None:
+				support = torch.zeros(
+					(tr.shape[0], self.support_dim),
+					dtype=tr.dtype, device=tr.device
+				)
+	
+			if not self.zero_offsets:
+				# Unified 4D relative position
+				pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
+				pos_rel_sp = pos_rel[:, 0:3]
+				pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim=1, keepdim=True)
+				pos_rel_tm = pos_rel[:, 3:4]
+				pos_norm_tm = torch.abs(pos_rel_tm)
+	
+				# Context-conditioned spatial/temporal bandwidths
+				delta = self.f_gamma(ctx)
+				alpha_global = 0.5 * torch.tanh(delta[:, 0:1])
+				alpha_space = 0.25 * torch.tanh(delta[:, 1:2])
+				alpha_time = 0.25 * torch.tanh(delta[:, 2:3])
+				residuals = 0.2 * torch.tanh(delta[:, 3:])
+	
+				alpha = torch.cat([
+					(alpha_global + alpha_space).expand(-1, 3),
+					(alpha_global + alpha_time).expand(-1, 2)
+				], dim=1)
+	
+				gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+				edge_gammas = gammas[A_src[0]] if gammas.shape[0] > 1 else gammas
+	
+				# Multi-scale spatial/temporal decays
+				spatial_decay = torch.exp(-pos_norm_sp * edge_gammas[:, 0:3])
+				temporal_decay = torch.exp(-pos_norm_tm * edge_gammas[:, 3:5])
+	
+				edge_attr = torch.cat((
+					pos_rel_sp / pos_norm_sp.clamp(min=1e-6),
+					spatial_decay,
+					temporal_decay,
+					pos_rel_tm
+				), dim=1)
+			else:
+				edge_attr = torch.zeros(
+					(A_src.shape[1], 0),
+					dtype=tr.dtype, device=tr.device
+				)
+	
+			# Global feature pooling
+			global_feat = self.activate3(self.fglobal(tr)).mean(dim=0, keepdim=True)
+	
+			# Source-source message passing
+			aggr_out = self.propagate(
+				A_src,
+				x=tr,
+				support=support,
+				edge_attr=edge_attr,
+				global_feat=global_feat,
+				embed_context=ctx,
+			)
+	
+			# Residual source representation
+			out = torch.cat((tr, aggr_out), dim=-1)
+			return self.activate2(self.fc2(out))
+	
+		def message(self, x_j, support_j, edge_attr, global_feat, embed_context):
+			if not self.zero_offsets:
+				inputs = torch.cat((
+					x_j,
+					support_j,
+					edge_attr,
+					global_feat.expand(len(x_j), -1)
+				), dim=-1)
+			else:
+				inputs = torch.cat((
+					x_j,
+					support_j,
+					global_feat.expand(len(x_j), -1)
+				), dim=-1)
+	
+			h = self.fc1(inputs)
+			return self.activate1(self.film(h, embed_context))
+			
 
 
 class SpaceTimeDirect(nn.Module):
