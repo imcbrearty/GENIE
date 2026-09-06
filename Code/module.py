@@ -404,14 +404,12 @@ class BipartiteGraphOperator1(MessagePassing):
 		return self.act_out(self.fc_out(self.norm(stacked_normalized)))
 
 
-
-
 class BipartiteGraphOperator(MessagePassing):
 	"""Product Graph to Source Graph Bipartite Projection Operator.
 
-	Maps product-space features (Source-Station pairs) onto the target source nodes.
-	Uses multi-gamma anisotropic linear RBF attenuation (e^-r), FiLM scale
-	conditioning, and variance-stabilized degree normalization.
+	Maps product-space features (Source-Station pairs) onto target source nodes.
+	Uses multi-scale spatial RBFs, FiLM conditioning, mask gating, and
+	coverage/evidence-aware backprojection.
 	"""
 
 	def __init__(
@@ -430,44 +428,43 @@ class BipartiteGraphOperator(MessagePassing):
 		self.scale_rel = scale_rel
 		self.scale_time = scale_time
 
-		# 1. Edge MLP: Evaluates physical features (Inputs + 3D Unit Dir + 1D Time + K Gammas)
-		# 3 (unit dir) + 1 (dt) + K (RBF decays) = 4 + n_gammas positional features
+		# 1. Edge MLP
 		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
 		self.film_edge = FiLM(embed_dim, ndim_in)
 		self.act_edge = nn.PReLU()
 
-		# 2. Low-Rank Mask Gate
+		# 2. Channel-wise Mask Gate
 		self.mask_gate = nn.Sequential(
-			nn.Linear(ndim_mask, 8),
-			nn.PReLU(),
-			nn.Linear(8, ndim_in),
-			nn.Sigmoid(),
+			nn.Linear(ndim_mask, 8), nn.PReLU(),
+			nn.Linear(8, ndim_in), nn.Sigmoid(),
 		)
 
-		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
-		# Outputs [1 + n_gammas * 4] -> 1 global zoom factor + 4D directional offsets per gamma
+		# 2b. Source-level Support Gate: [log_coverage, log_evidence, match_fraction]
+		self.support_gate = nn.Sequential(
+			nn.Linear(3, 8), nn.PReLU(), nn.Linear(8, 1), nn.Sigmoid()
+		)
+		nn.init.constant_(self.support_gate[-2].bias, -1.0)
+
+		# 3. Dynamic Bandwidth Predictor
 		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
-		nn.init.normal_(self.f_gamma.weight, std = 0.01)
+		nn.init.normal_(self.f_gamma.weight, std=0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
-		# Log-spaced initialization across spectrum: ~[0.05, 0.3, 0.8, 2.0]
-		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1,-1) # .unsqueeze(1) # .repeat(1, 3) # [n_gammas, 3]
-		# init_temporal = torch.logspace(-1, 0.7, steps=n_gammas) # .unsqueeze(1)			# [n_gammas, 1]
-		# init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)	  # [1, n_gammas, 4]
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
 		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
 
-		# 4. Normalization and Readout
+		# 4. Pattern Normalization and Readout
 		self.norm = nn.LayerNorm(ndim_in)
-		self.fc_out = nn.Linear(ndim_in, ndim_out)
+		self.fc_out = nn.Linear(ndim_in + 3, ndim_out)
 		self.act_out = nn.PReLU()
 
-	def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None): # Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, n_sta, n_temp)
+	def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None):
 		"""
 		Args:
 			inpt: [E_edges, ndim_in]
-			A_src_in_edges: PyG Data object containing edge_index and spatial-temporal x [E_edges, 4]
+			A_src_in_edges: PyG Data with edge_index and x [E_edges, 4]
 			mask: [E_edges, ndim_mask]
-			embed_context: [E_edges, embed_dim] or [1, embed_dim] context embedding
+			embed_context: [E_edges, embed_dim] or [1, embed_dim]
 		"""
 		N = inpt.shape[0]
 		if num_target_nodes is not None:
@@ -477,72 +474,64 @@ class BipartiteGraphOperator(MessagePassing):
 
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
-		# Step 1: Normalize spatial-temporal offsets
-		diff_sp = A_src_in_edges.x[:, 0:3] # / self.scale_rel
-		# diff_tm = A_src_in_edges.x[:, 3:4] # / self.scale_rel
+		# Step 1: Spatial geometry
+		diff_sp = A_src_in_edges.x[:, 0:3]
+		norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
+		unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
 
-		# Unit directional vector for spatial geometry
-		# norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
-		norm_pos = torch.linalg.vector_norm(diff_sp, dim = 1, keepdim = True)
-		unit_dir = diff_sp / norm_pos.clamp(min = 1e-6)  # [E_edges, 3]
-		# print('Norm')
-		# print(norm_pos.amin())
-		# print(norm_pos.amax())
-
-		# Step 2: Scale-conditioned Anisotropic Gammas
+		# Step 2: Scale-conditioned RBF bandwidths
 		delta = self.f_gamma(ctx)
-		# alpha = delta[:, :1].unsqueeze(-1)									 # Global scale factor
-		alpha = 0.5  * torch.tanh(delta[:, 0:1])
-		# alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
-		# alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
-		residuals =    0.2  * torch.tanh(delta[:, 1:])  # Anisotropic variations
-		# alpha = torch.cat([(alpha_global + alpha_space).expand(-1,1),
-		# 	(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
-		gammas = torch.exp(self.log_gamma_base + alpha + residuals)			# [E_edges, n_gammas, 4]
+		alpha = 0.5 * torch.tanh(delta[:, 0:1])
+		residuals = 0.2 * torch.tanh(delta[:, 1:])
+		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
 
-		# Step 3: Anisotropic LINEAR distance metric: sqrt( sum_d gamma_d * dr_d^2 )
-		# Linear distance prevents gradient cliffs over long-range global paths
-		# r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)	# [E_edges, 1, 4]
+		# Step 3: Multi-scale spatial RBFs
+		r_sp_sq = norm_pos ** 2
+		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5)
+		rbf_decay = torch.exp(-r_aniso)
 
-		# Compute isotropic 3D spatial distance squared and 1D temporal distance squared
-		r_sp_sq = norm_pos ** 2                                       # [E_edges, 1]
-		# r_tm_sq = diff_tm ** 2                                        # [E_edges, 1]
-		# r_sq = torch.cat((r_sp_sq, r_tm_sq), dim=1).unsqueeze(1)      # [E_edges, 1, 2]
-
-		# gammas is [E_edges, n_gammas, 2]
-		# Dot product across the 2 components (Space, Time):
-		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5) # [E_edges, n_gammas]
-
-		# r_aniso = torch.sqrt(torch.sum(gammas[:,:,0:1] * r_sq[:,:,0:3] + gammas[:,:,1:2] * r_sq[:,:,3:4], dim=-1) + 1e-5)		  # [E_edges, n_gammas]
-
-		# Exponential linear RBF decay: exp(-r_aniso)
-		rbf_decay = torch.exp(-1.0 * r_aniso)								  # [E_edges, n_gammas]
-
-		# Step 4: Non-linear geometric feature fusion with FiLM scale conditioning
-		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)			# [E_edges, 4 + n_gammas]
-		# rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)			# [E_edges, 4 + n_gammas]
+		# Step 4: Edge feature fusion
+		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)
 		edge_inpt = torch.cat((inpt, rel_pos), dim=-1)
-		# geo_features = self.act_edge(self.film_edge(self.fc_edge(torch.cat((inpt, rel_pos), dim=-1)), ctx))
 		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
 
-		# Step 5: Gated message composition (Existential gate * Phase routing gate)
-		absolute_gate = mask.max(1, keepdims=True)[0]						  # [E_edges, 1]
-		phase_routing = self.mask_gate(mask)								   # [E_edges, ndim_in]
+		# Step 5: Edge gating
+		absolute_gate = mask.max(1, keepdims=True)[0]  # Forced per-edge support gate
+		phase_routing = self.mask_gate(mask)
+		msg = absolute_gate * phase_routing * geo_features
 
-		msg = absolute_gate * (phase_routing * geo_features)				   # [E_edges, ndim_in]
-
-		# Step 6: Perform physical stacking (Sum-aggregate onto target source nodes)
-		stacked = self.propagate(A_src_in_edges.edge_index, size=(N, M), x=msg)
-
-		# Step 7: Variance-stabilized degree normalization (1 / sqrt(Degree))
+		# Step 6: Backprojection
 		target_indices = A_src_in_edges.edge_index[1]
-		deg = torch.zeros((M, 1), device=stacked.device, dtype=stacked.dtype)
-		deg.index_add_(0, target_indices, absolute_gate)
-		stacked_normalized = stacked / torch.sqrt(deg.clamp(min=1.0))
+		stacked = scatter(msg, target_indices, dim=0, dim_size=M, reduce="sum")
 
-		# Step 8: Standardize and Project
-		return self.act_out(self.fc_out(self.norm(stacked_normalized)))
+		# Step 7: Coverage and evidence
+		coverage = scatter(torch.ones_like(absolute_gate), target_indices, dim=0, dim_size=M, reduce="sum")
+		evidence = scatter(absolute_gate, target_indices, dim=0, dim_size=M, reduce="sum")
 
+		# Step 8: Coverage-normalized pattern + LayerNorm
+		stacked_normalized = stacked / torch.sqrt(coverage.clamp(min=1.0))
+		pattern = self.norm(stacked_normalized)
+
+		# Step 9: Explicit support features
+		log_coverage = torch.log1p(coverage)
+		log_evidence = torch.log1p(evidence)
+		match_fraction = evidence / coverage.clamp(min=1.0)
+
+		# Step 10: Merge pattern + support
+		features = torch.cat((pattern, log_coverage, log_evidence, match_fraction), dim=-1)
+
+		# Step 11: Readout
+		out = self.act_out(self.fc_out(features))
+
+		# Step 12: Source-level support gate
+		support_features = torch.cat((log_coverage, log_evidence, match_fraction), dim=-1)
+		learned_support = self.support_gate(support_features)
+
+		# No observational evidence => no source activation
+		hard_support = (evidence > 0).to(out.dtype)
+		out = out * learned_support * hard_support
+
+		return out
 
 
 # class BipartiteGraphOperator(MessagePassing):
@@ -1746,13 +1735,12 @@ class BipartiteGraphReadOutOperator1(MessagePassing):
 
 
 
+class BipartiteGraphReadOutOperator(nn.Module):
+	"""Source Space -> Product Graph Space readout.
 
-class BipartiteGraphReadOutOperator(MessagePassing):
-	"""Bipartite Readout Operator (Source Space -> Product Graph Space).
-
-	Reads out source node hypotheses back onto product-graph edges (Source-Station pairs).
-	Uses multi-gamma 4D anisotropic linear RBF decay, FiLM context conditioning,
-	and soft baseline gating to allow signal flow across hypothetical paths.
+	Propagates source hypotheses onto source-station product edges using
+	multi-scale spatial RBFs, FiLM conditioning, and soft source-support gating.
+	Each product edge has exactly one incoming source, so no aggregation is needed.
 	"""
 
 	def __init__(
@@ -1764,148 +1752,95 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		n_gammas=3, # 4
 		baseline_gate=0.01,
 	):
-		# Aggregating/Mapping from Source Nodes (edge_index[0]) to Product Graph Edges (edge_index[1])
-		super(BipartiteGraphReadOutOperator, self).__init__(aggr="add")
+		super(BipartiteGraphReadOutOperator, self).__init__()
 
 		self.n_gammas = n_gammas
 		self.baseline_gate = baseline_gate
 
 		# 1. Edge Feature Evaluator
-		# Inputs: Source feature (ndim_in) + Unit dir (3) + 1D Time (1) + n_gammas RBFs
 		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
 		self.film_edge = FiLM(embed_dim, ndim_in)
 		self.act_edge = nn.PReLU()
 
 		# 2. Phase / Mask Gate Router
 		self.mask_gate = nn.Sequential(
-			nn.Linear(ndim_mask, 8),
-			nn.PReLU(),
-			nn.Linear(8, ndim_in),
-			nn.Sigmoid(),
+			nn.Linear(ndim_mask, 8), nn.PReLU(),
+			nn.Linear(8, ndim_in), nn.Sigmoid(),
 		)
 
-		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
+		# 3. Dynamic Bandwidth Predictor
 		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
-		nn.init.normal_(self.f_gamma.weight, std = 0.01)
+		nn.init.normal_(self.f_gamma.weight, std=0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
-		# Multi-scale log-spaced initialization
-		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1,-1) # .unsqueeze(1) # .repeat(1, 3)
-		# init_temporal = torch.logspace(-1, 0.7, steps=n_gammas) # .unsqueeze(1)
-		# init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
 		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
 
-		# 4. Readout Normalization and Output Projection
+		# 4. Readout Normalization and Projection
 		self.norm = nn.LayerNorm(ndim_in)
 		self.fc_out = nn.Linear(ndim_in, ndim_out)
 		self.act_out = nn.PReLU()
 
-	def forward(
-		self,
-		inpt,
-		A_Lg_in_srcs,
-		mask,
-		embed_context,
-		num_target_nodes=None,
-	):
+	def forward(self, inpt, A_Lg_in_srcs, mask, embed_context, num_target_nodes=None):
 		"""Args:
-
-		inpt: [N_src, ndim_in] Source node features
-		A_Lg_in_srcs: PyG Data object containing edge_index [2, E] and x [E, 4]
-		mask: [N_src, ndim_mask] or [E, ndim_mask] Mask tensor
-		embed_context: [E, embed_dim] or [1, embed_dim] Context embedding
-		num_target_nodes: Optional explicit scalar M for target product graph size
+			inpt: [N_src, ndim_in] source node features
+			A_Lg_in_srcs: edge_index [2, E], x [E, 4]
+			mask: [N_src, ndim_mask] or [E, ndim_mask] source support mask
+			embed_context: [E, embed_dim] or [1, embed_dim]
 		"""
 		N = inpt.shape[0]
-		if num_target_nodes is not None:
-			M = num_target_nodes
-		else:
-			M = (
-				A_Lg_in_srcs.edge_index[1].max().item() + 1
-				if A_Lg_in_srcs.edge_index.numel() > 0
-				else 0
-			)
+		# M = num_target_nodes if num_target_nodes is not None else (
+		# 	A_Lg_in_srcs.edge_index[1].max().item() + 1
+		# 	if A_Lg_in_srcs.edge_index.numel() > 0 else 0
+		# )
 
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+		source_idx = A_Lg_in_srcs.edge_index[0]
 
-		# Step 1: Spatial-temporal offsets
+		# Step 1: Spatial geometry
 		diff_sp = A_Lg_in_srcs.x[:, 0:3]
-		# diff_tm = A_Lg_in_srcs.x[:, 3:4]
+		norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
+		unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
 
-		# norm_pos = torch.sqrt(torch.sum(diff_sp ** 2, dim=1, keepdim=True) + 1e-8)
-		norm_pos = torch.linalg.vector_norm(diff_sp, dim = 1, keepdim = True)
-		unit_dir = diff_sp / norm_pos.clamp(min = 1e-6)  # [E_edges, 3]
-
-		# print('Dir')
-		# print(norm_pos.amin())
-		# print(norm_pos.amax())
-
-		# Step 2: Scale-conditioned Anisotropic Gammas
+		# Step 2: Scale-conditioned RBF bandwidths
 		delta = self.f_gamma(ctx)
-		alpha = 0.5  * torch.tanh(delta[:, 0:1])
-		# alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
-		# alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
-		residuals =    0.2 * torch.tanh(delta[:, 1:])  # Anisotropic variations
-		# alpha = torch.cat([(alpha_global + alpha_space).expand(-1,1),
-		# 	(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
-		gammas = torch.exp(self.log_gamma_base + alpha + residuals)  # [E, n_gammas, 4]
-		# alpha = delta[:, :1].unsqueeze(-1)
-		# residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))
+		alpha = 0.5 * torch.tanh(delta[:, 0:1])
+		residuals = 0.2 * torch.tanh(delta[:, 1:])
+		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
 
-		# Compute isotropic 3D spatial distance squared and 1D temporal distance squared
-		r_sp_sq = norm_pos ** 2                                       # [E_edges, 1]
-		# r_tm_sq = diff_tm ** 2                                        # [E_edges, 1]
-		# r_sq = torch.cat((r_sp_sq, r_tm_sq), dim=1).unsqueeze(1)      # [E_edges, 1, 2]
-
-		# gammas is [E_edges, n_gammas, 2]
-		# Dot product across the 2 components (Space, Time):
-		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5) # [E_edges, n_gammas]
-
-		# Step 3: Anisotropic LINEAR distance metric
-		# r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)
-		# r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-5)
-		rbf_decay = torch.exp(-1.0 * r_aniso)  # [E, n_gammas]
+		# Step 3: Multi-scale spatial RBFs
+		r_sp_sq = norm_pos ** 2
+		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5)
+		rbf_decay = torch.exp(-r_aniso)
 
 		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)
 
-		# Step 4: Map source mask to edge indexing if passed as node mask
+		# Step 4: Map source mask to edge indexing
 		if mask.dim() > 1 and mask.shape[0] == N:
-			edge_mask = mask[A_Lg_in_srcs.edge_index[0]]
+			edge_mask = mask[source_idx]
 		else:
 			edge_mask = mask
 
-		# Step 5: Message propagation from Source (edge_index[0]) to Product Graph (edge_index[1])
-		out = self.propagate(
-			A_Lg_in_srcs.edge_index,
-			size=(N, M),
-			x=inpt,
-			rel_pos=rel_pos,
-			mask=edge_mask,
-			ctx=ctx,
-		)
-
-		# Step 6: Direct Standardization and Projection (Degree = 1 per product edge)
-		return self.act_out(self.fc_out(self.norm(out))), edge_mask
-
-	def message(self, x_j, rel_pos, mask, ctx):
-		"""Constructs the readout message for edge (src_i -> prod_j).
-
-		x_j: Source node features expanded to edges [E, ndim_in]
-		rel_pos: 4D Anisotropic positional features [E, 4 + n_gammas]
-		mask: Mask evaluated at edges [E, ndim_mask]
-		"""
-		# Feature transformation with FiLM conditioning
-		edge_inpt = torch.cat((x_j, rel_pos), dim=-1)
+		# Step 5: Direct source -> product-edge mapping
+		edge_inpt = torch.cat((inpt[source_idx], rel_pos), dim=-1)
 		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
 
-		# Soft baseline gating allows synthetic detection energy flow even when mask is 0
-		absolute_gate = mask.max(1, keepdims=True)[0]
+		# Step 6: Phase routing
+		phase_routing = self.mask_gate(edge_mask)
+		pattern = phase_routing * geo_features
+
+		# Step 7: Normalize pattern only
+		pattern = self.norm(pattern)
+
+		# Step 8: Project to product-space features
+		out = self.act_out(self.fc_out(pattern))
+
+		# Step 9: Soft source-support / baseline gate
+		absolute_gate = edge_mask.max(1, keepdims=True)[0]
 		gate = absolute_gate + self.baseline_gate
+		out = gate * out
 
-		phase_routing = self.mask_gate(mask)
-
-		return gate * (phase_routing * geo_features)
-
+		return out, edge_mask
 
 
 
