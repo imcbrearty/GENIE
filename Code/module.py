@@ -748,7 +748,8 @@ class SpaceTimeAttention(MessagePassing):
 
 		# Learned support score is assumed to be [0,1].
 		# Keep weak sources usable, but prevent them from dominating.
-		support_gate = 0.5 + 0.5 * support_j[:, 3:4]
+		# support_gate = 0.5 + 0.5 * support_j[:, 3:4]
+		support_gate = 0.7 + 0.3 * support_j[:, 3:4]
 		value_embed = value_embed * support_gate
 
 		# Geometry is the dominant attention term.
