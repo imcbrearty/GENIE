@@ -266,7 +266,7 @@ class DataAggregationExpanded(nn.Module):
 		return tr
 
 
-class BipartiteGraphOperator(MessagePassing):
+class BipartiteGraphOperator1(MessagePassing):
 	"""Product Graph to Source Graph Bipartite Projection Operator.
 
 	Maps product-space features (Source-Station pairs) onto the target source nodes.
@@ -284,7 +284,7 @@ class BipartiteGraphOperator(MessagePassing):
 		scale_rel=scale_rel,
 		scale_time=scale_time,
 	):
-		super(BipartiteGraphOperator, self).__init__(aggr="add")
+		super(BipartiteGraphOperator1, self).__init__(aggr="add")
 
 		self.n_gammas = n_gammas
 		self.scale_rel = scale_rel
@@ -292,7 +292,7 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# 1. Edge MLP: Evaluates physical features (Inputs + 3D Unit Dir + 1D Time + K Gammas)
 		# 3 (unit dir) + 1 (dt) + K (RBF decays) = 4 + n_gammas positional features
-		self.fc_edge = nn.Linear(ndim_in + 4 + n_gammas, ndim_in)
+		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
 		self.film_edge = FiLM(embed_dim, ndim_in)
 		self.act_edge = nn.PReLU()
 
@@ -306,15 +306,15 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
 		# Outputs [1 + n_gammas * 4] -> 1 global zoom factor + 4D directional offsets per gamma
-		self.f_gamma = nn.Linear(embed_dim, 3 + n_gammas * 2)
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
 		nn.init.normal_(self.f_gamma.weight, std = 0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
 		# Log-spaced initialization across spectrum: ~[0.05, 0.3, 0.8, 2.0]
-		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).unsqueeze(1) # .repeat(1, 3) # [n_gammas, 3]
-		init_temporal = torch.logspace(-1, 0.7, steps=n_gammas).unsqueeze(1)			# [n_gammas, 1]
-		init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)	  # [1, n_gammas, 4]
-		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1,-1) # .unsqueeze(1) # .repeat(1, 3) # [n_gammas, 3]
+		# init_temporal = torch.logspace(-1, 0.7, steps=n_gammas) # .unsqueeze(1)			# [n_gammas, 1]
+		# init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)	  # [1, n_gammas, 4]
+		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
 
 		# 4. Normalization and Readout
 		self.norm = nn.LayerNorm(ndim_in)
@@ -352,12 +352,12 @@ class BipartiteGraphOperator(MessagePassing):
 		# Step 2: Scale-conditioned Anisotropic Gammas
 		delta = self.f_gamma(ctx)
 		# alpha = delta[:, :1].unsqueeze(-1)									 # Global scale factor
-		alpha_global = 0.5  * torch.tanh(delta[:, 0:1])
-		alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
-		alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
-		residuals =    0.2  * torch.tanh(delta[:, 3:].view(-1, self.n_gammas, 2))  # Anisotropic variations
-		alpha = torch.cat([(alpha_global + alpha_space).expand(-1,1),
-			(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
+		alpha = 0.5  * torch.tanh(delta[:, 0:1])
+		# alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
+		# alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
+		residuals =    0.2  * torch.tanh(delta[:, 3:])  # Anisotropic variations
+		# alpha = torch.cat([(alpha_global + alpha_space).expand(-1,1),
+		# 	(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)			# [E_edges, n_gammas, 4]
 
 		# Step 3: Anisotropic LINEAR distance metric: sqrt( sum_d gamma_d * dr_d^2 )
@@ -366,12 +366,12 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# Compute isotropic 3D spatial distance squared and 1D temporal distance squared
 		r_sp_sq = norm_pos ** 2                                       # [E_edges, 1]
-		r_tm_sq = diff_tm ** 2                                        # [E_edges, 1]
-		r_sq = torch.cat((r_sp_sq, r_tm_sq), dim=1).unsqueeze(1)      # [E_edges, 1, 2]
+		# r_tm_sq = diff_tm ** 2                                        # [E_edges, 1]
+		# r_sq = torch.cat((r_sp_sq, r_tm_sq), dim=1).unsqueeze(1)      # [E_edges, 1, 2]
 
 		# gammas is [E_edges, n_gammas, 2]
 		# Dot product across the 2 components (Space, Time):
-		r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-5) # [E_edges, n_gammas]
+		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5) # [E_edges, n_gammas]
 
 		# r_aniso = torch.sqrt(torch.sum(gammas[:,:,0:1] * r_sq[:,:,0:3] + gammas[:,:,1:2] * r_sq[:,:,3:4], dim=-1) + 1e-5)		  # [E_edges, n_gammas]
 
@@ -379,7 +379,8 @@ class BipartiteGraphOperator(MessagePassing):
 		rbf_decay = torch.exp(-1.0 * r_aniso)								  # [E_edges, n_gammas]
 
 		# Step 4: Non-linear geometric feature fusion with FiLM scale conditioning
-		rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)			# [E_edges, 4 + n_gammas]
+		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)			# [E_edges, 4 + n_gammas]
+		# rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)			# [E_edges, 4 + n_gammas]
 		edge_inpt = torch.cat((inpt, rel_pos), dim=-1)
 		# geo_features = self.act_edge(self.film_edge(self.fc_edge(torch.cat((inpt, rel_pos), dim=-1)), ctx))
 		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
@@ -401,6 +402,136 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# Step 8: Standardize and Project
 		return self.act_out(self.fc_out(self.norm(stacked_normalized)))
+
+
+class BipartiteGraphOperator(MessagePassing):
+	"""Product Graph to Source Graph Bipartite Projection Operator.
+
+	Maps product-space features (Source-Station pairs) onto target source nodes.
+	Uses multi-scale spatial RBFs, FiLM conditioning, mask gating, and
+	coverage/evidence-aware backprojection.
+	"""
+
+	def __init__(
+		self,
+		ndim_in,
+		ndim_out,
+		ndim_mask=4,
+		embed_dim=10,
+		n_gammas=3, # 4
+		scale_rel=scale_rel,
+		scale_time=scale_time,
+	):
+		super(BipartiteGraphOperator, self).__init__(aggr="add")
+
+		self.n_gammas = n_gammas
+		self.scale_rel = scale_rel
+		self.scale_time = scale_time
+
+		# 1. Edge MLP
+		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
+		self.film_edge = FiLM(embed_dim, ndim_in)
+		self.act_edge = nn.PReLU()
+
+		# 2. Channel-wise Mask Gate
+		self.mask_gate = nn.Sequential(
+			nn.Linear(ndim_mask, 8), nn.PReLU(),
+			nn.Linear(8, ndim_in), nn.Sigmoid(),
+		)
+
+		# 2b. Source-level Support Gate: [log_coverage, log_evidence, match_fraction]
+		self.support_gate = nn.Sequential(
+			nn.Linear(3, 8), nn.PReLU(), nn.Linear(8, 1), nn.Sigmoid()
+		)
+		nn.init.constant_(self.support_gate[-2].bias, -1.0)
+
+		# 3. Dynamic Bandwidth Predictor
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
+		nn.init.normal_(self.f_gamma.weight, std=0.01)
+		nn.init.zeros_(self.f_gamma.bias)
+
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
+		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
+
+		# 4. Pattern Normalization and Readout
+		self.norm = nn.LayerNorm(ndim_in)
+		self.fc_out = nn.Linear(ndim_in + 3, ndim_out)
+		self.act_out = nn.PReLU()
+
+	def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None):
+		"""
+		Args:
+			inpt: [E_edges, ndim_in]
+			A_src_in_edges: PyG Data with edge_index and x [E_edges, 4]
+			mask: [E_edges, ndim_mask]
+			embed_context: [E_edges, embed_dim] or [1, embed_dim]
+		"""
+		N = inpt.shape[0]
+		if num_target_nodes is not None:
+			M = num_target_nodes
+		else:
+			M = A_src_in_edges.edge_index[1].max().item() + 1 if A_src_in_edges.edge_index.numel() > 0 else 0
+
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+		# Step 1: Spatial geometry
+		diff_sp = A_src_in_edges.x[:, 0:3]
+		norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
+		unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
+
+		# Step 2: Scale-conditioned RBF bandwidths
+		delta = self.f_gamma(ctx)
+		alpha = 0.5 * torch.tanh(delta[:, 0:1])
+		residuals = 0.2 * torch.tanh(delta[:, 1:])
+		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+
+		# Step 3: Multi-scale spatial RBFs
+		r_sp_sq = norm_pos ** 2
+		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5)
+		rbf_decay = torch.exp(-r_aniso)
+
+		# Step 4: Edge feature fusion
+		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)
+		edge_inpt = torch.cat((inpt, rel_pos), dim=-1)
+		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
+
+		# Step 5: Edge gating
+		absolute_gate = mask.max(1, keepdims=True)[0]  # Forced per-edge support gate
+		phase_routing = self.mask_gate(mask)
+		msg = absolute_gate * phase_routing * geo_features
+
+		# Step 6: Backprojection
+		target_indices = A_src_in_edges.edge_index[1]
+		stacked = scatter(msg, target_indices, dim=0, dim_size=M, reduce="sum")
+
+		# Step 7: Coverage and evidence
+		coverage = scatter(torch.ones_like(absolute_gate), target_indices, dim=0, dim_size=M, reduce="sum")
+		evidence = scatter(absolute_gate, target_indices, dim=0, dim_size=M, reduce="sum")
+
+		# Step 8: Coverage-normalized pattern + LayerNorm
+		stacked_normalized = stacked / torch.sqrt(coverage.clamp(min=1.0))
+		pattern = self.norm(stacked_normalized)
+
+		# Step 9: Explicit support features
+		log_coverage = torch.log1p(coverage)
+		log_evidence = torch.log1p(evidence)
+		match_fraction = evidence / coverage.clamp(min=1.0)
+
+		# Step 10: Merge pattern + support
+		features = torch.cat((pattern, log_coverage, log_evidence, match_fraction), dim=-1)
+
+		# Step 11: Readout
+		out = self.act_out(self.fc_out(features))
+
+		# Step 12: Source-level support gate
+		support_features = torch.cat((log_coverage, log_evidence, match_fraction), dim=-1)
+		learned_support = self.support_gate(support_features)
+
+		# No observational evidence => no source activation
+		hard_support = (evidence > 0).to(out.dtype)
+		out = out * learned_support * hard_support
+
+		return out, torch.cat((support_features, hard_support*learned_support), dim = 1)
 
 
 # class BipartiteGraphOperator(MessagePassing):
@@ -863,10 +994,10 @@ if use_anisotropic_spatial_aggregation == True:
 
 else:
 
-	class SpatialAggregation(MessagePassing):
+	class SpatialAggregation1(MessagePassing):
 		def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel, 
 					 n_global=5, n_hidden=30, zero_offsets=False):
-			super(SpatialAggregation, self).__init__(aggr='mean')
+			super(SpatialAggregation1, self).__init__(aggr='mean')
 
 			self.zero_offsets = zero_offsets
 			self.scale_rel = scale_rel
@@ -969,7 +1100,130 @@ else:
 			# Apply unified FiLM modulation and activation
 			return self.activate1(self.film(h, embed_context))
 
-
+	
+	class SpatialAggregation(MessagePassing):
+		def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel,
+					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=4):
+			super(SpatialAggregation, self).__init__(aggr='mean')
+	
+			self.zero_offsets = zero_offsets
+			self.scale_rel = scale_rel
+			self.support_dim = support_dim
+	
+			if not self.zero_offsets:
+				# Global + spatial/temporal scale adjustments + per-frequency residuals
+				self.f_gamma = nn.Linear(embed_dim, 3 + 5)
+				nn.init.normal_(self.f_gamma.weight, std=0.01)
+				nn.init.zeros_(self.f_gamma.bias)
+	
+				# 3 spatial + 2 temporal base scales
+				init_gammas = torch.tensor([0.1, 1.0, 5.0, 0.5, 10.0]).reshape(1, -1)
+				self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+	
+				# 3D direction + 3 spatial RBFs + 2 temporal RBFs + normalized dt
+				edge_dim = 9
+			else:
+				edge_dim = 0
+	
+			# Feature transformations
+			self.fc1 = nn.Linear(in_channels + support_dim + edge_dim + n_global, n_hidden)
+			self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
+			self.fglobal = nn.Linear(in_channels, n_global)
+	
+			# FiLM conditioning
+			self.film = FiLM(embed_dim, n_hidden)
+	
+			self.activate1 = nn.PReLU()
+			self.activate2 = nn.PReLU()
+			self.activate3 = nn.PReLU()
+	
+		def forward(self, tr, embed_context, A_src, pos, support=None):
+			"""
+			support: [N_source, 4] =
+				[log_coverage, log_evidence, match_fraction, support_score]
+			"""
+			ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+	
+			if support is None:
+				support = torch.zeros(
+					(tr.shape[0], self.support_dim),
+					dtype=tr.dtype, device=tr.device
+				)
+	
+			if not self.zero_offsets:
+				# Unified 4D relative position
+				pos_rel = (pos[A_src[1]] - pos[A_src[0]]) / self.scale_rel
+				pos_rel_sp = pos_rel[:, 0:3]
+				pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim=1, keepdim=True)
+				pos_rel_tm = pos_rel[:, 3:4]
+				pos_norm_tm = torch.abs(pos_rel_tm)
+	
+				# Context-conditioned spatial/temporal bandwidths
+				delta = self.f_gamma(ctx)
+				alpha_global = 0.5 * torch.tanh(delta[:, 0:1])
+				alpha_space = 0.25 * torch.tanh(delta[:, 1:2])
+				alpha_time = 0.25 * torch.tanh(delta[:, 2:3])
+				residuals = 0.2 * torch.tanh(delta[:, 3:])
+	
+				alpha = torch.cat([
+					(alpha_global + alpha_space).expand(-1, 3),
+					(alpha_global + alpha_time).expand(-1, 2)
+				], dim=1)
+	
+				gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+				edge_gammas = gammas[A_src[0]] if gammas.shape[0] > 1 else gammas
+	
+				# Multi-scale spatial/temporal decays
+				spatial_decay = torch.exp(-pos_norm_sp * edge_gammas[:, 0:3])
+				temporal_decay = torch.exp(-pos_norm_tm * edge_gammas[:, 3:5])
+	
+				edge_attr = torch.cat((
+					pos_rel_sp / pos_norm_sp.clamp(min=1e-6),
+					spatial_decay,
+					temporal_decay,
+					pos_rel_tm
+				), dim=1)
+			else:
+				edge_attr = torch.zeros(
+					(A_src.shape[1], 0),
+					dtype=tr.dtype, device=tr.device
+				)
+	
+			# Global feature pooling
+			global_feat = self.activate3(self.fglobal(tr)).mean(dim=0, keepdim=True)
+	
+			# Source-source message passing
+			aggr_out = self.propagate(
+				A_src,
+				x=tr,
+				support=support,
+				edge_attr=edge_attr,
+				global_feat=global_feat,
+				embed_context=ctx,
+			)
+	
+			# Residual source representation
+			out = torch.cat((tr, aggr_out), dim=-1)
+			return self.activate2(self.fc2(out))
+	
+		def message(self, x_j, support_j, edge_attr, global_feat, embed_context):
+			if not self.zero_offsets:
+				inputs = torch.cat((
+					x_j,
+					support_j,
+					edge_attr,
+					global_feat.expand(len(x_j), -1)
+				), dim=-1)
+			else:
+				inputs = torch.cat((
+					x_j,
+					support_j,
+					global_feat.expand(len(x_j), -1)
+				), dim=-1)
+	
+			h = self.fc1(inputs)
+			return self.activate1(self.film(h, embed_context))
+			
 
 
 class SpaceTimeDirect(nn.Module):
@@ -984,188 +1238,449 @@ class SpaceTimeDirect(nn.Module):
 		return self.activate(self.f_direct(inpts))
 
 
+class SpaceTimeAttention1(MessagePassing):
+    """Multi-Resolution Space-Time Interpolator with Dynamic RBF Edge Embeddings."""
 
+    def __init__(
+        self,
+        inpt_dim,
+        out_channels,
+        n_dim=4,
+        n_latent=16,
+        embed_dim=10,
+        n_heads=5,
+        scale_rel=scale_rel,
+        scale_time=scale_time,
+    ):
+        super(SpaceTimeAttention1, self).__init__(node_dim=0, aggr="add")
+        self.n_heads = n_heads
+        self.n_latent = n_latent
+        self.out_channels = out_channels
+        self.scale_rel = scale_rel
+        self.scale_time = scale_time
+
+        # 1. Feature Values & Feature Scores
+        self.f_values = nn.Linear(inpt_dim, n_latent)
+        self.film_values = FiLM(embed_dim, n_latent)
+        self.act_values = nn.PReLU()
+
+        self.f_feature_score = nn.Linear(inpt_dim, n_heads)
+        self.film_score = FiLM(embed_dim, n_heads)
+
+        # 2. Dynamic Gammas
+        self.f_gamma = nn.Linear(embed_dim, 3 + n_heads * 2)
+        nn.init.normal_(self.f_gamma.weight, std=0.01)
+        nn.init.zeros_(self.f_gamma.bias)
+
+        init_spatial = torch.logspace(-1, 0.7, steps=n_heads).unsqueeze(1)
+        init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads).unsqueeze(1)
+        init_gammas = torch.cat([init_spatial, init_temporal], dim=1).unsqueeze(0)
+        self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+
+        # 3. RBF Multi-Head Edge Projection
+        # Edge input: 3D Unit Dir (3) + Multi-Head Spatial RBF (n_heads) + Multi-Head Temporal RBF (n_heads) + Temporal Dir (1)
+        rbf_edge_dim = 3 + n_heads + n_heads + 1
+        self.edge_proj = nn.Sequential(
+            nn.Linear(rbf_edge_dim, n_latent),
+            nn.PReLU(),
+            nn.Linear(n_latent, n_latent),
+        )
+
+        # 4. Global Scale Cap for Gain
+        self.f_max_gain_cap = nn.Sequential(
+            nn.Linear(embed_dim, 16),
+            nn.PReLU(),
+            nn.Linear(16, 1),
+            nn.Sigmoid()
+        )
+
+        # 5. Readout Projection
+        self.proj = nn.Linear(n_latent * n_heads + embed_dim, out_channels)
+        self.activate2 = nn.PReLU()
+
+        self.spatial_gate = nn.Sequential(
+            nn.Linear(n_latent * n_heads, 1),
+            nn.Sigmoid()
+        )
+
+        self.use_fixed_edges = False
+        self.fixed_edges = None
+        self.edge_features = None
+
+    def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=16):
+        ctx_4d = torch.cat((x_context / self.scale_rel, (1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel), dim=1)
+        qry_4d = torch.cat((x_query / self.scale_rel, (1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel), dim=1)
+
+        edge_index = knn(ctx_4d, qry_4d, k=k).flip(0).to(x_query.device)
+
+        diff_sp = (x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel
+        diff_tm = (1000.0 * self.scale_time * (x_query_t[edge_index[1]].view(-1) - x_context_t[edge_index[0]].view(-1))).reshape(-1, 1) / self.scale_rel
+        
+        # Return raw vector offsets; RBF conversion will happen in message()
+        pos_rel = torch.cat((diff_sp, diff_tm), dim=1)
+        return edge_index, pos_rel
+
+    def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=16):
+        edge_index, pos_rel = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+        self.fixed_edges = edge_index
+        self.edge_features = pos_rel
+        self.use_fixed_edges = True
+
+    def message(self, x_j, embed_context, index, edge_attr):
+        # edge_attr is pos_rel [E, 4] -> (dx, dy, dz, dt)
+        pos_rel_sp = edge_attr[:, 0:3]
+        pos_rel_tm = edge_attr[:, 3:4]
+
+        # 1. Spatial/Temporal Norms
+        pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim=1, keepdim=True)
+        pos_norm_tm = torch.abs(pos_rel_tm)
+
+        spatial_sq = pos_norm_sp ** 2
+        temporal_sq = pos_norm_tm ** 2
+
+        # 2. Dynamic Gammas [1, n_heads, 2]
+        delta = self.f_gamma(embed_context)
+
+        
+        # 1. Decompose Alphas
+        alpha_global = 0.5  * torch.tanh(delta[:, 0:1])  # Dynamic zoom for all heads & dims
+        alpha_space  = 0.25 * torch.tanh(delta[:, 1:2])  # Spatial aspect-ratio tweak
+        alpha_time   = 0.25 * torch.tanh(delta[:, 2:3])  # Temporal aspect-ratio tweak
+
+        # 2. Combine into joint alpha [1, 1, 2]
+        alpha_st = torch.cat([alpha_space, alpha_time], dim=1).unsqueeze(1)  # [1, 1, 2]
+        alpha = alpha_global.unsqueeze(1) + alpha_st                        # [1, 1, 2]
+
+        # 3. Head Residuals [-0.1, +0.1]
+        residuals = 0.1 * torch.tanh(delta[:, 3:].view(-1, self.n_heads, 2))  # [1, n_heads, 2]
+
+        # 4. Final Dynamic Gammas
+        gammas = torch.exp(self.log_gamma_base + alpha + residuals)  # [1, n_heads, 2]
+
+        # 3. Dynamic Multi-Scale RBF Kernel Decays for Edge Feature
+        # Broadcast across edges [E, n_heads]
+        gammas_sp = gammas[:, :, 0] # [1, n_heads]
+        gammas_tm = gammas[:, :, 1] # [1, n_heads]
+
+        rbf_spatial = torch.exp(-gammas_sp * pos_norm_sp)   # [E, n_heads]
+        rbf_temporal = torch.exp(-gammas_tm * pos_norm_tm)  # [E, n_heads]
+
+        # Normalized 3D direction vector
+        unit_dir_sp = pos_rel_sp / pos_norm_sp.clamp(min=1e-6)
+
+        # Build 9D+ RBF Edge Attribute
+        rbf_edge_attr = torch.cat((unit_dir_sp, rbf_spatial, rbf_temporal, pos_rel_tm), dim=1)
+        edge_embed = self.edge_proj(rbf_edge_attr)
+
+        # 4. Feature Values + RBF Edge Embedding
+        value_embed = self.act_values(self.film_values(self.f_values(x_j), embed_context))
+        value_embed = value_embed + edge_embed
+
+        # 5. Attention Logits (Distance Gaussian + Feature Score)
+        distance_logits = (
+            -gammas_sp * spatial_sq
+            -gammas_tm * temporal_sq
+        )
+
+        raw_score = self.film_score(self.f_feature_score(x_j), embed_context)
+        score = 0.2 * torch.tanh(raw_score)
+        
+        logits = distance_logits + score
+        alpha_attn = softmax(logits, index)  # [E, n_heads]
+        
+        head_values = alpha_attn.unsqueeze(-1) * value_embed.unsqueeze(1)
+        head_values = head_values.reshape(-1, self.n_heads * self.n_latent)
+
+        attn_sq = alpha_attn ** 2
+
+        return torch.cat((head_values, attn_sq), dim=1)
+
+    def update(self, aggr_out):
+        # PyG automatically aggregated aggr_out via aggr="add" to [N_queries, n_latent + 1]
+        agg_values = aggr_out[:, :self.n_latent * self.n_heads]
+        agg_attn_sq = aggr_out[:, self.n_latent * self.n_heads:]
+        local_concentration = agg_attn_sq.mean(dim=1, keepdim=True)
+
+        # Calculate Local Sparsity: 1.0 - sum(alpha^2)
+        local_sparsity = torch.clamp(1.0 - local_concentration, min=0.0, max=1.0)
+        return agg_values, local_sparsity
+
+    def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, embed_context, k=16):
+        if self.use_fixed_edges and self.fixed_edges is not None:
+            edge_index, edge_attr = self.fixed_edges, self.edge_features
+        else:
+            edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+
+        ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+        # ctx_expanded = ctx.expand(x_query.shape[0], -1)
+
+        # Propagate calls message -> aggregate (add) -> update
+        interpolated, local_sparsity = self.propagate(
+            edge_index,
+            x=inpts,
+            embed_context=ctx, # .expand(len(inpts), -1),
+            edge_attr=edge_attr,
+            size=(x_context.shape[0], x_query.shape[0]),
+        )
+
+        # 1. Compute Global Scale Cap
+        # max_boost_cap = 1.5 * self.f_max_gain_cap(ctx_expanded)
+        max_boost_cap = 1.5 * self.f_max_gain_cap(ctx)
+
+        # 2. Local Gain
+        local_gain = 1.0 + max_boost_cap * local_sparsity
+
+        # 3. Apply Local Gain
+        interpolated_gated = interpolated * local_gain
+
+        # 4. Readout
+        gate = self.spatial_gate(interpolated_gated)
+        gated_ctx = ctx * gate
+
+        out = self.proj(torch.cat((interpolated_gated, gated_ctx), dim=1))
+        return self.activate2(out)
 
 
 class SpaceTimeAttention(MessagePassing):
-	"""Multi-Resolution Space-Time Interpolator with Local Coherence Super-Resolution Gain."""
+	"""Continuous 4D renderer from sparse source hypotheses.
 
-	def __init__(
-		self,
-		inpt_dim,
-		out_channels,
-		n_dim=4,
-		n_latent=16,
-		embed_dim=10,
-		n_heads=5,
-		scale_rel=scale_rel,
-		scale_time=scale_time,
-	):
+	Geometry dominates attention; source features provide content and bounded
+	attention corrections; support controls source reliability and the strength
+	of continuous-peak recovery under discrete spatial/temporal sampling.
+	"""
+
+	def __init__(self, inpt_dim, out_channels, n_dim=4, n_latent=16, embed_dim=10,
+				 n_heads=5, support_dim=4, scale_rel=scale_rel, scale_time=scale_time):
 		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
+
 		self.n_heads = n_heads
 		self.n_latent = n_latent
-		self.out_channels = out_channels
+		self.support_dim = support_dim
 		self.scale_rel = scale_rel
 		self.scale_time = scale_time
 
-		# 1. Feature Values & Feature Scores
+		# Source value embedding
 		self.f_values = nn.Linear(inpt_dim, n_latent)
 		self.film_values = FiLM(embed_dim, n_latent)
 		self.act_values = nn.PReLU()
 
+		# Source support embedding + bounded attention prior
+		self.f_support = nn.Sequential(
+			nn.Linear(support_dim, 8), nn.PReLU(), nn.Linear(8, n_latent)
+		)
+		self.f_support_score = nn.Linear(support_dim, n_heads)
+
+		# Source-feature attention correction
 		self.f_feature_score = nn.Linear(inpt_dim, n_heads)
 		self.film_score = FiLM(embed_dim, n_heads)
 
-		# 2. Dynamic Gammas
-		self.f_gamma = nn.Linear(embed_dim, 2 + n_heads * 2)
+		# Dynamic space-time bandwidths
+		self.f_gamma = nn.Linear(embed_dim, 3 + 2 * n_heads)
 		nn.init.normal_(self.f_gamma.weight, std=0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
-		init_spatial = torch.logspace(-1, 0.7, steps=n_heads).unsqueeze(1) # .repeat(1, 3)
+		init_spatial = torch.logspace(-1, 0.7, steps=n_heads).unsqueeze(1)
 		init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads).unsqueeze(1)
 		init_gammas = torch.cat([init_spatial, init_temporal], dim=1).unsqueeze(0)
-		# self.log_gamma_base = nn.Parameter(torch.log(init_gammas)).unsqueeze(0)
 		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
 
-		# 3. Global Scale Cap for Gain
-		self.f_max_gain_cap = nn.Sequential(
-			nn.Linear(embed_dim, 16),
-			nn.PReLU(),
-			nn.Linear(16, 1),
-			nn.Sigmoid()
-		)
-
-		# 4. Readout Projection
-		# self.proj = nn.Linear(n_latent + embed_dim, out_channels)
-		self.proj = nn.Linear(n_latent*n_heads + embed_dim, out_channels)
-		self.activate2 = nn.PReLU()
-
-		self.spatial_gate = nn.Sequential(
-			nn.Linear(n_latent*n_heads, 1),
-			nn.Sigmoid()
-		)
-
+		# Geometry -> latent edge embedding
+		rbf_edge_dim = 3 + 2 * n_heads + 1
 		self.edge_proj = nn.Sequential(
-		    nn.Linear(4 + 2, n_latent),
-		    nn.PReLU(),
-		    nn.Linear(n_latent, n_latent),
+			nn.Linear(rbf_edge_dim, n_latent), nn.PReLU(), nn.Linear(n_latent, n_latent)
 		)
+
+		# Bounded continuous-peak recovery
+		self.f_max_gain_cap = nn.Sequential(
+			nn.Linear(embed_dim, 16), nn.PReLU(), nn.Linear(16, 1), nn.Sigmoid()
+		)
+
+		# Query confidence gate
+		self.spatial_gate = nn.Sequential(
+			nn.Linear(n_latent * n_heads, 1), nn.Sigmoid()
+		)
+
+		# Readout
+		self.proj = nn.Linear(n_latent * n_heads + embed_dim, out_channels)
+		self.activate2 = nn.PReLU()
 
 		self.use_fixed_edges = False
 		self.fixed_edges = None
 		self.edge_features = None
 
-		# self.head_value_scale = nn.Parameter(
-		#     torch.zeros(n_heads, n_latent)
-		# )
-
 	def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=16):
-		ctx_4d = torch.cat((x_context / self.scale_rel, (1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel), dim=1)
-		qry_4d = torch.cat((x_query / self.scale_rel, (1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel), dim=1)
+		ctx_4d = torch.cat((
+			x_context / self.scale_rel,
+			(1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel
+		), dim=1)
+		qry_4d = torch.cat((
+			x_query / self.scale_rel,
+			(1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel
+		), dim=1)
 
 		edge_index = knn(ctx_4d, qry_4d, k=k).flip(0).to(x_query.device)
 
-		diff_sp = (x_query[edge_index[1], 0:3] - x_context[edge_index[0], 0:3]) / self.scale_rel
-		diff_tm = (1000.0 * self.scale_time * (x_query_t[edge_index[1]].view(-1) - x_context_t[edge_index[0]].view(-1))).reshape(-1, 1) / self.scale_rel
-		pos_rel = torch.cat((diff_sp, diff_tm), dim = 1)
+		diff_sp = (
+			x_query[edge_index[1], :3] - x_context[edge_index[0], :3]
+		) / self.scale_rel
+		diff_tm = (
+			1000.0 * self.scale_time *
+			(x_query_t[edge_index[1]].view(-1) - x_context_t[edge_index[0]].view(-1))
+		).reshape(-1, 1) / self.scale_rel
 
-		# Edge feature shape: [E, 4] -> (dx^2, dy^2, dz^2, dt^2)
-		edge_attr = torch.cat((pos_rel**2, pos_rel), dim = 1) # torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1)
-
-		return edge_index, edge_attr # , pos_rel
+		return edge_index, torch.cat((diff_sp, diff_tm), dim=1)
 
 	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=16):
-		edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
-		self.fixed_edges = edge_index
-		self.edge_features = edge_attr
+		self.fixed_edges, self.edge_features = self._build_edge_attr(
+			x_query, x_context, x_query_t, x_context_t, k=k
+		)
 		self.use_fixed_edges = True
 
-	def message(self, x_j, embed_context, index, edge_attr):
-		# 1. Feature Values
+	def message(self, x_j, support_j, embed_context, index, edge_attr):
+		pos_rel_sp = edge_attr[:, :3]
+		pos_rel_tm = edge_attr[:, 3:4]
 
-		spatial_sq = edge_attr[:,0:3].sum(dim = -1, keepdim = True)
-		temporal_sq = edge_attr[:,3:4]
+		pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim=1, keepdim=True)
+		pos_norm_tm = torch.abs(pos_rel_tm)
+		spatial_sq = pos_norm_sp.square()
+		temporal_sq = pos_norm_tm.square()
 
-		edge_embed = self.edge_proj(torch.cat((edge_attr[:,4:8], torch.sqrt(spatial_sq + 1e-6), torch.sqrt(temporal_sq + 1e-6)), dim = 1))
-
-		value_embed = self.act_values(self.film_values(self.f_values(x_j), embed_context))
-
-		value_embed = value_embed + edge_embed
-
-		# 2. Dynamic Gammas
+		# Dynamic multi-scale bandwidths
 		delta = self.f_gamma(embed_context)
-		# alpha = delta[:, :2].unsqueeze(1)
-		alpha = 0.5 * torch.tanh(delta[:, :2]).unsqueeze(1)
-		residuals = 0.1 * torch.tanh(delta[:, 2:].view(-1, self.n_heads, 2))
+		alpha_global = 0.5 * torch.tanh(delta[:, 0:1])
+		alpha_space = 0.25 * torch.tanh(delta[:, 1:2])
+		alpha_time = 0.25 * torch.tanh(delta[:, 2:3])
+
+		alpha = (
+			alpha_global.unsqueeze(1) +
+			torch.cat([alpha_space, alpha_time], dim=1).unsqueeze(1)
+		)
+		residuals = 0.1 * torch.tanh(delta[:, 3:].view(-1, self.n_heads, 2))
 
 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+		gammas_sp = gammas[:, :, 0]
+		gammas_tm = gammas[:, :, 1]
 
-		# 3. Distance & Bounded Score Logits
+		# Multi-scale geometric RBF features
+		# rbf_spatial = torch.exp(-gammas_sp * pos_norm_sp)
+		# rbf_temporal = torch.exp(-gammas_tm * pos_norm_tm)
+		rbf_spatial = torch.exp(-gammas_sp * spatial_sq)
+		rbf_temporal = torch.exp(-gammas_tm * temporal_sq)
+		unit_dir_sp = pos_rel_sp / pos_norm_sp.clamp(min=1e-6)
+
+		rbf_edge_attr = torch.cat((
+			unit_dir_sp, rbf_spatial, rbf_temporal, pos_rel_tm
+		), dim=1)
+		edge_embed = self.edge_proj(rbf_edge_attr)
+
+		# Source content + geometry + support
+		value_embed = self.act_values(
+			self.film_values(self.f_values(x_j), embed_context)
+		)
+		value_embed = value_embed + edge_embed + self.f_support(support_j)
+
+		# Learned support score is assumed to be [0,1].
+		# Keep weak sources usable, but prevent them from dominating.
+		support_gate = 0.5 + 0.5 * support_j[:, 3:4]
+		value_embed = value_embed * support_gate
+
+		# Geometry is the dominant attention term.
 		distance_logits = (
-			-gammas[:, :, 0] * spatial_sq
-			-gammas[:, :, 1] * temporal_sq
+			-gammas_sp * spatial_sq - gammas_tm * temporal_sq
 		)
 
-		raw_score = self.film_score(self.f_feature_score(x_j), embed_context)
-		score = 0.2 * torch.tanh(raw_score)
-		
-		logits = distance_logits + score
-		alpha_attn = softmax(logits, index) # [E, n_heads]
-		
-		head_values = alpha_attn.unsqueeze(-1) * value_embed.unsqueeze(1)
-		head_values = head_values.reshape(-1, self.n_heads * self.n_latent)
-		# head_values = head_values * (1 + self.head_value_scale)
+		# Small bounded source-content correction.
+		source_score = 0.2 * torch.tanh(
+			self.film_score(self.f_feature_score(x_j), embed_context)
+		)
 
-		# Weighted value output
-		# weighted_values = mean_attn * value_embed # [E, n_latent]
-		attn_sq = alpha_attn ** 2 # [E, 1]
+		# Small bounded support correction.
+		support_score = 0.2 * torch.tanh(
+			self.f_support_score(support_j)
+		)
 
-		# Pack into single vector [E, n_latent + 1] for unified aggregation
-		return torch.cat((head_values, attn_sq), dim=1)
+		logits = distance_logits + source_score + support_score
+
+		# PyG softmax normalizes over edges sharing the same target index,
+		# independently for each head: alpha_jh sums to 1 per query/head.
+		alpha_attn = softmax(logits, index)
+
+		head_values = (
+			alpha_attn.unsqueeze(-1) * value_embed.unsqueeze(1)
+		).reshape(-1, self.n_heads * self.n_latent)
+
+		# Also retain support-weighted attention mass and concentration.
+		# This lets sparsity recovery require actual source support.
+		support_rel = support_j[:, 3:4].clamp(0.0, 1.0)
+		support_mass = alpha_attn * support_rel
+		support_sq = support_mass.square()
+
+		return torch.cat((
+			head_values,
+			alpha_attn.square(),
+			support_mass,
+			support_sq
+		), dim=1)
 
 	def update(self, aggr_out):
-		# PyG automatically aggregated aggr_out via aggr="add" to [N_queries, n_latent + 1]
-		agg_values = aggr_out[:, :self.n_latent * self.n_heads]
-		agg_attn_sq = aggr_out[:, self.n_latent * self.n_heads:]
-		local_concentration = agg_attn_sq.mean(dim=1, keepdim=True)
+		n_value = self.n_latent * self.n_heads
+		n_head = self.n_heads
 
-		# Calculate Local Sparsity: 1.0 - sum(alpha^2)
-		local_sparsity = torch.clamp(1.0 - local_concentration, min=0.0, max=1.0)
-		return agg_values, local_sparsity
+		agg_values = aggr_out[:, :n_value]
+		agg_alpha_sq = aggr_out[:, n_value:n_value + n_head]
+		agg_support = aggr_out[:, n_value + n_head:n_value + 2 * n_head]
+		agg_support_sq = aggr_out[:, n_value + 2 * n_head:n_value + 3 * n_head]
 
-	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t, embed_context, k=16):
+		# Ordinary attention concentration.
+		concentration = agg_alpha_sq.mean(dim=1, keepdim=True)
+		sparsity = (1.0 - concentration).clamp(0.0, 1.0)
+
+		# Reliable support actually participating in the local interpolation.
+		support_mass = agg_support.mean(dim=1, keepdim=True).clamp(0.0, 1.0)
+
+		# Effective concentration among supported sources.
+		support_concentration = (
+			agg_support_sq.sum(dim=1, keepdim=True) /
+			(agg_support.sum(dim=1, keepdim=True).square() + 1e-6)
+		).clamp(0.0, 1.0)
+
+		support_sparsity = (1.0 - support_concentration).clamp(0.0, 1.0)
+
+		# Peak recovery requires BOTH distributed local support and spatial sparsity.
+		recovery = sparsity * support_sparsity * support_mass
+
+		return agg_values, recovery, support_mass
+
+	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t,
+				embed_context, support, k=16):
 		if self.use_fixed_edges and self.fixed_edges is not None:
 			edge_index, edge_attr = self.fixed_edges, self.edge_features
 		else:
-			edge_index, edge_attr = self._build_edge_attr(x_query, x_context, x_query_t, x_context_t, k=k)
+			edge_index, edge_attr = self._build_edge_attr(
+				x_query, x_context, x_query_t, x_context_t, k=k
+			)
 
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-		# ctx_expanded = ctx.expand(x_query.shape[0], -1)
 
-		# Propagate calls message -> aggregate (add) -> update
-		interpolated, local_sparsity = self.propagate(
+		interpolated, recovery, support_mass = self.propagate(
 			edge_index,
 			x=inpts,
-			embed_context=ctx, # .expand(len(inpts), -1),
+			support=support,
+			embed_context=ctx,
 			edge_attr=edge_attr,
-			size=(x_context.shape[0], x_query.shape[0]),
+			size=(x_context.shape[0], x_query.shape[0])
 		)
 
-		# 1. Compute Global Scale Cap
-		# max_boost_cap = 1.5 * self.f_max_gain_cap(ctx_expanded)
-		max_boost_cap = 1.5 * self.f_max_gain_cap(ctx)
+		# Bounded correction for continuous Gaussian peaks between samples.
+		max_gain = 1.5 * self.f_max_gain_cap(ctx)
+		local_gain = 1.0 + max_gain * recovery
+		interpolated = interpolated * local_gain
 
-		# 2. Local Gain
-		local_gain = 1.0 + max_boost_cap * local_sparsity
+		# Query confidence: weak local support cannot be hidden by context alone.
+		gate = self.spatial_gate(interpolated)
+		gated_ctx = ctx * gate * support_mass
 
-		# 3. Apply Local Gain
-		interpolated_gated = interpolated * local_gain
-
-		# 4. Readout
-		gate = self.spatial_gate(interpolated_gated)
-		gated_ctx = ctx * gate
-
-		out = self.proj(torch.cat((interpolated_gated, gated_ctx), dim=1))
+		out = self.proj(torch.cat((interpolated, gated_ctx), dim=1))
 		return self.activate2(out)
 
 
@@ -1425,7 +1940,7 @@ class SpaceTimeAttention(MessagePassing):
 
 
 
-class BipartiteGraphReadOutOperator(MessagePassing):
+class BipartiteGraphReadOutOperator1(MessagePassing):
 	"""Bipartite Readout Operator (Source Space -> Product Graph Space).
 
 	Reads out source node hypotheses back onto product-graph edges (Source-Station pairs).
@@ -1443,14 +1958,14 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		baseline_gate=0.01,
 	):
 		# Aggregating/Mapping from Source Nodes (edge_index[0]) to Product Graph Edges (edge_index[1])
-		super(BipartiteGraphReadOutOperator, self).__init__(aggr="add")
+		super(BipartiteGraphReadOutOperator1, self).__init__(aggr="add")
 
 		self.n_gammas = n_gammas
 		self.baseline_gate = baseline_gate
 
 		# 1. Edge Feature Evaluator
 		# Inputs: Source feature (ndim_in) + Unit dir (3) + 1D Time (1) + n_gammas RBFs
-		self.fc_edge = nn.Linear(ndim_in + 4 + n_gammas, ndim_in)
+		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
 		self.film_edge = FiLM(embed_dim, ndim_in)
 		self.act_edge = nn.PReLU()
 
@@ -1463,15 +1978,15 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		)
 
 		# 3. Dynamic Bandwidth Predictor (Linear 4D Gammas)
-		self.f_gamma = nn.Linear(embed_dim, 3 + n_gammas * 2)
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
 		nn.init.normal_(self.f_gamma.weight, std = 0.01)
 		nn.init.zeros_(self.f_gamma.bias)
 
 		# Multi-scale log-spaced initialization
-		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).unsqueeze(1) # .repeat(1, 3)
-		init_temporal = torch.logspace(-1, 0.7, steps=n_gammas).unsqueeze(1)
-		init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)
-		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1,-1) # .unsqueeze(1) # .repeat(1, 3)
+		# init_temporal = torch.logspace(-1, 0.7, steps=n_gammas) # .unsqueeze(1)
+		# init_gammas = torch.cat((init_spatial, init_temporal), dim=1).unsqueeze(0)
+		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
 
 		# 4. Readout Normalization and Output Projection
 		self.norm = nn.LayerNorm(ndim_in)
@@ -1520,31 +2035,31 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 
 		# Step 2: Scale-conditioned Anisotropic Gammas
 		delta = self.f_gamma(ctx)
-		alpha_global = 0.5  * torch.tanh(delta[:, 0:1])
-		alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
-		alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
-		residuals =    0.2 * torch.tanh(delta[:, 3:].view(-1, self.n_gammas, 2))  # Anisotropic variations
-		alpha = torch.cat([(alpha_global + alpha_space).expand(-1,1),
-			(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
+		alpha = 0.5  * torch.tanh(delta[:, 0:1])
+		# alpha_space =  0.25 * torch.tanh(delta[:, 1:2])
+		# alpha_time =   0.25 * torch.tanh(delta[:, 2:3])
+		residuals =    0.2 * torch.tanh(delta[:, 3:])  # Anisotropic variations
+		# alpha = torch.cat([(alpha_global + alpha_space).expand(-1,1),
+		# 	(alpha_global + alpha_time).expand(-1,1)], dim = 1).unsqueeze(1)
 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)  # [E, n_gammas, 4]
 		# alpha = delta[:, :1].unsqueeze(-1)
 		# residuals = 0.2 * torch.tanh(delta[:, 1:].view(-1, self.n_gammas, 4))
 
 		# Compute isotropic 3D spatial distance squared and 1D temporal distance squared
 		r_sp_sq = norm_pos ** 2                                       # [E_edges, 1]
-		r_tm_sq = diff_tm ** 2                                        # [E_edges, 1]
-		r_sq = torch.cat((r_sp_sq, r_tm_sq), dim=1).unsqueeze(1)      # [E_edges, 1, 2]
+		# r_tm_sq = diff_tm ** 2                                        # [E_edges, 1]
+		# r_sq = torch.cat((r_sp_sq, r_tm_sq), dim=1).unsqueeze(1)      # [E_edges, 1, 2]
 
 		# gammas is [E_edges, n_gammas, 2]
 		# Dot product across the 2 components (Space, Time):
-		r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-5) # [E_edges, n_gammas]
+		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5) # [E_edges, n_gammas]
 
 		# Step 3: Anisotropic LINEAR distance metric
 		# r_sq = torch.cat((diff_sp ** 2, diff_tm ** 2), dim=1).unsqueeze(1)
 		# r_aniso = torch.sqrt(torch.sum(gammas * r_sq, dim=-1) + 1e-5)
 		rbf_decay = torch.exp(-1.0 * r_aniso)  # [E, n_gammas]
 
-		rel_pos = torch.cat((unit_dir, rbf_decay, diff_tm), dim=-1)
+		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)
 
 		# Step 4: Map source mask to edge indexing if passed as node mask
 		if mask.dim() > 1 and mask.shape[0] == N:
@@ -1583,6 +2098,118 @@ class BipartiteGraphReadOutOperator(MessagePassing):
 		phase_routing = self.mask_gate(mask)
 
 		return gate * (phase_routing * geo_features)
+
+
+
+
+class BipartiteGraphReadOutOperator(nn.Module):
+	"""Source Space -> Product Graph Space readout.
+
+	Propagates source hypotheses onto source-station product edges using
+	multi-scale spatial RBFs, FiLM conditioning, and soft source-support gating.
+	Each product edge has exactly one incoming source, so no aggregation is needed.
+	"""
+
+	def __init__(
+		self,
+		ndim_in,
+		ndim_out,
+		ndim_mask=1,
+		embed_dim=10,
+		n_gammas=3, # 4
+		baseline_gate=0.01,
+	):
+		super(BipartiteGraphReadOutOperator, self).__init__()
+
+		self.n_gammas = n_gammas
+		self.baseline_gate = baseline_gate
+
+		# 1. Edge Feature Evaluator
+		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
+		self.film_edge = FiLM(embed_dim, ndim_in)
+		self.act_edge = nn.PReLU()
+
+		# 2. Phase / Mask Gate Router
+		self.mask_gate = nn.Sequential(
+			nn.Linear(ndim_mask, 8), nn.PReLU(),
+			nn.Linear(8, ndim_in), nn.Sigmoid(),
+		)
+
+		# 3. Dynamic Bandwidth Predictor
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
+		nn.init.normal_(self.f_gamma.weight, std=0.01)
+		nn.init.zeros_(self.f_gamma.bias)
+
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
+		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
+
+		# 4. Readout Normalization and Projection
+		self.norm = nn.LayerNorm(ndim_in)
+		self.fc_out = nn.Linear(ndim_in, ndim_out)
+		self.act_out = nn.PReLU()
+
+	def forward(self, inpt, A_Lg_in_srcs, mask, embed_context, num_target_nodes=None):
+		"""Args:
+			inpt: [N_src, ndim_in] source node features
+			A_Lg_in_srcs: edge_index [2, E], x [E, 4]
+			mask: [N_src, ndim_mask] or [E, ndim_mask] source support mask
+			embed_context: [E, embed_dim] or [1, embed_dim]
+		"""
+		N = inpt.shape[0]
+		# M = num_target_nodes if num_target_nodes is not None else (
+		# 	A_Lg_in_srcs.edge_index[1].max().item() + 1
+		# 	if A_Lg_in_srcs.edge_index.numel() > 0 else 0
+		# )
+
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+		source_idx = A_Lg_in_srcs.edge_index[0]
+
+		# Step 1: Spatial geometry
+		diff_sp = A_Lg_in_srcs.x[:, 0:3]
+		norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
+		unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
+
+		# Step 2: Scale-conditioned RBF bandwidths
+		delta = self.f_gamma(ctx)
+		alpha = 0.5 * torch.tanh(delta[:, 0:1])
+		residuals = 0.2 * torch.tanh(delta[:, 1:])
+		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+
+		# Step 3: Multi-scale spatial RBFs
+		r_sp_sq = norm_pos ** 2
+		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5)
+		rbf_decay = torch.exp(-r_aniso)
+
+		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)
+
+		# Step 4: Map source mask to edge indexing
+		if mask.dim() > 1 and mask.shape[0] == N:
+			edge_mask = mask[source_idx]
+		else:
+			edge_mask = mask
+
+		# Step 5: Direct source -> product-edge mapping
+		edge_inpt = torch.cat((inpt[source_idx], rel_pos), dim=-1)
+		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
+
+		# Step 6: Phase routing
+		phase_routing = self.mask_gate(edge_mask)
+		pattern = phase_routing * geo_features
+
+		# Step 7: Normalize pattern only
+		pattern = self.norm(pattern)
+
+		# Step 8: Project to product-space features
+		out = self.act_out(self.fc_out(pattern))
+
+		# Step 9: Soft source-support / baseline gate
+		absolute_gate = edge_mask.max(1, keepdims=True)[0]
+		gate = absolute_gate + self.baseline_gate
+		out = gate * out
+
+		return out, edge_mask
+
+
 
 
 class DataAggregationAssociation(nn.Module):
@@ -3809,26 +4436,26 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
 		)
 
-		x = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, num_target_nodes = n_temp)
-		x = self.SpatialAggregation1(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda) # x_temp_cuda_cart
-		x_local = self.SpatialAggregation2(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda)
+		x, support = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, num_target_nodes = n_temp)
+		x = self.SpatialAggregation1(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda, support = support) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda, support = support)
 		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, embed_context, A_src[1], x_temp_cuda) # x_temp_cuda_cart
+			x_expand = self.SpatialAggregation2_expanded(x, embed_context, A_src[1], x_temp_cuda, support = support) # x_temp_cuda_cart
 			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
 			x = x_local
-		x_spatial = self.SpatialAggregation3(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		x_spatial = self.SpatialAggregation3(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda, support = support) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
 		if self.use_direct_output == True:
 			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 		else:
-			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, embed_context) # contains data on spatial and temporal solution at fixed nodes
+			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, embed_context, support) # contains data on spatial and temporal solution at fixed nodes
 
 		y = self.proj_soln1(y_latent)
 		
 		if save_state == True:
-			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
+			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t, support)
 			
 		# print('Shapes')
 		# print(x_spatial.shape)
@@ -3837,7 +4464,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		# print(t_query.shape)
 		# print(x_temp_cuda_t.shape)
 		# print(embed_context.shape)
-		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, embed_context, support) # second slowest module (could use this embedding to seed source source attention vector).
 
 		x_src = []
 		x = self.proj_soln2(x)
@@ -3937,13 +4564,14 @@ class GCN_Detection_Network_extended(nn.Module):
 		# self.pos_rel_sta = pos_rel_sta
 		# self.pos_rel_src = pos_rel_src
 
-	def set_internal_state(self, x_spatial, x_temp_cuda_cart, x_temp_cuda_t): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
+	def set_internal_state(self, x_spatial, x_temp_cuda_cart, x_temp_cuda_t, support): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 		## Use this to set state for rapid queries of attention layer
 		self.x_spatial = x_spatial
 		self.x_temp_cuda_cart = x_temp_cuda_cart
 		self.x_temp_cuda_t = x_temp_cuda_t
+		self.support = support
 
-	def set_internal_state_queries(self, s, x_spatial, x_temp_cuda_cart, x_temp_cuda_t, locs_use_cart, tlatent): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
+	def set_internal_state_queries(self, s, x_spatial, x_temp_cuda_cart, x_temp_cuda_t, locs_use_cart, tlatent, support): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 		## Use this to set state for rapid queries of attention layer
 		
 		self.s = s
@@ -3952,12 +4580,13 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.x_temp_cuda_t = x_temp_cuda_t
 		self.locs_use_cart = locs_use_cart
 		self.tlatent = tlatent
+		self.support = support
 
 	def forward_queries(self, x_query_cart, t_query, train = False): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 
 		embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
 		## Use this to obtain query predictions. Note, can modify to also return the spatial embeddings (prior to proj_soln)
-		return self.activate(self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t, embed_context)))
+		return self.activate(self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t, embed_context, self.support)))
 
 	def forward_src_queries(self, x_query_src_cart, tq_sample, tpick, ipick, phase_label, trv_out_q): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 
@@ -4032,28 +4661,28 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
 		)
 
-		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, num_target_nodes = n_temp)
-		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
-		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda)
+		x, support = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, num_target_nodes = n_temp)
+		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda, support = support) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda, support = support)
 		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda, support = support) # x_temp_cuda_cart
 			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, self.embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
 			x = x_local
-		x_spatial = self.SpatialAggregation3(x, self.embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		x_spatial = self.SpatialAggregation3(x, self.embed_context, self.A_src, x_temp_cuda, support = support) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
 		if self.use_direct_output == True:
 			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 		else:
-			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, self.embed_context) # contains data on spatial and temporal solution at fixed nodes
+			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, self.embed_context, support) # contains data on spatial and temporal solution at fixed nodes
 
 		y = self.proj_soln1(y_latent)
 		
 		# if save_state == True:
 		# 	self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
 			
-		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context, support) # second slowest module (could use this embedding to seed source source attention vector).
 
 		x_src = []
 		x = self.proj_soln2(x)
@@ -4151,22 +4780,22 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
 		)
 
-		x = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, num_target_nodes = n_temp)
-		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda) # x_temp_cuda_cart
-		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda)
+		x, support = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, num_target_nodes = n_temp)
+		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda, support = support) # x_temp_cuda_cart
+		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda, support = support)
 		if self.use_expanded == True:
-			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda) # x_temp_cuda_cart
+			x_expand = self.SpatialAggregation2_expanded(x, self.embed_context, self.Ac, x_temp_cuda, support = support) # x_temp_cuda_cart
 			gate = torch.sigmoid(self.gate_expanded(torch.cat((x_local, x_expand, self.embed_context.expand(x_local.shape[0], -1)), dim = 1)))
 			x = x_local + gate*x_expand
 		else:
 			x = x_local
-		x_spatial = self.SpatialAggregation3(x, self.embed_context, self.A_src, x_temp_cuda) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
+		x_spatial = self.SpatialAggregation3(x, self.embed_context, self.A_src, x_temp_cuda, support = support) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
 
 		if save_state == True:
 			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
 			
-		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context, support) # second slowest module (could use this embedding to seed source source attention vector).
 
 		x_src = []
 		x = self.proj_soln2(x)
