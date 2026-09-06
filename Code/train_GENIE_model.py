@@ -45,7 +45,7 @@ import h5py
 
 
 from utils import *
-from module_backup import *
+from module import *
 from process_utils import *
 
 use_wandb_logging = False
