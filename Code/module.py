@@ -4450,12 +4450,12 @@ class GCN_Detection_Network_extended(nn.Module):
 		if self.use_direct_output == True:
 			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 		else:
-			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, embed_context) # contains data on spatial and temporal solution at fixed nodes
+			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, embed_context, support) # contains data on spatial and temporal solution at fixed nodes
 
 		y = self.proj_soln1(y_latent)
 		
 		if save_state == True:
-			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
+			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t, support)
 			
 		# print('Shapes')
 		# print(x_spatial.shape)
@@ -4464,7 +4464,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		# print(t_query.shape)
 		# print(x_temp_cuda_t.shape)
 		# print(embed_context.shape)
-		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, embed_context, support) # second slowest module (could use this embedding to seed source source attention vector).
 
 		x_src = []
 		x = self.proj_soln2(x)
@@ -4564,13 +4564,14 @@ class GCN_Detection_Network_extended(nn.Module):
 		# self.pos_rel_sta = pos_rel_sta
 		# self.pos_rel_src = pos_rel_src
 
-	def set_internal_state(self, x_spatial, x_temp_cuda_cart, x_temp_cuda_t): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
+	def set_internal_state(self, x_spatial, x_temp_cuda_cart, x_temp_cuda_t, support): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 		## Use this to set state for rapid queries of attention layer
 		self.x_spatial = x_spatial
 		self.x_temp_cuda_cart = x_temp_cuda_cart
 		self.x_temp_cuda_t = x_temp_cuda_t
+		self.support = support
 
-	def set_internal_state_queries(self, s, x_spatial, x_temp_cuda_cart, x_temp_cuda_t, locs_use_cart, tlatent): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
+	def set_internal_state_queries(self, s, x_spatial, x_temp_cuda_cart, x_temp_cuda_t, locs_use_cart, tlatent, support): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 		## Use this to set state for rapid queries of attention layer
 		
 		self.s = s
@@ -4579,12 +4580,13 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.x_temp_cuda_t = x_temp_cuda_t
 		self.locs_use_cart = locs_use_cart
 		self.tlatent = tlatent
+		self.support = support
 
 	def forward_queries(self, x_query_cart, t_query, train = False): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 
 		embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
 		## Use this to obtain query predictions. Note, can modify to also return the spatial embeddings (prior to proj_soln)
-		return self.activate(self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t, embed_context)))
+		return self.activate(self.proj_soln2(self.SpaceTimeAttention(self.x_spatial, x_query_cart, self.x_temp_cuda_cart, t_query, self.x_temp_cuda_t, embed_context, self.support)))
 
 	def forward_src_queries(self, x_query_src_cart, tq_sample, tpick, ipick, phase_label, trv_out_q): # x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t)
 
@@ -4673,14 +4675,14 @@ class GCN_Detection_Network_extended(nn.Module):
 		if self.use_direct_output == True:
 			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
 		else:
-			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, self.embed_context) # contains data on spatial and temporal solution at fixed nodes
+			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, self.embed_context, support) # contains data on spatial and temporal solution at fixed nodes
 
 		y = self.proj_soln1(y_latent)
 		
 		# if save_state == True:
 		# 	self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
 			
-		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context, support) # second slowest module (could use this embedding to seed source source attention vector).
 
 		x_src = []
 		x = self.proj_soln2(x)
@@ -4793,7 +4795,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		if save_state == True:
 			self.set_internal_state(x_spatial, x_temp_cuda_cart, x_temp_cuda_t)
 			
-		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context) # second slowest module (could use this embedding to seed source source attention vector).
+		x = self.SpaceTimeAttention(x_spatial, x_query_cart, x_temp_cuda_cart, t_query, x_temp_cuda_t, self.embed_context, support) # second slowest module (could use this embedding to seed source source attention vector).
 
 		x_src = []
 		x = self.proj_soln2(x)
