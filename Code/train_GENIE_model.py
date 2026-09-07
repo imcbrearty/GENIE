@@ -3075,7 +3075,7 @@ def get_step_ramp(current_step: int, start_step: int, ramp_steps: int) -> float:
 
 # 		return dice # .mean()
 
-class GaussianDiceLoss(nn.Module):
+class GaussianDiceLoss1(nn.Module):
 	def __init__(self, smooth=1e-5, bg_weight=1.0):
 		super().__init__()
 		self.smooth = smooth
@@ -3102,6 +3102,33 @@ class GaussianDiceLoss(nn.Module):
 		)
 
 		return 1.0 - dice
+
+
+class GaussianDiceLoss(nn.Module):
+    def __init__(self, smooth=1e-5):
+        super().__init__()
+        self.smooth = smooth
+
+    def forward(self, pred, target):
+        pred = F.relu(pred.float())
+        target = target.float()
+
+        target_sq_sum = target.square().sum()
+
+        if target_sq_sum < 1e-8:
+            return pred.sum() * 0.0
+
+        intersection = (pred * target).sum()
+        pred_sq_sum = pred.square().sum()
+
+        dice = (
+            2.0 * intersection + self.smooth
+        ) / (
+            pred_sq_sum + target_sq_sum + self.smooth
+        )
+
+        return 1.0 - dice
+
 
 
 def soft_dice_loss(pred, target, eps=1e-5):
@@ -4676,7 +4703,7 @@ for batch_idx, inputs in enumerate(loader):
 				edges_query = ifind_positive[remove_self_loops(knn(proj_coords, proj_coords, k = min(k_nearest_query, len(ifind_positive) - 1)))[0]] # .flip(0).contiguous()
 				trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
 				pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
-				weight_rel = torch.exp(-torch.abs(trgt_rel)/0.35)
+				weight_rel = 0.25 + 0.75*torch.exp(-torch.abs(trgt_rel)/0.35)
 				# loss_rel = weights[1] * charbonnier_loss(pred_rel, trgt_rel, weight = weight_rel)
 				loss_rel = weights[1] * loss_charbonnier_source(pred_rel, trgt_rel, sample_weight = weight_rel, apply_peak_weight = False)
 				loss_relative_val += loss_rel.item() / n_batch_valid
