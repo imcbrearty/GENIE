@@ -4670,9 +4670,9 @@ for batch_idx, inputs in enumerate(loader):
 		computed_relative_loss = False
 		if (use_relative_loss == True)*(ramp_aux > 0):
 			k_nearest_query = 30
-			ifind_positive = torch.where(Lbls_query[i0].squeeze() > 0.1)[0]
+			ifind_positive = torch.where(Lbls_query[i0].squeeze() > 0.1)[0].to(device)
 			if len(ifind_positive) > int(k_nearest_query/10):
-				proj_coords = torch.cat((ftrns1_diff(X_query[i0].to(device))/1000.0, scale_time*X_query[i0]), dim = 1)[ifind_positive]
+				proj_coords = torch.cat((ftrns1_diff(X_query[i0].to(device))/1000.0, scale_time*X_query[i0][:,3:4].to(device)), dim = 1)[ifind_positive]
 				edges_query = ifind_positive[remove_self_loops(knn(proj_coords, proj_coords, k = min(k_nearest_query, len(ifind_positive) - 1)))[0]] # .flip(0).contiguous()
 				trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
 				pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
