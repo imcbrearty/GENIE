@@ -4623,12 +4623,12 @@ for batch_idx, inputs in enumerate(loader):
 
 		# ==================== 1. DICE / LOCALIZATION LOSSES ====================
 		if use_dice_loss:
-			loss_base1 = weights[0] * DiceLoss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
-			loss_dice2 = weights[1] * DiceLoss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
+			# loss_base1 = weights[0] * DiceLoss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
+			# loss_dice2 = weights[1] * DiceLoss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
 			loss_dice3 = weight_assoc_v[inc] * weights[2] * DiceLoss(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0])
 			loss_dice4 = weight_assoc_v[inc] * weights[3] * DiceLoss(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1])
 
-			loss_dice_src_val += (loss_base1.item() + loss_dice2.item()) / n_batch_valid
+			# loss_dice_src_val += (loss_base1.item() + loss_dice2.item()) / n_batch_valid
 			loss_dice_asc_val += (loss_dice3.item() + loss_dice4.item()) / n_batch_valid
 			
 
@@ -4793,9 +4793,10 @@ for batch_idx, inputs in enumerate(loader):
 			loss += 0.05 * ramp_aux * weights[1] * loss_rel
 
 		if use_dice_loss == True:
-			loss += 0.05 * (loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
-			loss_dict['loss_base1'] = loss_base1
-			loss_dict['loss_dice2'] = loss_dice2
+			# loss += 0.05 * (loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
+			loss += 0.02 * (loss_dice3 + loss_dice4)
+			# loss_dict['loss_base1'] = loss_base1
+			# loss_dict['loss_dice2'] = loss_dice2
 			loss_dict['loss_dice3'] = loss_dice3
 			loss_dict['loss_dice4'] = loss_dice4
 		
