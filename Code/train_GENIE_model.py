@@ -4434,7 +4434,8 @@ for batch_idx, inputs in enumerate(loader):
 	loss_negative_val = 0.0
 	loss_relative_val = 0.0
 
-
+	n_batch_valid = sum([len(lp_times[i0]) > 0 for i0 in range(n_batch)])
+	
 	for inc, i0 in enumerate(range(n_batch)):
 
 
@@ -4584,8 +4585,8 @@ for batch_idx, inputs in enumerate(loader):
 			# 	loss_reg_base, loss_reg_query = l_base_u, l_query_u
 			# 	loss_reg_assoc_P, loss_reg_assoc_S = l_p_u, l_s_u
 
-			loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch
-			loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch
+			loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch_valid
+			loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch_valid
 
 
 		# ==================== 3. NEGATIVE SAMPLING LOSS ====================
@@ -4660,7 +4661,7 @@ for batch_idx, inputs in enumerate(loader):
 				# raw_loss_negative = gaussian_heatmap_loss(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final])
 				# loss_negative = weights[1] * charbonnier_loss(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final])
 				loss_negative = weights[1] * loss_charbonnier_source(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final], apply_peak_weight = False)
-				loss_negative_val += loss_negative.item() / n_batch
+				loss_negative_val += loss_negative.item() / n_batch_valid
 				computed_negative_loss = True
 		
 
@@ -4669,13 +4670,14 @@ for batch_idx, inputs in enumerate(loader):
 		computed_relative_loss = False
 		if (use_relative_loss == True)*(ramp_aux > 0):
 			k_nearest_query = 50
-			edges_query = knn(ftrns1_diff(X_query[i0].to(device))/1000.0, ftrns1_diff(X_query[i0].to(device))/1000.0, k = k_nearest_query) # .flip(0).contiguous()
+			proj_coords = torch.cat((ftrns1_diff(X_query[i0].to(device))/1000.0, scale_time*X_query[i0]), dim = 1)
+			edges_query = knn(proj_coords, proj_coords, k = k_nearest_query) # .flip(0).contiguous()
 			trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
 			pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
 			weight_rel = torch.exp(-torch.abs(trgt_rel)/0.35)
 			# loss_rel = weights[1] * charbonnier_loss(pred_rel, trgt_rel, weight = weight_rel)
 			loss_rel = weights[1] * loss_charbonnier_source(pred_rel, trgt_rel, sample_weight = weight_rel, apply_peak_weight = False)
-			loss_relative_val += loss_rel.item() / n_batch
+			loss_relative_val += loss_rel.item() / n_batch_valid
 			computed_relative_loss = True
 
 
@@ -4748,7 +4750,7 @@ for batch_idx, inputs in enumerate(loader):
 		# print(f"Query: {loss_reg_query.item():.4f} | Neg: {loss_negative.item():.4f} | Rel: {loss_rel.item():.4f}")
 
 		# loss = LossBalancer(loss_dict, accum_steps = n_batch, is_last_accum_step = (inc == (n_batch - 1))) # losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False
-		loss = loss/n_batch
+		loss = loss/n_batch_valid
 		loss.backward(retain_graph = False)
 
 
