@@ -3104,6 +3104,32 @@ class GaussianDiceLoss1(nn.Module):
 		return 1.0 - dice
 
 
+# class GaussianDiceLoss(nn.Module):
+#     def __init__(self, smooth=1e-5):
+#         super().__init__()
+#         self.smooth = smooth
+
+#     def forward(self, pred, target):
+#         pred = F.relu(pred.float())
+#         target = target.float()
+
+#         target_sq_sum = target.square().sum()
+
+#         if target_sq_sum < 1e-8:
+#             return pred.sum() * 0.0
+
+#         intersection = (pred * target).sum()
+#         pred_sq_sum = pred.square().sum()
+
+#         dice = (
+#             2.0 * intersection + self.smooth
+#         ) / (
+#             pred_sq_sum + target_sq_sum + self.smooth
+#         )
+
+#         return 1.0 - dice
+
+
 class GaussianDiceLoss(nn.Module):
     def __init__(self, smooth=1e-5):
         super().__init__()
@@ -3112,6 +3138,9 @@ class GaussianDiceLoss(nn.Module):
     def forward(self, pred, target):
         pred = F.relu(pred.float())
         target = target.float()
+
+        if target.numel() == 0:
+            return pred.sum() * 0.0
 
         target_sq_sum = target.square().sum()
 
@@ -4267,7 +4296,7 @@ if load_training_data == True:
 	dataset = TrainingDataset(np.random.permutation(files_load), n_batch, n_epochs, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded)
 
 
-use_dice_loss = False
+use_dice_loss = True
 use_regression_loss = True
 use_consistency_loss = False
 use_negative_loss = True
@@ -4276,10 +4305,10 @@ use_cap_loss = False
 
 
 # DiceLoss = GaussianDiceLossL1() ## Can change the bg_weight
-# DiceLoss = GaussianDiceLoss() ## Can change the bg_weight
 # gaussian_heatmap_loss = split_charbonnier_loss
 # gaussian_heatmap_loss_with_cap = split_charbonnier_loss
 
+DiceLoss = GaussianDiceLoss() ## Can change the bg_weight
 loss_charbonnier_source = EMAMassCharbonnierLoss()
 loss_charbonnier_assoc  = EMAMassCharbonnierLoss()
 
@@ -4580,17 +4609,7 @@ for batch_idx, inputs in enumerate(loader):
 			plt.close('all')
 
 
-		# ==================== 1. DICE / LOCALIZATION LOSSES ====================
-		# if use_dice_loss:
-		# 	loss_base1 = weights[0] * DiceLoss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
-		# 	loss_dice2 = weights[1] * DiceLoss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
-		# 	loss_dice3 = weight_assoc_v[inc] * weights[2] * DiceLoss(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0])
-		# 	loss_dice4 = weight_assoc_v[inc] * weights[3] * DiceLoss(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1])
-
-		# 	loss_dice_src_val += (loss_base1.item() + loss_dice2.item()) / n_batch
-		# 	loss_dice_asc_val += (loss_dice3.item() + loss_dice4.item()) / n_batch
-
-		# ==================== 2. REGRESSION / AMPLITUDE LOSSES ====================
+		# ==================== 1. REGRESSION / AMPLITUDE LOSSES ====================
 		if use_regression_loss:
 			# Uncapped baselines
 			loss_reg_query = weights[1] * loss_charbonnier_source(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], update_ema = True)
@@ -4598,23 +4617,20 @@ for batch_idx, inputs in enumerate(loader):
 			loss_reg_assoc_P = weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
 			loss_reg_assoc_S = weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
 
-			# if use_cap_loss and ramp_aux > 0.0:
-			# 	l_base_c = weights[0] * gaussian_heatmap_loss_with_cap(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
-			# 	l_query_c = weights[1] * gaussian_heatmap_loss_with_cap(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
-			# 	l_p_c = weight_assoc_v[inc] * weights[2] * gaussian_heatmap_loss_with_cap(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0])
-			# 	l_s_c = weight_assoc_v[inc] * weights[3] * gaussian_heatmap_loss_with_cap(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1])
-
-			# 	loss_reg_base = (1.0 - ramp_aux) * l_base_u + ramp_aux * l_base_c
-			# 	loss_reg_query = (1.0 - ramp_aux) * l_query_u + ramp_aux * l_query_c
-			# 	loss_reg_assoc_P = (1.0 - ramp_aux) * l_p_u + ramp_aux * l_p_c
-			# 	loss_reg_assoc_S = (1.0 - ramp_aux) * l_s_u + ramp_aux * l_s_c
-			# else:
-			# 	loss_reg_base, loss_reg_query = l_base_u, l_query_u
-			# 	loss_reg_assoc_P, loss_reg_assoc_S = l_p_u, l_s_u
-
 			loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch_valid
 			loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch_valid
 
+
+		# ==================== 1. DICE / LOCALIZATION LOSSES ====================
+		if use_dice_loss:
+			loss_base1 = weights[0] * DiceLoss(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
+			loss_dice2 = weights[1] * DiceLoss(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]])
+			loss_dice3 = weight_assoc_v[inc] * weights[2] * DiceLoss(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0])
+			loss_dice4 = weight_assoc_v[inc] * weights[3] * DiceLoss(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1])
+
+			loss_dice_src_val += (loss_base1.item() + loss_dice2.item()) / n_batch_valid
+			loss_dice_asc_val += (loss_dice3.item() + loss_dice4.item()) / n_batch_valid
+			
 
 		# ==================== 3. NEGATIVE SAMPLING LOSS ====================
 		computed_negative_loss = False
@@ -4687,7 +4703,7 @@ for batch_idx, inputs in enumerate(loader):
 			if neg_mask_final.any():
 				# raw_loss_negative = gaussian_heatmap_loss(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final])
 				# loss_negative = weights[1] * charbonnier_loss(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final])
-				loss_negative = weights[1] * loss_charbonnier_source(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final], apply_peak_weight = False)
+				loss_negative = loss_charbonnier_source(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final], apply_peak_weight = False)
 				loss_negative_val += loss_negative.item() / n_batch_valid
 				computed_negative_loss = True
 		
@@ -4705,7 +4721,7 @@ for batch_idx, inputs in enumerate(loader):
 				pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
 				weight_rel = 0.25 + 0.75*torch.exp(-torch.abs(trgt_rel)/0.35)
 				# loss_rel = weights[1] * charbonnier_loss(pred_rel, trgt_rel, weight = weight_rel)
-				loss_rel = weights[1] * loss_charbonnier_source(pred_rel, trgt_rel, sample_weight = weight_rel, apply_peak_weight = False)
+				loss_rel = loss_charbonnier_source(pred_rel, trgt_rel, sample_weight = weight_rel, apply_peak_weight = False)
 				loss_relative_val += loss_rel.item() / n_batch_valid
 				computed_relative_loss = True
 
@@ -4771,10 +4787,13 @@ for batch_idx, inputs in enumerate(loader):
 		# loss += 0.1*(loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
 
 		if computed_negative_loss == True:
-			loss += 0.3*ramp_aux*loss_negative
+			loss += 0.3 * ramp_aux * weights[1] * loss_negative
 
 		if computed_relative_loss == True:
-			loss += 0.2*ramp_aux*loss_rel
+			loss += 0.05 * ramp_aux * weights[1] * loss_rel
+
+		if use_dice_loss == True:
+			loss += 0.05 * (loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
 
 		# print(f"Query: {loss_reg_query.item():.4f} | Neg: {loss_negative.item():.4f} | Rel: {loss_rel.item():.4f}")
 
