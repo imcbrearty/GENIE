@@ -3611,7 +3611,7 @@ class EMAMassCharbonnierLoss(nn.Module):
         eps=1e-4,
         default_mass=1.0,
         min_mass=0.1,
-        device=None,
+        device=device,
     ):
         super().__init__()
 
