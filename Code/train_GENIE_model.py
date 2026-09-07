@@ -4794,7 +4794,11 @@ for batch_idx, inputs in enumerate(loader):
 
 		if use_dice_loss == True:
 			loss += 0.05 * (loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
-
+			loss_dict['loss_base1'] = loss_base1
+			loss_dict['loss_dice2'] = loss_dice2
+			loss_dict['loss_dice3'] = loss_dice3
+			loss_dict['loss_dice4'] = loss_dice4
+		
 		# print(f"Query: {loss_reg_query.item():.4f} | Neg: {loss_negative.item():.4f} | Rel: {loss_rel.item():.4f}")
 
 		# loss = LossBalancer(loss_dict, accum_steps = n_batch, is_last_accum_step = (inc == (n_batch - 1))) # losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False
@@ -4854,15 +4858,15 @@ for batch_idx, inputs in enumerate(loader):
 
 	optimizer.step()
 	losses[i] = loss_val
-	mx_trgt_1[i] = mx_trgt_val_1/n_batch
-	mx_trgt_2[i] = mx_trgt_val_2/n_batch
-	mx_trgt_3[i] = mx_trgt_val_3/n_batch
-	mx_trgt_4[i] = mx_trgt_val_4/n_batch
+	mx_trgt_1[i] = mx_trgt_val_1/n_batch_valid
+	mx_trgt_2[i] = mx_trgt_val_2/n_batch_valid
+	mx_trgt_3[i] = mx_trgt_val_3/n_batch_valid
+	mx_trgt_4[i] = mx_trgt_val_4/n_batch_valid
 
-	mx_pred_1[i] = mx_pred_val_1/n_batch
-	mx_pred_2[i] = mx_pred_val_2/n_batch
-	mx_pred_3[i] = mx_pred_val_3/n_batch
-	mx_pred_4[i] = mx_pred_val_4/n_batch
+	mx_pred_1[i] = mx_pred_val_1/n_batch_valid
+	mx_pred_2[i] = mx_pred_val_2/n_batch_valid
+	mx_pred_3[i] = mx_pred_val_3/n_batch_valid
+	mx_pred_4[i] = mx_pred_val_4/n_batch_valid
 	# loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
 	print('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_dice_src_val, loss_dice_asc_val, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val))
