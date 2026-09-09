@@ -4530,6 +4530,8 @@ if use_model_ema == True:
 	mz_ema = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device = device).to(device)
 	mz_ema.load_state_dict(mz.state_dict())
 	model_ema = 0.99
+	for p in mz_ema.parameters():
+	    p.requires_grad = False
 
 
 np.random.seed() ## randomize seed
@@ -4918,10 +4920,10 @@ for batch_idx, inputs in enumerate(loader):
 		## Load model and optimizer.
 		mz.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
 		if use_model_ema:
-			mz_ema.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_ema_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
+			mz_ema.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_ema_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
 
 		optimizer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(n_restart_step, n_ver), map_location = device))
-		checkpoint = torch.load('trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver), map_location = device)
+		checkpoint = torch.load(write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver), map_location = device)
 		loss_charbonnier_source.load_state_dict(checkpoint["loss_source_state_dict"])	
 		loss_charbonnier_assoc.load_state_dict(checkpoint["loss_assoc_state_dict"])
 		zlosses = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_restart_step, n_ver))
