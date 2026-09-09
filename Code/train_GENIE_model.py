@@ -4945,7 +4945,7 @@ for batch_idx, inputs in enumerate(loader):
 			torch.save(mz_ema.state_dict(), write_training_file + 'trained_gnn_model_step_ema_%d_ver_%d.h5'%(i, n_ver))
 		torch.save(optimizer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(i, n_ver))
 		np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
-		loss_checkpoint = {"loss_source_state_dict": loss_charbonnier_source.state_dict(), "loss_assoc_state_dict": loss_charbonnier_assoc.state_dict()}
+		checkpoint = {"loss_source_state_dict": loss_charbonnier_source.state_dict(), "loss_assoc_state_dict": loss_charbonnier_assoc.state_dict()}
 		# "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "epoch": epoch, "global_step": global_step,
 		torch.save(checkpoint, write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver))
 		print('saved model %s %d'%(n_ver, i))
