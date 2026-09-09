@@ -3916,9 +3916,9 @@ class EMAMassCharbonnierLoss(nn.Module):
         # Foreground / background balancing
         # ------------------------------------------------------------
         foreground_weight=1.0,
-        background_weight=1.0, # 0.1
+        background_weight=5.0, # 0.1
         foreground_threshold=0.01,
-        empty_batch_weight=0.25,
+        empty_batch_weight=0.5,
 
         # ------------------------------------------------------------
         # EMA normalization
@@ -4862,9 +4862,9 @@ loss_charbonnier_source = EMAMassCharbonnierLoss(
     peak_boost=10.0,
     momentum=0.001,
     foreground_weight=1.0,
-    background_weight=1.0,
+    background_weight=5.0,
     foreground_threshold=0.01,
-    empty_batch_weight=0.25,
+    empty_batch_weight=0.5,
     normalize_by_ema=True,
     ema_include_empty=True,
 )
@@ -4875,9 +4875,9 @@ loss_charbonnier_assoc = EMAMassCharbonnierLoss(
     peak_boost=10.0,
     momentum=0.001,
     foreground_weight=1.0,
-    background_weight=1.0,
+    background_weight=5.0,
     foreground_threshold=0.01,
-    empty_batch_weight=0.25,
+    empty_batch_weight=0.5,
     normalize_by_ema=True,
     ema_include_empty=True,
 )
