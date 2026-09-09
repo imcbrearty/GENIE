@@ -4529,7 +4529,7 @@ use_model_ema = True
 if use_model_ema == True:
 	mz_ema = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device = device).to(device)
 	mz_ema.load_state_dict(mz.state_dict())
-	model_ema = 0.999
+	model_ema = 0.99
 
 
 np.random.seed() ## randomize seed
