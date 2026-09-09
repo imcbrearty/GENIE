@@ -2385,63 +2385,63 @@ def compute_source_labels(x_query, x_query_t, src_x, src_t, src_spatial_kernel, 
 
 
 class LossLogger:
-    """
-    Lightweight, decoupled loss tracking utility.
-    Tracks raw microbatch losses, computes step averages, and maintains smooth EMAs.
-    Safe for conditional/sparse losses.
-    """
-    def __init__(self, alpha=0.95):
-        self.alpha = alpha
-        
-        # Accumulation state (resets every gradient step)
-        self._accum_sums = defaultdict(float)
-        self._accum_counts = defaultdict(int)
-        
-        # Smooth persistent state across training steps
-        self.ema_dict = {}
+	"""
+	Lightweight, decoupled loss tracking utility.
+	Tracks raw microbatch losses, computes step averages, and maintains smooth EMAs.
+	Safe for conditional/sparse losses.
+	"""
+	def __init__(self, alpha=0.95):
+		self.alpha = alpha
+		
+		# Accumulation state (resets every gradient step)
+		self._accum_sums = defaultdict(float)
+		self._accum_counts = defaultdict(int)
+		
+		# Smooth persistent state across training steps
+		self.ema_dict = {}
 
-    def update(self, losses_dict: dict):
-        """Accumulate loss values for a single microbatch / sub-step."""
-        for name, loss in losses_dict.items():
-            if loss is None:
-                continue
-            
-            # Extract float safely (handles 0D tensors, scalars, or 1D single-element tensors)
-            if isinstance(loss, torch.Tensor):
-                val = loss.detach().mean().item()
-            else:
-                val = float(loss)
+	def update(self, losses_dict: dict):
+		"""Accumulate loss values for a single microbatch / sub-step."""
+		for name, loss in losses_dict.items():
+			if loss is None:
+				continue
+			
+			# Extract float safely (handles 0D tensors, scalars, or 1D single-element tensors)
+			if isinstance(loss, torch.Tensor):
+				val = loss.detach().mean().item()
+			else:
+				val = float(loss)
 
-            self._accum_sums[name] += val
-            self._accum_counts[name] += 1
+			self._accum_sums[name] += val
+			self._accum_counts[name] += 1
 
-    def step(self) -> dict:
-        """
-        Call at the end of a gradient accumulation step (or end of batch).
-        Computes step means, updates global EMAs, and returns current step metrics.
-        """
-        step_means = {}
-        
-        for name, total_sum in self._accum_sums.items():
-            count = self._accum_counts[name]
-            mean_val = total_sum / max(1, count)
-            step_means[name] = mean_val
-            
-            # Update EMA (smooth long-term tracking)
-            if name not in self.ema_dict:
-                self.ema_dict[name] = mean_val
-            else:
-                self.ema_dict[name] = self.alpha * self.ema_dict[name] + (1.0 - self.alpha) * mean_val
-        
-        # Clear step buffers
-        self._accum_sums.clear()
-        self._accum_counts.clear()
-        
-        return step_means
+	def step(self) -> dict:
+		"""
+		Call at the end of a gradient accumulation step (or end of batch).
+		Computes step means, updates global EMAs, and returns current step metrics.
+		"""
+		step_means = {}
+		
+		for name, total_sum in self._accum_sums.items():
+			count = self._accum_counts[name]
+			mean_val = total_sum / max(1, count)
+			step_means[name] = mean_val
+			
+			# Update EMA (smooth long-term tracking)
+			if name not in self.ema_dict:
+				self.ema_dict[name] = mean_val
+			else:
+				self.ema_dict[name] = self.alpha * self.ema_dict[name] + (1.0 - self.alpha) * mean_val
+		
+		# Clear step buffers
+		self._accum_sums.clear()
+		self._accum_counts.clear()
+		
+		return step_means
 
-    def get_ema(self) -> dict:
-        """Returns current smoothed EMAs for logging."""
-        return dict(self.ema_dict)
+	def get_ema(self) -> dict:
+		"""Returns current smoothed EMAs for logging."""
+		return dict(self.ema_dict)
 
 
 
@@ -3042,1358 +3042,1332 @@ def get_step_ramp(current_step: int, start_step: int, ramp_steps: int) -> float:
 
 
 class GaussianDiceLoss(nn.Module):
-    def __init__(self, smooth=1e-5):
-        super().__init__()
-        self.smooth = smooth
+	def __init__(self, smooth=1e-5):
+		super().__init__()
+		self.smooth = smooth
 
-    def forward(self, pred, target):
-        pred = F.relu(pred.float())
-        target = target.float()
+	def forward(self, pred, target):
+		pred = F.relu(pred.float())
+		target = target.float()
 
-        if target.numel() == 0:
-            return pred.sum() * 0.0
+		if target.numel() == 0:
+			return pred.sum() * 0.0
 
-        target_sq_sum = target.square().sum()
+		target_sq_sum = target.square().sum()
 
-        if target_sq_sum < 1e-8:
-            return pred.sum() * 0.0
+		if target_sq_sum < 1e-8:
+			return pred.sum() * 0.0
 
-        intersection = (pred * target).sum()
-        pred_sq_sum = pred.square().sum()
+		intersection = (pred * target).sum()
+		pred_sq_sum = pred.square().sum()
 
-        dice = (
-            2.0 * intersection + self.smooth
-        ) / (
-            pred_sq_sum + target_sq_sum + self.smooth
-        )
+		dice = (
+			2.0 * intersection + self.smooth
+		) / (
+			pred_sq_sum + target_sq_sum + self.smooth
+		)
 
-        return 1.0 - dice
+		return 1.0 - dice
 
 
 def split_charbonnier_loss(pred, target, threshold=0.01, pos_weight=0.5, eps=1e-4):
-    """
-    Split Charbonnier Loss.
-    Separates positive and negative target regions into independent mean losses
-    to prevent sparse positive targets from being drowned out by background zeros.
-    """
-    pred = pred.float()
-    target = target.float()
+	"""
+	Split Charbonnier Loss.
+	Separates positive and negative target regions into independent mean losses
+	to prevent sparse positive targets from being drowned out by background zeros.
+	"""
+	pred = pred.float()
+	target = target.float()
 
-    pos_mask = target >= threshold
-    neg_mask = ~pos_mask
+	pos_mask = target >= threshold
+	neg_mask = ~pos_mask
 
-    # 1. Compute Positive Loss (Foreground)
-    if pos_mask.any():
-        pos_diff = pred[pos_mask] - target[pos_mask]
-        pos_loss = torch.sqrt(pos_diff.square() + eps).mean()
-    else:
-        # Maintain valid autograd node with 0 gradient if no positive points exist
-        pos_loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+	# 1. Compute Positive Loss (Foreground)
+	if pos_mask.any():
+		pos_diff = pred[pos_mask] - target[pos_mask]
+		pos_loss = torch.sqrt(pos_diff.square() + eps).mean()
+	else:
+		# Maintain valid autograd node with 0 gradient if no positive points exist
+		pos_loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
 
-    # 2. Compute Negative Loss (Background)
-    if neg_mask.any():
-        neg_diff = pred[neg_mask] - target[neg_mask]
-        neg_loss = torch.sqrt(neg_diff.square() + eps).mean()
-    else:
-        neg_loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+	# 2. Compute Negative Loss (Background)
+	if neg_mask.any():
+		neg_diff = pred[neg_mask] - target[neg_mask]
+		neg_loss = torch.sqrt(neg_diff.square() + eps).mean()
+	else:
+		neg_loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
 
-    # 3. Balance 50/50 (or custom ratio)
-    neg_weight = 1.0 - pos_weight
-    return pos_weight * pos_loss + neg_weight * neg_loss
+	# 3. Balance 50/50 (or custom ratio)
+	neg_weight = 1.0 - pos_weight
+	return pos_weight * pos_loss + neg_weight * neg_loss
 
 
 # class EMAMassCharbonnierLoss(nn.Module):
-#     def __init__(
-#         self,
-#         peak_boost=10.0,
-#         momentum=0.001,
-#         eps=1e-4,
-#         default_mass=1.0,
-#         min_mass=0.1,
-
-#         # ------------------------------------------------------------
-#         # Foreground / background balancing
-#         # ------------------------------------------------------------
-#         foreground_weight=1.0,
-#         background_weight=0.1,
-#         foreground_threshold=0.01,
-#         empty_batch_weight=0.25,
-
-#         # ------------------------------------------------------------
-#         # EMA normalization
-#         #
-#         # False = use balanced FG/BG loss directly.
-#         # True  = additionally divide the balanced loss by EMA mass.
-#         #
-#         # I recommend False initially.
-#         # ------------------------------------------------------------
-#         normalize_by_ema=False,
-
-#         device=device,
-#     ):
-#         super().__init__()
-
-#         self.peak_boost = peak_boost
-#         self.momentum = momentum
-#         self.eps = eps
-#         self.min_mass = min_mass
-
-#         self.foreground_weight = foreground_weight
-#         self.background_weight = background_weight
-#         self.foreground_threshold = foreground_threshold
-#         self.empty_batch_weight = empty_batch_weight
-
-#         self.normalize_by_ema = normalize_by_ema
-
-#         # Running estimate of average target mass.
-#         self.register_buffer(
-#             "running_target_mass",
-#             torch.tensor(
-#                 default_mass,
-#                 dtype=torch.float32,
-#                 device=device,
-#             )
-#         )
-
-#         # Temporary P mass for association EMA update.
-#         self._pending_assoc_mass = None
-
-#     def forward(
-#         self,
-#         pred,
-#         target,
-#         sample_weight=None,
-#         apply_peak_weight=True,
-#         update_ema=False,
-#         ema_group=None,       # None, "P", or "S"
-#     ):
-#         pred = pred.float()
-#         target = target.float()
-
-#         # ------------------------------------------------------------
-#         # Empty masked batch
-#         # ------------------------------------------------------------
-
-#         if target.numel() == 0:
-
-#             # If this is the S call, P may have been stored.
-#             # Since S has no usable mass, update EMA from P alone.
-#             if (
-#                 self.training
-#                 and update_ema
-#                 and ema_group == "S"
-#                 and self._pending_assoc_mass is not None
-#             ):
-#                 with torch.no_grad():
-
-#                     p_mass = self._pending_assoc_mass
-
-#                     if p_mass > 0.001:
-#                         self.running_target_mass.mul_(
-#                             1.0 - self.momentum
-#                         ).add_(
-#                             self.momentum * p_mass
-#                         )
-
-#                 self._pending_assoc_mass = None
-
-#             return pred.sum() * 0.0
-
-#         # ------------------------------------------------------------
-#         # Sanity checks
-#         # ------------------------------------------------------------
-
-#         if not torch.isfinite(pred).all():
-#             raise RuntimeError(
-#                 "EMAMassCharbonnierLoss: "
-#                 "pred contains NaN or Inf"
-#             )
-
-#         if not torch.isfinite(target).all():
-#             raise RuntimeError(
-#                 "EMAMassCharbonnierLoss: "
-#                 "target contains NaN or Inf"
-#             )
-
-#         # ------------------------------------------------------------
-#         # Peak weighting
-#         #
-#         # Since Gaussian peaks are always 1:
-#         #
-#         # target = 0.0 -> weight 1
-#         # target = 0.1 -> weight 1.9
-#         # target = 0.5 -> weight 5.5
-#         # target = 1.0 -> weight 10
-#         #
-#         # This controls how strongly we care about the Gaussian peak.
-#         # It is independent of FG/BG balancing.
-#         # ------------------------------------------------------------
-
-#         if apply_peak_weight:
-
-#             weight_map = (
-#                 1.0
-#                 + (self.peak_boost - 1.0) * target.abs()
-#             )
+#	 def __init__(
+#		 self,
+#		 peak_boost=10.0,
+#		 momentum=0.001,
+#		 eps=1e-4,
+#		 default_mass=1.0,
+#		 min_mass=0.1,
+
+#		 # ------------------------------------------------------------
+#		 # Foreground / background balancing
+#		 # ------------------------------------------------------------
+#		 foreground_weight=1.0,
+#		 background_weight=0.1,
+#		 foreground_threshold=0.01,
+#		 empty_batch_weight=0.25,
+
+#		 # ------------------------------------------------------------
+#		 # EMA normalization
+#		 #
+#		 # False = use balanced FG/BG loss directly.
+#		 # True  = additionally divide the balanced loss by EMA mass.
+#		 #
+#		 # I recommend False initially.
+#		 # ------------------------------------------------------------
+#		 normalize_by_ema=False,
+
+#		 device=device,
+#	 ):
+#		 super().__init__()
+
+#		 self.peak_boost = peak_boost
+#		 self.momentum = momentum
+#		 self.eps = eps
+#		 self.min_mass = min_mass
+
+#		 self.foreground_weight = foreground_weight
+#		 self.background_weight = background_weight
+#		 self.foreground_threshold = foreground_threshold
+#		 self.empty_batch_weight = empty_batch_weight
+
+#		 self.normalize_by_ema = normalize_by_ema
+
+#		 # Running estimate of average target mass.
+#		 self.register_buffer(
+#			 "running_target_mass",
+#			 torch.tensor(
+#				 default_mass,
+#				 dtype=torch.float32,
+#				 device=device,
+#			 )
+#		 )
+
+#		 # Temporary P mass for association EMA update.
+#		 self._pending_assoc_mass = None
+
+#	 def forward(
+#		 self,
+#		 pred,
+#		 target,
+#		 sample_weight=None,
+#		 apply_peak_weight=True,
+#		 update_ema=False,
+#		 ema_group=None,	   # None, "P", or "S"
+#	 ):
+#		 pred = pred.float()
+#		 target = target.float()
+
+#		 # ------------------------------------------------------------
+#		 # Empty masked batch
+#		 # ------------------------------------------------------------
+
+#		 if target.numel() == 0:
+
+#			 # If this is the S call, P may have been stored.
+#			 # Since S has no usable mass, update EMA from P alone.
+#			 if (
+#				 self.training
+#				 and update_ema
+#				 and ema_group == "S"
+#				 and self._pending_assoc_mass is not None
+#			 ):
+#				 with torch.no_grad():
+
+#					 p_mass = self._pending_assoc_mass
+
+#					 if p_mass > 0.001:
+#						 self.running_target_mass.mul_(
+#							 1.0 - self.momentum
+#						 ).add_(
+#							 self.momentum * p_mass
+#						 )
+
+#				 self._pending_assoc_mass = None
+
+#			 return pred.sum() * 0.0
+
+#		 # ------------------------------------------------------------
+#		 # Sanity checks
+#		 # ------------------------------------------------------------
+
+#		 if not torch.isfinite(pred).all():
+#			 raise RuntimeError(
+#				 "EMAMassCharbonnierLoss: "
+#				 "pred contains NaN or Inf"
+#			 )
+
+#		 if not torch.isfinite(target).all():
+#			 raise RuntimeError(
+#				 "EMAMassCharbonnierLoss: "
+#				 "target contains NaN or Inf"
+#			 )
+
+#		 # ------------------------------------------------------------
+#		 # Peak weighting
+#		 #
+#		 # Since Gaussian peaks are always 1:
+#		 #
+#		 # target = 0.0 -> weight 1
+#		 # target = 0.1 -> weight 1.9
+#		 # target = 0.5 -> weight 5.5
+#		 # target = 1.0 -> weight 10
+#		 #
+#		 # This controls how strongly we care about the Gaussian peak.
+#		 # It is independent of FG/BG balancing.
+#		 # ------------------------------------------------------------
+
+#		 if apply_peak_weight:
+
+#			 weight_map = (
+#				 1.0
+#				 + (self.peak_boost - 1.0) * target.abs()
+#			 )
 
-#         else:
+#		 else:
 
-#             weight_map = torch.ones_like(target)
+#			 weight_map = torch.ones_like(target)
 
-#         # ------------------------------------------------------------
-#         # External weighting
-#         # ------------------------------------------------------------
+#		 # ------------------------------------------------------------
+#		 # External weighting
+#		 # ------------------------------------------------------------
 
-#         if sample_weight is not None:
+#		 if sample_weight is not None:
 
-#             sample_weight = sample_weight.float().view_as(target)
+#			 sample_weight = sample_weight.float().view_as(target)
 
-#             if not torch.isfinite(sample_weight).all():
-#                 raise RuntimeError(
-#                     "EMAMassCharbonnierLoss: "
-#                     "sample_weight contains NaN or Inf"
-#                 )
+#			 if not torch.isfinite(sample_weight).all():
+#				 raise RuntimeError(
+#					 "EMAMassCharbonnierLoss: "
+#					 "sample_weight contains NaN or Inf"
+#				 )
 
-#             if (sample_weight < 0).any():
-#                 raise RuntimeError(
-#                     "EMAMassCharbonnierLoss: "
-#                     "sample_weight contains negative values"
-#                 )
+#			 if (sample_weight < 0).any():
+#				 raise RuntimeError(
+#					 "EMAMassCharbonnierLoss: "
+#					 "sample_weight contains negative values"
+#				 )
 
-#             weight_map = weight_map * sample_weight
+#			 weight_map = weight_map * sample_weight
 
-#         # ------------------------------------------------------------
-#         # Charbonnier
-#         # ------------------------------------------------------------
+#		 # ------------------------------------------------------------
+#		 # Charbonnier
+#		 # ------------------------------------------------------------
 
-#         diff = pred - target
+#		 diff = pred - target
 
-#         pointwise_loss = torch.sqrt(
-#             weight_map * diff.square()
-#             + self.eps ** 2
-#         )
+#		 pointwise_loss = torch.sqrt(
+#			 weight_map * diff.square()
+#			 + self.eps ** 2
+#		 )
 
-#         # ------------------------------------------------------------
-#         # EMA target mass
-#         #
-#         # IMPORTANT:
-#         #
-#         # This is still updated exactly as before.
-#         # We simply don't use it to solve FG/BG imbalance unless
-#         # normalize_by_ema=True.
-#         # ------------------------------------------------------------
+#		 # ------------------------------------------------------------
+#		 # EMA target mass
+#		 #
+#		 # IMPORTANT:
+#		 #
+#		 # This is still updated exactly as before.
+#		 # We simply don't use it to solve FG/BG imbalance unless
+#		 # normalize_by_ema=True.
+#		 # ------------------------------------------------------------
 
-#         if apply_peak_weight:
+#		 if apply_peak_weight:
 
-#             batch_size = target.shape[0]
+#			 batch_size = target.shape[0]
 
-#             current_mass = (
-#                 target.abs().sum()
-#                 / batch_size
-#             )
+#			 current_mass = (
+#				 target.abs().sum()
+#				 / batch_size
+#			 )
 
-#             if not torch.isfinite(current_mass):
-#                 raise RuntimeError(
-#                     "EMAMassCharbonnierLoss: "
-#                     "current target mass is non-finite: "
-#                     f"{current_mass}"
-#                 )
+#			 if not torch.isfinite(current_mass):
+#				 raise RuntimeError(
+#					 "EMAMassCharbonnierLoss: "
+#					 "current target mass is non-finite: "
+#					 f"{current_mass}"
+#				 )
 
-#             if self.training and update_ema:
+#			 if self.training and update_ema:
 
-#                 # ----------------------------------------------------
-#                 # Association P:
-#                 # store mass and wait for S
-#                 # ----------------------------------------------------
+#				 # ----------------------------------------------------
+#				 # Association P:
+#				 # store mass and wait for S
+#				 # ----------------------------------------------------
 
-#                 if ema_group == "P":
+#				 if ema_group == "P":
 
-#                     self._pending_assoc_mass = (
-#                         current_mass.detach()
-#                     )
+#					 self._pending_assoc_mass = (
+#						 current_mass.detach()
+#					 )
 
-#                 # ----------------------------------------------------
-#                 # Association S:
-#                 # combine with P if available
-#                 # ----------------------------------------------------
+#				 # ----------------------------------------------------
+#				 # Association S:
+#				 # combine with P if available
+#				 # ----------------------------------------------------
 
-#                 elif ema_group == "S":
+#				 elif ema_group == "S":
 
-#                     s_mass = current_mass.detach()
+#					 s_mass = current_mass.detach()
 
-#                     if self._pending_assoc_mass is not None:
+#					 if self._pending_assoc_mass is not None:
 
-#                         p_mass = self._pending_assoc_mass
+#						 p_mass = self._pending_assoc_mass
 
-#                         combined_mass = (
-#                             p_mass + s_mass
-#                         ) / 2.0
+#						 combined_mass = (
+#							 p_mass + s_mass
+#						 ) / 2.0
 
-#                         self._pending_assoc_mass = None
+#						 self._pending_assoc_mass = None
 
-#                     else:
+#					 else:
 
-#                         # No P was available.
-#                         # Use S alone.
-#                         combined_mass = s_mass
+#						 # No P was available.
+#						 # Use S alone.
+#						 combined_mass = s_mass
 
-#                     if combined_mass > 0.001:
+#					 if combined_mass > 0.001:
 
-#                         with torch.no_grad():
+#						 with torch.no_grad():
 
-#                             self.running_target_mass.mul_(
-#                                 1.0 - self.momentum
-#                             ).add_(
-#                                 self.momentum * combined_mass
-#                             )
+#							 self.running_target_mass.mul_(
+#								 1.0 - self.momentum
+#							 ).add_(
+#								 self.momentum * combined_mass
+#							 )
 
-#                 # ----------------------------------------------------
-#                 # Ordinary source loss:
-#                 # update directly
-#                 # ----------------------------------------------------
+#				 # ----------------------------------------------------
+#				 # Ordinary source loss:
+#				 # update directly
+#				 # ----------------------------------------------------
 
-#                 elif ema_group is None:
+#				 elif ema_group is None:
 
-#                     if current_mass > 0.001:
+#					 if current_mass > 0.001:
 
-#                         with torch.no_grad():
+#						 with torch.no_grad():
 
-#                             self.running_target_mass.mul_(
-#                                 1.0 - self.momentum
-#                             ).add_(
-#                                 self.momentum
-#                                 * current_mass.detach()
-#                             )
+#							 self.running_target_mass.mul_(
+#								 1.0 - self.momentum
+#							 ).add_(
+#								 self.momentum
+#								 * current_mass.detach()
+#							 )
 
-#         # ============================================================
-#         # Foreground / background separation
-#         # ============================================================
+#		 # ============================================================
+#		 # Foreground / background separation
+#		 # ============================================================
 
-#         target_abs = target.abs()
+#		 target_abs = target.abs()
 
-#         foreground = (
-#             target_abs > self.foreground_threshold
-#         )
+#		 foreground = (
+#			 target_abs > self.foreground_threshold
+#		 )
 
-#         background = ~foreground
+#		 background = ~foreground
 
-#         # ------------------------------------------------------------
-#         # Foreground loss
-#         # ------------------------------------------------------------
+#		 # ------------------------------------------------------------
+#		 # Foreground loss
+#		 # ------------------------------------------------------------
 
-#         if foreground.any():
+#		 if foreground.any():
 
-#             foreground_loss = (
-#                 pointwise_loss[foreground].mean()
-#             )
+#			 foreground_loss = (
+#				 pointwise_loss[foreground].mean()
+#			 )
 
-#         else:
+#		 else:
 
-#             foreground_loss = (
-#                 pointwise_loss.new_zeros(())
-#             )
+#			 foreground_loss = (
+#				 pointwise_loss.new_zeros(())
+#			 )
 
-#         # ------------------------------------------------------------
-#         # Background loss
-#         # ------------------------------------------------------------
+#		 # ------------------------------------------------------------
+#		 # Background loss
+#		 # ------------------------------------------------------------
 
-#         if background.any():
+#		 if background.any():
 
-#             background_loss = (
-#                 pointwise_loss[background].mean()
-#             )
+#			 background_loss = (
+#				 pointwise_loss[background].mean()
+#			 )
 
-#         else:
+#		 else:
 
-#             background_loss = (
-#                 pointwise_loss.new_zeros(())
-#             )
+#			 background_loss = (
+#				 pointwise_loss.new_zeros(())
+#			 )
 
-#         # ============================================================
-#         # Combine
-#         # ============================================================
+#		 # ============================================================
+#		 # Combine
+#		 # ============================================================
 
-#         if foreground.any():
+#		 if foreground.any():
 
-#             loss = (
-#                 self.foreground_weight
-#                 * foreground_loss
-#                 +
-#                 self.background_weight
-#                 * background_loss
-#             )
+#			 loss = (
+#				 self.foreground_weight
+#				 * foreground_loss
+#				 +
+#				 self.background_weight
+#				 * background_loss
+#			 )
 
-#         else:
+#		 else:
 
-#             # Entire batch is background.
-#             #
-#             # We still train these examples toward zero,
-#             # but don't allow the many all-zero microbatches
-#             # to dominate the source-containing batches.
-#             #
-#             loss = (
-#                 self.empty_batch_weight
-#                 * background_loss
-#             )
+#			 # Entire batch is background.
+#			 #
+#			 # We still train these examples toward zero,
+#			 # but don't allow the many all-zero microbatches
+#			 # to dominate the source-containing batches.
+#			 #
+#			 loss = (
+#				 self.empty_batch_weight
+#				 * background_loss
+#			 )
 
-#         # ============================================================
-#         # Optional EMA normalization
-#         # ============================================================
+#		 # ============================================================
+#		 # Optional EMA normalization
+#		 # ============================================================
 
-#         if (
-#             self.normalize_by_ema
-#             and apply_peak_weight
-#         ):
+#		 if (
+#			 self.normalize_by_ema
+#			 and apply_peak_weight
+#		 ):
 
-#             norm_mass = (
-#                 self.running_target_mass
-#                 .clamp_min(self.min_mass)
-#             )
+#			 norm_mass = (
+#				 self.running_target_mass
+#				 .clamp_min(self.min_mass)
+#			 )
 
-#             loss = loss / norm_mass
+#			 loss = loss / norm_mass
 
-#         return loss
+#		 return loss
 
 
 # class EMAMassCharbonnierLoss(nn.Module):
-#     def __init__(
-#         self,
-#         peak_boost=10.0,
-#         momentum=0.001,
-#         eps=1e-4,
-#         default_mass=1.0,
-#         min_mass=0.01,
-#         device=device,
-
-#         # ------------------------------------------------------------
-#         # Foreground / background balancing
-#         # ------------------------------------------------------------
-#         foreground_weight=1.0,
-#         background_weight=0.1,
-#         foreground_threshold=0.01,
-#         empty_batch_weight=0.25,
-
-#         # ------------------------------------------------------------
-#         # EMA normalization
-#         # ------------------------------------------------------------
-#         normalize_by_ema=True,
-
-#         # If True, update EMA mass from every microbatch, including
-#         # completely empty/background-only microbatches.
-#         #
-#         # Recommended for measuring the actual dataset/query
-#         # distribution.
-#         # ------------------------------------------------------------
-#         ema_include_empty=True,
-#     ):
-#         super().__init__()
-
-#         self.peak_boost = peak_boost
-#         self.momentum = momentum
-#         self.eps = eps
-#         self.min_mass = min_mass
-
-#         self.foreground_weight = foreground_weight
-#         self.background_weight = background_weight
-#         self.foreground_threshold = foreground_threshold
-#         self.empty_batch_weight = empty_batch_weight
-
-#         self.normalize_by_ema = normalize_by_ema
-#         self.ema_include_empty = ema_include_empty
-
-#         # ============================================================
-#         # EMA statistics
-#         # ============================================================
-
-#         # Average target mass per query.
-#         self.register_buffer(
-#             "running_target_mass",
-#             torch.tensor(
-#                 default_mass,
-#                 dtype=torch.float32,
-#                 device=device,
-#             )
-#         )
-
-#         # Fraction of elements which contain meaningful Gaussian
-#         # signal.
-#         self.register_buffer(
-#             "running_fg_fraction",
-#             torch.tensor(
-#                 0.0,
-#                 dtype=torch.float32,
-#                 device=device,
-#             )
-#         )
-
-#         # Running foreground loss.
-#         self.register_buffer(
-#             "running_fg_loss",
-#             torch.tensor(
-#                 0.0,
-#                 dtype=torch.float32,
-#                 device=device,
-#             )
-#         )
-
-#         # Running background loss.
-#         self.register_buffer(
-#             "running_bg_loss",
-#             torch.tensor(
-#                 0.0,
-#                 dtype=torch.float32,
-#                 device=device,
-#             )
-#         )
-
-#         # Temporary P statistics for association EMA update.
-#         self._pending_assoc_mass = None
-#         self._pending_assoc_fg_fraction = None
-
-#     def _ema_update(self, buffer, value):
-#         """
-#         Update an EMA buffer without tracking gradients.
-#         """
-#         with torch.no_grad():
-#             buffer.mul_(1.0 - self.momentum).add_(
-#                 self.momentum * value.detach()
-#             )
-
-#     def forward(
-#         self,
-#         pred,
-#         target,
-#         sample_weight=None,
-#         apply_peak_weight=True,
-#         update_ema=False,
-#         apply_normalize = True,
-#         ema_group=None,       # None, "P", or "S"
-#     ):
-#         pred = pred.float()
-#         target = target.float()
-
-#         # ============================================================
-#         # Empty masked tensor
-#         # ============================================================
-
-#         if target.numel() == 0:
-
-#             # If S arrives without a usable S target but P was stored,
-#             # update the association EMA from P.
-#             if (
-#                 self.training
-#                 and update_ema
-#                 and ema_group == "S"
-#                 and self._pending_assoc_mass is not None
-#             ):
-#                 self._ema_update(
-#                     self.running_target_mass,
-#                     self._pending_assoc_mass,
-#                 )
-
-#                 if self._pending_assoc_fg_fraction is not None:
-#                     self._ema_update(
-#                         self.running_fg_fraction,
-#                         self._pending_assoc_fg_fraction,
-#                     )
-
-#                 self._pending_assoc_mass = None
-#                 self._pending_assoc_fg_fraction = None
-
-#             return pred.sum() * 0.0
-
-#         # ============================================================
-#         # Sanity checks
-#         # ============================================================
-
-#         if not torch.isfinite(pred).all():
-#             raise RuntimeError(
-#                 "EMAMassCharbonnierLoss: "
-#                 "pred contains NaN or Inf"
-#             )
-
-#         if not torch.isfinite(target).all():
-#             raise RuntimeError(
-#                 "EMAMassCharbonnierLoss: "
-#                 "target contains NaN or Inf"
-#             )
-
-#         # ============================================================
-#         # Peak weighting
-#         # ============================================================
-
-#         target_abs = target.abs()
-
-#         if apply_peak_weight:
-
-#             weight_map = (
-#                 1.0
-#                 + (self.peak_boost - 1.0) * target_abs
-#             )
-
-#         else:
-
-#             weight_map = torch.ones_like(target)
-
-#         # ============================================================
-#         # External weighting
-#         # ============================================================
-
-#         if sample_weight is not None:
-
-#             sample_weight = (
-#                 sample_weight.float().view_as(target)
-#             )
-
-#             if not torch.isfinite(sample_weight).all():
-#                 raise RuntimeError(
-#                     "EMAMassCharbonnierLoss: "
-#                     "sample_weight contains NaN or Inf"
-#                 )
-
-#             if (sample_weight < 0).any():
-#                 raise RuntimeError(
-#                     "EMAMassCharbonnierLoss: "
-#                     "sample_weight contains negative values"
-#                 )
-
-#             weight_map = weight_map * sample_weight
-
-#         # ============================================================
-#         # Charbonnier
-#         # ============================================================
-
-#         diff = pred - target
+#	 def __init__(
+#		 self,
+#		 peak_boost=10.0,
+#		 momentum=0.001,
+#		 eps=1e-4,
+#		 default_mass=1.0,
+#		 min_mass=0.01,
+#		 device=device,
+
+#		 # ------------------------------------------------------------
+#		 # Foreground / background balancing
+#		 # ------------------------------------------------------------
+#		 foreground_weight=1.0,
+#		 background_weight=0.1,
+#		 foreground_threshold=0.01,
+#		 empty_batch_weight=0.25,
+
+#		 # ------------------------------------------------------------
+#		 # EMA normalization
+#		 # ------------------------------------------------------------
+#		 normalize_by_ema=True,
+
+#		 # If True, update EMA mass from every microbatch, including
+#		 # completely empty/background-only microbatches.
+#		 #
+#		 # Recommended for measuring the actual dataset/query
+#		 # distribution.
+#		 # ------------------------------------------------------------
+#		 ema_include_empty=True,
+#	 ):
+#		 super().__init__()
+
+#		 self.peak_boost = peak_boost
+#		 self.momentum = momentum
+#		 self.eps = eps
+#		 self.min_mass = min_mass
+
+#		 self.foreground_weight = foreground_weight
+#		 self.background_weight = background_weight
+#		 self.foreground_threshold = foreground_threshold
+#		 self.empty_batch_weight = empty_batch_weight
+
+#		 self.normalize_by_ema = normalize_by_ema
+#		 self.ema_include_empty = ema_include_empty
+
+#		 # ============================================================
+#		 # EMA statistics
+#		 # ============================================================
+
+#		 # Average target mass per query.
+#		 self.register_buffer(
+#			 "running_target_mass",
+#			 torch.tensor(
+#				 default_mass,
+#				 dtype=torch.float32,
+#				 device=device,
+#			 )
+#		 )
+
+#		 # Fraction of elements which contain meaningful Gaussian
+#		 # signal.
+#		 self.register_buffer(
+#			 "running_fg_fraction",
+#			 torch.tensor(
+#				 0.0,
+#				 dtype=torch.float32,
+#				 device=device,
+#			 )
+#		 )
+
+#		 # Running foreground loss.
+#		 self.register_buffer(
+#			 "running_fg_loss",
+#			 torch.tensor(
+#				 0.0,
+#				 dtype=torch.float32,
+#				 device=device,
+#			 )
+#		 )
+
+#		 # Running background loss.
+#		 self.register_buffer(
+#			 "running_bg_loss",
+#			 torch.tensor(
+#				 0.0,
+#				 dtype=torch.float32,
+#				 device=device,
+#			 )
+#		 )
+
+#		 # Temporary P statistics for association EMA update.
+#		 self._pending_assoc_mass = None
+#		 self._pending_assoc_fg_fraction = None
+
+#	 def _ema_update(self, buffer, value):
+#		 """
+#		 Update an EMA buffer without tracking gradients.
+#		 """
+#		 with torch.no_grad():
+#			 buffer.mul_(1.0 - self.momentum).add_(
+#				 self.momentum * value.detach()
+#			 )
+
+#	 def forward(
+#		 self,
+#		 pred,
+#		 target,
+#		 sample_weight=None,
+#		 apply_peak_weight=True,
+#		 update_ema=False,
+#		 apply_normalize = True,
+#		 ema_group=None,	   # None, "P", or "S"
+#	 ):
+#		 pred = pred.float()
+#		 target = target.float()
+
+#		 # ============================================================
+#		 # Empty masked tensor
+#		 # ============================================================
+
+#		 if target.numel() == 0:
+
+#			 # If S arrives without a usable S target but P was stored,
+#			 # update the association EMA from P.
+#			 if (
+#				 self.training
+#				 and update_ema
+#				 and ema_group == "S"
+#				 and self._pending_assoc_mass is not None
+#			 ):
+#				 self._ema_update(
+#					 self.running_target_mass,
+#					 self._pending_assoc_mass,
+#				 )
+
+#				 if self._pending_assoc_fg_fraction is not None:
+#					 self._ema_update(
+#						 self.running_fg_fraction,
+#						 self._pending_assoc_fg_fraction,
+#					 )
+
+#				 self._pending_assoc_mass = None
+#				 self._pending_assoc_fg_fraction = None
+
+#			 return pred.sum() * 0.0
+
+#		 # ============================================================
+#		 # Sanity checks
+#		 # ============================================================
+
+#		 if not torch.isfinite(pred).all():
+#			 raise RuntimeError(
+#				 "EMAMassCharbonnierLoss: "
+#				 "pred contains NaN or Inf"
+#			 )
+
+#		 if not torch.isfinite(target).all():
+#			 raise RuntimeError(
+#				 "EMAMassCharbonnierLoss: "
+#				 "target contains NaN or Inf"
+#			 )
+
+#		 # ============================================================
+#		 # Peak weighting
+#		 # ============================================================
+
+#		 target_abs = target.abs()
+
+#		 if apply_peak_weight:
+
+#			 weight_map = (
+#				 1.0
+#				 + (self.peak_boost - 1.0) * target_abs
+#			 )
+
+#		 else:
+
+#			 weight_map = torch.ones_like(target)
+
+#		 # ============================================================
+#		 # External weighting
+#		 # ============================================================
+
+#		 if sample_weight is not None:
+
+#			 sample_weight = (
+#				 sample_weight.float().view_as(target)
+#			 )
+
+#			 if not torch.isfinite(sample_weight).all():
+#				 raise RuntimeError(
+#					 "EMAMassCharbonnierLoss: "
+#					 "sample_weight contains NaN or Inf"
+#				 )
+
+#			 if (sample_weight < 0).any():
+#				 raise RuntimeError(
+#					 "EMAMassCharbonnierLoss: "
+#					 "sample_weight contains negative values"
+#				 )
+
+#			 weight_map = weight_map * sample_weight
+
+#		 # ============================================================
+#		 # Charbonnier
+#		 # ============================================================
+
+#		 diff = pred - target
 
-#         pointwise_loss = torch.sqrt(
-#             weight_map * diff.square()
-#             + self.eps ** 2
-#         )
+#		 pointwise_loss = torch.sqrt(
+#			 weight_map * diff.square()
+#			 + self.eps ** 2
+#		 )
 
-#         # ============================================================
-#         # Foreground / background classification
-#         # ============================================================
+#		 # ============================================================
+#		 # Foreground / background classification
+#		 # ============================================================
 
-#         foreground = (
-#             target_abs > self.foreground_threshold
-#         )
+#		 foreground = (
+#			 target_abs > self.foreground_threshold
+#		 )
 
-#         background = ~foreground
+#		 background = ~foreground
 
-#         # ============================================================
-#         # Dataset statistics
-#         # ============================================================
+#		 # ============================================================
+#		 # Dataset statistics
+#		 # ============================================================
 
-#         batch_size = target.shape[0]
+#		 batch_size = target.shape[0]
 
-#         # Average target mass per sample/query.
-#         current_mass = (
-#             target_abs.sum() / batch_size
-#         )
+#		 # Average target mass per sample/query.
+#		 current_mass = (
+#			 target_abs.sum() / batch_size
+#		 )
 
-#         # Fraction of individual target elements containing
-#         # meaningful Gaussian signal.
-#         current_fg_fraction = (
-#             foreground.float().mean()
-#         )
+#		 # Fraction of individual target elements containing
+#		 # meaningful Gaussian signal.
+#		 current_fg_fraction = (
+#			 foreground.float().mean()
+#		 )
 
-#         if not torch.isfinite(current_mass):
-#             raise RuntimeError(
-#                 "EMAMassCharbonnierLoss: "
-#                 f"current target mass is non-finite: {current_mass}"
-#             )
+#		 if not torch.isfinite(current_mass):
+#			 raise RuntimeError(
+#				 "EMAMassCharbonnierLoss: "
+#				 f"current target mass is non-finite: {current_mass}"
+#			 )
 
-#         if not torch.isfinite(current_fg_fraction):
-#             raise RuntimeError(
-#                 "EMAMassCharbonnierLoss: "
-#                 "current foreground fraction is non-finite"
-#             )
+#		 if not torch.isfinite(current_fg_fraction):
+#			 raise RuntimeError(
+#				 "EMAMassCharbonnierLoss: "
+#				 "current foreground fraction is non-finite"
+#			 )
 
-#         # ============================================================
-#         # Calculate FG / BG losses
-#         # ============================================================
+#		 # ============================================================
+#		 # Calculate FG / BG losses
+#		 # ============================================================
 
-#         if foreground.any():
+#		 if foreground.any():
 
-#             foreground_loss = (
-#                 pointwise_loss[foreground].mean()
-#             )
+#			 foreground_loss = (
+#				 pointwise_loss[foreground].mean()
+#			 )
 
-#         else:
+#		 else:
 
-#             foreground_loss = (
-#                 pointwise_loss.new_zeros(())
-#             )
+#			 foreground_loss = (
+#				 pointwise_loss.new_zeros(())
+#			 )
 
-#         if background.any():
+#		 if background.any():
 
-#             background_loss = (
-#                 pointwise_loss[background].mean()
-#             )
+#			 background_loss = (
+#				 pointwise_loss[background].mean()
+#			 )
 
-#         else:
+#		 else:
 
-#             background_loss = (
-#                 pointwise_loss.new_zeros(())
-#             )
+#			 background_loss = (
+#				 pointwise_loss.new_zeros(())
+#			 )
 
-#         # ============================================================
-#         # Update EMA statistics
-#         # ============================================================
+#		 # ============================================================
+#		 # Update EMA statistics
+#		 # ============================================================
 
-#         if self.training and update_ema:
+#		 if self.training and update_ema:
 
-#             # --------------------------------------------------------
-#             # Association P
-#             # --------------------------------------------------------
+#			 # --------------------------------------------------------
+#			 # Association P
+#			 # --------------------------------------------------------
 
-#             if ema_group == "P":
+#			 if ema_group == "P":
 
-#                 self._pending_assoc_mass = (
-#                     current_mass.detach()
-#                 )
+#				 self._pending_assoc_mass = (
+#					 current_mass.detach()
+#				 )
 
-#                 self._pending_assoc_fg_fraction = (
-#                     current_fg_fraction.detach()
-#                 )
+#				 self._pending_assoc_fg_fraction = (
+#					 current_fg_fraction.detach()
+#				 )
 
-#             # --------------------------------------------------------
-#             # Association S
-#             # --------------------------------------------------------
+#			 # --------------------------------------------------------
+#			 # Association S
+#			 # --------------------------------------------------------
 
-#             elif ema_group == "S":
+#			 elif ema_group == "S":
 
-#                 s_mass = current_mass.detach()
-#                 s_fg_fraction = current_fg_fraction.detach()
+#				 s_mass = current_mass.detach()
+#				 s_fg_fraction = current_fg_fraction.detach()
 
-#                 if self._pending_assoc_mass is not None:
+#				 if self._pending_assoc_mass is not None:
 
-#                     p_mass = self._pending_assoc_mass
+#					 p_mass = self._pending_assoc_mass
 
-#                     combined_mass = (
-#                         p_mass + s_mass
-#                     ) / 2.0
+#					 combined_mass = (
+#						 p_mass + s_mass
+#					 ) / 2.0
 
-#                     self._pending_assoc_mass = None
+#					 self._pending_assoc_mass = None
 
-#                 else:
+#				 else:
 
-#                     combined_mass = s_mass
+#					 combined_mass = s_mass
 
-#                 if self._pending_assoc_fg_fraction is not None:
+#				 if self._pending_assoc_fg_fraction is not None:
 
-#                     p_fg_fraction = (
-#                         self._pending_assoc_fg_fraction
-#                     )
+#					 p_fg_fraction = (
+#						 self._pending_assoc_fg_fraction
+#					 )
 
-#                     combined_fg_fraction = (
-#                         p_fg_fraction
-#                         + s_fg_fraction
-#                     ) / 2.0
+#					 combined_fg_fraction = (
+#						 p_fg_fraction
+#						 + s_fg_fraction
+#					 ) / 2.0
 
-#                     self._pending_assoc_fg_fraction = None
+#					 self._pending_assoc_fg_fraction = None
 
-#                 else:
+#				 else:
 
-#                     combined_fg_fraction = s_fg_fraction
+#					 combined_fg_fraction = s_fg_fraction
 
-#                 self._ema_update(
-#                     self.running_target_mass,
-#                     combined_mass,
-#                 )
+#				 self._ema_update(
+#					 self.running_target_mass,
+#					 combined_mass,
+#				 )
 
-#                 self._ema_update(
-#                     self.running_fg_fraction,
-#                     combined_fg_fraction,
-#                 )
+#				 self._ema_update(
+#					 self.running_fg_fraction,
+#					 combined_fg_fraction,
+#				 )
 
-#             # --------------------------------------------------------
-#             # Ordinary source loss
-#             # --------------------------------------------------------
+#			 # --------------------------------------------------------
+#			 # Ordinary source loss
+#			 # --------------------------------------------------------
 
-#             elif ema_group is None:
+#			 elif ema_group is None:
 
-#                 # Recommended: include zero/background-only batches.
-#                 if self.ema_include_empty:
+#				 # Recommended: include zero/background-only batches.
+#				 if self.ema_include_empty:
 
-#                     self._ema_update(
-#                         self.running_target_mass,
-#                         current_mass,
-#                     )
+#					 self._ema_update(
+#						 self.running_target_mass,
+#						 current_mass,
+#					 )
 
-#                     self._ema_update(
-#                         self.running_fg_fraction,
-#                         current_fg_fraction,
-#                     )
+#					 self._ema_update(
+#						 self.running_fg_fraction,
+#						 current_fg_fraction,
+#					 )
 
-#                 else:
+#				 else:
 
-#                     # Old behavior: ignore effectively empty batches.
-#                     if current_mass > 0.001:
+#					 # Old behavior: ignore effectively empty batches.
+#					 if current_mass > 0.001:
 
-#                         self._ema_update(
-#                             self.running_target_mass,
-#                             current_mass,
-#                         )
+#						 self._ema_update(
+#							 self.running_target_mass,
+#							 current_mass,
+#						 )
 
-#                         self._ema_update(
-#                             self.running_fg_fraction,
-#                             current_fg_fraction,
-#                         )
+#						 self._ema_update(
+#							 self.running_fg_fraction,
+#							 current_fg_fraction,
+#						 )
 
-#             # --------------------------------------------------------
-#             # Loss diagnostics
-#             # --------------------------------------------------------
+#			 # --------------------------------------------------------
+#			 # Loss diagnostics
+#			 # --------------------------------------------------------
 
-#             self._ema_update(
-#                 self.running_fg_loss,
-#                 foreground_loss,
-#             )
+#			 self._ema_update(
+#				 self.running_fg_loss,
+#				 foreground_loss,
+#			 )
 
-#             self._ema_update(
-#                 self.running_bg_loss,
-#                 background_loss,
-#             )
+#			 self._ema_update(
+#				 self.running_bg_loss,
+#				 background_loss,
+#			 )
 
-#         # ============================================================
-#         # Balanced loss
-#         # ============================================================
+#		 # ============================================================
+#		 # Balanced loss
+#		 # ============================================================
 
-#         if foreground.any():
+#		 if foreground.any():
 
-#             loss = (
-#                 self.foreground_weight
-#                 * foreground_loss
-#                 +
-#                 self.background_weight
-#                 * background_loss
-#             )
+#			 loss = (
+#				 self.foreground_weight
+#				 * foreground_loss
+#				 +
+#				 self.background_weight
+#				 * background_loss
+#			 )
 
-#         else:
+#		 else:
 
-#             # Completely background/zero microbatch.
-#             #
-#             # Still train toward zero, but with independently
-#             # controlled importance.
-#             loss = (
-#                 self.empty_batch_weight
-#                 * background_loss
-#             )
+#			 # Completely background/zero microbatch.
+#			 #
+#			 # Still train toward zero, but with independently
+#			 # controlled importance.
+#			 loss = (
+#				 self.empty_batch_weight
+#				 * background_loss
+#			 )
 
-#         # ============================================================
-#         # EMA mass normalization
-#         # ============================================================
+#		 # ============================================================
+#		 # EMA mass normalization
+#		 # ============================================================
 
-#         if (
-#             self.normalize_by_ema
-#             and apply_normalize
-#             # and apply_peak_weight
+#		 if (
+#			 self.normalize_by_ema
+#			 and apply_normalize
+#			 # and apply_peak_weight
 
-#         ):
+#		 ):
 
-#             norm_mass = (
-#                 self.running_target_mass
-#                 .clamp_min(self.min_mass)
-#             )
+#			 norm_mass = (
+#				 self.running_target_mass
+#				 .clamp_min(self.min_mass)
+#			 )
 
-#             loss = loss / norm_mass
+#			 loss = loss / norm_mass
 
-#         return loss
+#		 return loss
 
 
 
 class EMAMassCharbonnierLoss(nn.Module):
-    def __init__(
-        self,
-        peak_boost=10.0,
-        momentum=0.001,
-        eps=1e-4,
-        default_mass=1.0,
-        min_mass=0.01,
-        device=device,
-
-        # ------------------------------------------------------------
-        # Foreground / background balancing
-        # ------------------------------------------------------------
-        foreground_weight=1.0,
-        background_weight=5.0, # 0.1
-        foreground_threshold=0.01,
-        empty_batch_weight=0.5,
-
-        # ------------------------------------------------------------
-        # EMA normalization
-        # ------------------------------------------------------------
-        normalize_by_ema=True,
-
-        # If True, update EMA mass from every microbatch, including
-        # completely empty/background-only microbatches.
-        #
-        # Recommended for measuring the actual dataset/query
-        # distribution.
-        # ------------------------------------------------------------
-        ema_include_empty=True,
-    ):
-        super().__init__()
-
-        self.peak_boost = peak_boost
-        self.momentum = momentum
-        self.eps = eps
-        self.min_mass = min_mass
-
-        self.foreground_weight = foreground_weight
-        self.background_weight = background_weight
-        self.foreground_threshold = foreground_threshold
-        self.empty_batch_weight = empty_batch_weight
-
-        self.normalize_by_ema = normalize_by_ema
-        self.ema_include_empty = ema_include_empty
-
-        # ============================================================
-        # EMA statistics
-        # ============================================================
-
-        # Average target mass per query.
-        self.register_buffer(
-            "running_target_mass",
-            torch.tensor(
-                default_mass,
-                dtype=torch.float32,
-                device=device,
-            )
-        )
-
-        # Fraction of elements which contain meaningful Gaussian
-        # signal.
-        self.register_buffer(
-            "running_fg_fraction",
-            torch.tensor(
-                0.0,
-                dtype=torch.float32,
-                device=device,
-            )
-        )
-
-        # Running foreground loss.
-        self.register_buffer(
-            "running_fg_loss",
-            torch.tensor(
-                0.0,
-                dtype=torch.float32,
-                device=device,
-            )
-        )
-
-        # Running background loss.
-        self.register_buffer(
-            "running_bg_loss",
-            torch.tensor(
-                0.0,
-                dtype=torch.float32,
-                device=device,
-            )
-        )
-
-        # Temporary P statistics for association EMA update.
-        self._pending_assoc_mass = None
-        self._pending_assoc_fg_fraction = None
-
-    def _ema_update(self, buffer, value):
-        """
-        Update an EMA buffer without tracking gradients.
-        """
-        with torch.no_grad():
-            buffer.mul_(1.0 - self.momentum).add_(
-                self.momentum * value.detach()
-            )
-
-    def forward(
-        self,
-        pred,
-        target,
-        sample_weight=None,
-        apply_peak_weight=True,
-        update_ema=False,
-
-        # ------------------------------------------------------------
-        # Per-call controls
-        # ------------------------------------------------------------
-        apply_normalize=True,
-        apply_fg_bg_balance=True,
-
-        # None, "P", or "S"
-        ema_group=None,
-    ):
-        pred = pred.float()
-        target = target.float()
-
-        # ============================================================
-        # Empty masked tensor
-        # ============================================================
-
-        if target.numel() == 0:
-
-            # If S arrives without a usable S target but P was stored,
-            # update the association EMA from P.
-            if (
-                self.training
-                and update_ema
-                and ema_group == "S"
-                and self._pending_assoc_mass is not None
-            ):
-                self._ema_update(
-                    self.running_target_mass,
-                    self._pending_assoc_mass,
-                )
-
-                if self._pending_assoc_fg_fraction is not None:
-                    self._ema_update(
-                        self.running_fg_fraction,
-                        self._pending_assoc_fg_fraction,
-                    )
-
-                self._pending_assoc_mass = None
-                self._pending_assoc_fg_fraction = None
-
-            return pred.sum() * 0.0
-
-        # ============================================================
-        # Sanity checks
-        # ============================================================
-
-        if not torch.isfinite(pred).all():
-            raise RuntimeError(
-                "EMAMassCharbonnierLoss: "
-                "pred contains NaN or Inf"
-            )
-
-        if not torch.isfinite(target).all():
-            raise RuntimeError(
-                "EMAMassCharbonnierLoss: "
-                "target contains NaN or Inf"
-            )
-
-        # ============================================================
-        # Peak weighting
-        # ============================================================
-
-        target_abs = target.abs()
-
-        if apply_peak_weight:
-
-            weight_map = (
-                1.0
-                + (self.peak_boost - 1.0) * target_abs
-            )
-
-        else:
-
-            weight_map = torch.ones_like(target)
-
-        # ============================================================
-        # External weighting
-        # ============================================================
-
-        if sample_weight is not None:
-
-            sample_weight = (
-                sample_weight.float().view_as(target)
-            )
-
-            if not torch.isfinite(sample_weight).all():
-                raise RuntimeError(
-                    "EMAMassCharbonnierLoss: "
-                    "sample_weight contains NaN or Inf"
-                )
-
-            if (sample_weight < 0).any():
-                raise RuntimeError(
-                    "EMAMassCharbonnierLoss: "
-                    "sample_weight contains negative values"
-                )
+	def __init__(
+		self,
+		peak_boost=10.0,
+		momentum=0.001,
+		eps=1e-4,
+		default_mass=1.0,
+		min_mass=0.01,
+		device=device,
+
+		# ------------------------------------------------------------
+		# Foreground / background balancing
+		# ------------------------------------------------------------
+		foreground_weight=1.0,
+		background_weight=5.0, # 0.1
+		foreground_threshold=0.01,
+		empty_batch_weight=1.0,
+
+		# ------------------------------------------------------------
+		# EMA normalization
+		# ------------------------------------------------------------
+		normalize_by_ema=True,
+
+		# If True, update EMA mass from every microbatch, including
+		# completely empty/background-only microbatches.
+		#
+		# Recommended for measuring the actual dataset/query
+		# distribution.
+		# ------------------------------------------------------------
+		ema_include_empty=True,
+	):
+		super().__init__()
+
+		self.peak_boost = peak_boost
+		self.momentum = momentum
+		self.eps = eps
+		self.min_mass = min_mass
+
+		self.foreground_weight = foreground_weight
+		self.background_weight = background_weight
+		self.foreground_threshold = foreground_threshold
+		self.empty_batch_weight = empty_batch_weight
+
+		self.normalize_by_ema = normalize_by_ema
+		self.ema_include_empty = ema_include_empty
+
+		# ============================================================
+		# EMA statistics
+		# ============================================================
+
+		# Average target mass per query.
+		self.register_buffer(
+			"running_target_mass",
+			torch.tensor(
+				default_mass,
+				dtype=torch.float32,
+				device=device,
+			)
+		)
+
+		# Fraction of elements which contain meaningful Gaussian
+		# signal.
+		self.register_buffer(
+			"running_fg_fraction",
+			torch.tensor(
+				0.0,
+				dtype=torch.float32,
+				device=device,
+			)
+		)
+
+		# Running foreground loss.
+		self.register_buffer(
+			"running_fg_loss",
+			torch.tensor(
+				0.0,
+				dtype=torch.float32,
+				device=device,
+			)
+		)
+
+		# Running background loss.
+		self.register_buffer(
+			"running_bg_loss",
+			torch.tensor(
+				0.0,
+				dtype=torch.float32,
+				device=device,
+			)
+		)
+
+		# Temporary P statistics for association EMA update.
+		self._pending_assoc_mass = None
+		self._pending_assoc_fg_fraction = None
+
+	def _ema_update(self, buffer, value):
+		"""
+		Update an EMA buffer without tracking gradients.
+		"""
+		with torch.no_grad():
+			buffer.mul_(1.0 - self.momentum).add_(
+				self.momentum * value.detach()
+			)
+
+	def forward(
+		self,
+		pred,
+		target,
+		sample_weight=None,
+		apply_peak_weight=True,
+		update_ema=False,
+
+		# ------------------------------------------------------------
+		# Per-call controls
+		# ------------------------------------------------------------
+		apply_normalize=True,
+		apply_fg_bg_balance=True,
+
+		# None, "P", or "S"
+		ema_group=None,
+	):
+		pred = pred.float()
+		target = target.float()
+
+		# ============================================================
+		# Empty masked tensor
+		# ============================================================
+
+		if target.numel() == 0:
+
+			# If S arrives without a usable S target but P was stored,
+			# update the association EMA from P.
+			if (
+				self.training
+				and update_ema
+				and ema_group == "S"
+				and self._pending_assoc_mass is not None
+			):
+				self._ema_update(
+					self.running_target_mass,
+					self._pending_assoc_mass,
+				)
+
+				if self._pending_assoc_fg_fraction is not None:
+					self._ema_update(
+						self.running_fg_fraction,
+						self._pending_assoc_fg_fraction,
+					)
+
+				self._pending_assoc_mass = None
+				self._pending_assoc_fg_fraction = None
+
+			return pred.sum() * 0.0
+
+		# ============================================================
+		# Sanity checks
+		# ============================================================
+
+		if not torch.isfinite(pred).all():
+			raise RuntimeError(
+				"EMAMassCharbonnierLoss: "
+				"pred contains NaN or Inf"
+			)
+
+		if not torch.isfinite(target).all():
+			raise RuntimeError(
+				"EMAMassCharbonnierLoss: "
+				"target contains NaN or Inf"
+			)
+
+		# ============================================================
+		# Peak weighting
+		# ============================================================
+
+		target_abs = target.abs()
+
+		if apply_peak_weight:
+
+			weight_map = (
+				1.0
+				+ (self.peak_boost - 1.0) * target_abs
+			)
+
+		else:
+
+			weight_map = torch.ones_like(target)
+
+		# ============================================================
+		# External weighting
+		# ============================================================
+
+		if sample_weight is not None:
+
+			sample_weight = (
+				sample_weight.float().view_as(target)
+			)
+
+			if not torch.isfinite(sample_weight).all():
+				raise RuntimeError(
+					"EMAMassCharbonnierLoss: "
+					"sample_weight contains NaN or Inf"
+				)
+
+			if (sample_weight < 0).any():
+				raise RuntimeError(
+					"EMAMassCharbonnierLoss: "
+					"sample_weight contains negative values"
+				)
 
-            weight_map = weight_map * sample_weight
-
-        # ============================================================
-        # Charbonnier
-        # ============================================================
-
-        diff = pred - target
+			weight_map = weight_map * sample_weight
+
+		# ============================================================
+		# Charbonnier
+		# ============================================================
+
+		diff = pred - target
 
-        pointwise_loss = torch.sqrt(
-            weight_map * diff.square()
-            + self.eps ** 2
-        )
+		pointwise_loss = torch.sqrt(
+			weight_map * diff.square()
+			+ self.eps ** 2
+		)
 
-        # ============================================================
-        # Foreground / background classification
-        # ============================================================
+		# ============================================================
+		# Foreground / background classification
+		# ============================================================
 
-        foreground = (
-            target_abs > self.foreground_threshold
-        )
+		foreground = (
+			target_abs > self.foreground_threshold
+		)
 
-        background = ~foreground
+		background = ~foreground
 
-        has_foreground = foreground.any()
+		has_foreground = foreground.any()
 
-        # ============================================================
-        # Dataset statistics
-        # ============================================================
+		# ============================================================
+		# Dataset statistics
+		# ============================================================
 
-        batch_size = target.shape[0]
+		batch_size = target.shape[0]
 
-        # Average target mass per sample/query.
-        current_mass = (
-            target_abs.sum() / batch_size
-        )
+		# Average target mass per sample/query.
+		current_mass = (
+			target_abs.sum() / batch_size
+		)
 
-        # Fraction of individual target elements containing
-        # meaningful Gaussian signal.
-        current_fg_fraction = (
-            foreground.float().mean()
-        )
+		# Fraction of individual target elements containing
+		# meaningful Gaussian signal.
+		current_fg_fraction = (
+			foreground.float().mean()
+		)
 
-        if not torch.isfinite(current_mass):
-            raise RuntimeError(
-                "EMAMassCharbonnierLoss: "
-                f"current target mass is non-finite: {current_mass}"
-            )
+		if not torch.isfinite(current_mass):
+			raise RuntimeError(
+				"EMAMassCharbonnierLoss: "
+				f"current target mass is non-finite: {current_mass}"
+			)
 
-        if not torch.isfinite(current_fg_fraction):
-            raise RuntimeError(
-                "EMAMassCharbonnierLoss: "
-                "current foreground fraction is non-finite"
-            )
+		if not torch.isfinite(current_fg_fraction):
+			raise RuntimeError(
+				"EMAMassCharbonnierLoss: "
+				"current foreground fraction is non-finite"
+			)
 
-        # ============================================================
-        # Calculate FG / BG losses
-        # ============================================================
+		# ============================================================
+		# Calculate FG / BG losses
+		# ============================================================
 
-        if foreground.any():
+		if foreground.any():
 
-            foreground_loss = (
-                pointwise_loss[foreground].mean()
-            )
+			foreground_loss = (
+				pointwise_loss[foreground].mean()
+			)
 
-        else:
+		else:
 
-            foreground_loss = (
-                pointwise_loss.new_zeros(())
-            )
+			foreground_loss = (
+				pointwise_loss.new_zeros(())
+			)
 
-        if background.any():
+		if background.any():
 
-            background_loss = (
-                pointwise_loss[background].mean()
-            )
+			background_loss = (
+				pointwise_loss[background].mean()
+			)
 
-        else:
+		else:
 
-            background_loss = (
-                pointwise_loss.new_zeros(())
-            )
+			background_loss = (
+				pointwise_loss.new_zeros(())
+			)
 
-        # ============================================================
-        # Update EMA statistics
-        # ============================================================
+		# ============================================================
+		# Update EMA statistics
+		# ============================================================
 
-        if self.training and update_ema:
+		if self.training and update_ema:
 
-            # --------------------------------------------------------
-            # Association P
-            # --------------------------------------------------------
+			# --------------------------------------------------------
+			# Association P
+			# --------------------------------------------------------
 
-            if ema_group == "P":
+			if ema_group == "P":
 
-                self._pending_assoc_mass = (
-                    current_mass.detach()
-                )
+				self._pending_assoc_mass = (
+					current_mass.detach()
+				)
 
-                self._pending_assoc_fg_fraction = (
-                    current_fg_fraction.detach()
-                )
+				self._pending_assoc_fg_fraction = (
+					current_fg_fraction.detach()
+				)
 
-            # --------------------------------------------------------
-            # Association S
-            # --------------------------------------------------------
+			# --------------------------------------------------------
+			# Association S
+			# --------------------------------------------------------
 
-            elif ema_group == "S":
+			elif ema_group == "S":
 
-                s_mass = current_mass.detach()
-                s_fg_fraction = current_fg_fraction.detach()
+				s_mass = current_mass.detach()
+				s_fg_fraction = current_fg_fraction.detach()
 
-                if self._pending_assoc_mass is not None:
+				if self._pending_assoc_mass is not None:
 
-                    p_mass = self._pending_assoc_mass
+					p_mass = self._pending_assoc_mass
 
-                    combined_mass = (
-                        p_mass + s_mass
-                    ) / 2.0
+					combined_mass = (
+						p_mass + s_mass
+					) / 2.0
 
-                    self._pending_assoc_mass = None
+					self._pending_assoc_mass = None
 
-                else:
+				else:
 
-                    combined_mass = s_mass
+					combined_mass = s_mass
 
-                if self._pending_assoc_fg_fraction is not None:
+				if self._pending_assoc_fg_fraction is not None:
 
-                    p_fg_fraction = (
-                        self._pending_assoc_fg_fraction
-                    )
+					p_fg_fraction = (
+						self._pending_assoc_fg_fraction
+					)
 
-                    combined_fg_fraction = (
-                        p_fg_fraction
-                        + s_fg_fraction
-                    ) / 2.0
+					combined_fg_fraction = (
+						p_fg_fraction
+						+ s_fg_fraction
+					) / 2.0
 
-                    self._pending_assoc_fg_fraction = None
+					self._pending_assoc_fg_fraction = None
 
-                else:
+				else:
 
-                    combined_fg_fraction = s_fg_fraction
+					combined_fg_fraction = s_fg_fraction
 
-                self._ema_update(
-                    self.running_target_mass,
-                    combined_mass,
-                )
+				self._ema_update(
+					self.running_target_mass,
+					combined_mass,
+				)
 
-                self._ema_update(
-                    self.running_fg_fraction,
-                    combined_fg_fraction,
-                )
+				self._ema_update(
+					self.running_fg_fraction,
+					combined_fg_fraction,
+				)
 
-            # --------------------------------------------------------
-            # Ordinary source loss
-            # --------------------------------------------------------
+			# --------------------------------------------------------
+			# Ordinary source loss
+			# --------------------------------------------------------
 
-            elif ema_group is None:
+			elif ema_group is None:
 
-                # Recommended: include zero/background-only batches.
-                if self.ema_include_empty:
+				# Recommended: include zero/background-only batches.
+				if self.ema_include_empty:
 
-                    self._ema_update(
-                        self.running_target_mass,
-                        current_mass,
-                    )
+					self._ema_update(
+						self.running_target_mass,
+						current_mass,
+					)
 
-                    self._ema_update(
-                        self.running_fg_fraction,
-                        current_fg_fraction,
-                    )
+					self._ema_update(
+						self.running_fg_fraction,
+						current_fg_fraction,
+					)
 
-                else:
+				else:
 
-                    # Old behavior: ignore effectively empty batches.
-                    if current_mass > 0.001:
+					# Old behavior: ignore effectively empty batches.
+					if current_mass > 0.001:
 
-                        self._ema_update(
-                            self.running_target_mass,
-                            current_mass,
-                        )
+						self._ema_update(
+							self.running_target_mass,
+							current_mass,
+						)
 
-                        self._ema_update(
-                            self.running_fg_fraction,
-                            current_fg_fraction,
-                        )
+						self._ema_update(
+							self.running_fg_fraction,
+							current_fg_fraction,
+						)
 
-            # --------------------------------------------------------
-            # Loss diagnostics
-            # --------------------------------------------------------
+			# --------------------------------------------------------
+			# Loss diagnostics
+			# --------------------------------------------------------
 
-            self._ema_update(
-                self.running_fg_loss,
-                foreground_loss,
-            )
+			self._ema_update(
+				self.running_fg_loss,
+				foreground_loss,
+			)
 
-            self._ema_update(
-                self.running_bg_loss,
-                background_loss,
-            )
+			self._ema_update(
+				self.running_bg_loss,
+				background_loss,
+			)
 
-        # ============================================================
-        # Loss construction
-        # ============================================================
+		# ============================================================
+		# Loss construction
+		# ============================================================
 
-        if apply_fg_bg_balance:
+		if apply_fg_bg_balance:
 
-            # --------------------------------------------------------
-            # Non-empty / foreground-containing microbatch
-            # --------------------------------------------------------
+			if has_foreground:
 
-            if has_foreground:
+				loss = (
+					self.foreground_weight * foreground_loss
+					+ self.background_weight * background_loss
+				)
 
-                loss = (
-                    self.foreground_weight
-                    * foreground_loss
-                    +
-                    self.background_weight
-                    * background_loss
-                )
+			else:
 
-                # ----------------------------------------------------
-                # EMA mass normalization
-                #
-                # IMPORTANT:
-                # Only apply this to foreground-containing batches.
-                # This keeps empty_batch_weight meaningful for
-                # all-background microbatches.
-                # ----------------------------------------------------
+				loss = (
+					self.empty_batch_weight
+					* self.background_weight
+					* background_loss
+				)
 
-                if (
-                    self.normalize_by_ema
-                    and apply_normalize
-                ):
+			if self.normalize_by_ema and apply_normalize:
 
-                    norm_mass = (
-                        self.running_target_mass
-                        .clamp_min(self.min_mass)
-                    )
+				norm_mass = (
+					self.running_target_mass
+					.clamp_min(self.min_mass)
+				)
 
-                    loss = loss / norm_mass
+				loss = loss / norm_mass
 
-            # --------------------------------------------------------
-            # Completely background/zero microbatch
-            # --------------------------------------------------------
+		else:
 
-            else:
+			# ========================================================
+			# Unbalanced / ordinary loss path
+			#
+			# Used for auxiliary objectives such as hard negatives
+			# and relative loss.
+			# ========================================================
 
-                # Still train toward zero, but with independently
-                # controlled importance.
-                #
-                # Deliberately NO EMA mass normalization here.
-                loss = (
-                    self.empty_batch_weight
-                    * background_loss
-                )
+			loss = pointwise_loss.mean()
 
-        else:
+			# Optional normalization is still available, but the
+			# caller normally sets apply_normalize=False for these
+			# auxiliary objectives.
+			if (
+				self.normalize_by_ema
+				and apply_normalize
+			):
 
-            # ========================================================
-            # Unbalanced / ordinary loss path
-            #
-            # Used for auxiliary objectives such as hard negatives
-            # and relative loss.
-            # ========================================================
+				norm_mass = (
+					self.running_target_mass
+					.clamp_min(self.min_mass)
+				)
 
-            loss = pointwise_loss.mean()
+				loss = loss / norm_mass
 
-            # Optional normalization is still available, but the
-            # caller normally sets apply_normalize=False for these
-            # auxiliary objectives.
-            if (
-                self.normalize_by_ema
-                and apply_normalize
-            ):
-
-                norm_mass = (
-                    self.running_target_mass
-                    .clamp_min(self.min_mass)
-                )
-
-                loss = loss / norm_mass
-
-        return loss
+		return loss
 
 
 
@@ -4549,6 +4523,13 @@ else:
 mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device = device).to(device)
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
 logger = LossLogger()
+
+## Initialize model ema
+use_model_ema = True
+if use_model_ema == True:
+	mz_ema = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device = device).to(device)
+	mz_ema.load_state_dict(mz.state_dict())
+	model_ema = 0.999
 
 
 np.random.seed() ## randomize seed
@@ -4840,46 +4821,46 @@ DiceLoss = GaussianDiceLoss() ## Can change the bg_weight
 
 
 # loss_charbonnier_source = EMAMassCharbonnierLoss(
-#     peak_boost=10.0,
-#     foreground_weight=1.0,
-#     background_weight=0.1,
-#     foreground_threshold=0.01,
-#     empty_batch_weight=0.25,
-#     normalize_by_ema=False,
+#	 peak_boost=10.0,
+#	 foreground_weight=1.0,
+#	 background_weight=0.1,
+#	 foreground_threshold=0.01,
+#	 empty_batch_weight=0.25,
+#	 normalize_by_ema=False,
 # )
 
 # loss_charbonnier_assoc = EMAMassCharbonnierLoss(
-#     peak_boost=10.0,
-#     foreground_weight=1.0,
-#     background_weight=0.1,
-#     foreground_threshold=0.01,
-#     empty_batch_weight=0.25,
-#     normalize_by_ema=False,
+#	 peak_boost=10.0,
+#	 foreground_weight=1.0,
+#	 background_weight=0.1,
+#	 foreground_threshold=0.01,
+#	 empty_batch_weight=0.25,
+#	 normalize_by_ema=False,
 # )
 
 
 loss_charbonnier_source = EMAMassCharbonnierLoss(
-    peak_boost=10.0,
-    momentum=0.001,
-    foreground_weight=1.0,
-    background_weight=5.0,
-    foreground_threshold=0.01,
-    empty_batch_weight=0.5,
-    normalize_by_ema=True,
-    ema_include_empty=True,
+	peak_boost=10.0,
+	momentum=0.001,
+	foreground_weight=1.0,
+	background_weight=5.0,
+	foreground_threshold=0.01,
+	empty_batch_weight=1.0,
+	normalize_by_ema=True,
+	ema_include_empty=True,
 )
 
 
 
 loss_charbonnier_assoc = EMAMassCharbonnierLoss(
-    peak_boost=10.0,
-    momentum=0.001,
-    foreground_weight=1.0,
-    background_weight=5.0,
-    foreground_threshold=0.01,
-    empty_batch_weight=0.5,
-    normalize_by_ema=True,
-    ema_include_empty=True,
+	peak_boost=10.0,
+	momentum=0.001,
+	foreground_weight=1.0,
+	background_weight=5.0,
+	foreground_threshold=0.01,
+	empty_batch_weight=1.0,
+	normalize_by_ema=True,
+	ema_include_empty=True,
 )
 
 
@@ -4936,8 +4917,13 @@ for batch_idx, inputs in enumerate(loader):
 	if (i == n_restart_step)*(n_restart == True):
 		## Load model and optimizer.
 		mz.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
+		if use_model_ema:
+			mz_ema.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_ema_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
+
 		optimizer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(n_restart_step, n_ver), map_location = device))
-		# LossBalancer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(n_restart_step, n_ver), map_location = device))
+		checkpoint = torch.load('trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver), map_location = device)
+		loss_charbonnier_source.load_state_dict(checkpoint["loss_source_state_dict"])	
+		loss_charbonnier_assoc.load_state_dict(checkpoint["loss_assoc_state_dict"])
 		zlosses = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_restart_step, n_ver))
 		losses[0:n_restart_step] = zlosses['losses'][0:n_restart_step]
 		mx_trgt_1[0:n_restart_step] = zlosses['mx_trgt_1'][0:n_restart_step]; mx_trgt_2[0:n_restart_step] = zlosses['mx_trgt_2'][0:n_restart_step]
@@ -4946,7 +4932,6 @@ for batch_idx, inputs in enumerate(loader):
 		mx_pred_3[0:n_restart_step] = zlosses['mx_pred_3'][0:n_restart_step]; mx_pred_4[0:n_restart_step] = zlosses['mx_pred_4'][0:n_restart_step]
 		print('loaded model for restart on step %d ver %d \n'%(n_restart_step, n_ver))
 		zlosses.close()
-
 	
 	if use_variable_domain == False:
 		mz.set_scale_coefficients(src_x_kernel*2.0, scale_time, kernel_sig_t, kernel_sig_t*3.0, src_x_kernel, src_t_kernel, time_shift_range)
@@ -4956,10 +4941,13 @@ for batch_idx, inputs in enumerate(loader):
 
 		## Add save state of loss balancer so can re load
 		torch.save(mz.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(i, n_ver))
+		if use_model_ema:
+			torch.save(mz_ema.state_dict(), write_training_file + 'trained_gnn_model_step_ema_%d_ver_%d.h5'%(i, n_ver))
 		torch.save(optimizer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(i, n_ver))
-		# torch.save(LossBalancer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(i, n_ver))
-		# torch.save(balancer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_balancer.h5'%(i, n_ver))
 		np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
+		loss_checkpoint = {"loss_source_state_dict": loss_charbonnier_source.state_dict(), "loss_assoc_state_dict": loss_charbonnier_assoc.state_dict()}
+		# "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "epoch": epoch, "global_step": global_step,
+		torch.save(checkpoint, write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver))
 		print('saved model %s %d'%(n_ver, i))
 		print('saved model at step %d'%i)
 
@@ -5411,21 +5399,21 @@ for batch_idx, inputs in enumerate(loader):
 		mx_pred_val_4 += out[3].max().item()
 
 
-        # # 1. Zero gradients, compute primary loss backward
-        # optimizer.zero_grad()
-        # (loss_reg_query + loss_reg_base + loss_reg_assoc_P + loss_reg_assoc_S).backward(retain_graph=True)
-        # primary_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
+		# # 1. Zero gradients, compute primary loss backward
+		# optimizer.zero_grad()
+		# (loss_reg_query + loss_reg_base + loss_reg_assoc_P + loss_reg_assoc_S).backward(retain_graph=True)
+		# primary_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
 
-        # # 2. Compute relative loss backward independently
-        # if computed_relative_loss:
-        #     optimizer.zero_grad()
-        #     (0.2 * loss_rel).backward(retain_graph=True)
-        #     rel_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
-            
-        #     print(f"[Grad Ratio] Primary: {primary_grad_norm:.4f} | Relative (x0.2): {rel_grad_norm:.4f} | Ratio: {rel_grad_norm / (primary_grad_norm + 1e-8):.4f}")
+		# # 2. Compute relative loss backward independently
+		# if computed_relative_loss:
+		#	 optimizer.zero_grad()
+		#	 (0.2 * loss_rel).backward(retain_graph=True)
+		#	 rel_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
+			
+		#	 print(f"[Grad Ratio] Primary: {primary_grad_norm:.4f} | Relative (x0.2): {rel_grad_norm:.4f} | Ratio: {rel_grad_norm / (primary_grad_norm + 1e-8):.4f}")
 
-        # # 3. Clear and do the real combined backward step
-        # optimizer.zero_grad()
+		# # 3. Clear and do the real combined backward step
+		# optimizer.zero_grad()
 
 
 
@@ -5452,6 +5440,13 @@ for batch_idx, inputs in enumerate(loader):
 
 	print('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_dice_src_val, loss_dice_asc_val, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val))
 
+
+	if use_model_ema:
+		with torch.no_grad():
+			for p_ema, p in zip(mz_ema.parameters(), mz.parameters()):
+				p_ema.mul_(model_ema).add_(p, alpha=1.0 - model_ema)
+
+
 	# Log losses
 	if use_wandb_logging == True:
 		wandb.log({"loss": loss_val})
@@ -5470,34 +5465,34 @@ for batch_idx, inputs in enumerate(loader):
 
 # # ==================== 2. REGRESSION / AMPLITUDE LOSSES ====================
 # if use_regression_loss:
-#     # GT Heatmap pass: Update EMA and apply dynamic peak weighting
-#     loss_reg_query = weights[1] * loss_charbonnier_source(
-#         out[1][mask_lbls_query_l[i0]], 
-#         torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], 
-#         update_ema=True, 
-#         apply_peak_weight=True
-#     )
-#     loss_reg_base = weights[0] * loss_charbonnier_source(
-#         out[0][mask_lbls_l[i0]], 
-#         torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]],
-#         update_ema=False,
-#         apply_peak_weight=True
-#     )
-#     loss_reg_assoc_P = weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(
-#         out[2][mask_lbls_assoc_query_l[i0], :, 0], 
-#         pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], 
-#         update_ema=True, 
-#         apply_peak_weight=True
-#     )
-#     loss_reg_assoc_S = weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(
-#         out[3][mask_lbls_assoc_query_l[i0], :, 0], 
-#         pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], 
-#         update_ema=True, 
-#         apply_peak_weight=True
-#     )
+#	 # GT Heatmap pass: Update EMA and apply dynamic peak weighting
+#	 loss_reg_query = weights[1] * loss_charbonnier_source(
+#		 out[1][mask_lbls_query_l[i0]], 
+#		 torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], 
+#		 update_ema=True, 
+#		 apply_peak_weight=True
+#	 )
+#	 loss_reg_base = weights[0] * loss_charbonnier_source(
+#		 out[0][mask_lbls_l[i0]], 
+#		 torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]],
+#		 update_ema=False,
+#		 apply_peak_weight=True
+#	 )
+#	 loss_reg_assoc_P = weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(
+#		 out[2][mask_lbls_assoc_query_l[i0], :, 0], 
+#		 pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], 
+#		 update_ema=True, 
+#		 apply_peak_weight=True
+#	 )
+#	 loss_reg_assoc_S = weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(
+#		 out[3][mask_lbls_assoc_query_l[i0], :, 0], 
+#		 pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], 
+#		 update_ema=True, 
+#		 apply_peak_weight=True
+#	 )
 
-#     loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch
-#     loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch
+#	 loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch
+#	 loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch
 
 
 # # ==================== 3. NEGATIVE SAMPLING LOSS ====================
@@ -5506,18 +5501,18 @@ for batch_idx, inputs in enumerate(loader):
 # rand_use_negative = (use_real_data_sample_v[inc] == False) or (np.random.rand() < rand_mask_ratio)
 
 # if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
-#     # [... negative sampling logic ...]
+#	 # [... negative sampling logic ...]
 
-#     if neg_mask_final.any():
-#         # Baseline weight = 1.0 (apply_peak_weight=False avoids evaluating target * peak_weight)
-#         loss_negative = weights[1] * loss_charbonnier_source(
-#             out_query[neg_mask_final], 
-#             lbls_query_tensor[neg_mask_final],
-#             update_ema=False,
-#             apply_peak_weight=False
-#         )
-#         loss_negative_val += loss_negative.item() / n_batch
-#         computed_negative_loss = True
+#	 if neg_mask_final.any():
+#		 # Baseline weight = 1.0 (apply_peak_weight=False avoids evaluating target * peak_weight)
+#		 loss_negative = weights[1] * loss_charbonnier_source(
+#			 out_query[neg_mask_final], 
+#			 lbls_query_tensor[neg_mask_final],
+#			 update_ema=False,
+#			 apply_peak_weight=False
+#		 )
+#		 loss_negative_val += loss_negative.item() / n_batch
+#		 computed_negative_loss = True
 
 
 # # ==================== 4. RELATIVE LOSS ===================== #
@@ -5525,28 +5520,28 @@ for batch_idx, inputs in enumerate(loader):
 # computed_relative_loss = False
 
 # if use_relative_loss and (ramp_aux > 0.0):
-#     k_nearest_query = 50
-#     edges_query = knn(
-#         ftrns1_diff(X_query[i0].to(device)) / 1000.0, 
-#         ftrns1_diff(X_query[i0].to(device)) / 1000.0, 
-#         k=k_nearest_query
-#     )
-#     trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
-#     pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
-    
-#     # Gaussian similarity weighting focused strictly on similar points (|trgt_rel| -> 0)
-#     weight_rel = torch.exp(-torch.abs(trgt_rel) / 0.35)
-    
-#     # Bypasses peak weighting to prevent weight cancellation conflict
-#     loss_rel = weights[1] * loss_charbonnier_source(
-#         pred_rel, 
-#         trgt_rel, 
-#         sample_weight=weight_rel, 
-#         update_ema=False,
-#         apply_peak_weight=False
-#     )
-#     loss_relative_val += loss_rel.item() / n_batch
-#     computed_relative_loss = True
+#	 k_nearest_query = 50
+#	 edges_query = knn(
+#		 ftrns1_diff(X_query[i0].to(device)) / 1000.0, 
+#		 ftrns1_diff(X_query[i0].to(device)) / 1000.0, 
+#		 k=k_nearest_query
+#	 )
+#	 trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
+#	 pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
+	
+#	 # Gaussian similarity weighting focused strictly on similar points (|trgt_rel| -> 0)
+#	 weight_rel = torch.exp(-torch.abs(trgt_rel) / 0.35)
+	
+#	 # Bypasses peak weighting to prevent weight cancellation conflict
+#	 loss_rel = weights[1] * loss_charbonnier_source(
+#		 pred_rel, 
+#		 trgt_rel, 
+#		 sample_weight=weight_rel, 
+#		 update_ema=False,
+#		 apply_peak_weight=False
+#	 )
+#	 loss_relative_val += loss_rel.item() / n_batch
+#	 computed_relative_loss = True
 
 
 
