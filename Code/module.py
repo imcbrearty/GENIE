@@ -396,6 +396,83 @@ class BipartiteGraphOperator(MessagePassing):
 
 		return out, torch.cat((support_features, hard_support*learned_support), dim = 1).detach()
 
+	# def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None):
+	# 	"""
+	# 	Args:
+	# 		inpt: [E_edges, ndim_in]
+	# 		A_src_in_edges: PyG Data with edge_index and x [E_edges, 4]
+	# 		mask: [E_edges, ndim_mask]
+	# 		embed_context: [E_edges, embed_dim] or [1, embed_dim]
+	# 	"""
+	# 	N = inpt.shape[0]
+	# 	if num_target_nodes is not None:
+	# 		M = num_target_nodes
+	# 	else:
+	# 		M = A_src_in_edges.edge_index[1].max().item() + 1 if A_src_in_edges.edge_index.numel() > 0 else 0
+
+	# 	ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+	# 	# Step 1: Spatial geometry
+	# 	diff_sp = A_src_in_edges.x[:, 0:3]
+	# 	norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
+	# 	unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
+
+	# 	# Step 2: Scale-conditioned RBF bandwidths
+	# 	delta = self.f_gamma(ctx)
+	# 	alpha = 0.5 * torch.tanh(delta[:, 0:1])
+	# 	residuals = 0.2 * torch.tanh(delta[:, 1:])
+	# 	gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+
+	# 	# Step 3: Multi-scale spatial RBFs
+	# 	r_sp_sq = norm_pos ** 2
+	# 	r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5)
+	# 	rbf_decay = torch.exp(-r_aniso)
+
+	# 	# Step 4: Edge feature fusion
+	# 	rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)
+	# 	edge_inpt = torch.cat((inpt, rel_pos), dim=-1)
+	# 	geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
+
+	# 	# Step 5: Edge gating
+	# 	absolute_gate = mask.max(1, keepdims=True)[0]  # Forced per-edge support gate
+	# 	phase_routing = self.mask_gate(mask)
+	# 	msg = absolute_gate * phase_routing * geo_features
+
+	# 	# Step 6: Backprojection
+	# 	target_indices = A_src_in_edges.edge_index[1]
+	# 	stacked = scatter(msg, target_indices, dim=0, dim_size=M, reduce="sum")
+
+	# 	# Step 7: Coverage and evidence
+	# 	coverage = scatter(torch.ones_like(absolute_gate), target_indices, dim=0, dim_size=M, reduce="sum")
+	# 	evidence = scatter(absolute_gate, target_indices, dim=0, dim_size=M, reduce="sum")
+	# 	hard_support = (evidence > 0).to(inpt.dtype)
+		
+	# 	# Step 8: Coverage-normalized pattern + LayerNorm (hard-masked against LayerNorm bias leak)
+	# 	stacked_normalized = stacked / torch.sqrt(coverage.clamp(min=1.0))
+	# 	pattern = hard_support * self.norm(stacked_normalized)
+
+	# 	# Step 9: Explicit support features
+	# 	log_coverage = torch.log1p(coverage)
+	# 	log_evidence = torch.log1p(evidence)
+	# 	match_fraction = evidence / coverage.clamp(min=1.0)
+
+	# 	# Step 10: Merge pattern + support
+	# 	features = torch.cat((pattern, log_coverage, log_evidence, match_fraction), dim=-1)
+
+	# 	# Step 11: Readout
+	# 	out = self.act_out(self.fc_out(features))
+
+	# 	# Step 12: Soft Source-level support gate
+	# 	support_features = torch.cat((log_coverage, log_evidence, match_fraction), dim=-1)
+	# 	learned_support = self.support_gate(support_features)
+
+	# 	# Soft gating maintains continuous message passing downstream
+	# 	out = out * learned_support
+
+	# 	# Detached explicit support tuple preserves physical metric definitions
+	# 	support_out = torch.cat((support_features, hard_support * learned_support), dim=1).detach()
+
+	# 	return out, support_out
 
 
 use_anisotropic_spatial_aggregation = False
