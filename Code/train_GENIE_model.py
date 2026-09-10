@@ -5024,6 +5024,7 @@ for batch_idx, inputs in enumerate(loader):
 		mx_trgt_3[0:n_restart_step] = zlosses['mx_trgt_3'][0:n_restart_step]; mx_trgt_4[0:n_restart_step] = zlosses['mx_trgt_4'][0:n_restart_step]
 		mx_pred_1[0:n_restart_step] = zlosses['mx_pred_1'][0:n_restart_step]; mx_pred_2[0:n_restart_step] = zlosses['mx_pred_2'][0:n_restart_step]
 		mx_pred_3[0:n_restart_step] = zlosses['mx_pred_3'][0:n_restart_step]; mx_pred_4[0:n_restart_step] = zlosses['mx_pred_4'][0:n_restart_step]
+		loss_charbonnier_base.initialize_mass, loss_charbonnier_source.initialize_mass, loss_charbonnier_assoc.initialize_mass = False, False, False
 		print('loaded model for restart on step %d ver %d \n'%(n_restart_step, n_ver))
 		zlosses.close()
 	
