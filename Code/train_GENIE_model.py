@@ -5396,175 +5396,175 @@ for batch_idx, inputs in enumerate(loader):
 		# 		loss_relative_val += loss_rel.item() / n_batch_valid
 		# 		computed_relative_loss = True
 
-
+		
 		# ==================== 4. RELATIVE + SADDLE LOSS ==================== #
 		loss_rel = torch.tensor(0.0, device=device)
 		loss_saddle = torch.tensor(0.0, device=device)
-
+		
 		computed_relative_loss = False
 		computed_saddle_loss = False
-
+		
 		if use_relative_loss and ramp_aux > 0.0:
-
-			k_nearest_query = 50
-
-			ifind_positive = torch.where(
-				Lbls_query[i0].squeeze() > 0.01
-			)[0].to(device)
-
-			if len(ifind_positive) > 2:
-
-				proj_coords = torch.cat((
-					ftrns1_diff(X_query[i0].to(device)) / 1000.0,
-					scale_time * X_query[i0, 3:4].to(device)
-				), dim=1)[ifind_positive]
-
-				n_center = len(ifind_positive)
-				k = min(k_nearest_query, n_center - 1)
-
-			edge_index_full = knn(
-				proj_coords,
-				proj_coords,
-				k=k + 1,
-			)
-
-			src, dst = edge_index_full
-
-			# Make neighbor rows explicitly grouped by center.
-			order = torch.argsort(src)
-			src = src[order]
-			dst = dst[order]
-
-			# Remove self edges explicitly.
-			non_self = src != dst
-			src = src[non_self]
-			dst = dst[non_self]
-
-			# After removing self, each center should have k neighbors.
-			k_actual = dst.shape[0] // n_center
-
-			neighbors_local = dst.view(n_center, k_actual)
-
-			src_local = torch.arange(
-				n_center, device=device
-			).repeat_interleave(k_actual)
-
-			dst_local = neighbors_local.reshape(-1)
-
-			src_idx = ifind_positive[src_local]
-			dst_idx = ifind_positive[dst_local]
-
-			y = Lbls_query[i0].to(device)[:, 0]
-			p = out[1][:, 0]
-
-			# ============================================================
-			# Pairwise relative loss
-			# ============================================================
-			y0, y1 = y[src_idx], y[dst_idx]
-			p0, p1 = p[src_idx], p[dst_idx]
-
-			target_rel = y0 - y1
-			pred_rel = p0 - p1
-
-			weight_rel = (
-				0.5
-				+ 0.5 * torch.minimum(y0.abs(), y1.abs())
-				+ 0.5 * target_rel.abs()
-			)
-			weight_rel = weight_rel / weight_rel.mean().clamp_min(1e-6)
-
-			peak_reference_rel = 0.5 * (y0.abs() + y1.abs())
-
-			loss_rel = loss_charbonnier_source(
-				pred_rel,
-				target_rel,
-				sample_weight=weight_rel,
-				apply_peak_weight=True,
-				peak_reference=peak_reference_rel,
-				apply_fg_bg_balance=False,
-				apply_normalize=True,
-				update_ema=False,
-			)
-
-			loss_relative_val += loss_rel.item() / n_batch_valid
-			computed_relative_loss = True
-
-			# ============================================================
-			# Saddle / trough loss
-			# ============================================================
-			# Randomly shuffle neighbors independently within each center
-			perm = torch.argsort(
-				torch.rand_like(neighbors_local.float()), dim=1
-			)
-			neighbors_shuffled = neighbors_local.gather(1, perm)
-
-			n_pair = k_actual // 2
-
-			a_local = neighbors_shuffled[:, 0:2*n_pair:2].reshape(-1)
-			b_local = neighbors_shuffled[:, 1:2*n_pair:2].reshape(-1)
-			c_local = torch.arange(
-				n_center, device=device
-			).repeat_interleave(n_pair)
-
-			# Convert local -> original query indices
-			a_idx = ifind_positive[a_local]
-			b_idx = ifind_positive[b_local]
-			c_idx = ifind_positive[c_local]
-
-			yc, ya, yb = y[c_idx], y[a_idx], y[b_idx]
-			pc, pa, pb = p[c_idx], p[a_idx], p[b_idx]
-
-			# Opposing directions around center
-			dir_a = proj_coords[a_local] - proj_coords[c_local]
-			dir_b = proj_coords[b_local] - proj_coords[c_local]
-
-			cos_sim = (
-				torch.sum(dir_a * dir_b, dim=1)
-				/ (
-					torch.norm(dir_a, dim=1)
-					* torch.norm(dir_b, dim=1)
-					+ 1e-6
-				)
-			)
-
-			valley = (
-				(yc > 0.01) &
-				(ya > 0.1) &
-				(yb > 0.1) &
-				(yc < ya) &
-				(yc < yb) &
-				(cos_sim < 0.0)
-			)
-
-			if valley.sum() >= 4: ## valley.any() ##  valley.sum() >= 4 ## Change this to require at least some number of pairs
-
-				target_drop = torch.cat((
-					ya[valley] - yc[valley],
-					yb[valley] - yc[valley],
-				))
-
-				pred_drop = torch.cat((
-					pa[valley] - pc[valley],
-					pb[valley] - pc[valley],
-				))
-
-				peak_reference_saddle = torch.cat((
-					ya[valley].abs(),
-					yb[valley].abs(),
-				))
-
-				loss_saddle = loss_charbonnier_source(
-					pred_drop,
-					target_drop,
-					apply_peak_weight=True,
-					peak_reference=peak_reference_saddle,
-					apply_fg_bg_balance=False,
-					apply_normalize=True,
-					update_ema=False,
-				)
-
-				loss_saddle_val += loss_saddle.item() / n_batch_valid
-				computed_saddle_loss = True
+		
+		    k_nearest_query = 50
+		
+		    ifind_positive = torch.where(
+		        Lbls_query[i0].squeeze() > 0.01
+		    )[0].to(device)
+		
+		    # All KNN, relative, and saddle computations MUST live inside this check
+		    if len(ifind_positive) > 2:
+		
+		        proj_coords = torch.cat((
+		            ftrns1_diff(X_query[i0].to(device)) / 1000.0,
+		            scale_time * X_query[i0, 3:4].to(device)
+		        ), dim=1)[ifind_positive]
+		
+		        n_center = len(ifind_positive)
+		        k = min(k_nearest_query, n_center - 1)
+		
+		        edge_index_full = knn(
+		            proj_coords,
+		            proj_coords,
+		            k=k + 1,
+		        )
+		
+		        src, dst = edge_index_full
+		
+		        # Make neighbor rows explicitly grouped by center
+		        order = torch.argsort(src)
+		        src = src[order]
+		        dst = dst[order]
+		
+		        # Remove self edges explicitly
+		        non_self = src != dst
+		        src = src[non_self]
+		        dst = dst[non_self]
+		
+		        # After removing self, each center should have k neighbors
+		        k_actual = dst.shape[0] // n_center
+		
+		        neighbors_local = dst.view(n_center, k_actual)
+		
+		        src_local = torch.arange(
+		            n_center, device=device
+		        ).repeat_interleave(k_actual)
+		
+		        dst_local = neighbors_local.reshape(-1)
+		
+		        src_idx = ifind_positive[src_local]
+		        dst_idx = ifind_positive[dst_local]
+		
+		        y = Lbls_query[i0].to(device)[:, 0]
+		        p = out[1][:, 0]
+		
+		        # ============================================================
+		        # Pairwise relative loss
+		        # ============================================================
+		        y0, y1 = y[src_idx], y[dst_idx]
+		        p0, p1 = p[src_idx], p[dst_idx]
+		
+		        target_rel = y0 - y1
+		        pred_rel = p0 - p1
+		
+		        weight_rel = (
+		            0.5
+		            + 0.5 * torch.minimum(y0.abs(), y1.abs())
+		            + 0.5 * target_rel.abs()
+		        )
+		        weight_rel = weight_rel / weight_rel.mean().clamp_min(1e-6)
+		
+		        peak_reference_rel = 0.5 * (y0.abs() + y1.abs())
+		
+		        loss_rel = loss_charbonnier_source(
+		            pred_rel,
+		            target_rel,
+		            sample_weight=weight_rel,
+		            apply_peak_weight=True,
+		            peak_reference=peak_reference_rel,
+		            apply_fg_bg_balance=False,
+		            apply_normalize=True,
+		            update_ema=False,
+		        )
+		
+		        loss_relative_val += loss_rel.item() / n_batch_valid
+		        computed_relative_loss = True
+		
+		        # ============================================================
+		        # Saddle / trough loss
+		        # ============================================================
+		        perm = torch.argsort(
+		            torch.rand_like(neighbors_local.float()), dim=1
+		        )
+		        neighbors_shuffled = neighbors_local.gather(1, perm)
+		
+		        n_pair = k_actual // 2
+		
+		        if n_pair > 0:
+		            a_local = neighbors_shuffled[:, 0:2*n_pair:2].reshape(-1)
+		            b_local = neighbors_shuffled[:, 1:2*n_pair:2].reshape(-1)
+		            c_local = torch.arange(
+		                n_center, device=device
+		            ).repeat_interleave(n_pair)
+		
+		            a_idx = ifind_positive[a_local]
+		            b_idx = ifind_positive[b_local]
+		            c_idx = ifind_positive[c_local]
+		
+		            yc, ya, yb = y[c_idx], y[a_idx], y[b_idx]
+		            pc, pa, pb = p[c_idx], p[a_idx], p[b_idx]
+		
+		            dir_a = proj_coords[a_local] - proj_coords[c_local]
+		            dir_b = proj_coords[b_local] - proj_coords[c_local]
+		
+		            cos_sim = (
+		                torch.sum(dir_a * dir_b, dim=1)
+		                / (
+		                    torch.norm(dir_a, dim=1)
+		                    * torch.norm(dir_b, dim=1)
+		                    + 1e-6
+		                )
+		            )
+		
+		            valley = (
+		                (yc > 0.01) &
+		                (ya > 0.1) &
+		                (yb > 0.1) &
+		                (yc < ya) &
+		                (yc < yb) &
+		                (cos_sim < 0.0)
+		            )
+		
+		            # Require at least 4 valid saddle points to avoid high-variance gradient updates
+		            if valley.sum() >= 4:
+		
+		                target_drop = torch.cat((
+		                    ya[valley] - yc[valley],
+		                    yb[valley] - yc[valley],
+		                ))
+		
+		                pred_drop = torch.cat((
+		                    pa[valley] - pc[valley],
+		                    pb[valley] - pc[valley],
+		                ))
+		
+		                peak_reference_saddle = torch.cat((
+		                    ya[valley].abs(),
+		                    yb[valley].abs(),
+		                ))
+		
+		                loss_saddle = loss_charbonnier_source(
+		                    pred_drop,
+		                    target_drop,
+		                    apply_peak_weight=True,
+		                    peak_reference=peak_reference_saddle,
+		                    apply_fg_bg_balance=False,
+		                    apply_normalize=True,
+		                    update_ema=False,
+		                )
+		
+		                loss_saddle_val += loss_saddle.item() / n_batch_valid
+		                computed_saddle_loss = True
 
 
 
