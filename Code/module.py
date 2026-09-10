@@ -3485,6 +3485,44 @@ class GCN_Detection_Network_extended(nn.Module):
 			self.activate = lambda x: x
 
 
+		# 1. Initialize SpaceTimeDirect
+		nn.init.kaiming_normal_(self.SpaceTimeDirect.f_direct.weight, nonlinearity='leaky_relu')
+		if self.SpaceTimeDirect.f_direct.bias is not None:
+		    nn.init.zeros_(self.space_time_direct.f_direct.bias)
+		
+		# 2. Layer 1 (Hidden Projection): Kaiming Normal for PReLU
+		for proj in (self.proj_soln1, self.proj_soln2):
+		    nn.init.kaiming_normal_(proj[0].weight, nonlinearity='leaky_relu')
+		    if proj[0].bias is not None:
+		        nn.init.zeros_(proj[0].bias)
+		
+		# 3. Layer 2 (Final Readout): Small weights + Zero bias
+		for proj in (self.proj_soln1, self.proj_soln2):
+		    nn.init.normal_(proj[2].weight, std=0.01)
+		    if proj[2].bias is not None:
+		        nn.init.zeros_(proj[2].bias)
+
+		# # 2. Initialize SpaceTimeDirect
+		# nn.init.kaiming_normal_(self.SpaceTimeDirect.f_direct.weight, nonlinearity='leaky_relu')
+		# if self.SpaceTimeDirect.f_direct.bias is not None:
+		#     nn.init.zeros_(self.space_time_direct.f_direct.bias)
+		
+		# # 2. Custom Initialization
+		# # Layer 1: Standard Kaiming Normal for PReLU activations
+		# nn.init.kaiming_normal_(self.proj_soln1[0].weight, nonlinearity='leaky_relu')
+		# nn.init.kaiming_normal_(self.proj_soln2[0].weight, nonlinearity='leaky_relu')
+		# if self.proj_soln2[0].bias is not None:
+		#     nn.init.zeros_(self.proj_soln1[0].bias)
+		#     nn.init.zeros_(self.proj_soln2[0].bias)
+			
+		# # Layer 2 (Final Scalar Readout): Small weights + Zero bias
+		# # Keeps predictions near 0.0 at Epoch 0 to prevent gradient shocks
+		# nn.init.normal_(self.proj_soln1[2].weight, std=0.01)
+		# nn.init.normal_(self.proj_soln2[2].weight, std=0.01)
+		# if self.proj_soln2[2].bias is not None:
+		#     nn.init.zeros_(self.proj_soln1[2].bias)	
+		#     nn.init.zeros_(self.proj_soln2[2].bias)
+
 		# # 1. Activation stays unbounded so gradients never vanish
 		# self.activate = lambda x: F.leaky_relu(x, negative_slope=0.01)
 
