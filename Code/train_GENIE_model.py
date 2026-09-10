@@ -4053,7 +4053,7 @@ class EMAMassCharbonnierLoss(nn.Module):
 	                buffer.copy_(stacked_mass.mean())
 	                self.initialize_mass = False
 	                self.mass_buffer.clear() # Clear list to free GPU/host memory
-	                print(f"Finished initializing target mass: {buffer.item():.5f} ({self.loss_name})")
+	                print(f"Finished initializing target mass: {buffer.item():.5f} ({self.loss_name}) \n")
 	                return
 	            else:
 	                # Use a faster learning rate during initial warmup
@@ -4924,7 +4924,7 @@ loss_charbonnier_base = EMAMassCharbonnierLoss(
 	foreground_threshold=0.01,
 	empty_batch_weight=0.25,
 	normalize_by_ema=True,
-	ema_include_empty=True,
+	ema_include_empty=False, # True
 	loss_name = 'base'
 )
 
@@ -4937,7 +4937,7 @@ loss_charbonnier_source = EMAMassCharbonnierLoss(
 	foreground_threshold=0.01,
 	empty_batch_weight=1.0,
 	normalize_by_ema=True,
-	ema_include_empty=True,
+	ema_include_empty=False,
 	loss_name = 'source'
 )
 
@@ -4950,7 +4950,7 @@ loss_charbonnier_assoc = EMAMassCharbonnierLoss(
 	foreground_threshold=0.01,
 	empty_batch_weight=1.0,
 	normalize_by_ema=True,
-	ema_include_empty=True,
+	ema_include_empty=False,
 	loss_name = 'assoc'
 )
 
