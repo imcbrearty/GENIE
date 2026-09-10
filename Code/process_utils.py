@@ -5151,6 +5151,85 @@ def maximize_bipartite_assignment_wrapper(cat, srcs, ftrns1, ftrns2, temporal_wi
     return results, res
 
 
+import numpy as np
+import scipy.sparse as sp
+from scipy.spatial import cKDTree
+from scipy.optimize import linear_sum_assignment
+
+def maximize_bipartite_assignment_fast(cat, srcs, ftrns1, ftrns2, temporal_win=10.0, spatial_win=75e3, verbose=True):
+    # 1. Spatial/Temporal KDTree Query to find candidate edges only
+    tree_t = cKDTree(srcs[:, 3].reshape(-1, 1))
+    tree_s = cKDTree(ftrns1(srcs[:, 0:3]))
+
+    lp_t = tree_t.query_ball_point(cat[:, 3].reshape(-1, 1), r=temporal_win)
+    lp_s = tree_s.query_ball_point(ftrns1(cat[:, 0:3]), r=spatial_win)
+
+    # Intersection of spatial & temporal candidates per catalog event
+    cat_indices = []
+    src_indices = []
+    
+    for j in range(cat.shape[0]):
+        cand = list(set(lp_t[j]).intersection(lp_s[j]))
+        if cand:
+            cat_indices.extend([j] * len(cand))
+            src_indices.extend(cand)
+
+    if not cat_indices:
+        return np.array([]), np.array([])
+
+    cat_indices = np.array(cat_indices)
+    src_indices = np.array(src_indices)
+
+    # 2. Extract unique participating nodes
+    unique_cat_ind, cat_rev = np.unique(cat_indices, return_inverse=True)
+    unique_src_ind, src_rev = np.unique(src_indices, return_inverse=True)
+
+    nunique_cat = len(unique_cat_ind)
+    nunique_src = len(unique_src_ind)
+
+    # 3. Vectorized coordinate differences ONLY for valid spatial/temporal edges
+    cat_coords = ftrns1(cat[unique_cat_ind, 0:3])
+    src_coords = ftrns1(srcs[unique_src_ind, 0:3])
+    cat_times = cat[unique_cat_ind, 3]
+    src_times = srcs[unique_src_ind, 3]
+
+    # Compute dense differences only within the compact sub-matrix
+    t_diff = cat_times[:, None] - src_times[None, :]
+    s_diff = np.linalg.norm(cat_coords[:, None, :] - src_coords[None, :, :], axis=2)
+
+    # Calculate Gaussian weights
+    weights = np.exp(-0.5 * (t_diff**2) / (temporal_win**2)) * np.exp(-0.5 * (s_diff**2) / (spatial_win**2))
+    
+    # Filter out weak couplings below 0.01 threshold
+    weights[abs(t_diff) > temporal_win] = 0
+    weights[abs(s_diff) > spatial_win] = 0
+    weights[weights < 0.01] = 0
+
+    # 4. Global Maximum Bipartite Matching via Scipy
+    # (Negate weights to turn maximization into cost minimization)
+    row_ind, col_ind = linear_sum_assignment(-weights)
+
+    # Filter out zero-weight assignments
+    valid_matches = weights[row_ind, col_ind] > 0
+    row_ind = row_ind[valid_matches]
+    col_ind = col_ind[valid_matches]
+
+    # 5. Build global index output map
+    matched_cat_global = unique_cat_ind[row_ind]
+    matched_src_global = unique_src_ind[col_ind]
+
+    results = np.column_stack([matched_cat_global, matched_src_global])
+    res = cat[matched_cat_global, 0:4] - srcs[matched_src_global, 0:4]
+
+    if verbose:
+        print(f"Matched {len(results)} source-to-source pairs.")
+
+    return results, res
+
+
+
+
+
 ## Interpolation class
 class NNInterp(nn.Module):
 	def __init__(self, pos, ftrns1, ftrns1_diff, device = 'cpu', n_res = 11, dx = None, scale_x = 1000.0):
