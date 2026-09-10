@@ -3906,7 +3906,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		# 1. Initialize SpaceTimeDirect
 		nn.init.kaiming_normal_(self.SpaceTimeDirect.f_direct.weight, nonlinearity='leaky_relu')
 		if self.SpaceTimeDirect.f_direct.bias is not None:
-		    nn.init.zeros_(self.space_time_direct.f_direct.bias)
+		    nn.init.zeros_(self.SpaceTimeDirect.f_direct.bias)
 		
 		# 2. Layer 1 (Hidden Projection): Kaiming Normal for PReLU
 		for proj in (self.proj_soln1, self.proj_soln2):
