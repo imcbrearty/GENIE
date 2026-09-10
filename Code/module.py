@@ -369,10 +369,12 @@ class BipartiteGraphOperator(MessagePassing):
 		# Step 7: Coverage and evidence
 		coverage = scatter(torch.ones_like(absolute_gate), target_indices, dim=0, dim_size=M, reduce="sum")
 		evidence = scatter(absolute_gate, target_indices, dim=0, dim_size=M, reduce="sum")
-
+		# has_evidence = (evidence > 0)
+		hard_support = (evidence > 0).to(inpt.dtype)
+		
 		# Step 8: Coverage-normalized pattern + LayerNorm
 		stacked_normalized = stacked / torch.sqrt(coverage.clamp(min=1.0))
-		pattern = self.norm(stacked_normalized)
+		pattern = hard_support * self.norm(stacked_normalized)
 
 		# Step 9: Explicit support features
 		log_coverage = torch.log1p(coverage)
@@ -390,8 +392,7 @@ class BipartiteGraphOperator(MessagePassing):
 		learned_support = self.support_gate(support_features)
 
 		# No observational evidence => no source activation
-		hard_support = (evidence > 0).to(out.dtype)
-		out = out * learned_support * hard_support
+		out = out * learned_support # * hard_support
 
 		return out, torch.cat((support_features, hard_support*learned_support), dim = 1).detach()
 
