@@ -1383,11 +1383,271 @@ class SpaceTimeAttention1(MessagePassing):
 
 
 
+# class SpaceTimeAttention(MessagePassing):
+# 	"""Continuous 4D renderer from sparse source hypotheses.
+
+# 	Geometry strictly dictates spatial attention weights. Source features and 
+# 	reliability support modulate value payloads and continuous peak recovery.
+# 	"""
+
+# 	def __init__(self, inpt_dim, out_channels, n_dim=4, n_latent=16, embed_dim=10,
+# 				 n_heads=5, support_dim=4, scale_rel=scale_rel, scale_time=scale_time):
+# 		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
+
+# 		self.n_heads = n_heads
+# 		self.n_latent = n_latent
+# 		self.support_dim = support_dim
+# 		self.scale_rel = scale_rel
+# 		self.scale_time = scale_time
+
+# 		# Source value embedding
+# 		self.f_values = nn.Linear(inpt_dim, n_latent)
+# 		self.film_values = FiLM(embed_dim, n_latent)
+# 		self.act_values = nn.PReLU()
+
+# 		# Source support embedding (Transforms reliability stats into value channel)
+# 		self.f_support = nn.Sequential(
+# 			nn.Linear(support_dim, 8), nn.PReLU(), nn.Linear(8, n_latent)
+# 		)
+
+# 		# Source-feature attention correction
+# 		self.f_feature_score = nn.Linear(inpt_dim, n_heads)
+# 		self.film_score = FiLM(embed_dim, n_heads)
+
+# 		# Dynamic space-time bandwidths
+# 		self.f_gamma = nn.Linear(embed_dim, 3 + 2 * n_heads)
+# 		nn.init.normal_(self.f_gamma.weight, std=0.01)
+# 		nn.init.zeros_(self.f_gamma.bias)
+
+# 		init_spatial = torch.logspace(-1, 0.7, steps=n_heads).unsqueeze(1)
+# 		init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads).unsqueeze(1)
+# 		init_gammas = torch.cat([init_spatial, init_temporal], dim=1).unsqueeze(0)
+# 		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+
+# 		# Geometry -> latent edge embedding
+# 		rbf_edge_dim = 3 + 2 * n_heads + 1
+# 		self.edge_proj = nn.Sequential(
+# 			nn.Linear(rbf_edge_dim, n_latent), nn.PReLU(), nn.Linear(n_latent, n_latent)
+# 		)
+
+# 		# Bounded continuous-peak recovery
+# 		self.f_max_gain_cap = nn.Sequential(
+# 			nn.Linear(embed_dim, 16), nn.PReLU(), nn.Linear(16, 1), nn.Sigmoid()
+# 		)
+
+# 		# Query confidence gate
+# 		self.spatial_gate = nn.Sequential(
+# 			nn.Linear(n_latent * n_heads, 1), nn.Sigmoid()
+# 		)
+
+# 		# Pure feature readout + FiLM context modulation
+# 		self.proj = nn.Linear(n_latent * n_heads, out_channels)
+# 		self.film_readout = FiLM(embed_dim, out_channels)
+# 		self.activate2 = nn.PReLU()
+
+# 		self.use_fixed_edges = False
+# 		self.fixed_edges = None
+# 		self.edge_features = None
+
+# 	def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=16):
+# 		ctx_4d = torch.cat((
+# 			x_context / self.scale_rel,
+# 			(1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel
+# 		), dim=1)
+# 		qry_4d = torch.cat((
+# 			x_query / self.scale_rel,
+# 			(1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel
+# 		), dim=1)
+
+# 		edge_index = knn(ctx_4d, qry_4d, k=k).flip(0).to(x_query.device)
+
+# 		diff_sp = (
+# 			x_query[edge_index[1], :3] - x_context[edge_index[0], :3]
+# 		) / self.scale_rel
+# 		diff_tm = (
+# 			1000.0 * self.scale_time *
+# 			(x_query_t[edge_index[1]].view(-1) - x_context_t[edge_index[0]].view(-1))
+# 		).reshape(-1, 1) / self.scale_rel
+
+# 		return edge_index, torch.cat((diff_sp, diff_tm), dim=1)
+
+# 	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=16):
+# 		self.fixed_edges, self.edge_features = self._build_edge_attr(
+# 			x_query, x_context, x_query_t, x_context_t, k=k
+# 		)
+# 		self.use_fixed_edges = True
+
+# 	def message(self, x_j, support_j, embed_context, index, edge_attr):
+# 		pos_rel_sp = edge_attr[:, :3]
+# 		pos_rel_tm = edge_attr[:, 3:4]
+
+# 		pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim=1, keepdim=True)
+# 		pos_norm_tm = torch.abs(pos_rel_tm)
+# 		spatial_sq = pos_norm_sp.square()
+# 		temporal_sq = pos_norm_tm.square()
+
+# 		# Dynamic multi-scale bandwidths
+# 		delta = self.f_gamma(embed_context)
+# 		alpha_global = 0.5 * torch.tanh(delta[:, 0:1])
+# 		alpha_space = 0.25 * torch.tanh(delta[:, 1:2])
+# 		alpha_time = 0.25 * torch.tanh(delta[:, 2:3])
+
+# 		alpha = (
+# 			alpha_global.unsqueeze(1) +
+# 			torch.cat([alpha_space, alpha_time], dim=1).unsqueeze(1)
+# 		)
+# 		residuals = 0.1 * torch.tanh(delta[:, 3:].view(-1, self.n_heads, 2))
+
+# 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+# 		gammas_sp = torch.clamp(gammas[:, :, 0], min=1e-3, max=50.0)
+# 		gammas_tm = torch.clamp(gammas[:, :, 1], min=1e-3, max=50.0)
+
+# 		# Multi-scale geometric RBF features
+# 		rbf_spatial = torch.exp(-gammas_sp * spatial_sq)
+# 		rbf_temporal = torch.exp(-gammas_tm * temporal_sq)
+# 		unit_dir_sp = pos_rel_sp / torch.sqrt(spatial_sq + 1e-4)
+		
+# 		rbf_edge_attr = torch.cat((
+# 			unit_dir_sp, rbf_spatial, rbf_temporal, pos_rel_tm
+# 		), dim=1)
+# 		edge_embed = self.edge_proj(rbf_edge_attr)
+
+# 		# Source content + geometry + support
+# 		value_embed = self.act_values(
+# 			self.film_values(self.f_values(x_j), embed_context)
+# 		)
+# 		value_embed = value_embed + edge_embed + self.f_support(support_j)
+
+# 		# Modulate source feature amplitude by reliability support score
+# 		support_gate = 0.5 + 0.5 * support_j[:, 3:4].clamp(0.0, 1.0)
+# 		value_embed = value_embed * support_gate
+
+# 		# Pure Geometric distance attention logits
+# 		distance_logits = (-gammas_sp * spatial_sq - gammas_tm * temporal_sq)
+
+# 		# Bounded content correction
+# 		source_score = 0.2 * torch.tanh(
+# 			self.film_score(self.f_feature_score(x_j), embed_context)
+# 		)
+
+# 		logits = distance_logits + source_score
+
+# 		# KNN BOUNDARY FADING (Safe -1e9 mask)
+# 		dist_4d_sq = spatial_sq + temporal_sq
+# 		max_dist_sq = scatter(dist_4d_sq, index, dim=0, reduce="max")[index] + 1e-6
+# 		fade_factor = (1.0 - (dist_4d_sq / max_dist_sq)).clamp(min=0.0)
+
+# 		log_fade = torch.where(
+# 			fade_factor < 1e-5,
+# 			torch.full_like(fade_factor, -1e9),
+# 			torch.log(fade_factor.clamp(min=1e-5))
+# 		)
+# 		logits = logits + log_fade
+
+# 		alpha_attn = softmax(logits, index)
+
+# 		head_values = (
+# 			alpha_attn.unsqueeze(-1) * value_embed.unsqueeze(1)
+# 		).reshape(-1, self.n_heads * self.n_latent)
+
+# 		# Track local support mass for continuous peak recovery
+# 		support_rel = support_j[:, 3:4].clamp(0.0, 1.0)
+# 		support_mass = alpha_attn * support_rel
+# 		support_sq = support_mass.square()
+
+# 		return torch.cat((
+# 			head_values,
+# 			alpha_attn.square(),
+# 			support_mass,
+# 			support_sq
+# 		), dim=1)
+
+# 	def update(self, aggr_out):
+# 		n_value = self.n_latent * self.n_heads
+# 		n_head = self.n_heads
+
+# 		agg_values = aggr_out[:, :n_value]
+# 		agg_alpha_sq = aggr_out[:, n_value:n_value + n_head]
+# 		agg_support = aggr_out[:, n_value + n_head:n_value + 2 * n_head]
+# 		agg_support_sq = aggr_out[:, n_value + 2 * n_head:n_value + 3 * n_head]
+
+# 		concentration = agg_alpha_sq.mean(dim=1, keepdim=True)
+# 		sparsity = (1.0 - concentration).clamp(0.0, 1.0)
+
+# 		support_mass = agg_support.mean(dim=1, keepdim=True).clamp(0.0, 1.0)
+
+# 		support_concentration = (
+# 			agg_support_sq.sum(dim=1, keepdim=True) /
+# 			(agg_support.sum(dim=1, keepdim=True).square() + 1e-6)
+# 		).clamp(0.0, 1.0)
+
+# 		support_sparsity = (1.0 - support_concentration).clamp(0.0, 1.0)
+
+# 		recovery = sparsity * support_sparsity * support_mass
+
+# 		return agg_values, recovery, support_mass
+
+# 	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t,
+# 				embed_context, support, k=16):
+# 		if self.use_fixed_edges and self.fixed_edges is not None:
+# 			edge_index, edge_attr = self.fixed_edges, self.edge_features
+# 		else:
+# 			edge_index, edge_attr = self._build_edge_attr(
+# 				x_query, x_context, x_query_t, x_context_t, k=k
+# 			)
+
+# 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+# 		interpolated, recovery, support_mass = self.propagate(
+# 			edge_index,
+# 			x=inpts,
+# 			support=support,
+# 			embed_context=ctx,
+# 			edge_attr=edge_attr,
+# 			size=(x_context.shape[0], x_query.shape[0])
+# 		)
+
+# 		# Bounded correction for continuous Gaussian peaks between samples
+# 		max_gain = 1.5 * self.f_max_gain_cap(ctx)
+# 		local_gain = 1.0 + max_gain * recovery
+# 		interpolated = interpolated * local_gain
+
+# 		# --- Correct forward() readout sequence ---
+# 		# 1. Project aggregated spatial features
+# 		out = self.proj(interpolated)
+		
+# 		# 2. Modulate features with context (adds beta)
+# 		out = self.film_readout(out, ctx)
+		
+# 		# 3. Non-linear activation
+# 		out = self.activate2(out)
+		
+# 		# 4. ABSOLUTE ZERO-FLOOR (Applied LAST)
+# 		# Multiplies both feature mass AND the FiLM beta shift by exact spatial/support mask
+# 		gate = self.spatial_gate(interpolated)
+# 		out = out * gate * support_mass 
+		
+# 		return out
+
+
+		# # Readout: Project aggregated spatial features directly
+		# out = self.proj(interpolated)
+
+		# # Modulate scale/amplitude via FiLM using global context
+		# out = self.film_readout(out, ctx)
+
+		# # Spatial gate enforces exact zero in empty space
+		# gate = self.spatial_gate(interpolated)
+		# out = out * gate * support_mass
+
+		# return self.activate2(out)
+
+
 class SpaceTimeAttention(MessagePassing):
 	"""Continuous 4D renderer from sparse source hypotheses.
 
-	Geometry strictly dictates spatial attention weights. Source features and 
-	reliability support modulate value payloads and continuous peak recovery.
+	Geometry strictly dictates spatial attention weights. Source support acts as an 
+	additive value channel and a final output validity floor.
 	"""
 
 	def __init__(self, inpt_dim, out_channels, n_dim=4, n_latent=16, embed_dim=10,
@@ -1400,12 +1660,11 @@ class SpaceTimeAttention(MessagePassing):
 		self.scale_rel = scale_rel
 		self.scale_time = scale_time
 
-		# Source value embedding
+		# Source value + support embedding
 		self.f_values = nn.Linear(inpt_dim, n_latent)
 		self.film_values = FiLM(embed_dim, n_latent)
 		self.act_values = nn.PReLU()
 
-		# Source support embedding (Transforms reliability stats into value channel)
 		self.f_support = nn.Sequential(
 			nn.Linear(support_dim, 8), nn.PReLU(), nn.Linear(8, n_latent)
 		)
@@ -1512,15 +1771,12 @@ class SpaceTimeAttention(MessagePassing):
 		), dim=1)
 		edge_embed = self.edge_proj(rbf_edge_attr)
 
-		# Source content + geometry + support
+		# Source content + geometry + support (Additive incorporation)
 		value_embed = self.act_values(
 			self.film_values(self.f_values(x_j), embed_context)
 		)
 		value_embed = value_embed + edge_embed + self.f_support(support_j)
-
-		# Modulate source feature amplitude by reliability support score
-		support_gate = 0.5 + 0.5 * support_j[:, 3:4].clamp(0.0, 1.0)
-		value_embed = value_embed * support_gate
+		# REMOVED: support_gate multiplication inside message() to eliminate quadratic dampening
 
 		# Pure Geometric distance attention logits
 		distance_logits = (-gammas_sp * spatial_sq - gammas_tm * temporal_sq)
@@ -1550,16 +1806,14 @@ class SpaceTimeAttention(MessagePassing):
 			alpha_attn.unsqueeze(-1) * value_embed.unsqueeze(1)
 		).reshape(-1, self.n_heads * self.n_latent)
 
-		# Track local support mass for continuous peak recovery
+		# Track local support mass for continuous peak recovery & final gating
 		support_rel = support_j[:, 3:4].clamp(0.0, 1.0)
 		support_mass = alpha_attn * support_rel
-		support_sq = support_mass.square()
 
 		return torch.cat((
 			head_values,
 			alpha_attn.square(),
-			support_mass,
-			support_sq
+			support_mass
 		), dim=1)
 
 	def update(self, aggr_out):
@@ -1569,21 +1823,14 @@ class SpaceTimeAttention(MessagePassing):
 		agg_values = aggr_out[:, :n_value]
 		agg_alpha_sq = aggr_out[:, n_value:n_value + n_head]
 		agg_support = aggr_out[:, n_value + n_head:n_value + 2 * n_head]
-		agg_support_sq = aggr_out[:, n_value + 2 * n_head:n_value + 3 * n_head]
 
+		# Spatial concentration and recovery
 		concentration = agg_alpha_sq.mean(dim=1, keepdim=True)
 		sparsity = (1.0 - concentration).clamp(0.0, 1.0)
-
 		support_mass = agg_support.mean(dim=1, keepdim=True).clamp(0.0, 1.0)
 
-		support_concentration = (
-			agg_support_sq.sum(dim=1, keepdim=True) /
-			(agg_support.sum(dim=1, keepdim=True).square() + 1e-6)
-		).clamp(0.0, 1.0)
-
-		support_sparsity = (1.0 - support_concentration).clamp(0.0, 1.0)
-
-		recovery = sparsity * support_sparsity * support_mass
+		# Simplified Peak Recovery: Boosts sparse spatial sampling without over-penalizing soft support
+		recovery = sparsity * support_mass
 
 		return agg_values, recovery, support_mass
 
@@ -1612,36 +1859,20 @@ class SpaceTimeAttention(MessagePassing):
 		local_gain = 1.0 + max_gain * recovery
 		interpolated = interpolated * local_gain
 
-		# --- Correct forward() readout sequence ---
-		# 1. Project aggregated spatial features
+		# Readout: Pure Spatial Aggregation
 		out = self.proj(interpolated)
-		
-		# 2. Modulate features with context (adds beta)
+
+		# FiLM Context Modulation
 		out = self.film_readout(out, ctx)
-		
-		# 3. Non-linear activation
+
+		# Non-linear activation BEFORE zero-floor gating
 		out = self.activate2(out)
-		
-		# 4. ABSOLUTE ZERO-FLOOR (Applied LAST)
-		# Multiplies both feature mass AND the FiLM beta shift by exact spatial/support mask
+
+		# ABSOLUTE ZERO-FLOOR (Applied LAST to kill FiLM beta shift in empty space)
 		gate = self.spatial_gate(interpolated)
-		out = out * gate * support_mass 
-		
+		out = out * gate * support_mass
+
 		return out
-
-
-		# # Readout: Project aggregated spatial features directly
-		# out = self.proj(interpolated)
-
-		# # Modulate scale/amplitude via FiLM using global context
-		# out = self.film_readout(out, ctx)
-
-		# # Spatial gate enforces exact zero in empty space
-		# gate = self.spatial_gate(interpolated)
-		# out = out * gate * support_mass
-
-		# return self.activate2(out)
-
 
 
 
