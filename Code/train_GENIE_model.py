@@ -5417,7 +5417,7 @@ for batch_idx, inputs in enumerate(loader):
 		
 		        proj_coords = torch.cat((
 		            ftrns1_diff(X_query[i0].to(device)) / 1000.0,
-		            scale_time * X_query[i0, 3:4].to(device)
+		            scale_time * X_query[i0][:, 3:4].to(device)
 		        ), dim=1)[ifind_positive]
 		
 		        n_center = len(ifind_positive)
