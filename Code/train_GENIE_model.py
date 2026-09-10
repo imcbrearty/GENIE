@@ -5535,7 +5535,7 @@ for batch_idx, inputs in enumerate(loader):
 				(cos_sim < 0.0)
 			)
 
-			if valley.any(): ## valley.sum() >= 4 ## Change this to require at least some number of pairs
+			if valley.sum() >= 4: ## valley.any() ##  valley.sum() >= 4 ## Change this to require at least some number of pairs
 
 				target_drop = torch.cat((
 					ya[valley] - yc[valley],
