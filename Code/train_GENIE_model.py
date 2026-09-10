@@ -452,6 +452,7 @@ use_preferential_sampling = train_config['use_preferential_sampling']
 use_shallow_sources = train_config['use_shallow_sources']
 use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
+min_sta_ref = int(n_sta_range[0]*len(locs))
 
 
 def WGS84_radii_of_curvature(lat_rad, a=6378137.0, f=1.0 / 298.257223563):
@@ -3933,7 +3934,7 @@ class EMAMassCharbonnierLoss(nn.Module):
 		# ------------------------------------------------------------
 		ema_include_empty=False, # True
 		initialize_mass = True,
-		initialize_mass_buffer = 100,
+		initialize_mass_buffer = 30,
 		loss_name = 'base'
 
 	):
@@ -4946,7 +4947,7 @@ loss_charbonnier_assoc = EMAMassCharbonnierLoss(
 	peak_boost=10.0,
 	momentum=0.001,
 	foreground_weight=1.0,
-	background_weight=8.0,
+	background_weight=3.0,
 	foreground_threshold=0.01,
 	empty_batch_weight=1.0,
 	normalize_by_ema=True,
@@ -5266,11 +5267,17 @@ for batch_idx, inputs in enumerate(loader):
 
 		# ==================== 1. REGRESSION / AMPLITUDE LOSSES ====================
 		if use_regression_loss:
+
+			## Normalize association loss by reference station count
+			N_stations_sample = pick_lbls.shape[1]
+			assoc_loss_scale = 1.0 + torch.log(torch.tensor(max(1.0, N_stations_sample / min_sta_ref), device = device))
+
 			# Uncapped baselines
 			loss_reg_query = weights[1] * loss_charbonnier_source(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], update_ema = True)
 			loss_reg_base = weights[0] * loss_charbonnier_base(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]], update_ema = True)
-			loss_reg_assoc_P = weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
-			loss_reg_assoc_S = weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
+			loss_reg_assoc_P = (assoc_loss_scale / N_stations_sample) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
+			loss_reg_assoc_S = (assoc_loss_scale / N_stations_sample) * weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
+			# loss_reg_assoc_P *= assoc_loss_scale
 
 			loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch_valid
 			loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch_valid
@@ -5685,16 +5692,14 @@ for batch_idx, inputs in enumerate(loader):
 		# optimizer.zero_grad()
 
 
-
-
-
-
 	use_grad_norm = False
 	if use_grad_norm == True:
 		torch.nn.utils.clip_grad_norm_(mz.parameters(), max_norm = 5.0)
 
 
-	optimizer.step()
+	if (loss_charbonnier_source.initialize_mass == False) and (loss_charbonnier_assoc.initialize_mass == False):
+		optimizer.step()
+
 	losses[i] = loss_val
 	mx_trgt_1[i] = mx_trgt_val_1/n_batch_valid
 	mx_trgt_2[i] = mx_trgt_val_2/n_batch_valid
