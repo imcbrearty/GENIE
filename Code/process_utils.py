@@ -3120,6 +3120,137 @@ def competitive_assignment(w, sta_inds, cost, min_val = 0.02, restrict = None, f
 
 	return assignments, sources_active
 
+
+import numpy as np
+import scipy.sparse as sp
+from scipy.optimize import milp, LinearConstraint, Bounds
+from time import time
+
+def competitive_assignment_sparse(w, sta_inds, cost, min_val=0.02, restrict=None, force_n_sources=None, verbose=False):
+    if verbose:
+        start_time = time()
+
+    n_phases = len(w)
+    n_srcs, n_arvs = w[0].shape
+    unique_stations = np.unique(sta_inds)
+    n_unique_stations = len(unique_stations)
+
+    # 1. Sparse Candidate Harvesting (Drop weak couplings early)
+    # Collect tuples: (phase_idx, src_idx, arv_idx, weight)
+    cand_p, cand_s, cand_a, cand_w = [], [], [], []
+    for p in range(n_phases):
+        s_idx, a_idx = np.where(w[p] >= min_val)
+        cand_p.extend([p] * len(s_idx))
+        cand_s.extend(s_idx)
+        cand_a.extend(a_idx)
+        cand_w.extend(w[p][s_idx, a_idx])
+
+    n_cand = len(cand_w)
+    if n_cand == 0:
+        return [], np.array([])
+
+    cand_p = np.array(cand_p)
+    cand_s = np.array(cand_s)
+    cand_a = np.array(cand_a)
+    cand_w = np.array(cand_w)
+
+    # Variables: x = [edge_variables (n_cand), source_activations (n_srcs)]
+    n_vars = n_cand + n_srcs
+
+    # Objective: Minimize (-1 * weights * edges + cost * sources)
+    c = np.zeros(n_vars)
+    c[:n_cand] = -cand_w
+    c[n_cand:] = cost
+
+    rows, cols, data = [], [], []
+    b_upper, b_lower = [], []
+    row_idx = 0
+
+    # Constraint 1: Each arrival assigned to <= 1 candidate edge
+    for a in range(n_arvs):
+        edge_indices = np.where(cand_a == a)[0]
+        if len(edge_indices) > 0:
+            rows.extend([row_idx] * len(edge_indices))
+            cols.extend(edge_indices)
+            data.extend([1.0] * len(edge_indices))
+            b_upper.append(1.0)
+            b_lower.append(-np.inf)
+            row_idx += 1
+
+    # Constraint 2: Each station has <= 1 phase per active source
+    for st in unique_stations:
+        arvs_at_st = np.where(sta_inds == st)[0]
+        for s in range(n_srcs):
+            for p in range(n_phases):
+                edge_indices = np.where((cand_s == s) & (cand_p == p) & np.isin(cand_a, arvs_at_st))[0]
+                if len(edge_indices) > 0:
+                    rows.extend([row_idx] * len(edge_indices))
+                    cols.extend(edge_indices)
+                    data.extend([1.0] * len(edge_indices))
+                    b_upper.append(1.0)
+                    b_lower.append(-np.inf)
+                    row_idx += 1
+
+    # Constraint 3: Source activation trigger (sum(edges_for_source_s) - M * y_s <= 0)
+    activation_term = -n_phases * n_unique_stations
+    for s in range(n_srcs):
+        edge_indices = np.where(cand_s == s)[0]
+        if len(edge_indices) > 0:
+            rows.extend([row_idx] * (len(edge_indices) + 1))
+            cols.extend(edge_indices)
+            data.extend([1.0] * len(edge_indices))
+            
+            # Activation variable
+            cols.append(n_cand + s)
+            data.append(activation_term)
+
+            b_upper.append(0.0)
+            b_lower.append(-np.inf)
+            row_idx += 1
+
+    # Optional Constraints: Restrictions
+    if restrict is not None:
+        for pair in restrict:
+            rows.extend([row_idx, row_idx])
+            cols.extend([n_cand + pair[0], n_cand + pair[1]])
+            data.extend([1.0, 1.0])
+            b_upper.append(1.0)
+            b_lower.append(-np.inf)
+            row_idx += 1
+
+    # Build Sparse Matrix A
+    A_sparse = sp.coo_matrix((data, (rows, cols)), shape=(row_idx, n_vars)).tocsc()
+    constraints = LinearConstraint(A_sparse, b_lower, b_upper)
+    integrality = np.ones(n_vars)  # All variables integer (0-1)
+    bounds = Bounds(0, 1)
+
+    # Solve MILP via HiGHS solver
+    res = milp(c=c, integrality=integrality, constraints=constraints, bounds=bounds)
+
+    assert res.success, f"MILP Optimization failed: {res.status}"
+    solution = np.round(res.x)
+
+    # Parse Active Sources & Assignments
+    active_sources = np.where(solution[n_cand:] > 0)[0]
+    active_edge_indices = np.where(solution[:n_cand] > 0)[0]
+
+    assignments = []
+    for s in active_sources:
+        src_assignments = []
+        for p in range(n_phases):
+            p_edges = active_edge_indices[
+                (cand_s[active_edge_indices] == s) & (cand_p[active_edge_indices] == p)
+            ]
+            src_assignments.append(cand_a[p_edges])
+        assignments.append(src_assignments)
+
+    if verbose:
+        print(f"Competitive assignment finished in {time() - start_time:.2f}s")
+        print(f"Inferred {len(active_sources)} active sources.")
+
+    return assignments, active_sources
+
+
 def competitive_assignment_split(w, sta_inds, cost, min_val = 0.02, restrict = None, force_n_sources = None, verbose = False):
 
 	# w is the edges, or weight matrix between sources and arrivals.
