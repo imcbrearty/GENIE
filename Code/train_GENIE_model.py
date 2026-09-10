@@ -3908,8 +3908,8 @@ class EMAMassCharbonnierLoss(nn.Module):
 		peak_boost=10.0,
 		momentum=0.001,
 		eps=1e-4,
-		default_mass=1.0,
-		min_mass=0.01,
+		default_mass=0.1, # 1.0
+		min_mass=1e-5, # 0.01
 		device=device,
 
 		# ------------------------------------------------------------
@@ -3931,7 +3931,11 @@ class EMAMassCharbonnierLoss(nn.Module):
 		# Recommended for measuring the actual dataset/query
 		# distribution.
 		# ------------------------------------------------------------
-		ema_include_empty=True,
+		ema_include_empty=False, # True
+		initialize_mass = True,
+		initialize_mass_buffer = 100,
+		loss_name = 'base'
+
 	):
 		super().__init__()
 
@@ -3947,6 +3951,10 @@ class EMAMassCharbonnierLoss(nn.Module):
 
 		self.normalize_by_ema = normalize_by_ema
 		self.ema_include_empty = ema_include_empty
+		self.initialize_mass = initialize_mass
+		self.initialize_mass_buffer = initialize_mass_buffer
+		self.mass_buffer = []
+		self.loss_name = loss_name
 
 		# ============================================================
 		# EMA statistics
@@ -3997,14 +4005,66 @@ class EMAMassCharbonnierLoss(nn.Module):
 		self._pending_assoc_mass = None
 		self._pending_assoc_fg_fraction = None
 
+	# def _ema_update(self, buffer, value):
+	# 	"""
+	# 	Update an EMA buffer without tracking gradients.
+	# 	"""
+	# 	scale_momentum = 1.0
+	# 	# pdb.set_trace()
+
+	# 	# if self.initialize_mass == False:
+	# 	if (self.initialize_mass == True)*(self.running_target_mass == buffer):
+
+	# 		self.mass_buffer.append(value.detach())
+	# 		if len(self.mass_buffer) == 1:
+	# 			buffer.copy_(value.detach())
+	# 			scale_momentum = 0.0
+	# 		elif len(self.mass_buffer) >= self.initialize_mass_buffer:
+	# 			buffer.copy_(torch.mean(torch.tensor(self.mass_buffer, device = self.running_target_mass.device)))
+	# 			self.initialize_mass = False
+	# 			scale_momentum = 0.0
+	# 			print('Finished initializing mass: %0.5f (%s)'%(buffer, self.loss_name))
+	# 		else:
+	# 			scale_momentum = 5.0
+
+	# 	with torch.no_grad():
+	# 		buffer.mul_(1.0 - scale_momentum * self.momentum).add_(
+	# 			scale_momentum * self.momentum * value.detach()
+	# 		)
+
 	def _ema_update(self, buffer, value):
-		"""
-		Update an EMA buffer without tracking gradients.
-		"""
-		with torch.no_grad():
-			buffer.mul_(1.0 - self.momentum).add_(
-				self.momentum * value.detach()
-			)
+	    """
+	    Update EMA buffers safely using copy_().
+	    Only warmup/buffer initialization applies to running_target_mass.
+	    """
+	    with torch.no_grad():
+	        val = value.detach()
+
+	        # 1. Warmup logic ONLY applies to running_target_mass
+	        if buffer is self.running_target_mass and self.initialize_mass:
+	            self.mass_buffer.append(val)
+
+	            if len(self.mass_buffer) == 1:
+	                buffer.copy_(val)
+	                return
+	            elif len(self.mass_buffer) >= self.initialize_mass_buffer:
+	                # Set initial mass to the average of the first N non-empty micro-batches
+	                stacked_mass = torch.stack(self.mass_buffer)
+	                buffer.copy_(stacked_mass.mean())
+	                self.initialize_mass = False
+	                self.mass_buffer.clear() # Clear list to free GPU/host memory
+	                print(f"Finished initializing target mass: {buffer.item():.5f} ({self.loss_name})")
+	                return
+	            else:
+	                # Use a faster learning rate during initial warmup
+	                scale_momentum = 5.0
+	        else:
+	            scale_momentum = 1.0
+
+	        # 2. Compute out-of-place and copy into buffer
+	        m = scale_momentum * self.momentum
+	        updated_val = (1.0 - m) * buffer + m * val
+	        buffer.copy_(updated_val)
 
 	def forward(
 		self,
@@ -4022,6 +4082,7 @@ class EMAMassCharbonnierLoss(nn.Module):
 
 		# None, "P", or "S"
 		ema_group=None,
+		peak_reference=None
 	):
 		pred = pred.float()
 		target = target.float()
@@ -4080,9 +4141,14 @@ class EMAMassCharbonnierLoss(nn.Module):
 
 		if apply_peak_weight:
 
+			if peak_reference is None:
+				peak_reference = target_abs
+			else:
+				peak_reference = peak_reference.abs()
+
 			weight_map = (
 				1.0
-				+ (self.peak_boost - 1.0) * target_abs
+				+ (self.peak_boost - 1.0) * peak_reference
 			)
 
 		else:
@@ -4122,7 +4188,7 @@ class EMAMassCharbonnierLoss(nn.Module):
 		pointwise_loss = torch.sqrt(
 			weight_map * diff.square()
 			+ self.eps ** 2
-		)
+		) - self.eps
 
 		# ============================================================
 		# Foreground / background classification
@@ -4140,12 +4206,21 @@ class EMAMassCharbonnierLoss(nn.Module):
 		# Dataset statistics
 		# ============================================================
 
-		batch_size = target.shape[0]
+		## Previous mass estimate
+		# batch_size = target.shape[0]
+
+		# # Average target mass per sample/query.
+		# current_mass = (
+		# 	target_abs.sum() / batch_size
+		# )
+
+		# batch_size = target.shape[0]
 
 		# Average target mass per sample/query.
-		current_mass = (
-			target_abs.sum() / batch_size
-		)
+		current_mass = target_abs.mean() # (
+			# target_abs.mean() # / batch_size
+		# )
+
 
 		# Fraction of individual target elements containing
 		# meaningful Gaussian signal.
@@ -4531,7 +4606,7 @@ if use_model_ema == True:
 	mz_ema.load_state_dict(mz.state_dict())
 	model_ema = 0.99
 	for p in mz_ema.parameters():
-	    p.requires_grad = False
+		p.requires_grad = False
 
 
 np.random.seed() ## randomize seed
@@ -4841,6 +4916,19 @@ DiceLoss = GaussianDiceLoss() ## Can change the bg_weight
 # )
 
 
+loss_charbonnier_base = EMAMassCharbonnierLoss(
+	peak_boost=3.0,
+	momentum=0.001,
+	foreground_weight=1.0,
+	background_weight=1.0,
+	foreground_threshold=0.01,
+	empty_batch_weight=0.25,
+	normalize_by_ema=True,
+	ema_include_empty=True,
+	loss_name = 'base'
+)
+
+
 loss_charbonnier_source = EMAMassCharbonnierLoss(
 	peak_boost=10.0,
 	momentum=0.001,
@@ -4850,19 +4938,20 @@ loss_charbonnier_source = EMAMassCharbonnierLoss(
 	empty_batch_weight=1.0,
 	normalize_by_ema=True,
 	ema_include_empty=True,
+	loss_name = 'source'
 )
-
 
 
 loss_charbonnier_assoc = EMAMassCharbonnierLoss(
 	peak_boost=10.0,
 	momentum=0.001,
 	foreground_weight=1.0,
-	background_weight=5.0,
+	background_weight=8.0,
 	foreground_threshold=0.01,
 	empty_batch_weight=1.0,
 	normalize_by_ema=True,
 	ema_include_empty=True,
+	loss_name = 'assoc'
 )
 
 
@@ -4914,6 +5003,7 @@ for batch_idx, inputs in enumerate(loader):
 
 
 	ramp_aux = get_step_ramp(i, start_step = int(n_epochs/10), ramp_steps = int(1*n_epochs/5))
+	ramp_main = get_step_ramp(i, start_step = 0, ramp_steps = int(n_epochs/10))
 
 
 	if (i == n_restart_step)*(n_restart == True):
@@ -4924,6 +5014,7 @@ for batch_idx, inputs in enumerate(loader):
 
 		optimizer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(n_restart_step, n_ver), map_location = device))
 		checkpoint = torch.load(write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver), map_location = device)
+		loss_charbonnier_base.load_state_dict(checkpoint["loss_base_state_dict"])	
 		loss_charbonnier_source.load_state_dict(checkpoint["loss_source_state_dict"])	
 		loss_charbonnier_assoc.load_state_dict(checkpoint["loss_assoc_state_dict"])
 		zlosses = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_restart_step, n_ver))
@@ -4947,7 +5038,7 @@ for batch_idx, inputs in enumerate(loader):
 			torch.save(mz_ema.state_dict(), write_training_file + 'trained_gnn_model_step_ema_%d_ver_%d.h5'%(i, n_ver))
 		torch.save(optimizer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(i, n_ver))
 		np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
-		checkpoint = {"loss_source_state_dict": loss_charbonnier_source.state_dict(), "loss_assoc_state_dict": loss_charbonnier_assoc.state_dict()}
+		checkpoint = {"loss_source_state_dict": loss_charbonnier_source.state_dict(), "loss_assoc_state_dict": loss_charbonnier_assoc.state_dict(), 'loss_base_state_dict': loss_charbonnier_base.state_dict()}
 		# "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "epoch": epoch, "global_step": global_step,
 		torch.save(checkpoint, write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver))
 		print('saved model %s %d'%(n_ver, i))
@@ -4995,9 +5086,9 @@ for batch_idx, inputs in enumerate(loader):
 	weight_assoc_v = []
 	for j in range(n_batch):
 
-		rand_mask_ratio = 0.5
+		rand_mask_ratio = 0.25 # 0.5
 		if (use_real_data_sample_v[j] == True)*(np.random.rand() < rand_mask_ratio):
-			weight_assoc = 0.5 # else 1.0
+			weight_assoc = 0.75 # 0.5 # else 1.0
 			## Only use labels within ~3 std of the sources
 
 			mask_lbls = torch.zeros(num_fixed[j],1).to(device)
@@ -5007,15 +5098,15 @@ for batch_idx, inputs in enumerate(loader):
 			if len(lp_srcs[j]) > 0:
 
 				dist_srcs = ((np.linalg.norm(np.expand_dims(X_fixed_cart[j].cpu().detach().numpy()[:,0:3], axis = 0) - np.expand_dims(ftrns1(lp_srcs[j].cpu().detach().numpy()[:,0:3]), axis = 1), axis = 2) / src_x_kernel) < 5)
-				dist_srcs_t = ((np.abs(np.expand_dims(X_fixed_t[j].cpu().detach().numpy().reshape(-1,1), axis = 0) - np.expand_dims(lp_srcs[j].cpu().detach().numpy()[:,[3]], axis = 1)) / src_t_kernel) < 3)[:,:,0]
+				dist_srcs_t = ((np.abs(np.expand_dims(X_fixed_t[j].cpu().detach().numpy().reshape(-1,1), axis = 0) - np.expand_dims(lp_srcs[j].cpu().detach().numpy()[:,[3]], axis = 1)) / src_t_kernel) < 5)[:,:,0]
 				mask_lbls[np.where((dist_srcs*dist_srcs_t).max(0) > 0)[0]] = 1.0
 
 				dist_srcs = ((np.linalg.norm(np.expand_dims(ftrns1(X_query[j].cpu().detach().numpy()[:,0:3]), axis = 0) - np.expand_dims(ftrns1(lp_srcs[j].cpu().detach().numpy()[:,0:3]), axis = 1), axis = 2) / src_x_kernel) < 5)
-				dist_srcs_t = ((np.abs(np.expand_dims(X_query[j].cpu().detach().numpy()[:,[3]], axis = 0) - np.expand_dims(lp_srcs[j].cpu().detach().numpy()[:,[3]], axis = 1)) / src_t_kernel) < 3)[:,:,0]
+				dist_srcs_t = ((np.abs(np.expand_dims(X_query[j].cpu().detach().numpy()[:,[3]], axis = 0) - np.expand_dims(lp_srcs[j].cpu().detach().numpy()[:,[3]], axis = 1)) / src_t_kernel) < 5)[:,:,0]
 				mask_lbls_query[np.where((dist_srcs*dist_srcs_t).max(0) > 0)[0]] = 1.0
 			
 				dist_srcs = ((np.linalg.norm(np.expand_dims(x_src_query_cart_l[j].cpu().detach().numpy()[:,0:3], axis = 0) - np.expand_dims(ftrns1(lp_srcs[j].cpu().detach().numpy()[:,0:3]), axis = 1), axis = 2) / src_x_kernel) < 5)
-				dist_srcs_t = ((np.abs(np.expand_dims(tq_sample[j].reshape(-1,1), axis = 0) - np.expand_dims(lp_srcs[j].cpu().detach().numpy()[:,[3]], axis = 1)) / src_t_kernel) < 3)[:,:,0]
+				dist_srcs_t = ((np.abs(np.expand_dims(tq_sample[j].reshape(-1,1), axis = 0) - np.expand_dims(lp_srcs[j].cpu().detach().numpy()[:,[3]], axis = 1)) / src_t_kernel) < 5)[:,:,0]
 				mask_lbls_assoc_query[np.where((dist_srcs*dist_srcs_t).max(0) > 0)[0]] = 1.0
 
 			mask_lbls_lv.append(mask_lbls)
@@ -5052,6 +5143,7 @@ for batch_idx, inputs in enumerate(loader):
 	loss_reg_asc_val = 0.0
 	loss_negative_val = 0.0
 	loss_relative_val = 0.0
+	loss_saddle_val = 0.0
 
 	n_batch_valid = sum([len(lp_times[i0]) > 0 for i0 in range(n_batch)])
 	
@@ -5176,7 +5268,7 @@ for batch_idx, inputs in enumerate(loader):
 		if use_regression_loss:
 			# Uncapped baselines
 			loss_reg_query = weights[1] * loss_charbonnier_source(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], update_ema = True)
-			loss_reg_base = weights[0] * loss_charbonnier_source(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]])
+			loss_reg_base = weights[0] * loss_charbonnier_base(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]], update_ema = True)
 			loss_reg_assoc_P = weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
 			loss_reg_assoc_S = weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
 
@@ -5202,9 +5294,9 @@ for batch_idx, inputs in enumerate(loader):
 
 		if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
 
-			min_up_sample = 0.1
-			min_safe_dist_m = 3.0 * src_x_kernel
-			min_safe_t_s = 3.0 * src_t_kernel
+			min_up_sample = 0.05 # 0.1
+			min_safe_dist_m = 2.5 * src_x_kernel # 3.0
+			min_safe_t_s = 2.5 * src_t_kernel # 3.0
 
 			queries_np = X_query[i0].cpu().detach().numpy() # [N, 4]
 			sources_np = lp_srcs[i0].cpu().detach().numpy() # [M, 4]
@@ -5267,7 +5359,8 @@ for batch_idx, inputs in enumerate(loader):
 				# raw_loss_negative = gaussian_heatmap_loss(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final])
 				# loss_negative = weights[1] * charbonnier_loss(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final])
 				loss_negative = loss_charbonnier_source(out_query[neg_mask_final], lbls_query_tensor[neg_mask_final], 
-					apply_peak_weight = False, apply_fg_bg_balance = False, apply_normalize = False, update_ema = False)
+					apply_peak_weight = False, apply_fg_bg_balance = True, apply_normalize = True, update_ema = False)
+					# apply_peak_weight = False, apply_fg_bg_balance = False, apply_normalize = False, update_ema = False)
 				loss_negative_val += loss_negative.item() / n_batch_valid
 				computed_negative_loss = True
 
@@ -5277,23 +5370,194 @@ for batch_idx, inputs in enumerate(loader):
 				# update_ema=False,
 		
 
-		# ==================== 4. RELATIVE LOSS ===================== #
-		loss_rel = torch.Tensor([0.0]).to(device)
+		# # ==================== 4. RELATIVE LOSS ===================== #
+		# loss_rel = torch.Tensor([0.0]).to(device)
+		# computed_relative_loss = False
+		# if (use_relative_loss == True)*(ramp_aux > 0):
+		# 	k_nearest_query = 30
+		# 	ifind_positive = torch.where(Lbls_query[i0].squeeze() > 0.1)[0].to(device)
+		# 	if len(ifind_positive) > int(k_nearest_query/10):
+		# 		proj_coords = torch.cat((ftrns1_diff(X_query[i0].to(device))/1000.0, scale_time*X_query[i0][:,3:4].to(device)), dim = 1)[ifind_positive]
+		# 		edges_query = ifind_positive[remove_self_loops(knn(proj_coords, proj_coords, k = min(k_nearest_query, len(ifind_positive) - 1)))[0]] # .flip(0).contiguous()
+		# 		trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
+		# 		pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
+		# 		weight_rel = 0.25 + 0.75*torch.exp(-torch.abs(trgt_rel)/0.35)
+		# 		# loss_rel = weights[1] * charbonnier_loss(pred_rel, trgt_rel, weight = weight_rel)
+		# 		loss_rel = loss_charbonnier_source(pred_rel, trgt_rel, sample_weight = weight_rel, 
+		# 			apply_peak_weight = False, apply_fg_bg_balance=False, apply_normalize = False, update_ema = False)
+		# 		loss_relative_val += loss_rel.item() / n_batch_valid
+		# 		computed_relative_loss = True
+
+
+		# ==================== 4. RELATIVE + SADDLE LOSS ==================== #
+		loss_rel = torch.tensor(0.0, device=device)
+		loss_saddle = torch.tensor(0.0, device=device)
+
 		computed_relative_loss = False
-		if (use_relative_loss == True)*(ramp_aux > 0):
-			k_nearest_query = 30
-			ifind_positive = torch.where(Lbls_query[i0].squeeze() > 0.1)[0].to(device)
-			if len(ifind_positive) > int(k_nearest_query/10):
-				proj_coords = torch.cat((ftrns1_diff(X_query[i0].to(device))/1000.0, scale_time*X_query[i0][:,3:4].to(device)), dim = 1)[ifind_positive]
-				edges_query = ifind_positive[remove_self_loops(knn(proj_coords, proj_coords, k = min(k_nearest_query, len(ifind_positive) - 1)))[0]] # .flip(0).contiguous()
-				trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
-				pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
-				weight_rel = 0.25 + 0.75*torch.exp(-torch.abs(trgt_rel)/0.35)
-				# loss_rel = weights[1] * charbonnier_loss(pred_rel, trgt_rel, weight = weight_rel)
-				loss_rel = loss_charbonnier_source(pred_rel, trgt_rel, sample_weight = weight_rel, 
-					apply_peak_weight = False, apply_fg_bg_balance=False, apply_normalize = False, update_ema = False)
-				loss_relative_val += loss_rel.item() / n_batch_valid
-				computed_relative_loss = True
+		computed_saddle_loss = False
+
+		if use_relative_loss and ramp_aux > 0.0:
+
+			k_nearest_query = 50
+
+			ifind_positive = torch.where(
+				Lbls_query[i0].squeeze() > 0.01
+			)[0].to(device)
+
+			if len(ifind_positive) > 2:
+
+				proj_coords = torch.cat((
+					ftrns1_diff(X_query[i0].to(device)) / 1000.0,
+					scale_time * X_query[i0, 3:4].to(device)
+				), dim=1)[ifind_positive]
+
+				n_center = len(ifind_positive)
+				k = min(k_nearest_query, n_center - 1)
+
+			edge_index_full = knn(
+				proj_coords,
+				proj_coords,
+				k=k + 1,
+			)
+
+			src, dst = edge_index_full
+
+			# Make neighbor rows explicitly grouped by center.
+			order = torch.argsort(src)
+			src = src[order]
+			dst = dst[order]
+
+			# Remove self edges explicitly.
+			non_self = src != dst
+			src = src[non_self]
+			dst = dst[non_self]
+
+			# After removing self, each center should have k neighbors.
+			k_actual = dst.shape[0] // n_center
+
+			neighbors_local = dst.view(n_center, k_actual)
+
+			src_local = torch.arange(
+				n_center, device=device
+			).repeat_interleave(k_actual)
+
+			dst_local = neighbors_local.reshape(-1)
+
+			src_idx = ifind_positive[src_local]
+			dst_idx = ifind_positive[dst_local]
+
+			y = Lbls_query[i0].to(device)[:, 0]
+			p = out[1][:, 0]
+
+			# ============================================================
+			# Pairwise relative loss
+			# ============================================================
+			y0, y1 = y[src_idx], y[dst_idx]
+			p0, p1 = p[src_idx], p[dst_idx]
+
+			target_rel = y0 - y1
+			pred_rel = p0 - p1
+
+			weight_rel = (
+				0.5
+				+ 0.5 * torch.minimum(y0.abs(), y1.abs())
+				+ 0.5 * target_rel.abs()
+			)
+			weight_rel = weight_rel / weight_rel.mean().clamp_min(1e-6)
+
+			peak_reference_rel = 0.5 * (y0.abs() + y1.abs())
+
+			loss_rel = loss_charbonnier_source(
+				pred_rel,
+				target_rel,
+				sample_weight=weight_rel,
+				apply_peak_weight=True,
+				peak_reference=peak_reference_rel,
+				apply_fg_bg_balance=False,
+				apply_normalize=True,
+				update_ema=False,
+			)
+
+			loss_relative_val += loss_rel.item() / n_batch_valid
+			computed_relative_loss = True
+
+			# ============================================================
+			# Saddle / trough loss
+			# ============================================================
+			# Randomly shuffle neighbors independently within each center
+			perm = torch.argsort(
+				torch.rand_like(neighbors_local.float()), dim=1
+			)
+			neighbors_shuffled = neighbors_local.gather(1, perm)
+
+			n_pair = k_actual // 2
+
+			a_local = neighbors_shuffled[:, 0:2*n_pair:2].reshape(-1)
+			b_local = neighbors_shuffled[:, 1:2*n_pair:2].reshape(-1)
+			c_local = torch.arange(
+				n_center, device=device
+			).repeat_interleave(n_pair)
+
+			# Convert local -> original query indices
+			a_idx = ifind_positive[a_local]
+			b_idx = ifind_positive[b_local]
+			c_idx = ifind_positive[c_local]
+
+			yc, ya, yb = y[c_idx], y[a_idx], y[b_idx]
+			pc, pa, pb = p[c_idx], p[a_idx], p[b_idx]
+
+			# Opposing directions around center
+			dir_a = proj_coords[a_local] - proj_coords[c_local]
+			dir_b = proj_coords[b_local] - proj_coords[c_local]
+
+			cos_sim = (
+				torch.sum(dir_a * dir_b, dim=1)
+				/ (
+					torch.norm(dir_a, dim=1)
+					* torch.norm(dir_b, dim=1)
+					+ 1e-6
+				)
+			)
+
+			valley = (
+				(yc > 0.01) &
+				(ya > 0.1) &
+				(yb > 0.1) &
+				(yc < ya) &
+				(yc < yb) &
+				(cos_sim < 0.0)
+			)
+
+			if valley.any():
+
+				target_drop = torch.cat((
+					ya[valley] - yc[valley],
+					yb[valley] - yc[valley],
+				))
+
+				pred_drop = torch.cat((
+					pa[valley] - pc[valley],
+					pb[valley] - pc[valley],
+				))
+
+				peak_reference_saddle = torch.cat((
+					ya[valley].abs(),
+					yb[valley].abs(),
+				))
+
+				loss_saddle = loss_charbonnier_source(
+					pred_drop,
+					target_drop,
+					apply_peak_weight=True,
+					peak_reference=peak_reference_saddle,
+					apply_fg_bg_balance=False,
+					apply_normalize=True,
+					update_ema=False,
+				)
+
+				loss_saddle_val += loss_saddle.item() / n_batch_valid
+				computed_saddle_loss = True
+
 
 
 		# ==================== 5. CONSISTENCY LOSS ====================
@@ -5353,14 +5617,17 @@ for batch_idx, inputs in enumerate(loader):
 		# 	loss_dict['aux_consistency'] = ramp_aux * raw_loss_consistency
 
 
-		loss = 1.0*(loss_reg_query + loss_reg_base + loss_reg_assoc_P + loss_reg_assoc_S)
+		loss = 1.0*(loss_reg_base + ramp_main*loss_reg_query + ramp_main*loss_reg_assoc_P + ramp_main*loss_reg_assoc_S)
 		# loss += 0.1*(loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
 
 		if computed_negative_loss == True:
 			loss += 0.3 * ramp_aux * weights[1] * loss_negative
 
 		if computed_relative_loss == True:
-			loss += 0.05 * ramp_aux * weights[1] * loss_rel
+			loss += 0.08 * ramp_aux * weights[1] * loss_rel
+
+		if computed_saddle_loss == True:
+			loss += 0.02 * ramp_aux * weights[1] * loss_saddle
 
 		if use_dice_loss == True:
 			# loss += 0.05 * (loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
