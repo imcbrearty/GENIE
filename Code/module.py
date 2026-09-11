@@ -2314,7 +2314,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		ndim_mask=1,
 		embed_dim=10,
 		n_gammas=3, # 4
-		baseline_gate=0.01,
+		baseline_gate=0.001, # 0.01
 	):
 		super(BipartiteGraphReadOutOperator, self).__init__()
 
