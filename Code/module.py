@@ -4069,9 +4069,12 @@ class GCN_Detection_Network_extended(nn.Module):
 		x_src = []
 		x = self.proj_soln2(x)
 		
-		slope_width = 0.1
-		mask_p_thresh = 0.1
-		mask_out = torch.relu(y - mask_p_thresh)
+		# slope_width = 0.1
+		# mask_p_thresh = 0.1
+		# mask_out = torch.relu(y - mask_p_thresh)
+		# Replaces: mask_out = torch.relu(y - mask_p_thresh)
+		# Smooth, differentiable soft gate (centered at 0.05, temperature 0.025)
+		mask_out = y * torch.sigmoid((y - 0.05) / 0.025)
 		
 		if mask_out.dim() == 1:
 		    mask_out = mask_out.unsqueeze(-1)
@@ -4289,9 +4292,10 @@ class GCN_Detection_Network_extended(nn.Module):
 		x_src = []
 		x = self.proj_soln2(x)
 		
-		slope_width = 0.1
-		mask_p_thresh = 0.1
-		mask_out = torch.relu(y - mask_p_thresh)
+		# slope_width = 0.1
+		# mask_p_thresh = 0.1
+		# mask_out = torch.relu(y - mask_p_thresh)
+		mask_out = y * torch.sigmoid((y - 0.05) / 0.025)
 		
 		if mask_out.dim() == 1:
 		    mask_out = mask_out.unsqueeze(-1)
