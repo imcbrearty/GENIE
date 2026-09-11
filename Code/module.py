@@ -219,7 +219,11 @@ class DataAggregationExpanded(nn.Module):
 		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37, n_hidden)
 		self.film_init = FiLM(embed_dim, n_hidden)
 		self.act_init = nn.PReLU()
-
+					 
+		# # Calculate feature dimensions dynamically
+		# main_in_dim = in_channels + (2 * n_embedding if self.use_embedding else 0) + n_dim_mask
+		# self.init_trns = nn.Linear(main_in_dim, n_hidden)
+					 
 		self.layer1 = DataAggregationLayer(
 			in_channels=n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
 			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded = use_expanded
