@@ -316,7 +316,8 @@ class BipartiteGraphOperator(MessagePassing):
 		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
 
 		# 4. Pattern Normalization and Readout
-		self.norm = nn.LayerNorm(ndim_in)
+		# self.norm = nn.LayerNorm(ndim_in)
+		self.norm = nn.RMSNorm(ndim_in)
 		self.fc_out = nn.Linear(ndim_in + 3, ndim_out)
 		self.act_out = nn.PReLU()
 
@@ -2336,7 +2337,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
 
 		# 4. Readout Normalization and Projection
-		self.norm = nn.LayerNorm(ndim_in)
+		# self.norm = nn.LayerNorm(ndim_in)
 		self.fc_out = nn.Linear(ndim_in, ndim_out)
 		self.act_out = nn.PReLU()
 
@@ -2389,7 +2390,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		pattern = phase_routing * geo_features
 
 		# Step 7: Normalize pattern only
-		pattern = self.norm(pattern)
+		# pattern = self.norm(pattern)
 
 		# Step 8: Project to product-space features
 		out = self.act_out(self.fc_out(pattern))
@@ -3807,6 +3808,19 @@ class FiLM(nn.Module):
 		return x * (1.0 + gamma) + beta
 
 
+class RMSNorm(nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x):
+        # Calculate the root mean square along the last dimension
+        variance = x.pow(2).mean(-1, keepdim=True)
+        # Normalize and scale with the learnable weight parameter
+        return x * torch.rsqrt(variance + self.eps) * self.weight
+
+
 class GCN_Detection_Network_extended(nn.Module):
 	def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, use_embedding = use_embedding, use_src_pred = False, use_sigmoid = use_sigmoid, attach_time = attach_time, use_absolute_offset = True, trv = None, device = 'cuda'):
 		super(GCN_Detection_Network_extended, self).__init__()
@@ -3818,8 +3832,14 @@ class GCN_Detection_Network_extended(nn.Module):
 		
 		embed_vector_dim = 10 ## Note can add normalization to output
 		# self.embed_vector = nn.Sequential(nn.Linear(6, 30), nn.PReLU(), nn.Linear(30, embed_vector_dim))
-		self.embed_vector = nn.Sequential(nn.Linear(6, 30), nn.PReLU(), nn.Linear(30, embed_vector_dim), nn.LayerNorm(embed_vector_dim))
-
+		# self.embed_vector = nn.Sequential(nn.Linear(6, 30), nn.PReLU(), nn.Linear(30, embed_vector_dim), nn.LayerNorm(embed_vector_dim))
+		# Un-bounded, un-normalized scale context projection
+		self.embed_vector = nn.Sequential(
+		    nn.Linear(6, 30),
+		    nn.SiLU(),  # SiLU (Swish) or GELU extrapolates better than PReLU
+		    nn.Linear(30, embed_vector_dim)
+		)		
+		
 		# Main Encoder Stack
 		self.DataAggregation = DataAggregationExpanded(
 			in_channels= 4 + n_dim_extra_inpt + n_dim_extra_feat + embed_vector_dim,
@@ -4053,6 +4073,8 @@ class GCN_Detection_Network_extended(nn.Module):
 		mask_p_thresh = 0.1
 		mask_out = torch.relu(y - mask_p_thresh)
 		
+		if mask_out.dim() == 1:
+		    mask_out = mask_out.unsqueeze(-1)
 
 		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, A_Lg_in_src, mask_out, embed_context, num_target_nodes = n_line_nodes) # could we concatenate masks and pass through a single one into next layer
 		
@@ -4271,6 +4293,8 @@ class GCN_Detection_Network_extended(nn.Module):
 		mask_p_thresh = 0.1
 		mask_out = torch.relu(y - mask_p_thresh)
 		
+		if mask_out.dim() == 1:
+		    mask_out = mask_out.unsqueeze(-1)
 
 		s, mask_out_1 = self.BipartiteGraphReadOutOperator(y_latent, self.A_Lg_in_src, mask_out, self.embed_context, num_target_nodes = n_line_nodes) # could we concatenate masks and pass through a single one into next layer
 		
