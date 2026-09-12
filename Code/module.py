@@ -321,7 +321,7 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# 4. Pattern Normalization and Readout
 		# self.norm = nn.LayerNorm(ndim_in)
-		self.norm = nn.RMSNorm(ndim_in)
+		self.norm = RMSNorm(ndim_in)
 		self.fc_out = nn.Linear(ndim_in + 3, ndim_out)
 		self.act_out = nn.PReLU()
 
