@@ -3281,7 +3281,6 @@ class DataAggregationAssociation(nn.Module):
 
 # 			return arv_embed, mask_misfit_time
 
-
 class ArrivalEmbedding(nn.Module):
     def __init__(
         self,
@@ -3299,7 +3298,8 @@ class ArrivalEmbedding(nn.Module):
         min_thresh=0.01,
         trv=None,
         ftrns2=None,
-        debug_asserts=False,
+        debug_asserts=True,
+        device = device
     ):
         super().__init__()
         self.ftrns2 = ftrns2
@@ -3370,7 +3370,8 @@ class ArrivalEmbedding(nn.Module):
         delta = f_g(ctx.reshape(-1, ctx.shape[-1]))
         alpha = 1.1 * torch.tanh(delta[..., :n_g])
         res = 0.2 * torch.tanh(delta[..., n_g:])
-        return torch.exp(log_base.to(ctx.device) + alpha + res).mean(dim=0, keepdim=True)
+        # return torch.exp(log_base.to(ctx.device) + alpha + res).mean(dim=0, keepdim=True)
+        return torch.exp(log_base + alpha + res).mean(dim=0, keepdim=True)
 
     def _process_phase_branch(
         self,
@@ -3397,6 +3398,10 @@ class ArrivalEmbedding(nn.Module):
                 torch.zeros((N_picks, out_dim), device=device),
                 torch.zeros((N_picks, out_dim), device=device),
             )
+
+        sig_scale = torch.exp(self.log_sig_t_scale)
+        # sig_p = (self.scale_misfit * self.kernel_sig_t * sig_scale[0]) ** 2
+        # sig_s = (self.scale_misfit * self.kernel_sig_t * sig_scale[1]) ** 2
 
         # 1. Fully Canonical Station Matching (Shared across both P and S)
         prod_sta = A_src_in_sta[0]
@@ -3546,7 +3551,8 @@ class ArrivalEmbedding(nn.Module):
             diff_t = tpick[p_inds].reshape(-1, 1) - tlatent[p_nodes, p_idx].reshape(-1, 1)
             misfit_rel = torch.cat(
                 (
-                    torch.exp(-1.0 * torch.abs(diff_t) / (self.scale_misfit * self.kernel_sig_t)),
+                    # torch.exp(-1.0 * torch.abs(diff_t) / (self.scale_misfit * self.kernel_sig_t)),
+                    torch.exp(-1.0 * torch.abs(diff_t) / (self.scale_misfit * self.kernel_sig_t * sig_scale[p_idx])),
                     torch.sign(diff_t),
                 ),
                 dim=1,
@@ -3577,7 +3583,6 @@ class ArrivalEmbedding(nn.Module):
             results.append(agg)
 
         return self.norm2(results[0]), self.norm3(results[1])
-
 
 
     def forward(
@@ -3612,13 +3617,13 @@ class ArrivalEmbedding(nn.Module):
 
         # 1. Misfit Filtering (Filter active pairs FIRST)
         sig_scale = torch.exp(self.log_sig_t_scale)
-        sig_p = (self.dilate_scale * self.kernel_sig_t * sig_scale[0]) ** 2
-        sig_s = (self.dilate_scale * self.kernel_sig_t * sig_scale[1]) ** 2
+        sig_p = self.dilate_scale * self.kernel_sig_t * sig_scale[0] # ) ** 2
+        sig_s = self.dilate_scale * self.kernel_sig_t * sig_scale[1] # ) ** 2
 
         trv_p = trv_out[:, ipick, 0]
         trv_s = trv_out[:, ipick, 1]
-        misfit_p = torch.exp(-0.5 * (trv_p - tpick) ** 2 / sig_p)
-        misfit_s = torch.exp(-0.5 * (trv_s - tpick) ** 2 / sig_s)
+        misfit_p = torch.exp(-0.5 * (trv_p - tpick) ** 2 / (sig_p.detach() + 1e-5)**2 )
+        misfit_s = torch.exp(-0.5 * (trv_s - tpick) ** 2 / (sig_s.detach() + 1e-5)**2 )
         # misfit_p_ = torch.exp(-0.5 * (trv_p - tpick) ** 2 / sig_p)
         # misfit_s_ = torch.exp(-0.5 * (trv_s - tpick) ** 2 / sig_s)        
 
@@ -3654,8 +3659,11 @@ class ArrivalEmbedding(nn.Module):
             # active_q_unique, active_q_inv = torch.unique(isrc, return_inverse=True)
             
             # Fast unique for sorted 1D tensors on GPU
-            mask_unique = torch.cat([torch.tensor([True], device=device), isrc[1:] != isrc[:-1]])
+            # mask_unique = torch.cat([torch.tensor([True], device=device), isrc[1:] != isrc[:-1]])
+            first_elem = torch.ones(1, dtype=torch.bool, device=isrc.device)
+            mask_unique = torch.cat([first_elem, isrc[1:] != isrc[:-1]])
             active_q_unique = isrc[mask_unique]
+            # torch.unique_consecutive(isrc)
 
 
             edge_idx = knn(
@@ -3731,12 +3739,16 @@ class ArrivalEmbedding(nn.Module):
                 trv_ph = trv_out[q_idx, ipick[p_arr_idx], p_idx].reshape(-1, 1)
                 m_query = tpick[p_arr_idx].reshape(-1, 1) - trv_ph
 
+                sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1)
+
                 m_rel_feat = torch.cat(
-                    (torch.exp(-1.0 * torch.abs(m_rel) / (self.scale_misfit * self.kernel_sig_t)),
+                    # (torch.exp(-1.0 * torch.abs(m_rel) / (self.scale_misfit * self.kernel_sig_t)),
+                    (torch.exp(-1.0 * torch.abs(m_rel) / (sig_phase + 1e-5)),
                      torch.sign(m_rel)), dim=1
                 )
                 m_query_feat = torch.cat(
-                    (torch.exp(-1.0 * torch.abs(m_query) / (self.scale_misfit * self.kernel_sig_t)),
+                    # (torch.exp(-1.0 * torch.abs(m_query) / (self.scale_misfit * self.kernel_sig_t)),
+                    (torch.exp(-1.0 * torch.abs(m_query) / (sig_phase + 1e-5)),
                      torch.sign(m_query)), dim=1
                 )
 
@@ -3778,12 +3790,25 @@ class ArrivalEmbedding(nn.Module):
                 emb = self.film1(self.fc1(inpt), ctx.expand(len(inpt), -1))
                 flat_target = q_idx * N_p + p_arr_idx
 
-                flat_embed = self.norm1(scatter(emb, flat_target, dim=0, dim_size=N_q * N_p, reduce="mean"))
+                # FIXED
                 counts = scatter(torch.ones(len(flat_target), 1, device=device), flat_target, dim=0, dim_size=N_q * N_p, reduce="sum")
+                mask_active_scat = (counts > 0).squeeze(-1)
+
+                raw_scatter = scatter(emb, flat_target, dim=0, dim_size=N_q * N_p, reduce="mean")
+                if mask_active_scat.any():
+                    arv_flat[mask_active_scat] = self.norm1(raw_scatter[mask_active_scat])
+
+
+                # Direct in-place assignment without intermediate masking
+                # flat_embed = scatter(emb, flat_target, dim=0, dim_size=N_q * N_p, reduce="mean")
+                # arv_flat = self.norm1(flat_embed) # Normalize entire tensor block or active subset safely
+
+                # flat_embed = self.norm1(scatter(emb, flat_target, dim=0, dim_size=N_q * N_p, reduce="mean"))
+                # counts = scatter(torch.ones(len(flat_target), 1, device=device), flat_target, dim=0, dim_size=N_q * N_p, reduce="sum")
                 # flat_embed = self.norm1(flat_embed)
 
-                mask_scat = (counts > 0).squeeze(-1)
-                arv_flat[mask_scat] = flat_embed[mask_scat]
+                # mask_scat = (counts > 0).squeeze(-1)
+                # arv_flat[mask_scat] = flat_embed[mask_scat]
 
         arv_embed = arv_flat.view(N_q, N_p, D_h)
 
@@ -3819,7 +3844,6 @@ class ArrivalEmbedding(nn.Module):
         # print('Time [3] : %0.4f' % (time.time() - start_time))
 
         return out, mask_misfit_time
-
 
 
 
