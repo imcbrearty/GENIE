@@ -3299,6 +3299,7 @@ class ArrivalEmbedding(nn.Module):
         trv=None,
         ftrns2=None,
         debug_asserts=True,
+        scale_s_window = 1.5,
         device = device
     ):
         super().__init__()
@@ -3311,8 +3312,9 @@ class ArrivalEmbedding(nn.Module):
         self.scale_time = scale_time
         self.scale_rel = scale_rel
         self.k_spc_edges = k_spc_edges
-        self.dilate_scale = 2.0
-        self.scale_misfit = 2.0
+        self.dilate_scale = 4.0
+        self.scale_misfit = 3.0
+        self.scale_s_window = scale_s_window
 
         self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
         self.phase_embed = nn.Embedding(2, n_phase_embed)
@@ -3399,7 +3401,7 @@ class ArrivalEmbedding(nn.Module):
                 torch.zeros((N_picks, out_dim), device=device),
             )
 
-        sig_scale = torch.exp(self.log_sig_t_scale)
+        # sig_scale = torch.exp(self.log_sig_t_scale)
         # sig_p = (self.scale_misfit * self.kernel_sig_t * sig_scale[0]) ** 2
         # sig_s = (self.scale_misfit * self.kernel_sig_t * sig_scale[1]) ** 2
 
@@ -3527,6 +3529,12 @@ class ArrivalEmbedding(nn.Module):
         f_gammas = [self.f_gamma_t2, self.f_gamma_t3]
         log_bases = [self.log_gamma_base_t2, self.log_gamma_base_t3]
 
+        sig_scale = torch.exp(self.log_sig_t_scale)
+        sig_p = (self.scale_misfit * self.kernel_sig_t * sig_scale[0]).clamp(min = 1e-3) # ) ** 2
+        sig_s = (self.scale_misfit * self.kernel_sig_t * sig_scale[1] * self.scale_s_window).clamp(min = 1e-3) # ) ** 2
+        sig_phases = [sig_p, sig_s]
+        # sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1).clamp(min = 1e-3)
+
         for p_idx in range(2):
             p_mask = phases == p_idx
             if not p_mask.any():
@@ -3550,13 +3558,14 @@ class ArrivalEmbedding(nn.Module):
             # Feature Assembly
             diff_t = tpick[p_inds].reshape(-1, 1) - tlatent[p_nodes, p_idx].reshape(-1, 1)
             misfit_rel = torch.cat(
-                (
-                    # torch.exp(-1.0 * torch.abs(diff_t) / (self.scale_misfit * self.kernel_sig_t)),
-                    torch.exp(-1.0 * torch.abs(diff_t) / (self.scale_misfit * self.kernel_sig_t * sig_scale[p_idx])),
-                    torch.sign(diff_t),
-                ),
+                [
+                    torch.exp(-1.0 * torch.abs(diff_t) / sig_phases[p_idx]),
+                    torch.tanh(diff_t / sig_phases[p_idx])
+                ],
                 dim=1,
             )
+
+            # torch.exp(-1.0 * torch.abs(diff_t) / (self.scale_misfit * self.kernel_sig_t)),
 
             off_sta = (locs_use_cart[ipick[p_inds]] - x_context_cart[A_src_in_sta[1, p_nodes]]) / (10.0 * self.scale_rel)
             norm_s = torch.linalg.vector_norm(off_sta, dim=1, keepdim=True).clamp(min=1e-6)
@@ -3616,14 +3625,18 @@ class ArrivalEmbedding(nn.Module):
             phase_label = torch.zeros_like(phase_label)
 
         # 1. Misfit Filtering (Filter active pairs FIRST)
-        sig_scale = torch.exp(self.log_sig_t_scale)
-        sig_p = self.dilate_scale * self.kernel_sig_t * sig_scale[0] # ) ** 2
-        sig_s = self.dilate_scale * self.kernel_sig_t * sig_scale[1] # ) ** 2
+        # sig_scale = torch.exp(self.log_sig_t_scale)
+        # sig_p = self.dilate_scale * self.kernel_sig_t # * sig_scale[0] # ) ** 2
+        # sig_s = self.dilate_scale * self.kernel_sig_t # * sig_scale[1] # ) ** 2
+
+        var_p = max(self.dilate_scale * self.kernel_sig_t, 1e-3)**2
+        var_s = max(self.dilate_scale * self.kernel_sig_t * self.scale_s_window, 1e-3)**2
 
         trv_p = trv_out[:, ipick, 0]
         trv_s = trv_out[:, ipick, 1]
-        misfit_p = torch.exp(-0.5 * (trv_p - tpick) ** 2 / (sig_p.detach() + 1e-5)**2 )
-        misfit_s = torch.exp(-0.5 * (trv_s - tpick) ** 2 / (sig_s.detach() + 1e-5)**2 )
+
+        misfit_p = torch.exp(-0.5 * (trv_p - tpick.reshape(1,-1)) ** 2 / var_p )
+        misfit_s = torch.exp(-0.5 * (trv_s - tpick.reshape(1,-1)) ** 2 / var_s )
         # misfit_p_ = torch.exp(-0.5 * (trv_p - tpick) ** 2 / sig_p)
         # misfit_s_ = torch.exp(-0.5 * (trv_s - tpick) ** 2 / sig_s)        
 
@@ -3739,18 +3752,22 @@ class ArrivalEmbedding(nn.Module):
                 trv_ph = trv_out[q_idx, ipick[p_arr_idx], p_idx].reshape(-1, 1)
                 m_query = tpick[p_arr_idx].reshape(-1, 1) - trv_ph
 
-                sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1)
+                sig_scale = torch.exp(self.log_sig_t_scale)
+                sig_p = self.scale_misfit * self.kernel_sig_t * sig_scale[0] # ) ** 2
+                sig_s = self.scale_misfit * self.kernel_sig_t * sig_scale[1] * self.scale_s_window # ) ** 2
+                sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1).clamp(min = 1e-3)
 
                 m_rel_feat = torch.cat(
-                    # (torch.exp(-1.0 * torch.abs(m_rel) / (self.scale_misfit * self.kernel_sig_t)),
-                    (torch.exp(-1.0 * torch.abs(m_rel) / (sig_phase + 1e-5)),
-                     torch.sign(m_rel)), dim=1
+                    [torch.exp(-1.0 * torch.abs(m_rel) / sig_phase),
+                     torch.tanh(m_rel / sig_phase)], dim = 1 #  # torch.sign(m_rel)), dim=1
                 )
                 m_query_feat = torch.cat(
-                    # (torch.exp(-1.0 * torch.abs(m_query) / (self.scale_misfit * self.kernel_sig_t)),
-                    (torch.exp(-1.0 * torch.abs(m_query) / (sig_phase + 1e-5)),
-                     torch.sign(m_query)), dim=1
+                    [torch.exp(-1.0 * torch.abs(m_query) / sig_phase),
+                     torch.tanh(m_query / sig_phase)], dim = 1 # # torch.sign(m_query)), dim=1
                 )
+
+                # (torch.exp(-1.0 * torch.abs(m_rel) / (self.scale_misfit * self.kernel_sig_t)),
+                # (torch.exp(-1.0 * torch.abs(m_rel) / (self.scale_misfit * self.kernel_sig_t)),
 
                 off_src_sta = (locs_use_cart[ipick[p_arr_idx]] - x_query_cart[q_idx]) / (10.0 * self.scale_rel)
                 off_ref_sta = (locs_use_cart[ipick[p_arr_idx]] - x_context_cart[A_src_in_sta[1, node_idx]]) / (10.0 * self.scale_rel)
