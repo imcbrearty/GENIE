@@ -4816,6 +4816,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		# self.SpaceTimeAttentionQuery.kernel_sig_t = kernel_sig_t
 		
 		self.Arrivals.eps = eps
+		self.Arrivals.t_kernel_sq = eps ** 2
 		self.embedding_vector = torch.tensor([np.log(scale_rel)/5.0, np.log(scale_time), np.log(kernel_sig_t), np.log(src_x_kernel)/3.0, np.log(src_t_kernel), np.log(time_shift_range)/2.0], device = self.device).reshape(1,-1).float()
 		self.embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # embed_context = self.embed_vector(self.embedding_vector).expand(Slice.shape[0], -1)
 		
