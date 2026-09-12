@@ -3299,7 +3299,6 @@ class ArrivalEmbedding(nn.Module):
         trv=None,
         ftrns2=None,
         debug_asserts=True,
-        scale_s_window = 1.5,
         device = device
     ):
         super().__init__()
@@ -3314,7 +3313,7 @@ class ArrivalEmbedding(nn.Module):
         self.k_spc_edges = k_spc_edges
         self.dilate_scale = 4.0
         self.scale_misfit = 3.0
-        self.scale_s_window = scale_s_window
+        self.scale_s_window = 1.5
 
         self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
         self.phase_embed = nn.Embedding(2, n_phase_embed)
