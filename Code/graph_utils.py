@@ -6977,7 +6977,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
         Product = SpectralProductSampler(G_src, G_sta, x_grid_proj[:,0:3]/1000.0, locs_cart/1000.0) # locs_cart, srcs_cart
         # G_product = Product.build_final_subgraph(target_node_count = int(n_fraction*len(x_grid_proj)*len(locs_cart)), skip_paths = True if not use_paths else False)        
         G_product, params, n_anchor_target = Product.sample_subgraph(int(n_fraction*len(x_grid_proj)*len(locs_cart)))
-        print('Product graph params %d, %d:'%(n_acnhor_target, int(n_fraction*len(x_grid_proj)*len(locs_cart))))
+        print('Product graph params %d, %d:'%(n_anchor_target, int(n_fraction*len(x_grid_proj)*len(locs_cart))))
         print(params)
         A_src_in_sta = np.flip(np.vstack(list(G_product.nodes())).T, axis = 0)
         isort = np.lexsort((A_src_in_sta[0], A_src_in_sta[1]))
