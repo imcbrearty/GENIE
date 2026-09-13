@@ -3973,7 +3973,424 @@ class SpectralProductSampler:
     
 
 
+import scipy.sparse as sp
+from scipy.sparse.linalg import lsqr
 
+
+class SpectralProductSampler_updated:
+    def __init__(self, G_A, G_B, pos_A, pos_B, sparse_threshold=2000, k_approx=150):
+        self.G_A = G_A.copy()
+        self.G_B = G_B.copy()
+        self.pos_A = pos_A
+        self.pos_B = pos_B
+        self.k_approx = k_approx
+
+        self.nodes_A = list(self.G_A.nodes())
+        self.nodes_B = list(self.G_B.nodes())
+        self.node_to_idx_A = {node: i for i, node in enumerate(self.nodes_A)}
+        self.node_to_idx_B = {node: i for i, node in enumerate(self.nodes_B)}
+
+        self.mode_A = 'sparse' if len(G_A) > sparse_threshold else 'dense'
+        self.mode_B = 'sparse' if len(G_B) > sparse_threshold else 'dense'
+
+        # 1. Compute Spectral Leverage Scores
+        self.tau_A, self.L_A_obj = self._compute_spectral_stats(self.G_A, self.mode_A)
+        self.tau_B, self.L_B_obj = self._compute_spectral_stats(self.G_B, self.mode_B)
+
+        # 2. Precompute Effective Resistance Weights on Factor Graphs
+        self._precompute_edge_weights()
+
+        # Robust probability normalization
+        sum_tau_A = np.sum(self.tau_A)
+        sum_tau_B = np.sum(self.tau_B)
+        self.p_A = self.tau_A / sum_tau_A if sum_tau_A > 0 else np.full(len(self.tau_A), 1.0 / len(self.tau_A))
+        self.p_B = self.tau_B / sum_tau_B if sum_tau_B > 0 else np.full(len(self.tau_B), 1.0 / len(self.tau_B))
+
+        self.mean_tau_A = np.mean(self.tau_A)
+        self.mean_tau_B = np.mean(self.tau_B)
+
+        self.adj_A = nx.to_scipy_sparse_array(self.G_A, format='csr', dtype=np.float32)
+        self.adj_B = nx.to_scipy_sparse_array(self.G_B, format='csr', dtype=np.float32)
+
+    def _precompute_edge_weights(self):
+        """Precomputes and attaches effective resistance weights (res_w) to edges."""
+        for G, L_obj, mode, mapping in [
+            (self.G_A, self.L_A_obj, self.mode_A, self.node_to_idx_A),
+            (self.G_B, self.L_B_obj, self.mode_B, self.node_to_idx_B)
+        ]:
+            for u, v in G.edges():
+                if mode == 'dense':
+                    u_idx, v_idx = mapping[u], mapping[v]
+                    w = max(1e-6, L_obj[u_idx, u_idx] + L_obj[v_idx, v_idx] - 2 * L_obj[u_idx, v_idx])
+                else:
+                    w = 1.0 / np.sqrt(max(1, G.degree(u)) * max(1, G.degree(v)))
+
+                G[u][v]['res_w'] = float(w)
+
+    def _compute_spectral_stats(self, G, mode):
+        L = nx.laplacian_matrix(G).astype(float)
+        n = L.shape[0]
+
+        if mode == 'dense':
+            L_pinv = np.linalg.pinv(L.toarray())
+            tau = np.maximum(np.diag(L_pinv), 1e-12)
+            return tau, L_pinv
+        else:
+            R = np.random.randn(n, self.k_approx) / np.sqrt(self.k_approx)
+            Z = np.zeros((n, self.k_approx))
+            for i in range(self.k_approx):
+                sol = lsqr(L, R[:, i])[0]
+                Z[:, i] = sol
+            tau = np.maximum(np.sum(Z**2, axis=1), 1e-12)
+            return tau, L
+
+    def derive_adaptive_sampling_params(self, k_local=10):
+        n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+
+        aspect_ratio = max(n_a, n_b) / max(min(n_a, n_b), 1)
+        physical_ratio = float(np.clip(0.3 + 0.2 * np.log10(aspect_ratio), 0.3, 0.75))
+
+        coords_A = np.array([self.pos_A[n] for n in self.nodes_A])
+        tree_A = cKDTree(coords_A)
+        k_actual = min(k_local, n_a)
+
+        dists_A, _ = tree_A.query(coords_A, k=k_actual)
+        if dists_A.ndim == 1:
+            dists_A = dists_A[:, None]
+
+        sigma_A = np.maximum(dists_A[:, -1] / 1.1774, 1e-5)
+        densities_A = 1.0 / (sigma_A**2)
+        cv_density = np.std(densities_A) / np.mean(densities_A) if np.mean(densities_A) > 0 else 0.0
+
+        density_equalization_gamma = float(np.clip(0.3 + 0.3 * cv_density, 0.2, 0.8))
+
+        avg_deg_A = np.mean([d for _, d in self.G_A.degree()]) if len(self.G_A) > 0 else 1.0
+        avg_deg_B = np.mean([d for _, d in self.G_B.degree()]) if len(self.G_B) > 0 else 1.0
+        avg_deg = (avg_deg_A + avg_deg_B) / 2.0
+
+        k_base = max(1, int(np.round(np.clip(avg_deg / (1.0 + np.log10(aspect_ratio)), 1, 5))))
+        degree_headroom = float(np.clip(2.0 - 0.25 * np.log10(aspect_ratio), 1.2, 2.0))
+
+        return {
+            "physical_ratio": physical_ratio,
+            "density_equalization_gamma": density_equalization_gamma,
+            "k_base": k_base,
+            "degree_headroom": degree_headroom
+        }
+
+    def select_anchors(
+        self,
+        n_anchor_target,
+        use_cartesian_core=False,
+        core_ratio=0.1,
+        physical_ratio=None,
+        k_local_scale=10,
+        density_equalization_gamma=None
+    ):
+        if physical_ratio is None or density_equalization_gamma is None:
+            derived = self.derive_adaptive_sampling_params(k_local=k_local_scale)
+            physical_ratio = physical_ratio if physical_ratio is not None else derived["physical_ratio"]
+            density_equalization_gamma = (
+                density_equalization_gamma if density_equalization_gamma is not None
+                else derived["density_equalization_gamma"]
+            )
+
+        anchors = set()
+        coords_A = np.array([self.pos_A[n] for n in self.nodes_A])
+        coords_B = np.array([self.pos_B[n] for n in self.nodes_B])
+
+        # A. Cartesian Core
+        n_core_target = int(n_anchor_target * core_ratio) if use_cartesian_core else 0
+        if n_core_target > 0:
+            ratio = len(self.nodes_A) / len(self.nodes_B)
+            k_a = max(1, int(np.sqrt(n_core_target * ratio)))
+            k_b = max(1, int(n_core_target / k_a))
+
+            top_a_indices = np.argsort(self.tau_A)[-k_a:]
+            top_b_indices = np.argsort(self.tau_B)[-k_b:]
+
+            for idx_a in top_a_indices:
+                for idx_b in top_b_indices:
+                    if len(anchors) < n_core_target:
+                        anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
+
+        # B. Density-Equalized Physical Importance Sampling
+        n_physical_target = int(n_anchor_target * physical_ratio)
+        if n_physical_target > 0:
+            tree_A = cKDTree(coords_A)
+            tree_B = cKDTree(coords_B)
+
+            k_candidate_pool = max(k_local_scale * 3, 20)
+            k_actual_B = min(k_candidate_pool, len(self.nodes_B))
+            k_actual_A = min(k_local_scale, len(self.nodes_A))
+
+            dists_B, indices_B = tree_B.query(coords_A, k=k_actual_B)
+            if dists_B.ndim == 1:
+                dists_B, indices_B = dists_B[:, None], indices_B[:, None]
+
+            dists_A, _ = tree_A.query(coords_B, k=k_actual_A)
+            if dists_A.ndim == 1:
+                dists_A = dists_A[:, None]
+
+            sigma_A = np.maximum(dists_B[:, min(k_local_scale - 1, k_actual_B - 1)] / 1.1774, 1e-5)
+            sigma_B = np.maximum(dists_A[:, min(k_local_scale - 1, k_actual_A - 1)] / 1.1774, 1e-5)
+
+            density_A = 1.0 / (sigma_A**2)
+            density_B = 1.0 / (sigma_B**2)
+
+            raw_weights = np.exp(- (dists_B**2) / (2 * (sigma_A[:, None]**2)))
+            candidate_density_B = density_B[indices_B]
+            joint_density = (density_A[:, None] * candidate_density_B) ** density_equalization_gamma
+
+            equalized_weights = raw_weights / np.maximum(joint_density, 1e-8)
+            equalized_weights = np.nan_to_num(equalized_weights, nan=0.0)
+
+            sum_weights = np.sum(equalized_weights)
+            if sum_weights > 0:
+                flat_probs = (equalized_weights / sum_weights).ravel()
+            else:
+                flat_probs = np.full(equalized_weights.size, 1.0 / equalized_weights.size)
+
+            n_candidates = flat_probs.shape[0]
+            target_physical_count = n_core_target + n_physical_target
+            attempts = 0
+            max_attempts = n_physical_target * 20
+
+            while len(anchors) < target_physical_count and attempts < max_attempts:
+                n_draws = min(n_physical_target * 2, n_candidates)
+                sampled_flat_indices = np.random.choice(
+                    n_candidates, size=n_draws, replace=True, p=flat_probs
+                )
+                for flat_idx in sampled_flat_indices:
+                    if len(anchors) >= target_physical_count:
+                        break
+                    src_idx = flat_idx // k_actual_B
+                    cand_idx = flat_idx % k_actual_B
+                    sta_idx = indices_B[src_idx, cand_idx]
+                    anchors.add((self.nodes_A[src_idx], self.nodes_B[sta_idx]))
+                attempts += n_draws
+
+        # C. Spectral Leverage Sampling
+        n_remaining = max(0, n_anchor_target - len(anchors))
+        attempts = 0
+        max_attempts = max(100, n_remaining * 20)
+        while len(anchors) < n_anchor_target and attempts < max_attempts:
+            idx_a = np.random.choice(len(self.nodes_A), p=self.p_A)
+            idx_b = np.random.choice(len(self.nodes_B), p=self.p_B)
+            anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
+            attempts += 1
+
+        anchor_list = list(anchors)
+        random.shuffle(anchor_list)
+        return anchor_list
+
+    def compute_dynamic_caps(self, node_a, node_b, k_base=3, clip_range=(0.5, 3.0)):
+        n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+        ratio_a = np.sqrt(n_a / n_b)
+        ratio_b = np.sqrt(n_b / n_a)
+
+        idx_a = self.node_to_idx_A[node_a]
+        idx_b = self.node_to_idx_B[node_b]
+
+        mult_a = np.clip(self.tau_A[idx_a] / self.mean_tau_A, clip_range[0], clip_range[1])
+        mult_b = np.clip(self.tau_B[idx_b] / self.mean_tau_B, clip_range[0], clip_range[1])
+
+        cap_a = max(1, int(round(k_base * ratio_a * mult_a)))
+        cap_b = max(1, int(round(k_base * ratio_b * mult_b)))
+
+        return cap_a, cap_b
+
+    def sample_star_neighbors(self, neighbors, tau_scores, node_to_idx, cap_limit, max_degree_cap, epsilon=0.2):
+        if not neighbors:
+            return []
+
+        indices = [node_to_idx[n] for n in neighbors]
+        raw_tau = tau_scores[indices]
+
+        tau_sum = np.sum(raw_tau)
+        tau_norm = raw_tau / tau_sum if tau_sum > 0 else np.full(len(neighbors), 1.0 / len(neighbors))
+        uniform_norm = np.full(len(neighbors), 1.0 / len(neighbors))
+
+        mixed_probs = (1.0 - epsilon) * tau_norm + epsilon * uniform_norm
+        mixed_probs /= np.sum(mixed_probs)
+
+        effective_cap = min(cap_limit, max_degree_cap, len(neighbors))
+        return list(np.random.choice(neighbors, size=effective_cap, replace=False, p=mixed_probs))
+
+    def expand_partial_stars(self, anchors, target_node_count, k_base=None, epsilon=0.2, degree_headroom=None):
+        if k_base is None or degree_headroom is None:
+            derived = self.derive_adaptive_sampling_params()
+            k_base = k_base if k_base is not None else derived["k_base"]
+            degree_headroom = degree_headroom if degree_headroom is not None else derived["degree_headroom"]
+
+        retained_nodes = set(anchors)
+        n_anchors = max(1, len(anchors))
+
+        avg_budget_per_anchor = max(2.0, (target_node_count - n_anchors) / n_anchors)
+        dynamic_max_degree = max(2, int(np.floor(degree_headroom * avg_budget_per_anchor)))
+
+        max_allowed_nodes = int(target_node_count * 1.15)
+
+        for a, b in anchors:
+            if len(retained_nodes) >= max_allowed_nodes:
+                break
+
+            cap_a, cap_b = self.compute_dynamic_caps(a, b, k_base=k_base)
+
+            # Factor A Expansion
+            all_na = list(self.G_A.neighbors(a))
+            unvisited_na = [na for na in all_na if (na, b) not in retained_nodes]
+
+            if unvisited_na:
+                chosen_a = self.sample_star_neighbors(
+                    neighbors=unvisited_na,
+                    tau_scores=self.tau_A,
+                    node_to_idx=self.node_to_idx_A,
+                    cap_limit=cap_a,
+                    max_degree_cap=dynamic_max_degree,
+                    epsilon=epsilon
+                )
+                for na in chosen_a:
+                    retained_nodes.add((na, b))
+                    if len(retained_nodes) >= target_node_count:
+                        break
+
+            if len(retained_nodes) >= target_node_count:
+                break
+
+            # Factor B Expansion
+            all_nb = list(self.G_B.neighbors(b))
+            unvisited_nb = [nb for nb in all_nb if (a, nb) not in retained_nodes]
+
+            if unvisited_nb:
+                chosen_b = self.sample_star_neighbors(
+                    neighbors=unvisited_nb,
+                    tau_scores=self.tau_B,
+                    node_to_idx=self.node_to_idx_B,
+                    cap_limit=cap_b,
+                    max_degree_cap=dynamic_max_degree,
+                    epsilon=epsilon
+                )
+                for nb in chosen_b:
+                    retained_nodes.add((a, nb))
+                    if len(retained_nodes) >= target_node_count:
+                        break
+
+        # Dynamic Safety Fallback Pass (Handles dead-end node eviction)
+        fallback_attempts = 0
+        max_fallback = (target_node_count - len(retained_nodes)) * 20
+        current_list = list(retained_nodes)
+
+        while len(retained_nodes) < target_node_count and fallback_attempts < max_fallback:
+            fallback_attempts += 1
+            if not current_list:
+                break
+
+            idx = np.random.randint(0, len(current_list))
+            parent_a, parent_b = current_list[idx]
+
+            neighbors_a = [na for na in self.G_A.neighbors(parent_a) if (na, parent_b) not in retained_nodes]
+            if neighbors_a:
+                new_a = neighbors_a[np.random.randint(0, len(neighbors_a))]
+                retained_nodes.add((new_a, parent_b))
+                current_list.append((new_a, parent_b))
+                continue
+
+            neighbors_b = [nb for nb in self.G_B.neighbors(parent_b) if (parent_a, nb) not in retained_nodes]
+            if neighbors_b:
+                new_b = neighbors_b[np.random.randint(0, len(neighbors_b))]
+                retained_nodes.add((parent_a, new_b))
+                current_list.append((parent_a, new_b))
+                continue
+
+            # If node has no unvisited neighbors in either graph, evict it to avoid infinite looping
+            current_list.pop(idx)
+
+        return retained_nodes
+
+    def estimate_anchor_target(self, target_node_count, k_base=None):
+        if k_base is None:
+            derived = self.derive_adaptive_sampling_params()
+            k_base = derived["k_base"]
+
+        n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+        ratio_a = np.sqrt(n_a / n_b)
+        ratio_b = np.sqrt(n_b / n_a)
+
+        expected_yield_per_anchor = 1.0 + k_base * (ratio_a + ratio_b)
+        n_anchor_target = int(np.ceil(target_node_count / expected_yield_per_anchor))
+
+        max_sensible_anchors = max(10, int(target_node_count * 0.5))
+        return int(np.clip(n_anchor_target, 10, max_sensible_anchors))
+
+    def build_networkx_subgraph(self, retained_nodes):
+        """
+        Constructs and returns the induced NetworkX Cartesian Product Subgraph
+        with 2D spatial coordinates and precomputed effective resistance edge weights.
+        """
+        G_sub = nx.Graph()
+        retained_set = set(retained_nodes)
+
+        for a, b in retained_set:
+            pos_a = self.pos_A[a]
+            pos_b = self.pos_B[b]
+
+            # 2D Cartesian spatial projection
+            proj_pos = (float(pos_a[0] + pos_b[0]), float(pos_a[1] + pos_b[1]))
+            G_sub.add_node((a, b), pos=proj_pos)
+
+        # Induce Cartesian product edges within the sampled set
+        for a, b in retained_set:
+            # Edges from Factor Graph A: (a, b) <-> (na, b)
+            for na in self.G_A.neighbors(a):
+                if (na, b) in retained_set and not G_sub.has_edge((a, b), (na, b)):
+                    res_w = self.G_A[a][na].get('res_w', 1.0)
+                    G_sub.add_edge((a, b), (na, b), weight=res_w)
+
+            # Edges from Factor Graph B: (a, b) <-> (a, nb)
+            for nb in self.G_B.neighbors(b):
+                if (a, nb) in retained_set and not G_sub.has_edge((a, b), (a, nb)):
+                    res_w = self.G_B[b][nb].get('res_w', 1.0)
+                    G_sub.add_edge((a, b), (a, nb), weight=res_w)
+
+        return G_sub
+
+    def sample_subgraph(
+        self,
+        target_node_count,
+        use_cartesian_core=False,
+        core_ratio=0.1,
+        epsilon=0.2,
+        k_local_scale=10
+    ):
+        """End-to-end dynamic sampling entry point returning a ready-to-use NetworkX graph."""
+        params = self.derive_adaptive_sampling_params(k_local=k_local_scale)
+
+        n_anchor_target = self.estimate_anchor_target(
+            target_node_count=target_node_count,
+            k_base=params["k_base"]
+        )
+
+        anchors = self.select_anchors(
+            n_anchor_target=n_anchor_target,
+            use_cartesian_core=use_cartesian_core,
+            core_ratio=core_ratio,
+            physical_ratio=params["physical_ratio"],
+            k_local_scale=k_local_scale,
+            density_equalization_gamma=params["density_equalization_gamma"]
+        )
+
+        retained_nodes = self.expand_partial_stars(
+            anchors=anchors,
+            target_node_count=target_node_count,
+            k_base=params["k_base"],
+            epsilon=epsilon,
+            degree_headroom=params["degree_headroom"]
+        )
+
+        G_sub = self.build_networkx_subgraph(retained_nodes)
+
+        return G_sub, params, n_anchor_target
 
 
 
