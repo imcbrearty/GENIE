@@ -2057,7 +2057,7 @@ def robust_fiedler_solver(L, tol=1e-4):
 
 
 
-def soft_component_merger(G, coords, sigma):
+def soft_component_merger_backup(G, coords, sigma):
     """
     Connects disjoint components using boundary-to-boundary distances 
     to prevent 'far apart' connections caused by centroid logic.
@@ -2116,6 +2116,92 @@ def soft_component_merger(G, coords, sigma):
             added_bridges += 1
 
     print(f"Soft Merger added {added_bridges} bridges using boundary-to-boundary logic.")
+    return G
+
+
+def soft_component_merger(G, coords, scale_length=None):
+    """
+    Connects disjoint components using boundary-to-boundary minimum distances.
+    Weights are computed using node-specific variable density scale factors
+    consistent with the scale-invariant Gaussian kernel framework.
+    """
+    components = sorted(nx.connected_components(G), key=len, reverse=True)
+    if len(components) <= 1:
+        return G
+
+    # Retrieve global fallback scale if scale_length is not explicitly passed
+    if scale_length is None:
+        scale_length = G.graph.get('scale_length', 1.0)
+
+    # Pre-extract local node sigma values if available (fallback to 1.0 if not assigned)
+    # sigma_i is the local density scale factor per node
+    node_sigmas = {
+        n: G.nodes[n].get('sigma', 1.0) 
+        for n in G.nodes()
+    }
+
+    # Start with the Largest Connected Component as the main body
+    main_nodes = set(components[0])
+    remaining_components = components[1:]
+    
+    added_bridges = 0
+    new_bridge_edges = []
+
+    while remaining_components:
+        main_node_indices = list(main_nodes)
+        main_coords = coords[main_node_indices]
+        main_tree = cKDTree(main_coords)
+
+        best_global_bridge = None
+        min_global_dist = float('inf')
+        best_comp_idx = -1
+
+        # Search for the absolute nearest boundary node across all remaining components
+        for idx, comp in enumerate(remaining_components):
+            comp_nodes = list(comp)
+            # Find nearest neighbor in main body for each node in candidate component
+            dists, neighbors = main_tree.query(coords[comp_nodes], k=1)
+            
+            local_min_idx = np.argmin(dists)
+            local_min_dist = dists[local_min_idx]
+
+            if local_min_dist < min_global_dist:
+                min_global_dist = local_min_dist
+                u = comp_nodes[local_min_idx]
+                v = main_node_indices[neighbors[local_min_idx]]
+                best_global_bridge = (u, v)
+                best_comp_idx = idx
+
+        # Insert bridge edge
+        if best_global_bridge:
+            u, v = best_global_bridge
+            
+            # --- Scale-Invariant Weight Formula ---
+            # Effective scale length combines global scale with local density multipliers
+            sigma_u = node_sigmas[u]
+            sigma_v = node_sigmas[v]
+            effective_scale = scale_length * np.sqrt(sigma_u * sigma_v)
+            
+            # Distance-decay weight safely clamped to (0, 1]
+            w = np.exp(-min_global_dist / max(effective_scale, 1e-8))
+
+            G.add_edge(
+                u, v, 
+                dist=float(min_global_dist), 
+                weight=float(w), 
+                is_bridge=True
+            )
+            
+            new_bridge_edges.append((u, v))
+            
+            # Merge component into main body and continue loop
+            main_nodes.update(remaining_components.pop(best_comp_idx))
+            added_bridges += 1
+
+    print(f"Soft Merger added {added_bridges} bridge edge(s) using variable-scale boundary logic.")
+    
+    # Store added bridge edges in graph metadata for downstream delta updates
+    G.graph['last_added_bridges'] = new_bridge_edges
     return G
 
 
@@ -3007,7 +3093,7 @@ import networkx as nx
 import numpy as np
 from scipy.spatial import cKDTree, Delaunay
 
-def initialize_sensor_graph(
+def initialize_sensor_graph_backup(
     coords, 
     cnt=0, 
     min_weight=0.05, 
@@ -3271,6 +3357,546 @@ def initialize_sensor_graph(
     return G, edges_array, fiedler_vec, curvature_vec, [], degree_vec, comp_vec, G.graph.get('fiedler_value', 0.0), scale_length
 
 
+def initialize_sensor_graph_backup(
+    coords, 
+    cnt=0, 
+    min_weight=0.05, 
+    G=None, 
+    k_trgt=10, 
+    use_local_scale=True, 
+    set_initial_edges=None, 
+    edges_to_update=None, 
+    init_knn=None, 
+    use_rng=True,
+    enable_optimization_matrices=False
+):
+    n_nodes, n_dim = coords.shape
+    fiedler_graph = 0.0
+
+    # Determine whether we need candidate search matrices
+    requires_matrices = enable_optimization_matrices or (edges_to_update is not None)
+
+    # ---------------------------------------------------------
+    # 1. INITIAL GRAPH CONSTRUCTION (Runs only when G is None)
+    # ---------------------------------------------------------
+    if G is None:
+        G = nx.Graph()
+        G.add_nodes_from(range(n_nodes))
+        for i, p in enumerate(coords):
+            G.nodes[i]['pos'] = p
+
+        tree = cKDTree(coords)
+        scale_base = np.quantile(tree.query(coords, k=k_trgt + 1)[0][:, -1], 0.75)
+
+        # Local Scale Computation
+        if use_local_scale:
+            raw_local_sigmas = tree.query(coords, k=k_trgt + 1)[0][:, -1]
+            median_sigma = np.median(raw_local_sigmas)
+            bounded_sigmas = np.clip(raw_local_sigmas, 0.3 * median_sigma, 3.0 * median_sigma)
+            for i in range(n_nodes):
+                G.nodes[i]['scale'] = float(bounded_sigmas[i])
+        else:
+            for i in range(n_nodes):
+                G.nodes[i]['scale'] = float(scale_base)
+
+        initial_edges = []
+
+        # --- HIGHER DIMENSION STRATEGY (k-NN + RNG Check) ---
+        if n_dim >= 3:
+            k_check = int(n_dim * 2)
+            distances, indices = tree.query(coords, k=k_check + 1)
+            for i in range(n_nodes):
+                p_i = coords[i]
+                for neighbor_idx in range(1, k_check + 1):
+                    j = indices[i, neighbor_idx]
+                    p_j = coords[j]
+                    d_ij = distances[i, neighbor_idx]
+
+                    if use_rng:
+                        midpoint = (p_i + p_j) / 2.0
+                        radius = d_ij - 1e-9 
+                        potential_violators = tree.query_ball_point(midpoint, radius)
+                        
+                        is_rng = True
+                        for v_idx in potential_violators:
+                            if v_idx in (i, j): 
+                                continue
+                            if (np.linalg.norm(p_i - coords[v_idx]) < d_ij and 
+                                np.linalg.norm(p_j - coords[v_idx]) < d_ij):
+                                is_rng = False
+                                break
+                        if not is_rng: 
+                            continue
+
+                    if i in indices[j, 1:k_check + 1]:
+                        u, v = sorted((i, j))
+                        initial_edges.append((u, v, d_ij))
+            
+            initial_edges = list(set(initial_edges))
+
+        # --- 2D STRATEGY (Gabriel Backbone) ---
+        else:
+            tri = Delaunay(coords)
+            edges_set = set()
+            for simplex in tri.simplices:
+                for i in range(len(simplex)):
+                    for j in range(i + 1, len(simplex)):
+                        edges_set.add(tuple(sorted((simplex[i], simplex[j]))))
+
+            for i, j in edges_set:
+                p1, p2 = coords[i], coords[j]
+                midpoint = (p1 + p2) / 2.0
+                radius = (np.linalg.norm(p1 - p2) / 2.0) - 1e-9
+                if not tree.query_ball_point(midpoint, radius):
+                    initial_edges.append((i, j, float(np.linalg.norm(p1 - p2))))
+
+        # --- SCALE & COMPONENT MANAGEMENT ---
+        G_init = nx.Graph()
+        G_init.add_weighted_edges_from(initial_edges, weight='dist')
+        
+        comps = list(nx.connected_components(G_init))
+        if comps:
+            lcc = G_init.subgraph(max(comps, key=len))
+            mst_edges = [d['dist'] for u, v, d in nx.minimum_spanning_tree(lcc, weight='dist').edges(data=True)]
+            scale_length = float(np.maximum(scale_base, np.percentile(mst_edges, 99)))
+        else:
+            scale_length = float(scale_base)
+            
+        G.graph['scale_length'] = scale_length
+
+        if set_initial_edges is not None:
+            initial_edges = [
+                (int(set_initial_edges[0, i]), int(set_initial_edges[1, i]), 
+                 float(np.linalg.norm(coords[set_initial_edges[0, i]] - coords[set_initial_edges[1, i]]))) 
+                for i in range(set_initial_edges.shape[1])
+            ]
+
+        # Apply weights for initial structural edges
+        for u, v, d in initial_edges:
+            effective_scale = scale_length * (G.nodes[u]['scale'] * G.nodes[v]['scale']) ** (1 / 3)
+            w = np.exp(-d / effective_scale)
+            if w >= min_weight:
+                G.add_edge(int(u), int(v), dist=d, weight=float(w), step=0, immutable=True)
+
+        if init_knn is not None:
+            knn_dists, knn_indices = tree.query(coords, k=init_knn + 1)
+            for j in range(n_nodes):
+                for idx_pos, v in enumerate(knn_indices[j, 1:]):
+                    d = float(knn_dists[j, idx_pos + 1])
+                    effective_scale = scale_length * (G.nodes[j]['scale'] * G.nodes[v]['scale']) ** (1 / 3)
+                    w = np.exp(-d / effective_scale)
+                    if w >= min_weight:
+                        G.add_edge(int(j), int(v), dist=d, weight=float(w), step=0, immutable=True)
+
+        # Connect isolated graph components
+        G = soft_component_merger(G, coords, scale_length)
+        
+        # ---------------------------------------------------------
+        # OPTIONAL DENSE MATRICES (Only generated if optimizing)
+        # ---------------------------------------------------------
+        if requires_matrices:
+            G.graph['distances'] = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
+            scales = np.array([G.nodes[i]['scale'] for i in range(n_nodes)])
+            G.graph['scale_values'] = (scale_length * scales.reshape(-1, 1) * scales.reshape(1, -1)) ** (1 / 3)
+            G.graph['weights'] = np.exp(-G.graph['distances'] / G.graph['scale_values'])
+
+            edges_allowed = G.graph['weights'] >= min_weight
+            ilist1, ilist2 = np.where(edges_allowed)
+            edges_allowed = np.column_stack((ilist1, ilist2))
+            G.graph['allowed_edges'] = edges_allowed[edges_allowed[:, 0] < edges_allowed[:, 1]]
+
+    scale_length = G.graph.get('scale_length', 1.0)
+
+    # ---------------------------------------------------------
+    # 2. SPECTRAL & COMPONENT ANALYSIS
+    # ---------------------------------------------------------
+    # Fast paths for simple non-optimized initialization on large node sets
+    if not requires_matrices and n_nodes > 10000:
+        fiedler_vec = np.zeros(n_nodes, dtype=float)
+        comp_vec = np.zeros(n_nodes, dtype=int)
+        curvature_vec = np.zeros(n_nodes, dtype=float)
+        degree_vec = np.array([G.degree(i, weight='weight') for i in range(n_nodes)], dtype=float)
+        edges_array = np.array(list(G.edges())).T if G.number_of_edges() > 0 else np.empty((2, 0))
+        
+        return G, edges_array, fiedler_vec, curvature_vec, [], degree_vec, comp_vec, 0.0, scale_length
+
+    # Full spectral calculations for optimization passes
+    components_list = sorted(nx.connected_components(G), key=len, reverse=True)
+    normalize_fiedler = True
+
+    for comp_id, nodes in enumerate(components_list):
+        nodes_sorted = sorted(nodes)
+        subG = G.subgraph(nodes_sorted)
+
+        if comp_id == 0 and (cnt % 50 == 0):
+            G.graph['diameter'] = float(nx.algorithms.approximation.diameter(subG))
+
+        for n in nodes_sorted:
+            G.nodes[n]['comp_id'] = comp_id
+
+        if len(nodes_sorted) > 2 and init_knn != k_trgt:
+            L = nx.laplacian_matrix(subG, nodelist=nodes_sorted, weight='weight').astype(float)
+            fiedler_vector, fiedler_value, flag = robust_fiedler_solver(L)
+            
+            if comp_id == 0:
+                fiedler_graph = float(fiedler_value)
+                G.graph['fiedler_value'] = float(fiedler_value)
+
+            if not flag:
+                fiedler_vector = np.zeros(len(nodes_sorted))
+
+            if normalize_fiedler:
+                v_min, v_max = np.min(fiedler_vector), np.max(fiedler_vector)
+                ptp = v_max - v_min
+                if ptp > 1e-8:
+                    fiedler_vector = 2.0 * (fiedler_vector - v_min) / ptp - 1.0
+                else:
+                    fiedler_vector = np.zeros_like(fiedler_vector)
+
+            for i, node_idx in enumerate(nodes_sorted):
+                G.nodes[node_idx]['fiedler'] = float(fiedler_vector[i])
+        else:
+            for node_idx in nodes_sorted:
+                G.nodes[node_idx]['fiedler'] = 0.0
+            if comp_id == 0:
+                G.graph['fiedler_value'] = 0.0
+
+    # Forman-Ricci Curvature
+    use_normalized_node_importance = True
+    node_weights = {u: G.degree(u, weight='weight') for u in range(n_nodes)}
+    
+    if edges_to_update is None:
+        edges_to_update = list(G.edges())
+
+    edge_metrics = []
+    for u, v in edges_to_update:
+        if not G.has_edge(u, v):
+            continue
+        w_e = G[u][v]['weight']
+        
+        if use_normalized_node_importance:
+            sum_u = sum(np.sqrt(w_e / G[u][n]['weight']) for n in G.neighbors(u) if n != v)
+            sum_v = sum(np.sqrt(w_e / G[v][n]['weight']) for n in G.neighbors(v) if n != u)
+            ricci = 2.0 - sum_u - sum_v
+        else:
+            w_u, w_v = node_weights[u], node_weights[v]
+            sum_u = sum(np.sqrt(w_u / (w_e * G[u][n]['weight'])) for n in G.neighbors(u) if n != v)
+            sum_v = sum(np.sqrt(w_v / (w_e * G[v][n]['weight'])) for n in G.neighbors(v) if n != u)
+            ricci = w_e * ((w_u / w_e) + (w_v / w_e) - sum_u - sum_v)
+
+        G[u][v]['ricci'] = float(ricci)
+        edge_metrics.append([u, v, ricci, G[u][v]['dist'], w_e])
+
+    edge_metrics = np.array(edge_metrics).T if edge_metrics else np.empty((5, 0))
+
+    for u in range(n_nodes):
+        vals = [G[u][v]['ricci'] for v in G.neighbors(u) if 'ricci' in G[u][v]]
+        G.nodes[u]['total_curvature'] = float(sum(vals) / len(vals)) if vals else 0.0
+
+    fiedler_vec = np.array([G.nodes[i].get('fiedler', 0.0) for i in range(n_nodes)], dtype=float)
+    comp_vec = np.array([G.nodes[i].get('comp_id', 0) for i in range(n_nodes)], dtype=int)
+    curvature_vec = np.array([G.nodes[i].get('total_curvature', 0.0) for i in range(n_nodes)], dtype=float)
+    degree_vec = np.array([G.degree(i, weight='weight') for i in range(n_nodes)], dtype=float)
+
+    edges_array = np.array(list(G.edges())).T if G.number_of_edges() > 0 else np.empty((2, 0))
+
+    return G, edges_array, fiedler_vec, curvature_vec, [], degree_vec, comp_vec, G.graph.get('fiedler_value', 0.0), scale_length
+
+
+
+import numpy as np
+import networkx as nx
+from scipy.spatial import cKDTree, Delaunay
+
+def initialize_sensor_graph(
+    coords, 
+    cnt=0, 
+    min_weight=0.05, 
+    G=None, 
+    k_trgt=10, 
+    use_local_scale=True, 
+    set_initial_edges=None, 
+    edges_to_update=None, 
+    init_knn=None, 
+    use_rng=True,
+    enable_optimization_matrices=False
+):
+    n_nodes, n_dim = coords.shape
+    fiedler_graph = 0.0
+
+    # Determine whether candidate search matrices are needed
+    requires_matrices = enable_optimization_matrices or (edges_to_update is not None)
+
+    # ---------------------------------------------------------
+    # 1. INITIAL GRAPH CONSTRUCTION (Runs only when G is None)
+    # ---------------------------------------------------------
+    if G is None:
+        G = nx.Graph()
+        G.add_nodes_from(range(n_nodes))
+        for i, p in enumerate(coords):
+            G.nodes[i]['pos'] = p
+
+        tree = cKDTree(coords)
+        knn_dists_raw = tree.query(coords, k=k_trgt + 1)[0][:, -1]
+        scale_base = float(np.median(knn_dists_raw))
+
+        # --- UNIFIED LOCAL SCALE COMPUTATION ---
+        if use_local_scale:
+            median_sigma = scale_base
+            if median_sigma > 1e-8:
+                # Convert physical distances to dimensionless relative multipliers (~0.5 to 2.0)
+                relative_sigmas = knn_dists_raw / median_sigma
+                bounded_sigmas = np.clip(relative_sigmas, 0.5, 2.0)
+            else:
+                bounded_sigmas = np.ones(n_nodes)
+
+            for i in range(n_nodes):
+                G.nodes[i]['scale'] = float(bounded_sigmas[i])
+        else:
+            for i in range(n_nodes):
+                G.nodes[i]['scale'] = 1.0  # Unit multiplier
+
+        initial_edges = []
+
+        # --- HIGHER DIMENSION STRATEGY (k-NN + RNG Check) ---
+        if n_dim >= 3:
+            k_check = int(n_dim * 2)
+            distances, indices = tree.query(coords, k=k_check + 1)
+            for i in range(n_nodes):
+                p_i = coords[i]
+                for neighbor_idx in range(1, k_check + 1):
+                    j = indices[i, neighbor_idx]
+                    p_j = coords[j]
+                    d_ij = distances[i, neighbor_idx]
+
+                    if use_rng:
+                        midpoint = (p_i + p_j) / 2.0
+                        radius = d_ij - 1e-9 
+                        potential_violators = tree.query_ball_point(midpoint, radius)
+                        
+                        is_rng = True
+                        for v_idx in potential_violators:
+                            if v_idx in (i, j): 
+                                continue
+                            if (np.linalg.norm(p_i - coords[v_idx]) < d_ij and 
+                                np.linalg.norm(p_j - coords[v_idx]) < d_ij):
+                                is_rng = False
+                                break
+                        if not is_rng: 
+                            continue
+
+                    if i in indices[j, 1:k_check + 1]:
+                        u, v = sorted((i, j))
+                        initial_edges.append((u, v, d_ij))
+            
+            initial_edges = list(set(initial_edges))
+
+        # --- 2D STRATEGY (Gabriel Backbone) ---
+        else:
+            tri = Delaunay(coords)
+            edges_set = set()
+            for simplex in tri.simplices:
+                for i in range(len(simplex)):
+                    for j in range(i + 1, len(simplex)):
+                        edges_set.add(tuple(sorted((simplex[i], simplex[j]))))
+
+            for i, j in edges_set:
+                p1, p2 = coords[i], coords[j]
+                midpoint = (p1 + p2) / 2.0
+                radius = (np.linalg.norm(p1 - p2) / 2.0) - 1e-9
+                if not tree.query_ball_point(midpoint, radius):
+                    initial_edges.append((i, j, float(np.linalg.norm(p1 - p2))))
+
+        # --- SCALE & COMPONENT MANAGEMENT ---
+        G_init = nx.Graph()
+        G_init.add_weighted_edges_from(initial_edges, weight='dist')
+        
+        comps = list(nx.connected_components(G_init))
+        if comps:
+            lcc = G_init.subgraph(max(comps, key=len))
+            mst_edges = [d['dist'] for u, v, d in nx.minimum_spanning_tree(lcc, weight='dist').edges(data=True)]
+            # 85th percentile of MST distances acts as the physical scale reference
+            scale_length = float(np.percentile(mst_edges, 85))
+        else:
+            scale_length = float(scale_base)
+            
+        G.graph['scale_length'] = scale_length
+
+        if set_initial_edges is not None:
+            initial_edges = [
+                (int(set_initial_edges[0, i]), int(set_initial_edges[1, i]), 
+                 float(np.linalg.norm(coords[set_initial_edges[0, i]] - coords[set_initial_edges[1, i]]))) 
+                for i in range(set_initial_edges.shape[1])
+            ]
+
+        # Apply weights for initial structural edges
+        for u, v, d in initial_edges:
+            effective_scale = scale_length * np.sqrt(G.nodes[u]['scale'] * G.nodes[v]['scale'])
+            w = np.exp(-d / max(effective_scale, 1e-6))
+            if w >= min_weight:
+                G.add_edge(int(u), int(v), dist=d, weight=float(w), step=0, immutable=True)
+
+        if init_knn is not None:
+            knn_dists, knn_indices = tree.query(coords, k=init_knn + 1)
+            for j in range(n_nodes):
+                for idx_pos, v in enumerate(knn_indices[j, 1:]):
+                    d = float(knn_dists[j, idx_pos + 1])
+                    effective_scale = scale_length * np.sqrt(G.nodes[j]['scale'] * G.nodes[v]['scale'])
+                    w = np.exp(-d / max(effective_scale, 1e-6))
+                    if w >= min_weight:
+                        G.add_edge(int(j), int(v), dist=d, weight=float(w), step=0, immutable=True)
+
+        # Connect isolated graph components
+        if 'soft_component_merger' in globals():
+            G = soft_component_merger(G, coords, scale_length)
+        
+        # ---------------------------------------------------------
+        # OPTIONAL DENSE MATRICES (Only generated if optimizing)
+        # ---------------------------------------------------------
+        if requires_matrices:
+            G.graph['distances'] = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
+            scales = np.array([G.nodes[i]['scale'] for i in range(n_nodes)])
+            
+            # Vectorized Geometric Mean of Dimensionless Multipliers
+            scale_matrix = np.sqrt(scales.reshape(-1, 1) * scales.reshape(1, -1))
+            G.graph['scale_values'] = scale_length * scale_matrix
+            
+            G.graph['weights'] = np.exp(-G.graph['distances'] / np.maximum(G.graph['scale_values'], 1e-6))
+
+            edges_allowed = G.graph['weights'] >= min_weight
+            ilist1, ilist2 = np.where(edges_allowed)
+            edges_allowed = np.column_stack((ilist1, ilist2))
+            G.graph['allowed_edges'] = edges_allowed[edges_allowed[:, 0] < edges_allowed[:, 1]]
+
+    scale_length = G.graph.get('scale_length', 1.0)
+
+    # ---------------------------------------------------------
+    # 2. SPECTRAL & COMPONENT ANALYSIS
+    # ---------------------------------------------------------
+    if not requires_matrices and n_nodes > 10000:
+        fiedler_vec = np.zeros(n_nodes, dtype=float)
+        comp_vec = np.zeros(n_nodes, dtype=int)
+        curvature_vec = np.zeros(n_nodes, dtype=float)
+        degree_vec = np.array([G.degree(i, weight='weight') for i in range(n_nodes)], dtype=float)
+        edges_array = np.array(list(G.edges())).T if G.number_of_edges() > 0 else np.empty((2, 0))
+        
+        return G, edges_array, fiedler_vec, curvature_vec, [], degree_vec, comp_vec, 0.0, scale_length
+
+    # Full spectral calculations
+    components_list = sorted(nx.connected_components(G), key=len, reverse=True)
+    normalize_fiedler = True
+
+    for comp_id, nodes in enumerate(components_list):
+        nodes_sorted = sorted(nodes)
+        subG = G.subgraph(nodes_sorted)
+
+        if comp_id == 0 and (cnt % 50 == 0):
+            G.graph['diameter'] = float(nx.algorithms.approximation.diameter(subG))
+
+        for n in nodes_sorted:
+            G.nodes[n]['comp_id'] = comp_id
+
+        if len(nodes_sorted) > 2 and init_knn != k_trgt:
+            if 'robust_fiedler_solver' in globals():
+                L = nx.laplacian_matrix(subG, nodelist=nodes_sorted, weight='weight').astype(float)
+                fiedler_vector, fiedler_value, flag = robust_fiedler_solver(L)
+                
+                if comp_id == 0:
+                    fiedler_graph = float(fiedler_value)
+                    G.graph['fiedler_value'] = float(fiedler_value)
+
+                if not flag:
+                    fiedler_vector = np.zeros(len(nodes_sorted))
+
+                if normalize_fiedler:
+                    v_min, v_max = np.min(fiedler_vector), np.max(fiedler_vector)
+                    ptp = v_max - v_min
+                    if ptp > 1e-8:
+                        fiedler_vector = 2.0 * (fiedler_vector - v_min) / ptp - 1.0
+                    else:
+                        fiedler_vector = np.zeros_like(fiedler_vector)
+
+                for i, node_idx in enumerate(nodes_sorted):
+                    G.nodes[node_idx]['fiedler'] = float(fiedler_vector[i])
+            else:
+                for node_idx in nodes_sorted:
+                    G.nodes[node_idx]['fiedler'] = 0.0
+        else:
+            for node_idx in nodes_sorted:
+                G.nodes[node_idx]['fiedler'] = 0.0
+            if comp_id == 0:
+                G.graph['fiedler_value'] = 0.0
+
+    # Forman-Ricci Curvature
+    use_normalized_node_importance = True
+    node_weights = {u: G.degree(u, weight='weight') for u in range(n_nodes)}
+    
+    if edges_to_update is None:
+        edges_to_update = list(G.edges())
+
+    edge_metrics = []
+    for u, v in edges_to_update:
+        if not G.has_edge(u, v):
+            continue
+        w_e = G[u][v]['weight']
+        
+        if use_normalized_node_importance:
+            sum_u = sum(np.sqrt(w_e / G[u][n]['weight']) for n in G.neighbors(u) if n != v)
+            sum_v = sum(np.sqrt(w_e / G[v][n]['weight']) for n in G.neighbors(v) if n != u)
+            ricci = 2.0 - sum_u - sum_v
+        else:
+            w_u, w_v = node_weights[u], node_weights[v]
+            sum_u = sum(np.sqrt(w_u / (w_e * G[u][n]['weight'])) for n in G.neighbors(u) if n != v)
+            sum_v = sum(np.sqrt(w_v / (w_e * G[v][n]['weight'])) for n in G.neighbors(v) if n != u)
+            ricci = w_e * ((w_u / w_e) + (w_v / w_e) - sum_u - sum_v)
+
+        G[u][v]['ricci'] = float(ricci)
+        edge_metrics.append([u, v, ricci, G[u][v]['dist'], w_e])
+
+    for u in range(n_nodes):
+        vals = [G[u][v]['ricci'] for v in G.neighbors(u) if 'ricci' in G[u][v]]
+        G.nodes[u]['total_curvature'] = float(sum(vals) / len(vals)) if vals else 0.0
+
+    fiedler_vec = np.array([G.nodes[i].get('fiedler', 0.0) for i in range(n_nodes)], dtype=float)
+    comp_vec = np.array([G.nodes[i].get('comp_id', 0) for i in range(n_nodes)], dtype=int)
+    curvature_vec = np.array([G.nodes[i].get('total_curvature', 0.0) for i in range(n_nodes)], dtype=float)
+    degree_vec = np.array([G.degree(i, weight='weight') for i in range(n_nodes)], dtype=float)
+
+    # ---------------------------------------------------------
+    # 3. LOGGING / DIAGNOSTICS
+    # ---------------------------------------------------------
+    if cnt % 100 == 0:
+        print(f"\n[Iter {cnt}] Fiedler value: {G.graph.get('fiedler_value', 0.0):0.3f}")
+        print(f"Diameter: {G.graph.get('diameter', 0.0):0.3f}")
+        
+        if len(curvature_vec) > 0:
+            print(f"Curvature distribution: {np.quantile(curvature_vec, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+        
+        if G.number_of_edges() > 0:
+            # Extract metrics directly from edge attributes (works for both fast-path and optimization branches)
+            edge_ricci = [d['ricci'] for u, v, d in G.edges(data=True) if 'ricci' in d]
+            edge_weights = [d['weight'] for u, v, d in G.edges(data=True) if 'weight' in d]
+
+            if edge_ricci:
+                print(f"Edge Curvature dist: {np.quantile(edge_ricci, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+            if edge_weights:
+                print(f"Edge Weight dist: {np.quantile(edge_weights, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+
+        if len(degree_vec) > 0:
+            print(f"Degree distribution: {np.quantile(degree_vec, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+    
+    edges_array = np.array(list(G.edges())).T if G.number_of_edges() > 0 else np.empty((2, 0))
+
+    return G, edges_array, fiedler_vec, curvature_vec, [], degree_vec, comp_vec, G.graph.get('fiedler_value', 0.0), scale_length
+
+
+
+
+
+
+
+
+
 def optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3, max_iters = 5000):
     locs_proj = ftrns1(locs_use) / 1000.0
     locs_cart = np.copy(locs_proj)
@@ -3278,7 +3904,7 @@ def optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3, max_iter
     target_edge_limit = len(locs_cart) * (k_trgt // 2)
 
     G, edges, fiedler, curvature, _, degree_values, components, fiedler_value, scale_length = initialize_sensor_graph(
-        locs_cart, init_knn=init_knn, k_trgt=k_trgt
+        locs_cart, init_knn=init_knn, k_trgt=k_trgt, enable_optimization_matrices = True
     )
 
     edges_to_update = None
@@ -3328,7 +3954,7 @@ def optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio 
 
     # 2. Initial Graph Construction
     G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = initialize_sensor_graph(
-        srcs_cart, init_knn=init_knn, k_trgt=k_trgt
+        srcs_cart, init_knn=init_knn, k_trgt=k_trgt, enable_optimization_matrices = True
     )
 
     edges_to_update = None
