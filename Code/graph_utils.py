@@ -2881,6 +2881,7 @@ def initialize_sensor_graph(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt
     normalize_fiedler = True
     components = sorted(nx.connected_components(G), key=len, reverse=True)
     scale_length = G.graph.get('scale_length', 1.0)
+    # fiedler_graph = np.nan
     
     for comp_id, nodes in enumerate(components):
         nodes_sorted = sorted(nodes)
@@ -2902,6 +2903,7 @@ def initialize_sensor_graph(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt
             # Fast ARPACK solver call
             # fiedler_vector, fiedler_value, flag = robust_universal_fiedler_solver(L)
             fiedler_vector, fiedler_value, flag = robust_fiedler_solver(L)
+            if comp_id == 0: fiedler_graph = fiedler_value
             
             if not flag:
                 print(f"Warning: Fiedler solver did not converge for component {comp_id}")
