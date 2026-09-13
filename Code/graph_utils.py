@@ -8069,8 +8069,8 @@ def get_most_impactful_edges_balanced(G, scale_length, cnt = 0, top_k=5, degree_
     edge_allowed = G.graph.get('allowed_edges', np.empty((0, 2), dtype=int))
     
     # Safeguard: Early exit if candidate edge list is exhausted
-        if len(edge_allowed) == 0:
-            return G, None, None, []
+    if len(edge_allowed) == 0:
+        return G, None, None, []
     
     if mode == 'bipartite':
         n_nodes_s = G.graph['n_nodes_s']
