@@ -4548,7 +4548,7 @@ class SpectralProductSampler_updated1:
         effective_cap = min(cap_limit, max_degree_cap, len(neighbors))
         return list(np.random.choice(neighbors, size=effective_cap, replace=False, p=mixed_probs))
 
-    def expand_partial_stars(self, anchors, target_node_count, k_base=None, epsilon=0.2, degree_headroom=None):
+    def expand_partial_stars_backup(self, anchors, target_node_count, k_base=None, epsilon=0.2, degree_headroom=None):
         if k_base is None or degree_headroom is None:
             derived = self.derive_adaptive_sampling_params()
             k_base = k_base if k_base is not None else derived["k_base"]
@@ -4638,7 +4638,7 @@ class SpectralProductSampler_updated1:
             current_list.pop(idx)
 
         return retained_nodes
-
+    
     def estimate_anchor_target(self, target_node_count, k_base=None):
         if k_base is None:
             derived = self.derive_adaptive_sampling_params()
@@ -5411,7 +5411,7 @@ class SpectralProductSampler:
         random.shuffle(anchor_list)
         return anchor_list
 
-    def expand_partial_stars(self, anchors, target_node_count, k_base=None, epsilon=0.2, degree_headroom=None):
+    def expand_partial_stars_backup(self, anchors, target_node_count, k_base=None, epsilon=0.2, degree_headroom=None):
         if k_base is None or degree_headroom is None:
             derived = self.derive_adaptive_sampling_params()
             k_base = k_base if k_base is not None else derived["k_base"]
@@ -5479,7 +5479,121 @@ class SpectralProductSampler:
                         break
 
         return retained_nodes
-
+    
+    def expand_partial_stars(
+        self, 
+        anchors, 
+        target_node_count, 
+        k_base=None, 
+        epsilon=0.2, 
+        degree_headroom=None,
+        budget_tolerance=0.05  # Allows a slight 5% overshoot to complete star neighborhoods
+    ):
+        if k_base is None or degree_headroom is None:
+            derived = self.derive_adaptive_sampling_params()
+            k_base = k_base if k_base is not None else derived["k_base"]
+            degree_headroom = degree_headroom if degree_headroom is not None else derived["degree_headroom"]
+    
+        retained_nodes = set(anchors)
+        n_anchors = max(1, len(anchors))
+        
+        # Define a soft tolerance ceiling (e.g., 5000 -> 5250)
+        soft_budget_cap = int(target_node_count * (1.0 + budget_tolerance))
+        
+        avg_budget_per_anchor = max(2.0, (target_node_count - n_anchors) / n_anchors)
+        dynamic_max_degree = max(2, int(np.floor(degree_headroom * avg_budget_per_anchor)))
+    
+        indptr_A, indices_A = self.adj_A.indptr, self.adj_A.indices
+        indptr_B, indices_B = self.adj_B.indptr, self.adj_B.indices
+    
+        # Shuffle anchor evaluation order to eliminate static positional bias
+        shuffled_anchors = list(anchors)
+        random.shuffle(shuffled_anchors)
+    
+        ratio_a = np.sqrt(len(self.nodes_A) / len(self.nodes_B))
+        ratio_b = np.sqrt(len(self.nodes_B) / len(self.nodes_A))
+    
+        # Pre-calculate sampling targets and candidate sets per anchor
+        anchor_tasks = []
+        for a, b in shuffled_anchors:
+            idx_a = self.node_to_idx_A[a]
+            idx_b = self.node_to_idx_B[b]
+    
+            mult_a = np.clip(self.tau_A[idx_a] / self.mean_tau_A, 0.5, 3.0)
+            mult_b = np.clip(self.tau_B[idx_b] / self.mean_tau_B, 0.5, 3.0)
+            
+            cap_a = max(1, int(round(k_base * ratio_a * mult_a)))
+            cap_b = max(1, int(round(k_base * ratio_b * mult_b)))
+    
+            anchor_tasks.append({
+                'a': a, 'b': b,
+                'idx_a': idx_a, 'idx_b': idx_b,
+                'cap_a': min(cap_a, dynamic_max_degree),
+                'cap_b': min(cap_b, dynamic_max_degree),
+                'expanded_a': False,
+                'expanded_b': False
+            })
+    
+        # Round-Robin Expansion Phase: Distribute node quota evenly across anchors
+        active = True
+        while active and len(retained_nodes) < soft_budget_cap:
+            active = False  # Track if any progress was made in this pass
+            
+            # Shuffle loop order per round so no single anchor dominates
+            random.shuffle(anchor_tasks)
+    
+            for task in anchor_tasks:
+                if len(retained_nodes) >= soft_budget_cap:
+                    break
+    
+                a, b = task['a'], task['b']
+                
+                # Eliminate A-before-B bias by randomly ordering factor expansion
+                factors = ['A', 'B']
+                random.shuffle(factors)
+    
+                for factor in factors:
+                    if len(retained_nodes) >= soft_budget_cap:
+                        break
+    
+                    if factor == 'A' and not task['expanded_a']:
+                        neigh_indices = indices_A[indptr_A[task['idx_a']]:indptr_A[task['idx_a']+1]]
+                        unvisited = [n_idx for n_idx in neigh_indices if (self.nodes_A[n_idx], b) not in retained_nodes]
+    
+                        if unvisited:
+                            raw_tau = self.tau_A[unvisited]
+                            tau_sum = np.sum(raw_tau)
+                            probs = (1.0 - epsilon) * (raw_tau / tau_sum if tau_sum > 0 else 1.0 / len(unvisited)) + epsilon * (1.0 / len(unvisited))
+                            probs /= np.sum(probs)
+    
+                            eff_cap = min(task['cap_a'], len(unvisited))
+                            chosen = np.random.choice(unvisited, size=eff_cap, replace=False, p=probs)
+                            for c_idx in chosen:
+                                retained_nodes.add((self.nodes_A[c_idx], b))
+    
+                        task['expanded_a'] = True
+                        active = True
+    
+                    elif factor == 'B' and not task['expanded_b']:
+                        neigh_indices = indices_B[indptr_B[task['idx_b']]:indptr_B[task['idx_b']+1]]
+                        unvisited = [n_idx for n_idx in neigh_indices if (a, self.nodes_B[n_idx]) not in retained_nodes]
+    
+                        if unvisited:
+                            raw_tau = self.tau_B[unvisited]
+                            tau_sum = np.sum(raw_tau)
+                            probs = (1.0 - epsilon) * (raw_tau / tau_sum if tau_sum > 0 else 1.0 / len(unvisited)) + epsilon * (1.0 / len(unvisited))
+                            probs /= np.sum(probs)
+    
+                            eff_cap = min(task['cap_b'], len(unvisited))
+                            chosen = np.random.choice(unvisited, size=eff_cap, replace=False, p=probs)
+                            for c_idx in chosen:
+                                retained_nodes.add((a, self.nodes_B[c_idx]))
+    
+                        task['expanded_b'] = True
+                        active = True
+    
+        return retained_nodes
+    
     def estimate_anchor_target(self, target_node_count, k_base=None):
         if k_base is None:
             derived = self.derive_adaptive_sampling_params()
