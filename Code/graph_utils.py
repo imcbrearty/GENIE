@@ -6298,6 +6298,117 @@ class SpectralProductSampler:
             "degree_headroom": degree_headroom
         }
 
+    # def select_anchors(
+    #     self,
+    #     n_anchor_target,
+    #     use_cartesian_core=False,
+    #     core_ratio=0.1,
+    #     physical_ratio=None,
+    #     k_local_scale=10,
+    #     density_equalization_gamma=None
+    # ):
+    #     if physical_ratio is None or density_equalization_gamma is None:
+    #         derived = self.derive_adaptive_sampling_params(k_local=k_local_scale)
+    #         physical_ratio = physical_ratio if physical_ratio is not None else derived["physical_ratio"]
+    #         density_equalization_gamma = (
+    #             density_equalization_gamma if density_equalization_gamma is not None
+    #             else derived["density_equalization_gamma"]
+    #         )
+
+    #     anchors = set()
+    #     coords_A = np.array([self.pos_A[n] for n in self.nodes_A])
+    #     coords_B = np.array([self.pos_B[n] for n in self.nodes_B])
+
+    #     # A. Cartesian Core
+    #     n_core_target = int(n_anchor_target * core_ratio) if use_cartesian_core else 0
+    #     if n_core_target > 0:
+    #         ratio = len(self.nodes_A) / len(self.nodes_B)
+    #         k_a = min(len(self.nodes_A), max(1, int(np.sqrt(n_core_target * ratio))))
+    #         k_b = min(len(self.nodes_B), max(1, int(n_core_target / max(1, k_a))))
+
+    #         top_a_indices = np.argsort(self.tau_A)[-k_a:]
+    #         top_b_indices = np.argsort(self.tau_B)[-k_b:]
+
+    #         for idx_a in top_a_indices:
+    #             for idx_b in top_b_indices:
+    #                 if len(anchors) < n_core_target:
+    #                     anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
+
+    #     # B. Physical Importance Sampling
+    #     n_physical_target = int(n_anchor_target * physical_ratio)
+    #     if n_physical_target > 0:
+    #         tree_A = cKDTree(coords_A)
+    #         tree_B = cKDTree(coords_B)
+    #         n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+
+    #         aspect_pool_scale = np.sqrt(n_b / max(1, n_a))
+    #         k_candidate_pool = int(np.clip(k_local_scale * 3 * aspect_pool_scale, 20, n_b))
+    #         k_actual_B = min(k_candidate_pool, n_b)
+
+    #         dists_B, indices_B = tree_B.query(coords_A, k=k_actual_B)
+    #         if dists_B.ndim == 1:
+    #             dists_B, indices_B = dists_B[:, None], indices_B[:, None]
+
+    #         dists_self_A, _ = tree_A.query(coords_A, k=min(k_local_scale, n_a))
+    #         dists_self_B, _ = tree_B.query(coords_B, k=min(k_local_scale, n_b))
+
+    #         if dists_self_A.ndim == 1: dists_self_A = dists_self_A[:, None]
+    #         if dists_self_B.ndim == 1: dists_self_B = dists_self_B[:, None]
+
+    #         sigma_A = np.maximum(dists_self_A[:, -1] / 1.1774, 1e-5)
+    #         sigma_B = np.maximum(dists_self_B[:, -1] / 1.1774, 1e-5)
+
+    #         density_A = 1.0 / (sigma_A**2)
+    #         density_B = 1.0 / (sigma_B**2)
+
+    #         spatial_extent = np.linalg.norm(coords_A.max(axis=0) - coords_A.min(axis=0)) + 1e-5
+    #         scaled_dists_B = dists_B / spatial_extent
+    #         bandwidth = np.median(scaled_dists_B) + 1e-5
+
+    #         raw_weights = np.exp(- (scaled_dists_B**2) / (2 * (bandwidth**2)))
+    #         candidate_density_B = density_B[indices_B]
+
+    #         joint_density = (density_A[:, None] * candidate_density_B) ** density_equalization_gamma
+    #         equalized_weights = raw_weights / np.maximum(joint_density, 1e-8)
+    #         equalized_weights = np.nan_to_num(equalized_weights, nan=0.0)
+
+    #         # Two-level 1D Sampling (Fast for large N)
+    #         row_sums = np.sum(equalized_weights, axis=1)
+    #         total_sum = np.sum(row_sums)
+            
+    #         p_rows = row_sums / total_sum if total_sum > 0 else np.full(n_a, 1.0 / n_a)
+
+    #         target_physical_count = n_core_target + n_physical_target
+    #         needed = target_physical_count - len(anchors)
+            
+    #         if needed > 0:
+    #             sampled_rows = np.random.choice(n_a, size=needed * 2, replace=True, p=p_rows)
+    #             for r_idx in sampled_rows:
+    #                 row_w = equalized_weights[r_idx]
+    #                 r_sum = row_sums[r_idx]
+    #                 p_cols = row_w / r_sum if r_sum > 0 else np.full(k_actual_B, 1.0 / k_actual_B)
+                    
+    #                 c_idx = np.random.choice(k_actual_B, p=p_cols)
+    #                 sta_idx = indices_B[r_idx, c_idx]
+    #                 anchors.add((self.nodes_A[r_idx], self.nodes_B[sta_idx]))
+                    
+    #                 if len(anchors) >= target_physical_count:
+    #                     break
+
+    #     # C. Spectral Leverage Sampling
+    #     n_remaining = max(0, n_anchor_target - len(anchors))
+    #     if n_remaining > 0:
+    #         sampled_a = np.random.choice(len(self.nodes_A), size=n_remaining * 3, replace=True, p=self.p_A)
+    #         sampled_b = np.random.choice(len(self.nodes_B), size=n_remaining * 3, replace=True, p=self.p_B)
+    #         for idx_a, idx_b in zip(sampled_a, sampled_b):
+    #             anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
+    #             if len(anchors) >= n_anchor_target:
+    #                 break
+
+    #     anchor_list = list(anchors)
+    #     random.shuffle(anchor_list)
+    #     return anchor_list
+    
     def select_anchors(
         self,
         n_anchor_target,
@@ -6307,6 +6418,7 @@ class SpectralProductSampler:
         k_local_scale=10,
         density_equalization_gamma=None
     ):
+        # 1. Derive parameters dynamically if not explicitly provided
         if physical_ratio is None or density_equalization_gamma is None:
             derived = self.derive_adaptive_sampling_params(k_local=k_local_scale)
             physical_ratio = physical_ratio if physical_ratio is not None else derived["physical_ratio"]
@@ -6314,101 +6426,122 @@ class SpectralProductSampler:
                 density_equalization_gamma if density_equalization_gamma is not None
                 else derived["density_equalization_gamma"]
             )
-
+    
         anchors = set()
         coords_A = np.array([self.pos_A[n] for n in self.nodes_A])
         coords_B = np.array([self.pos_B[n] for n in self.nodes_B])
-
-        # A. Cartesian Core
+        n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+    
+        # ------------------------------------------------------------------
+        # Step A: Cartesian Core (High-Leverage Spectral Pairs)
+        # ------------------------------------------------------------------
         n_core_target = int(n_anchor_target * core_ratio) if use_cartesian_core else 0
         if n_core_target > 0:
-            ratio = len(self.nodes_A) / len(self.nodes_B)
-            k_a = min(len(self.nodes_A), max(1, int(np.sqrt(n_core_target * ratio))))
-            k_b = min(len(self.nodes_B), max(1, int(n_core_target / max(1, k_a))))
-
+            ratio = n_a / n_b
+            k_a = min(n_a, max(1, int(np.sqrt(n_core_target * ratio))))
+            k_b = min(n_b, max(1, int(n_core_target / max(1, k_a))))
+    
             top_a_indices = np.argsort(self.tau_A)[-k_a:]
             top_b_indices = np.argsort(self.tau_B)[-k_b:]
-
+    
             for idx_a in top_a_indices:
                 for idx_b in top_b_indices:
-                    if len(anchors) < n_core_target:
-                        anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
-
-        # B. Physical Importance Sampling
+                    anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
+    
+        # ------------------------------------------------------------------
+        # Step B: Per-Source Adaptive Physical Sampling (Vectorized)
+        # ------------------------------------------------------------------
         n_physical_target = int(n_anchor_target * physical_ratio)
+    
         if n_physical_target > 0:
             tree_A = cKDTree(coords_A)
             tree_B = cKDTree(coords_B)
-            n_a, n_b = len(self.nodes_A), len(self.nodes_B)
-
+    
+            # Dynamic calculation of K per source derived from physical_ratio
+            k_per_source_exact = n_physical_target / max(1, n_a)
+            k_draw_base = int(np.floor(k_per_source_exact))
+            prob_extra = k_per_source_exact - k_draw_base
+    
             aspect_pool_scale = np.sqrt(n_b / max(1, n_a))
             k_candidate_pool = int(np.clip(k_local_scale * 3 * aspect_pool_scale, 20, n_b))
             k_actual_B = min(k_candidate_pool, n_b)
-
+    
             dists_B, indices_B = tree_B.query(coords_A, k=k_actual_B)
             if dists_B.ndim == 1:
                 dists_B, indices_B = dists_B[:, None], indices_B[:, None]
-
+    
             dists_self_A, _ = tree_A.query(coords_A, k=min(k_local_scale, n_a))
             dists_self_B, _ = tree_B.query(coords_B, k=min(k_local_scale, n_b))
-
+    
             if dists_self_A.ndim == 1: dists_self_A = dists_self_A[:, None]
             if dists_self_B.ndim == 1: dists_self_B = dists_self_B[:, None]
-
+    
             sigma_A = np.maximum(dists_self_A[:, -1] / 1.1774, 1e-5)
             sigma_B = np.maximum(dists_self_B[:, -1] / 1.1774, 1e-5)
-
+    
             density_A = 1.0 / (sigma_A**2)
             density_B = 1.0 / (sigma_B**2)
-
+    
             spatial_extent = np.linalg.norm(coords_A.max(axis=0) - coords_A.min(axis=0)) + 1e-5
             scaled_dists_B = dists_B / spatial_extent
             bandwidth = np.median(scaled_dists_B) + 1e-5
-
+    
             raw_weights = np.exp(- (scaled_dists_B**2) / (2 * (bandwidth**2)))
             candidate_density_B = density_B[indices_B]
-
+    
             joint_density = (density_A[:, None] * candidate_density_B) ** density_equalization_gamma
             equalized_weights = raw_weights / np.maximum(joint_density, 1e-8)
             equalized_weights = np.nan_to_num(equalized_weights, nan=0.0)
-
-            # Two-level 1D Sampling (Fast for large N)
-            row_sums = np.sum(equalized_weights, axis=1)
-            total_sum = np.sum(row_sums)
+    
+            # --- VECTORIZED LOCAL NORMALIZATION ---
+            row_sums = equalized_weights.sum(axis=1, keepdims=True)
+            # Normalize per row; fallback to uniform if a row sum is zero
+            p_matrix = np.where(row_sums > 0, equalized_weights / np.maximum(row_sums, 1e-12), 1.0 / k_actual_B)
+            # Apply 10% uniform exploration floor across the candidate set
+            p_matrix = 0.9 * p_matrix + (0.1 / k_actual_B)
+            p_matrix /= p_matrix.sum(axis=1, keepdims=True)
+    
+            # --- VECTORIZED NUMBER OF DRAWS PER SOURCE ---
+            extra_draws = (np.random.rand(n_a) < prob_extra).astype(int)
+            n_draws_per_source = np.clip(k_draw_base + extra_draws, 1, k_actual_B)
+            max_draws = n_draws_per_source.max()
+    
+            # --- VECTORIZED SAMPLING WITHOUT REPLACEMENT (Gumbel-Max trick) ---
+            # Draw Gumbel noise across all candidate entries simultaneously
+            u = np.random.uniform(1e-10, 1.0 - 1e-10, size=(n_a, k_actual_B))
+            gumbel_scores = np.log(p_matrix) - np.log(-np.log(u))
             
-            p_rows = row_sums / total_sum if total_sum > 0 else np.full(n_a, 1.0 / n_a)
-
-            target_physical_count = n_core_target + n_physical_target
-            needed = target_physical_count - len(anchors)
-            
-            if needed > 0:
-                sampled_rows = np.random.choice(n_a, size=needed * 2, replace=True, p=p_rows)
-                for r_idx in sampled_rows:
-                    row_w = equalized_weights[r_idx]
-                    r_sum = row_sums[r_idx]
-                    p_cols = row_w / r_sum if r_sum > 0 else np.full(k_actual_B, 1.0 / k_actual_B)
-                    
-                    c_idx = np.random.choice(k_actual_B, p=p_cols)
-                    sta_idx = indices_B[r_idx, c_idx]
-                    anchors.add((self.nodes_A[r_idx], self.nodes_B[sta_idx]))
-                    
-                    if len(anchors) >= target_physical_count:
-                        break
-
-        # C. Spectral Leverage Sampling
+            # Ranking candidate columns by score gives exact categorical samples without replacement
+            top_col_indices = np.argsort(-gumbel_scores, axis=1)[:, :max_draws]
+    
+            # Extract sampled station indices and construct anchor pairs
+            row_indices, rank_indices = np.ogrid[:n_a, :max_draws]
+            valid_mask = rank_indices < n_draws_per_source[:, None]
+    
+            sampled_source_rows = np.repeat(np.arange(n_a)[:, None], max_draws, axis=1)[valid_mask]
+            sampled_cand_cols = top_col_indices[valid_mask]
+            sampled_station_cols = indices_B[sampled_source_rows, sampled_cand_cols]
+    
+            for r_idx, sta_idx in zip(sampled_source_rows, sampled_station_cols):
+                anchors.add((self.nodes_A[r_idx], self.nodes_B[sta_idx]))
+    
+        # ------------------------------------------------------------------
+        # Step C: Spectral Leverage Sampling (Global Residuals)
+        # ------------------------------------------------------------------
         n_remaining = max(0, n_anchor_target - len(anchors))
         if n_remaining > 0:
-            sampled_a = np.random.choice(len(self.nodes_A), size=n_remaining * 3, replace=True, p=self.p_A)
-            sampled_b = np.random.choice(len(self.nodes_B), size=n_remaining * 3, replace=True, p=self.p_B)
+            sampled_a = np.random.choice(n_a, size=n_remaining * 3, replace=True, p=self.p_A)
+            sampled_b = np.random.choice(n_b, size=n_remaining * 3, replace=True, p=self.p_B)
             for idx_a, idx_b in zip(sampled_a, sampled_b):
                 anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
                 if len(anchors) >= n_anchor_target:
                     break
-
+    
         anchor_list = list(anchors)
         random.shuffle(anchor_list)
         return anchor_list
 
+    
     def expand_partial_stars_backup(self, anchors, target_node_count, k_base=None, epsilon=0.2, degree_headroom=None):
         if k_base is None or degree_headroom is None:
             derived = self.derive_adaptive_sampling_params()
