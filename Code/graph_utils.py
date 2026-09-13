@@ -2878,6 +2878,7 @@ def initialize_sensor_graph(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt
 
     
     # Sort components largest to smallest
+    normalize_fiedler = True
     components = sorted(nx.connected_components(G), key=len, reverse=True)
     scale_length = G.graph.get('scale_length', 1.0)
     
