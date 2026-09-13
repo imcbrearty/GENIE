@@ -3035,17 +3035,34 @@ def initialize_sensor_graph(
         tree = cKDTree(coords)
         scale_base = np.quantile(tree.query(coords, k=k_trgt + 1)[0][:, -1], 0.75)
 
-        # Local Scale Computation & Bounding
+        # # Local Scale Computation & Bounding
+        # if use_local_scale:
+        #     raw_local_sigmas = compute_local_sigma(coords, k=k_trgt)
+        #     # Relative scaling bounded between 0.3x and 3.0x of baseline
+        #     rel_scales = np.clip(raw_local_sigmas / max(scale_base, 1e-6), 0.3, 3.0)
+        #     for i in range(n_nodes):
+        #         G.nodes[i]['scale'] = float(rel_scales[i])
+        # else:
+        #     for i in range(n_nodes):
+        #         G.nodes[i]['scale'] = 1.0
+
+        # ---------------------------------------------------------
+        # Correct Local Scale Setup (Preserves physical distance scaling)
+        # ---------------------------------------------------------
         if use_local_scale:
             raw_local_sigmas = compute_local_sigma(coords, k=k_trgt)
-            # Relative scaling bounded between 0.3x and 3.0x of baseline
-            rel_scales = np.clip(raw_local_sigmas / max(scale_base, 1e-6), 0.3, 3.0)
+            
+            # Clip extreme outliers relative to median density (k-NN distance)
+            # Allows sparse nodes to scale up, without exploding infinitely
+            median_sigma = np.median(raw_local_sigmas)
+            bounded_sigmas = np.clip(raw_local_sigmas, 0.3 * median_sigma, 3.0 * median_sigma)
+            
             for i in range(n_nodes):
-                G.nodes[i]['scale'] = float(rel_scales[i])
+                G.nodes[i]['scale'] = float(bounded_sigmas[i])
         else:
             for i in range(n_nodes):
-                G.nodes[i]['scale'] = 1.0
-
+                G.nodes[i]['scale'] = float(scale_base)
+        
         initial_edges = []
 
         # --- HIGHER DIMENSION STRATEGY (k-NN + RNG Check) ---
@@ -3286,7 +3303,7 @@ def optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3, max_iter
             use_triangles=use_triangles, 
             update=True
         )
-
+        
         if not edges_to_update:
             print("No new valid edges found to insert. Stopping early.")
             break
@@ -7587,7 +7604,7 @@ def optimize_source_graph_backup(x_grid, ftrns1, k_spc_edges, scale_time, k_init
 
 
 
-def get_most_impactful_edges_balanced(G, scale_length, cnt = 0, top_k=5, degree_p=1.0, greedy_regularize = 0.9, greedy_regularize_extra = 0.1, alpha_scale = 0.75, beta_scale = 0.1, min_weight = 0.05, exclusion_scale = 1.0, mode = 'univariate', use_triangles = False, update = False): # tracked_values = None, track_resistance = True
+def get_most_impactful_edges_balanced_backup(G, scale_length, cnt = 0, top_k=5, degree_p=1.0, greedy_regularize = 0.9, greedy_regularize_extra = 0.1, alpha_scale = 0.75, beta_scale = 0.1, min_weight = 0.05, exclusion_scale = 1.0, mode = 'univariate', use_triangles = False, update = False): # tracked_values = None, track_resistance = True
 
     nodes = list(G.nodes(data=True))
     n = len(nodes)
@@ -8011,6 +8028,458 @@ def get_most_impactful_edges_balanced(G, scale_length, cnt = 0, top_k=5, degree_
         edges_to_update = set(new_edges + incident_edges)
 
     return G_updated, candidates, candidates_select, edges_to_update
+
+
+
+
+
+def get_most_impactful_edges_balanced(G, scale_length, cnt = 0, top_k=5, degree_p=1.0, greedy_regularize = 0.9, greedy_regularize_extra = 0.1, alpha_scale = 0.75, beta_scale = 0.1, min_weight = 0.05, exclusion_scale = 1.0, mode = 'univariate', use_triangles = False, update = False): # tracked_values = None, track_resistance = True
+
+    nodes = list(G.nodes(data=True))
+    n = len(nodes)
+    n_dim = len(G.nodes[0]['pos'])
+
+    # node_weights = {n: G.degree(n, weight='weight') for n in G.nodes()}
+    node_weights = np.array([v for n, v in G.degree(weight='weight')])
+    node_inv_sqrt_sum = np.array([sum(1.0 / np.sqrt(G[n][nbr]['weight']) for nbr in G.neighbors(n)) for n in G.nodes()])
+
+
+    use_normalized_ricci = True
+    gamma_penalty = 0.2
+    tau_scale = 0.1
+
+
+    if (greedy_regularize == 1.0)*(greedy_regularize_extra > 0):
+        if np.random.rand() < greedy_regularize_extra:
+            greedy_regularize = 1.0 - greedy_regularize_extra
+
+    if greedy_regularize != 1.0:
+        L = nx.laplacian_matrix(G, weight='weight').astype(float)
+        solve = spla.factorized((L + 1e-4 * sp.eye(n)).tocsc())
+
+
+    # Before the loop starts, create a mapping of component IDs to their sizes
+    comp_ids = np.array([du.get('comp_id', 0) for _, du in nodes])
+    # from collections import Counter
+    comp_sizes = Counter(comp_ids)
+    weights = G.graph['weights']
+    distances = G.graph['distances']
+    scale_values = G.graph['scale_values']
+    # edge_allowed = G.graph['allowed_edges'] # G.graph['allowed_edges']
+    edge_allowed = G.graph.get('allowed_edges', np.empty((0, 2), dtype=int))
+    
+    # Safeguard: Early exit if candidate edge list is exhausted
+        if len(edge_allowed) == 0:
+            return G, None, None, []
+    
+    if mode == 'bipartite':
+        n_nodes_s = G.graph['n_nodes_s']
+        n_nodes_r = G.graph['n_nodes_r']
+        scale_src = G.graph['scale_src']
+        scale_sta = G.graph['scale_sta']
+
+    # ilist1, ilist2 = np.where(mask_allowed > 0)
+    # edge_allowed = np.concatenate((ilist1.reshape(-1,1) ilist2.reshape(-1,1)), axis = 1)
+    # edge_allowed = edges_allowed[edges_allowed[:,0] <= edges_allowed[:,1]]
+
+    fiedler_vec = np.array([v['fiedler'] for n, v in nodes])
+    curvature = np.array([v['total_curvature'] for n, v in nodes])
+    degrees = np.array([v for u,v in G.degree()])
+
+    edge_slice = np.stack(list(G.edges()))
+    tree_edges = cKDTree(np.concatenate((edge_slice, np.flip(edge_slice, axis = 1)), axis = 0))
+
+
+
+    top_k_approx = np.minimum(250*top_k, int(0.1*len(edge_allowed)))
+    top_k_approx1 = np.minimum(2*top_k_approx, int(0.2*len(edge_allowed)))
+    if cnt == 0: print('Top k values : %d, %d, %d'%(top_k, top_k_approx, top_k_approx1)) # *len(patch)
+
+    # mov_mean_resistance = -1
+    ## Also estimate the (even larger) k min required to ensure sum - resistance - curvature is within top k set
+
+    batch_size_val = int(50e3)
+    num_batches = int(np.ceil(len(edge_allowed) / batch_size_val))
+    
+    ind_batches = [
+        np.arange(i * batch_size_val, min((i + 1) * batch_size_val, len(edge_allowed)))
+        for i in range(num_batches)
+    ]
+    
+    # # candidates = [] ## How can we pre-determine the top-k pairs to try at all for the search?
+    # batch_size_val = int(50e3)
+    # ind_batches = [np.arange(int(batch_size_val)) + i*batch_size_val for i in range(int(np.ceil(len(edge_allowed)/batch_size_val)))]    
+    # if (ind_batches[-1][-1] < len(edge_allowed))*(len(ind_batches) > 1):
+    #     ind_batches.append(np.arange(ind_batches[-1][-1] + 1, len(edge_allowed)))
+    # elif (ind_batches[-1][-1] < len(edge_allowed)):
+    #     ind_batches[0] = np.arange(len(edge_allowed))
+    # elif (ind_batches[-1][-1] >= len(edge_allowed)):
+    #     ind_batches[-1] = np.arange(ind_batches[-1][0], len(edge_allowed))
+    assert(max([len(ind_batches[i]) for i in range(len(ind_batches))]) <= 1.5*batch_size_val)
+
+
+    ## Initial pass
+    candidates = []
+    use_greedy = []
+
+    # pdb.set_trace()
+    for batch_ind in ind_batches:
+        edge_slice = edge_allowed[batch_ind,:] # .T
+        edge_slice = edge_slice[tree_edges.query(edge_slice)[0] > 0]
+        # u_slice, v_slice = edge_slice[tree_edges.query(edge_slice)[0] > 0].T
+        u_slice, v_slice = edge_slice.T
+
+        w_new = weights[u_slice,v_slice]
+        spec_log = np.log(np.abs(fiedler_vec[u_slice] - fiedler_vec[v_slice])*(comp_ids[u_slice] == comp_ids[v_slice]) + 1e-9) # + np.log(eff_res + 1e-9) ## Consider non local weight scaling for distance
+        cost_log = np.log(1.0 + (distances[u_slice,v_slice] / scale_values[u_slice, v_slice])/2.0) # (dist / scale_length)/2.0 # This is the log of your 'cost' variable
+        balance_log = degree_p * np.log(degrees[u_slice] + degrees[v_slice] + 1e-9)
+        score_approx1 = spec_log - cost_log - balance_log
+
+        irand_greedy = 1.0*(np.random.rand(len(edge_slice)) < greedy_regularize).reshape(-1,1)
+        candidates.append(np.concatenate((edge_slice, w_new.reshape(-1,1), score_approx1.reshape(-1,1) - irand_greedy*spec_log.reshape(-1,1), spec_log.reshape(-1,1)), axis = 1))
+        use_greedy.append(irand_greedy.reshape(-1))
+
+    ## Select top percentile candidates (with greedy shortcut)
+    candidates = np.vstack(candidates)
+    use_greedy = np.hstack(use_greedy)
+
+    # igrab_optimal = np.flip(np.argsort(candidates[:,3])[-top_k_approx1::])
+
+    igrab_optimal = np.flip(np.argsort(candidates[:,3]*(use_greedy == 0))[-top_k_approx1::]).astype('int')
+    igrab_greedy = np.flip(np.argsort(candidates[:,3]*(use_greedy == 1))[-top_k_approx1::]).astype('int')
+    # pdb.set_trace()
+
+    # try:
+    igrab_optimal = np.array(list(set(igrab_optimal).union(igrab_greedy))).astype('int')
+    # except:
+
+    candidates = candidates[igrab_optimal]
+    use_greedy = use_greedy[igrab_optimal]
+
+    use_loop_version = False
+    if use_loop_version == True:
+
+        ## Update scores with Curvature and smoothness losses
+        score_approx = []
+        for c in candidates: # [0:top_k_approx]:
+
+            u, v, w_new = c[0:3] # c['u'], c['v'], c['w_new']
+            u, v = int(u), int(v)
+            u_neigh = list(G.neighbors(u))
+            v_neigh = list(G.neighbors(v))
+            weight_u_neigh = weights[u, u_neigh]
+            weight_v_neigh = weights[v, v_neigh]
+
+            patch = list(set([u,v] + u_neigh + v_neigh))
+            patch_curv = curvature[patch]
+
+            if use_normalized_ricci == True: # u, v, w_new, deg_u, deg_v, curv_u, curv_v, u_neigh, v_neigh, weight_u_neig, weight_v_neigh, node_inv_sqrt_sum_u, node_inv_sqrt_sum_v, deg_u_neigh, deg_v_neigh, patch_curv
+                ricci_delta, local_debt = calculate_ricci_delta(u, v, w_new, degrees[u], degrees[v], curvature[u], curvature[v], u_neigh, v_neigh, weight_u_neigh, weight_v_neigh, node_inv_sqrt_sum[u], node_inv_sqrt_sum[v], degrees[u_neigh], degrees[v_neigh], patch_curv, use_normalized = True, node_weights = None) # min_debt_thresh = 0.2 # node_weights = None
+                # ricci_delta, local_debt = calculate_ricci_delta(G, u, v, w_new, node_inv_sqrt_sum[u], node_inv_sqrt_sum[v], use_normalized = True, node_weights = None) # min_debt_thresh = 0.2 # node_weights = None
+
+            else:
+                ricci_delta, local_debt = calculate_ricci_delta(u, v, w_new, degrees[u], degrees[v], curvature[u], curvature[v], u_neigh, v_neigh, weight_u_neigh, weight_v_neigh, node_inv_sqrt_sum[u], node_inv_sqrt_sum[v], degrees[u_neigh], degrees[v_neigh], patch_curv, use_normalized = False, node_weights = node_weights)
+                # ricci_delta, local_debt = calculate_ricci_delta(G, u, v, w_new, node_inv_sqrt_sum[u], node_inv_sqrt_sum[v], use_normalized = False, node_weights = node_weights)
+
+            # Option 3: Full log-space geometry reward
+            ricci_scaled = local_debt * ricci_delta  # positive when healing
+            geo_log = alpha_scale * np.log(1.0 + np.maximum(0, ricci_scaled))  # only reward healing, ignore neutral/negative
+            if ricci_delta < 0:
+                geo_log -= gamma_penalty * np.log(1.0 + abs(ricci_delta))            
+
+
+            if use_triangles == True:
+                common_neighbors = set(u_neigh) & set(v_neigh)
+                use_forman = True
+                if use_forman == True:
+                    triangle_bonus = (w_new >= 0.0)*np.sum([(w_new*weights[u,c]*weights[v,c])**(1/3) for c in common_neighbors])
+                    # triangle_bonus = (w_new >= 0.0)*np.sum([(w_new*G[u][c]['weight']*G[v][c]['weight'])**(1/3) for c in common_neighbors])
+                else:
+                    triangle_bonus = (w_new >= 0.0)*np.sqrt(w_new)*np.sum([np.sqrt(weights[u,c]*weights[v,c]) for c in common_neighbors]) ## Simple triangles
+                    # triangle_bonus = (w_new >= 0.0)*np.sqrt(w_new)*np.sum([np.sqrt(G[u][c]['weight']*G[v][c]['weight']) for c in common_neighbors]) ## Simple triangles
+                triangle_log = tau_scale * np.log(1.0 + triangle_bonus)
+                geo_log += triangle_log
+
+            # degree_smooth = calculate_weighted_smoothness_penalty(u, v, list(G.neighbors(u)), list(G.neighbors(v)), w_new, node_weights) # G, u, v, w_new, node_weights
+            degree_smooth = calculate_weighted_smoothness_penalty(u, v, u_neigh, v_neigh, w_new, node_weights) # G, u, v, w_new, node_weights
+            smooth_log = beta_scale * degree_smooth
+            score_approx.append(c[3] + geo_log - smooth_log)
+
+        score_approx = np.hstack(score_approx)
+        # iarg_sort = np.flip(np.argsort(score_approx)[-top_k_approx::])
+
+    else:
+
+        pre_compute = precompute_large_graph(G, weights, node_inv_sqrt_sum, curvature, degrees) # G, weights, node_inv_sqrt_sum, curvature, degrees
+        
+        # print('Time [2] %0.3f'%(time.time() - st_time))
+
+        score_approx = optimized_normalized_scores_large(
+        G,
+        candidates,  # np.array (N, 5+): [u, v, w_new, prior_score, ...] — uses [:,0:4]
+        alpha_scale,
+        beta_scale,
+        gamma_penalty,
+        tau_scale,
+        use_triangles=use_triangles,
+        use_forman=True,
+        min_debt_thresh=0.2,
+        skip_low_debt=True,
+        weights=weights,  # n x n array for edge weights
+        curvature=curvature,  # np.array (n,) node curvatures
+        degrees=degrees,  # np.array (n,) node degrees
+        node_inv_sqrt_sum=node_inv_sqrt_sum,  # np.array (n,) precomputed inv sqrt sums
+        precomputed_data=pre_compute)  # Dict from precompute_large_graph
+
+
+    # pdb.set_trace()
+    igrab_optimal = np.flip(np.argsort(score_approx*(use_greedy == 0))[-top_k_approx::]).astype('int')
+    igrab_greedy = np.flip(np.argsort(score_approx*(use_greedy == 1))[-top_k_approx::]).astype('int')
+    igrab_optimal = np.array(list(set(igrab_optimal).union(igrab_greedy))).astype('int')
+
+
+    score_approx = score_approx[igrab_optimal]
+    candidates = candidates[igrab_optimal]
+    use_greedy = use_greedy[igrab_optimal]
+
+
+    use_batch = True
+    if use_batch == False:
+
+        score = []
+        for i, c in enumerate(candidates): # [0:top_k_approx]:
+            u, v = c[0:2]
+            u, v = int(u), int(v)
+
+
+            if use_greedy[i] == 0:
+
+                # inside_component = (comp_nodes[u] == comp_nodes[v])
+                inside_component = (comp_ids[u] == comp_ids[v])
+                if inside_component: ## Can pre compute low likelihood edges and skip this step
+                    rhs = np.zeros(n)
+                    rhs[u], rhs[v] = 1, -1
+                    z = solve(rhs)
+                    eff_res = abs(z[u] - z[v])
+                else:
+                    size_u = comp_sizes[comp_ids[u]] # comp_sizes[comp_u]
+                    size_v = comp_sizes[comp_ids[v]] # comp_sizes[comp_v]
+                    eff_res = 1e5*(size_u + size_v)
+
+            else:
+
+                eff_res = 1.0
+
+            score.append(np.exp(score_approx[i] + np.log(eff_res + 1e-9)))
+
+        score = np.hstack(score)
+
+    else:
+
+
+        eff_res_batch = np.ones(len(candidates))  # default for greedy or inter-component
+
+        # Find indices where we need to compute real eff_res
+        need_eff_res = (use_greedy == 0)
+        need_eff_res = need_eff_res & (comp_ids[candidates[:,0].astype(int)] == comp_ids[candidates[:,1].astype(int)])
+
+        if np.any(need_eff_res):
+            
+            idxs = np.flatnonzero(need_eff_res)
+            k = len(idxs)
+            
+            # Build batch RHS: (n, k) sparse matrix
+            rows = np.concatenate([np.repeat(np.arange(k), 2), np.arange(k)])  # u and v rows
+            cols = np.tile([0, 1], k) + np.repeat(np.arange(k), 2) * 2  # wait, simpler:
+            
+            # Simpler: use list of arrays
+            us_batch = candidates[idxs, 0].astype(int)
+            vs_batch = candidates[idxs, 1].astype(int)
+            
+            # Check if inside same component
+            same_comp = (comp_ids[us_batch] == comp_ids[vs_batch])
+            
+            # For inter-component: set high resistance
+            inter_comp = ~same_comp
+            if np.any(inter_comp):
+                size_u = np.array([comp_sizes[comp_ids[us_batch[j]]] for j in np.flatnonzero(inter_comp)])
+                size_v = np.array([comp_sizes[comp_ids[vs_batch[j]]] for j in np.flatnonzero(inter_comp)])
+                eff_res_batch[idxs[inter_comp]] = 1e5 * (size_u + size_v)
+            
+            # For intra-component: batch solve
+            intra = same_comp
+            if np.any(intra):
+                k_intra = np.sum(intra)
+                RHS = np.zeros((n, k_intra))
+                intra_idxs = idxs[intra]
+                us_intra = us_batch[intra]
+                vs_intra = vs_batch[intra]
+                
+                RHS[us_intra, np.arange(k_intra)] = 1
+                RHS[vs_intra, np.arange(k_intra)] = -1
+                
+                # Batch solve!
+                Z = solve(RHS)  # (n, k_intra)
+                
+                eff_res_intra = np.abs(Z[us_intra, np.arange(k_intra)] - Z[vs_intra, np.arange(k_intra)])
+                eff_res_batch[intra_idxs] = eff_res_intra
+
+        # Now use eff_res_batch in scoring
+        score = np.exp(score_approx + np.log(eff_res_batch + 1e-9))
+
+
+    if greedy_regularize == 1.0:
+
+        score = np.hstack(score)
+        igrab_optimal = np.flip(np.argsort(score*(use_greedy == 1))[-int(np.ceil(top_k*greedy_regularize))::]).astype('int')
+        if np.random.rand() < greedy_regularize:
+            igrab_optimal = igrab_optimal[np.flip(np.argsort(score[igrab_optimal]*(use_greedy[igrab_optimal] == 1)))[0:int((use_greedy[igrab_optimal] == 1).sum())]]
+             # igrab_optimal[np.flip(np.argsort(score[igrab_optimal]*(use_greedy[igrab_optimal] == 0)))[0:int((use_greedy[igrab_optimal] == 0).sum())]]), axis = 0)
+        else:
+            igrab_optimal = igrab_optimal[np.flip(np.argsort(score[igrab_optimal]*(use_greedy[igrab_optimal] == 1)))[0:int((use_greedy[igrab_optimal] == 1).sum())]]
+
+    else:
+
+        score = np.hstack(score)
+        # igrab_optimal = np.flip(np.argsort(score*(use_greedy == 0))[-top_k::]).astype('int')
+        igrab_optimal = np.flip(np.argsort(score*(use_greedy == 0))[-int(np.ceil(top_k*(1 - greedy_regularize)))::]).astype('int')
+        igrab_greedy = np.flip(np.argsort(score*(use_greedy == 1))[-int(np.ceil(top_k*greedy_regularize))::]).astype('int')
+        igrab_optimal = np.array(list(set(igrab_optimal).union(igrab_greedy)))
+
+        if np.random.rand() < greedy_regularize:
+            igrab_optimal = np.concatenate((igrab_optimal[np.flip(np.argsort(score[igrab_optimal]*(use_greedy[igrab_optimal] == 1)))[0:int((use_greedy[igrab_optimal] == 1).sum())]], \
+             igrab_optimal[np.flip(np.argsort(score[igrab_optimal]*(use_greedy[igrab_optimal] == 0)))[0:int((use_greedy[igrab_optimal] == 0).sum())]]), axis = 0)
+        else:
+            igrab_optimal = np.concatenate((igrab_optimal[np.flip(np.argsort(igrab_optimal*(use_greedy[igrab_optimal] == 0)))[0:int((use_greedy[igrab_optimal] == 0).sum())]], \
+             igrab_optimal[np.flip(np.argsort(igrab_optimal*(use_greedy[igrab_optimal] == 1)))[0:int((use_greedy[igrab_optimal] == 1).sum())]]), axis = 0)
+
+
+    # iarg_sort = np.flip(np.argsort(score)[-top_k::])
+    igrab_optimal = igrab_optimal.astype('int')
+    candidates = candidates[igrab_optimal]
+    use_greedy = use_greedy[igrab_optimal]
+    score = score[igrab_optimal]
+
+    print('Ratio %0.4f'%(use_greedy.sum()/len(use_greedy)))
+
+
+    candidates_select = []
+    node_used = []
+    G_updated = G.copy()
+    cnt_new_edge = 0
+
+    if (update == True)*(len(candidates) > 0):
+
+        edge_pairs = np.concatenate((candidates[:,[0]], candidates[:,[1]], score.reshape(-1,1), weights[candidates[:,0].astype('int'), candidates[:,1].astype('int')].reshape(-1,1), distances[candidates[:,0].astype('int'), candidates[:,1].astype('int')].reshape(-1,1)), axis = 1).T
+
+        
+        # Track which nodes and spatial neighborhoods we have already "serviced"
+        nodes_used = set()
+        neighborhood_midpoints = []
+
+                
+        # Iterate through candidates (they are already sorted by score)
+        for i in range(edge_pairs.shape[1]):
+            u = int(edge_pairs[0, i])
+            v = int(edge_pairs[1, i])
+            score = edge_pairs[2, i]
+            w = edge_pairs[3, i]
+            dist = edge_pairs[4, i]
+            
+            # --- Spatial Logic Check ---
+            # 1. Don't reuse nodes in the same batch update
+            if u in nodes_used or v in nodes_used:
+                continue
+
+
+            is_redundant = False ## Update prev_midpoint to record it's exclusion radius (and then take the mean of the two exclusion radius)
+            if mode == 'univariate':
+
+                scale_length_local = scale_values[u,v]
+                exclusion_radius = 1.2*scale_length_local ## Correct?
+
+                p1 = G.nodes[u]['pos']
+                p2 = G.nodes[v]['pos']
+                midpoint = (p1 + p2) / 2.0
+
+                for prev_midpoint in neighborhood_midpoints:
+                    if np.linalg.norm(midpoint - prev_midpoint) < exclusion_scale*exclusion_radius:
+                        is_redundant = True
+                        break
+            
+            elif mode == 'bipartite':
+
+                p1 = G.nodes[u]['pos'].reshape(-1) ## Src
+                p2 = G.nodes[v]['pos'].reshape(-1) ## Station
+                midpoint = np.concatenate((p1, p2), axis = 0)
+
+                scale_length_local_src = scale_src[u]
+                scale_length_local_sta = scale_sta[v - n_nodes_s]
+                exclusion_radius_src = 1.2*scale_length_local_src ## Correct?
+                exclusion_radius_sta = 1.2*scale_length_local_sta ## Correct?
+                scale_length_local = scale_values[u,v]
+
+
+                # is_redundant = False ## Update prev_midpoint to record it's exclusion radius (and then take the mean of the two exclusion radius)
+                for prev_midpoint in neighborhood_midpoints:
+                    flag1 = (np.linalg.norm(midpoint[0:n_dim] - prev_midpoint[0:n_dim]) < exclusion_scale*exclusion_radius_src)
+                    flag2 = (np.linalg.norm(midpoint[n_dim::] - prev_midpoint[n_dim::]) < exclusion_scale*exclusion_radius_sta)
+                    # if (np.linalg.norm(midpoint[0:n_dim] - prev_midpoint[0:n_dim]) < exclusion_scale*exclusion_radius_src):
+                    if flag1*flag2:
+                        is_redundant = True
+                        break
+
+            else:
+                print('Error, no type chosen')
+                assert(1 == 0)
+
+            if is_redundant:
+                continue
+
+            # pdb.set_trace()
+            assert(w == np.exp(-dist / scale_length_local))
+            if w < min_weight:
+                continue
+
+            G_updated.add_edge(int(u), int(v), dist = float(dist), weight = float(w), step = cnt)
+            candidates_select.append(candidates[i])
+            
+            # Update tracking sets
+            nodes_used.update([u, v])
+            neighborhood_midpoints.append(midpoint)
+            cnt_new_edge += 1
+
+    edges_to_update = []
+    if update and cnt_new_edge > 0:
+        # Collect all nodes touched in this batch
+        touched_nodes = nodes_used  # already a set from your code
+        
+        # Collect all edges that need Ricci update:
+        # 1. New edges
+        new_edges = [(int(c[0]), int(c[1])) for c in candidates_select]
+        
+        # 2. Existing edges incident to touched nodes
+        incident_edges = []
+        for node in touched_nodes:
+            for nbr in G.neighbors(node):  # G is the old graph (before add_edge)
+                edge = tuple(sorted((node, nbr)))
+                if edge not in new_edges:  # avoid double-counting new ones
+                    incident_edges.append(edge)
+        
+        # Combine and dedupe
+        edges_to_update = set(new_edges + incident_edges)
+
+    return G_updated, candidates, candidates_select, edges_to_update
+
+
+
+
+
+
+
+
+
+
 
 
 
