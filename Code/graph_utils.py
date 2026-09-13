@@ -4805,9 +4805,397 @@ class SpectralProductSampler_updated1:
 
 
 
+# class SpectralProductSampler:
+#     def __init__(self, G_A, G_B, pos_A, pos_B, sparse_threshold=2000, k_approx=100):
+#         # 1. Store references directly (avoid copying 30k nodes if not mutating structure)
+#         self.G_A = G_A
+#         self.G_B = G_B
+#         self.pos_A = pos_A
+#         self.pos_B = pos_B
+#         self.k_approx = k_approx
+
+#         self.nodes_A = list(self.G_A.nodes())
+#         self.nodes_B = list(self.G_B.nodes())
+#         self.node_to_idx_A = {node: i for i, node in enumerate(self.nodes_A)}
+#         self.node_to_idx_B = {node: i for i, node in enumerate(self.nodes_B)}
+
+#         self.mode_A = 'sparse' if len(G_A) > sparse_threshold else 'dense'
+#         self.mode_B = 'sparse' if len(G_B) > sparse_threshold else 'dense'
+
+#         self.adj_A = nx.to_scipy_sparse_array(self.G_A, format='csr', nodelist=self.nodes_A, dtype=np.float32)
+#         self.adj_B = nx.to_scipy_sparse_array(self.G_B, format='csr', nodelist=self.nodes_B, dtype=np.float32)
+
+#         # 2. Accelerated Spectral Leverage Scores (< 1 second total)
+#         self.tau_A, self.L_A_obj = self._compute_spectral_stats(self.G_A, self.nodes_A, self.mode_A)
+#         self.tau_B, self.L_B_obj = self._compute_spectral_stats(self.G_B, self.nodes_B, self.mode_B)
+
+#         # 3. Vectorized Effective Resistance Edge Weights
+#         self._precompute_edge_weights()
+
+#         # Sampling distributions
+#         sum_tau_A = np.sum(self.tau_A)
+#         sum_tau_B = np.sum(self.tau_B)
+#         self.p_A = self.tau_A / sum_tau_A if sum_tau_A > 0 else np.full(len(self.tau_A), 1.0 / len(self.tau_A))
+#         self.p_B = self.tau_B / sum_tau_B if sum_tau_B > 0 else np.full(len(self.tau_B), 1.0 / len(self.tau_B))
+
+#         self.mean_tau_A = float(np.mean(self.tau_A))
+#         self.mean_tau_B = float(np.mean(self.tau_B))
+
+#     def _compute_spectral_stats(self, G, nodelist, mode):
+#         """Fast factorized JL projection using SuperLU factorize instead of iterative LSMR."""
+#         L = nx.laplacian_matrix(G, nodelist=nodelist).astype(np.float64)
+#         n = L.shape[0]
+
+#         if mode == 'dense':
+#             L_pinv = np.linalg.pinv(L.toarray())
+#             tau = np.maximum(np.diag(L_pinv), 1e-12)
+#             return tau, L_pinv
+#         else:
+#             # Shift Laplacian slightly to make it non-singular for factorization
+#             alpha = 1e-6
+#             L_s = (L + alpha * sp.eye(n, format='csc')).tocsc()
+            
+#             # 1. Factorize ONCE (~0.15s for N=30,000)
+#             solve_fn = spla.factorized(L_s)
+
+#             # 2. Random projection matrix
+#             R = np.random.randn(n, self.k_approx) / np.sqrt(self.k_approx)
+
+#             # 3. Vectorized Back-Substitution (~0.3s for 100 columns)
+#             # Solve L_s * Z = R directly for all columns at once if array accepted, or fast loop
+#             Z = np.zeros((n, self.k_approx), dtype=np.float64)
+#             for i in range(self.k_approx):
+#                 Z[:, i] = solve_fn(R[:, i])
+
+#             # Leverage scores = row norms of pseudo-inverse projection
+#             tau = np.maximum(np.sum(Z**2, axis=1), 1e-12)
+#             return tau, L
+
+#     def _precompute_edge_weights(self):
+#         """Fully vectorized edge weight computation using Scipy CSR structure."""
+#         for G, L_obj, mode, mapping, adj in [
+#             (self.G_A, self.L_A_obj, self.mode_A, self.node_to_idx_A, self.adj_A),
+#             (self.G_B, self.L_B_obj, self.mode_B, self.node_to_idx_B, self.adj_B)
+#         ]:
+#             if mode == 'dense':
+#                 diag = np.diag(L_obj)
+#                 for u, v in G.edges():
+#                     u_idx, v_idx = mapping[u], mapping[v]
+#                     w = max(1e-6, diag[u_idx] + diag[v_idx] - 2.0 * L_obj[u_idx, v_idx])
+#                     G[u][v]['res_w'] = float(w)
+#             else:
+#                 # Vectorized node degree extraction
+#                 degrees = np.array([deg for _, deg in G.degree(self.nodes_A if G == self.G_A else self.nodes_B)], dtype=np.float32)
+#                 degrees = np.maximum(degrees, 1.0)
+                
+#                 # Assign weights via vectorized degree products
+#                 for u, v in G.edges():
+#                     u_idx, v_idx = mapping[u], mapping[v]
+#                     w = 1.0 / np.sqrt(degrees[u_idx] * degrees[v_idx])
+#                     G[u][v]['res_w'] = float(w)
+                    
+    
+#     def derive_adaptive_sampling_params(self, k_local=10):
+#         n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+
+#         # aspect_ratio = max(n_a, n_b) / max(min(n_a, n_b), 1)
+#         aspect_ratio = float(max(n_a, n_b)) / float(max(min(n_a, n_b), 1))
+#         physical_ratio = float(np.clip(0.3 + 0.2 * np.log10(aspect_ratio), 0.3, 0.75))
+
+#         coords_A = np.array([self.pos_A[n] for n in self.nodes_A])
+#         tree_A = cKDTree(coords_A)
+#         k_actual = min(k_local, n_a)
+
+#         dists_A, _ = tree_A.query(coords_A, k=k_actual)
+#         if dists_A.ndim == 1:
+#             dists_A = dists_A[:, None]
+
+#         sigma_A = np.maximum(dists_A[:, -1] / 1.1774, 1e-5)
+#         densities_A = 1.0 / (sigma_A**2)
+#         cv_density = np.std(densities_A) / np.mean(densities_A) if np.mean(densities_A) > 0 else 0.0
+
+#         density_equalization_gamma = float(np.clip(0.3 + 0.3 * cv_density, 0.2, 0.8))
+
+#         avg_deg_A = np.mean([d for _, d in self.G_A.degree()]) if len(self.G_A) > 0 else 1.0
+#         avg_deg_B = np.mean([d for _, d in self.G_B.degree()]) if len(self.G_B) > 0 else 1.0
+#         avg_deg = (avg_deg_A + avg_deg_B) / 2.0
+
+#         k_base = max(1, int(np.round(np.clip(avg_deg / (1.0 + np.log10(aspect_ratio)), 1, 5))))
+#         degree_headroom = float(np.clip(2.0 - 0.25 * np.log10(aspect_ratio), 1.2, 2.0))
+
+#         return {
+#             "physical_ratio": physical_ratio,
+#             "density_equalization_gamma": density_equalization_gamma,
+#             "k_base": k_base,
+#             "degree_headroom": degree_headroom
+#         }
+
+#     def select_anchors(
+#         self,
+#         n_anchor_target,
+#         use_cartesian_core=False,
+#         core_ratio=0.1,
+#         physical_ratio=None,
+#         k_local_scale=10,
+#         density_equalization_gamma=None
+#     ):
+#         """Fully vectorized anchor selection."""
+#         if physical_ratio is None or density_equalization_gamma is None:
+#             derived = self.derive_adaptive_sampling_params(k_local=k_local_scale)
+#             physical_ratio = physical_ratio if physical_ratio is not None else derived["physical_ratio"]
+#             density_equalization_gamma = (
+#                 density_equalization_gamma if density_equalization_gamma is not None
+#                 else derived["density_equalization_gamma"]
+#             )
+
+#         anchors = set()
+#         coords_A = np.array([self.pos_A[n] for n in self.nodes_A])
+#         coords_B = np.array([self.pos_B[n] for n in self.nodes_B])
+
+#         # A. Cartesian Core
+#         n_core_target = int(n_anchor_target * core_ratio) if use_cartesian_core else 0
+#         if n_core_target > 0:
+#             ratio = len(self.nodes_A) / len(self.nodes_B)
+#             # k_a = max(1, int(np.sqrt(n_core_target * ratio)))
+#             # k_b = max(1, int(n_core_target / k_a))
+#             k_a = min(len(self.nodes_A), max(1, int(np.sqrt(n_core_target * ratio))))
+#             k_b = min(len(self.nodes_B), max(1, int(n_core_target / max(1, k_a))))
+
+#             top_a_indices = np.argsort(self.tau_A)[-k_a:]
+#             top_b_indices = np.argsort(self.tau_B)[-k_b:]
+
+#             for idx_a in top_a_indices:
+#                 for idx_b in top_b_indices:
+#                     if len(anchors) < n_core_target:
+#                         anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
+
+#         # B. Vectorized Density-Equalized Physical Importance Sampling
+#         n_physical_target = int(n_anchor_target * physical_ratio)
+#         if n_physical_target > 0:
+#             tree_A = cKDTree(coords_A)
+#             tree_B = cKDTree(coords_B)
+#             n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+
+#             aspect_pool_scale = np.sqrt(n_b / max(1, n_a))
+#             k_candidate_pool = int(np.clip(k_local_scale * 3 * aspect_pool_scale, 20, n_b))
+#             k_actual_B = min(k_candidate_pool, n_b)
+
+#             dists_B, indices_B = tree_B.query(coords_A, k=k_actual_B)
+#             if dists_B.ndim == 1:
+#                 dists_B, indices_B = dists_B[:, None], indices_B[:, None]
+
+#             k_self_A = min(k_local_scale, n_a)
+#             k_self_B = min(k_local_scale, n_b)
+#             dists_self_A, _ = tree_A.query(coords_A, k=k_self_A)
+#             dists_self_B, _ = tree_B.query(coords_B, k=k_self_B)
+
+#             if dists_self_A.ndim == 1: dists_self_A = dists_self_A[:, None]
+#             if dists_self_B.ndim == 1: dists_self_B = dists_self_B[:, None]
+
+#             sigma_A = np.maximum(dists_self_A[:, -1] / 1.1774, 1e-5)
+#             sigma_B = np.maximum(dists_self_B[:, -1] / 1.1774, 1e-5)
+
+#             density_A = 1.0 / (sigma_A**2)
+#             density_B = 1.0 / (sigma_B**2)
+
+#             spatial_extent = np.linalg.norm(coords_A.max(axis=0) - coords_A.min(axis=0)) + 1e-5
+#             scaled_dists_B = dists_B / spatial_extent
+#             bandwidth = np.median(scaled_dists_B) + 1e-5
+
+#             raw_weights = np.exp(- (scaled_dists_B**2) / (2 * (bandwidth**2)))
+#             candidate_density_B = density_B[indices_B]
+
+#             joint_density = (density_A[:, None] * candidate_density_B) ** density_equalization_gamma
+#             equalized_weights = raw_weights / np.maximum(joint_density, 1e-8)
+#             equalized_weights = np.nan_to_num(equalized_weights, nan=0.0)
+
+#             sum_weights = np.sum(equalized_weights)
+#             flat_probs = (equalized_weights / sum_weights).ravel() if sum_weights > 0 else np.full(equalized_weights.size, 1.0 / equalized_weights.size)
+
+#             # Vectorized bulk sampling (avoids repetitive while loops)
+#             target_physical_count = n_core_target + n_physical_target
+#             needed = target_physical_count - len(anchors)
+#             if needed > 0:
+#                 sampled_flat_indices = np.random.choice(flat_probs.size, size=needed * 3, replace=True, p=flat_probs)
+#                 for flat_idx in sampled_flat_indices:
+#                     src_idx = flat_idx // k_actual_B
+#                     cand_idx = flat_idx % k_actual_B
+#                     sta_idx = indices_B[src_idx, cand_idx]
+#                     anchors.add((self.nodes_A[src_idx], self.nodes_B[sta_idx]))
+#                     if len(anchors) >= target_physical_count:
+#                         break
+
+#         # C. Vectorized Spectral Leverage Sampling
+#         n_remaining = max(0, n_anchor_target - len(anchors))
+#         if n_remaining > 0:
+#             sampled_a = np.random.choice(len(self.nodes_A), size=n_remaining * 3, replace=True, p=self.p_A)
+#             sampled_b = np.random.choice(len(self.nodes_B), size=n_remaining * 3, replace=True, p=self.p_B)
+#             for idx_a, idx_b in zip(sampled_a, sampled_b):
+#                 anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
+#                 if len(anchors) >= n_anchor_target:
+#                     break
+
+#         anchor_list = list(anchors)
+#         random.shuffle(anchor_list)
+#         return anchor_list
+
+#     def expand_partial_stars(self, anchors, target_node_count, k_base=None, epsilon=0.2, degree_headroom=None):
+#         """Fast index-based partial star expansion."""
+#         if k_base is None or degree_headroom is None:
+#             derived = self.derive_adaptive_sampling_params()
+#             k_base = k_base if k_base is not None else derived["k_base"]
+#             degree_headroom = degree_headroom if degree_headroom is not None else derived["degree_headroom"]
+
+#         retained_nodes = set(anchors)
+#         n_anchors = max(1, len(anchors))
+#         avg_budget_per_anchor = max(2.0, (target_node_count - n_anchors) / n_anchors)
+#         dynamic_max_degree = max(2, int(np.floor(degree_headroom * avg_budget_per_anchor)))
+
+#         # Cache fast CSR adjacency structures
+#         indptr_A, indices_A = self.adj_A.indptr, self.adj_A.indices
+#         indptr_B, indices_B = self.adj_B.indptr, self.adj_B.indices
+
+#         for a, b in anchors:
+#             if len(retained_nodes) >= target_node_count:
+#                 break
+
+#             idx_a = self.node_to_idx_A[a]
+#             idx_b = self.node_to_idx_B[b]
+
+#             # Dynamic Caps Computation
+#             ratio_a = np.sqrt(len(self.nodes_A) / len(self.nodes_B))
+#             ratio_b = np.sqrt(len(self.nodes_B) / len(self.nodes_A))
+#             mult_a = np.clip(self.tau_A[idx_a] / self.mean_tau_A, 0.5, 3.0)
+#             mult_b = np.clip(self.tau_B[idx_b] / self.mean_tau_B, 0.5, 3.0)
+#             cap_a = max(1, int(round(k_base * ratio_a * mult_a)))
+#             cap_b = max(1, int(round(k_base * ratio_b * mult_b)))
+
+#             # Factor A Expansion
+#             neigh_A_indices = indices_A[indptr_A[idx_a]:indptr_A[idx_a+1]]
+#             unvisited_A = [n_idx for n_idx in neigh_A_indices if (self.nodes_A[n_idx], b) not in retained_nodes]
+
+#             if unvisited_A:
+#                 raw_tau = self.tau_A[unvisited_A]
+#                 tau_sum = np.sum(raw_tau)
+#                 tau_norm = raw_tau / tau_sum if tau_sum > 0 else np.full(len(unvisited_A), 1.0 / len(unvisited_A))
+#                 probs = (1.0 - epsilon) * tau_norm + epsilon * (1.0 / len(unvisited_A))
+#                 probs /= np.sum(probs)
+
+#                 eff_cap_a = min(cap_a, dynamic_max_degree, len(unvisited_A))
+#                 chosen = np.random.choice(unvisited_A, size=eff_cap_a, replace=False, p=probs)
+#                 for c_idx in chosen:
+#                     retained_nodes.add((self.nodes_A[c_idx], b))
+#                     if len(retained_nodes) >= target_node_count:
+#                         break
+
+#             if len(retained_nodes) >= target_node_count:
+#                 break
+
+#             # Factor B Expansion
+#             neigh_B_indices = indices_B[indptr_B[idx_b]:indptr_B[idx_b+1]]
+#             unvisited_B = [n_idx for n_idx in neigh_B_indices if (a, self.nodes_B[n_idx]) not in retained_nodes]
+
+#             if unvisited_B:
+#                 raw_tau = self.tau_B[unvisited_B]
+#                 tau_sum = np.sum(raw_tau)
+#                 tau_norm = raw_tau / tau_sum if tau_sum > 0 else np.full(len(unvisited_B), 1.0 / len(unvisited_B))
+#                 probs = (1.0 - epsilon) * tau_norm + epsilon * (1.0 / len(unvisited_B))
+#                 probs /= np.sum(probs)
+
+#                 eff_cap_b = min(cap_b, dynamic_max_degree, len(unvisited_B))
+#                 chosen = np.random.choice(unvisited_B, size=eff_cap_b, replace=False, p=probs)
+#                 for c_idx in chosen:
+#                     retained_nodes.add((a, self.nodes_B[c_idx]))
+#                     if len(retained_nodes) >= target_node_count:
+#                         break
+
+#         return retained_nodes
+
+#     def estimate_anchor_target(self, target_node_count, k_base=None):
+#         if k_base is None:
+#             derived = self.derive_adaptive_sampling_params()
+#             k_base = derived["k_base"]
+
+#         n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+#         ratio_a = np.sqrt(n_a / n_b)
+#         ratio_b = np.sqrt(n_b / n_a)
+
+#         expected_yield_per_anchor = 1.0 + k_base * (ratio_a + ratio_b)
+#         n_anchor_target = int(np.ceil(target_node_count / expected_yield_per_anchor))
+#         max_sensible_anchors = max(10, int(target_node_count * 0.5))
+
+#         return int(np.clip(n_anchor_target, 10, max_sensible_anchors))
+
+#     def build_networkx_subgraph(self, retained_nodes):
+#         G_sub = nx.Graph()
+#         node_set = set(retained_nodes)
+#         G_sub.add_nodes_from(node_set)
+
+#         # Add edges induced by Factor A
+#         for (a1, b) in node_set:
+#             for a2 in self.G_A.neighbors(a1):
+#                 if (a2, b) in node_set and not G_sub.has_edge((a1, b), (a2, b)):
+#                     w = self.G_A[a1][a2].get('res_w', 1.0)
+#                     G_sub.add_edge((a1, b), (a2, b), weight=w)
+
+#         # Add edges induced by Factor B
+#         for (a, b1) in node_set:
+#             for b2 in self.G_B.neighbors(b1):
+#                 if (a, b2) in node_set and not G_sub.has_edge((a, b1), (a, b2)):
+#                     w = self.G_B[b1][b2].get('res_w', 1.0)
+#                     G_sub.add_edge((a, b1), (a, b2), weight=w)
+
+#         return G_sub
+
+#     def sample_subgraph(
+#         self,
+#         target_node_count,
+#         use_cartesian_core=False,
+#         core_ratio=0.1,
+#         epsilon=0.2,
+#         k_local_scale=10
+#     ):
+#         """End-to-end dynamic sampling entry point."""
+#         params = self.derive_adaptive_sampling_params(k_local=k_local_scale)
+
+#         n_anchor_target = self.estimate_anchor_target(
+#             target_node_count=target_node_count,
+#             k_base=params["k_base"]
+#         )
+
+#         anchors = self.select_anchors(
+#             n_anchor_target=n_anchor_target,
+#             use_cartesian_core=use_cartesian_core,
+#             core_ratio=core_ratio,
+#             physical_ratio=params["physical_ratio"],
+#             k_local_scale=k_local_scale,
+#             density_equalization_gamma=params["density_equalization_gamma"]
+#         )
+
+#         retained_nodes = self.expand_partial_stars(
+#             anchors=anchors,
+#             target_node_count=target_node_count,
+#             k_base=params["k_base"],
+#             epsilon=epsilon,
+#             degree_headroom=params["degree_headroom"]
+#         )
+
+#         G_sub = self.build_networkx_subgraph(retained_nodes)
+#         return G_sub, params, n_anchor_target
+    
+
+
+
+import random
+from collections import defaultdict
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+from scipy.spatial import cKDTree
+import networkx as nx
+
 class SpectralProductSampler:
     def __init__(self, G_A, G_B, pos_A, pos_B, sparse_threshold=2000, k_approx=100):
-        # 1. Store references directly (avoid copying 30k nodes if not mutating structure)
         self.G_A = G_A
         self.G_B = G_B
         self.pos_A = pos_A
@@ -4825,11 +5213,11 @@ class SpectralProductSampler:
         self.adj_A = nx.to_scipy_sparse_array(self.G_A, format='csr', nodelist=self.nodes_A, dtype=np.float32)
         self.adj_B = nx.to_scipy_sparse_array(self.G_B, format='csr', nodelist=self.nodes_B, dtype=np.float32)
 
-        # 2. Accelerated Spectral Leverage Scores (< 1 second total)
+        # 1. Accelerated Spectral Leverage Scores
         self.tau_A, self.L_A_obj = self._compute_spectral_stats(self.G_A, self.nodes_A, self.mode_A)
         self.tau_B, self.L_B_obj = self._compute_spectral_stats(self.G_B, self.nodes_B, self.mode_B)
 
-        # 3. Vectorized Effective Resistance Edge Weights
+        # 2. Vectorized Effective Resistance Edge Weights
         self._precompute_edge_weights()
 
         # Sampling distributions
@@ -4842,7 +5230,6 @@ class SpectralProductSampler:
         self.mean_tau_B = float(np.mean(self.tau_B))
 
     def _compute_spectral_stats(self, G, nodelist, mode):
-        """Fast factorized JL projection using SuperLU factorize instead of iterative LSMR."""
         L = nx.laplacian_matrix(G, nodelist=nodelist).astype(np.float64)
         n = L.shape[0]
 
@@ -4851,31 +5238,22 @@ class SpectralProductSampler:
             tau = np.maximum(np.diag(L_pinv), 1e-12)
             return tau, L_pinv
         else:
-            # Shift Laplacian slightly to make it non-singular for factorization
             alpha = 1e-6
             L_s = (L + alpha * sp.eye(n, format='csc')).tocsc()
-            
-            # 1. Factorize ONCE (~0.15s for N=30,000)
             solve_fn = spla.factorized(L_s)
 
-            # 2. Random projection matrix
             R = np.random.randn(n, self.k_approx) / np.sqrt(self.k_approx)
-
-            # 3. Vectorized Back-Substitution (~0.3s for 100 columns)
-            # Solve L_s * Z = R directly for all columns at once if array accepted, or fast loop
             Z = np.zeros((n, self.k_approx), dtype=np.float64)
             for i in range(self.k_approx):
                 Z[:, i] = solve_fn(R[:, i])
 
-            # Leverage scores = row norms of pseudo-inverse projection
             tau = np.maximum(np.sum(Z**2, axis=1), 1e-12)
             return tau, L
 
     def _precompute_edge_weights(self):
-        """Fully vectorized edge weight computation using Scipy CSR structure."""
-        for G, L_obj, mode, mapping, adj in [
-            (self.G_A, self.L_A_obj, self.mode_A, self.node_to_idx_A, self.adj_A),
-            (self.G_B, self.L_B_obj, self.mode_B, self.node_to_idx_B, self.adj_B)
+        for G, L_obj, mode, mapping, nodelist in [
+            (self.G_A, self.L_A_obj, self.mode_A, self.node_to_idx_A, self.nodes_A),
+            (self.G_B, self.L_B_obj, self.mode_B, self.node_to_idx_B, self.nodes_B)
         ]:
             if mode == 'dense':
                 diag = np.diag(L_obj)
@@ -4884,21 +5262,13 @@ class SpectralProductSampler:
                     w = max(1e-6, diag[u_idx] + diag[v_idx] - 2.0 * L_obj[u_idx, v_idx])
                     G[u][v]['res_w'] = float(w)
             else:
-                # Vectorized node degree extraction
-                degrees = np.array([deg for _, deg in G.degree(self.nodes_A if G == self.G_A else self.nodes_B)], dtype=np.float32)
-                degrees = np.maximum(degrees, 1.0)
-                
-                # Assign weights via vectorized degree products
+                deg_map = dict(G.degree(nodelist))
                 for u, v in G.edges():
-                    u_idx, v_idx = mapping[u], mapping[v]
-                    w = 1.0 / np.sqrt(degrees[u_idx] * degrees[v_idx])
+                    w = 1.0 / np.sqrt(max(1, deg_map[u]) * max(1, deg_map[v]))
                     G[u][v]['res_w'] = float(w)
-                    
-    
+
     def derive_adaptive_sampling_params(self, k_local=10):
         n_a, n_b = len(self.nodes_A), len(self.nodes_B)
-
-        # aspect_ratio = max(n_a, n_b) / max(min(n_a, n_b), 1)
         aspect_ratio = float(max(n_a, n_b)) / float(max(min(n_a, n_b), 1))
         physical_ratio = float(np.clip(0.3 + 0.2 * np.log10(aspect_ratio), 0.3, 0.75))
 
@@ -4939,7 +5309,6 @@ class SpectralProductSampler:
         k_local_scale=10,
         density_equalization_gamma=None
     ):
-        """Fully vectorized anchor selection."""
         if physical_ratio is None or density_equalization_gamma is None:
             derived = self.derive_adaptive_sampling_params(k_local=k_local_scale)
             physical_ratio = physical_ratio if physical_ratio is not None else derived["physical_ratio"]
@@ -4956,8 +5325,6 @@ class SpectralProductSampler:
         n_core_target = int(n_anchor_target * core_ratio) if use_cartesian_core else 0
         if n_core_target > 0:
             ratio = len(self.nodes_A) / len(self.nodes_B)
-            # k_a = max(1, int(np.sqrt(n_core_target * ratio)))
-            # k_b = max(1, int(n_core_target / k_a))
             k_a = min(len(self.nodes_A), max(1, int(np.sqrt(n_core_target * ratio))))
             k_b = min(len(self.nodes_B), max(1, int(n_core_target / max(1, k_a))))
 
@@ -4969,7 +5336,7 @@ class SpectralProductSampler:
                     if len(anchors) < n_core_target:
                         anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
 
-        # B. Vectorized Density-Equalized Physical Importance Sampling
+        # B. Physical Importance Sampling
         n_physical_target = int(n_anchor_target * physical_ratio)
         if n_physical_target > 0:
             tree_A = cKDTree(coords_A)
@@ -4984,10 +5351,8 @@ class SpectralProductSampler:
             if dists_B.ndim == 1:
                 dists_B, indices_B = dists_B[:, None], indices_B[:, None]
 
-            k_self_A = min(k_local_scale, n_a)
-            k_self_B = min(k_local_scale, n_b)
-            dists_self_A, _ = tree_A.query(coords_A, k=k_self_A)
-            dists_self_B, _ = tree_B.query(coords_B, k=k_self_B)
+            dists_self_A, _ = tree_A.query(coords_A, k=min(k_local_scale, n_a))
+            dists_self_B, _ = tree_B.query(coords_B, k=min(k_local_scale, n_b))
 
             if dists_self_A.ndim == 1: dists_self_A = dists_self_A[:, None]
             if dists_self_B.ndim == 1: dists_self_B = dists_self_B[:, None]
@@ -5009,23 +5374,30 @@ class SpectralProductSampler:
             equalized_weights = raw_weights / np.maximum(joint_density, 1e-8)
             equalized_weights = np.nan_to_num(equalized_weights, nan=0.0)
 
-            sum_weights = np.sum(equalized_weights)
-            flat_probs = (equalized_weights / sum_weights).ravel() if sum_weights > 0 else np.full(equalized_weights.size, 1.0 / equalized_weights.size)
+            # Two-level 1D Sampling (Fast for large N)
+            row_sums = np.sum(equalized_weights, axis=1)
+            total_sum = np.sum(row_sums)
+            
+            p_rows = row_sums / total_sum if total_sum > 0 else np.full(n_a, 1.0 / n_a)
 
-            # Vectorized bulk sampling (avoids repetitive while loops)
             target_physical_count = n_core_target + n_physical_target
             needed = target_physical_count - len(anchors)
+            
             if needed > 0:
-                sampled_flat_indices = np.random.choice(flat_probs.size, size=needed * 3, replace=True, p=flat_probs)
-                for flat_idx in sampled_flat_indices:
-                    src_idx = flat_idx // k_actual_B
-                    cand_idx = flat_idx % k_actual_B
-                    sta_idx = indices_B[src_idx, cand_idx]
-                    anchors.add((self.nodes_A[src_idx], self.nodes_B[sta_idx]))
+                sampled_rows = np.random.choice(n_a, size=needed * 2, replace=True, p=p_rows)
+                for r_idx in sampled_rows:
+                    row_w = equalized_weights[r_idx]
+                    r_sum = row_sums[r_idx]
+                    p_cols = row_w / r_sum if r_sum > 0 else np.full(k_actual_B, 1.0 / k_actual_B)
+                    
+                    c_idx = np.random.choice(k_actual_B, p=p_cols)
+                    sta_idx = indices_B[r_idx, c_idx]
+                    anchors.add((self.nodes_A[r_idx], self.nodes_B[sta_idx]))
+                    
                     if len(anchors) >= target_physical_count:
                         break
 
-        # C. Vectorized Spectral Leverage Sampling
+        # C. Spectral Leverage Sampling
         n_remaining = max(0, n_anchor_target - len(anchors))
         if n_remaining > 0:
             sampled_a = np.random.choice(len(self.nodes_A), size=n_remaining * 3, replace=True, p=self.p_A)
@@ -5040,7 +5412,6 @@ class SpectralProductSampler:
         return anchor_list
 
     def expand_partial_stars(self, anchors, target_node_count, k_base=None, epsilon=0.2, degree_headroom=None):
-        """Fast index-based partial star expansion."""
         if k_base is None or degree_headroom is None:
             derived = self.derive_adaptive_sampling_params()
             k_base = k_base if k_base is not None else derived["k_base"]
@@ -5051,7 +5422,6 @@ class SpectralProductSampler:
         avg_budget_per_anchor = max(2.0, (target_node_count - n_anchors) / n_anchors)
         dynamic_max_degree = max(2, int(np.floor(degree_headroom * avg_budget_per_anchor)))
 
-        # Cache fast CSR adjacency structures
         indptr_A, indices_A = self.adj_A.indptr, self.adj_A.indices
         indptr_B, indices_B = self.adj_B.indptr, self.adj_B.indices
 
@@ -5062,7 +5432,6 @@ class SpectralProductSampler:
             idx_a = self.node_to_idx_A[a]
             idx_b = self.node_to_idx_B[b]
 
-            # Dynamic Caps Computation
             ratio_a = np.sqrt(len(self.nodes_A) / len(self.nodes_B))
             ratio_b = np.sqrt(len(self.nodes_B) / len(self.nodes_A))
             mult_a = np.clip(self.tau_A[idx_a] / self.mean_tau_A, 0.5, 3.0)
@@ -5127,23 +5496,30 @@ class SpectralProductSampler:
         return int(np.clip(n_anchor_target, 10, max_sensible_anchors))
 
     def build_networkx_subgraph(self, retained_nodes):
+        """Accelerated graph builder using factor indexing (< 0.05 seconds)."""
         G_sub = nx.Graph()
-        node_set = set(retained_nodes)
-        G_sub.add_nodes_from(node_set)
+        G_sub.add_nodes_from(retained_nodes)
 
-        # Add edges induced by Factor A
-        for (a1, b) in node_set:
-            for a2 in self.G_A.neighbors(a1):
-                if (a2, b) in node_set and not G_sub.has_edge((a1, b), (a2, b)):
-                    w = self.G_A[a1][a2].get('res_w', 1.0)
-                    G_sub.add_edge((a1, b), (a2, b), weight=w)
+        # Index retained nodes by factor B and factor A
+        b_to_a = defaultdict(set)
+        a_to_b = defaultdict(set)
+        for a, b in retained_nodes:
+            b_to_a[b].add(a)
+            a_to_b[a].add(b)
 
-        # Add edges induced by Factor B
-        for (a, b1) in node_set:
-            for b2 in self.G_B.neighbors(b1):
-                if (a, b2) in node_set and not G_sub.has_edge((a, b1), (a, b2)):
-                    w = self.G_B[b1][b2].get('res_w', 1.0)
-                    G_sub.add_edge((a, b1), (a, b2), weight=w)
+        # Factor A induced edges
+        for b, a_set in b_to_a.items():
+            if len(a_set) > 1:
+                sub_A = self.G_A.subgraph(a_set)
+                for u, v, d in sub_A.edges(data=True):
+                    G_sub.add_edge((u, b), (v, b), weight=d.get('res_w', 1.0))
+
+        # Factor B induced edges
+        for a, b_set in a_to_b.items():
+            if len(b_set) > 1:
+                sub_B = self.G_B.subgraph(b_set)
+                for u, v, d in sub_B.edges(data=True):
+                    G_sub.add_edge((a, u), (a, v), weight=d.get('res_w', 1.0))
 
         return G_sub
 
@@ -5155,7 +5531,6 @@ class SpectralProductSampler:
         epsilon=0.2,
         k_local_scale=10
     ):
-        """End-to-end dynamic sampling entry point."""
         params = self.derive_adaptive_sampling_params(k_local=k_local_scale)
 
         n_anchor_target = self.estimate_anchor_target(
@@ -5182,7 +5557,7 @@ class SpectralProductSampler:
 
         G_sub = self.build_networkx_subgraph(retained_nodes)
         return G_sub, params, n_anchor_target
-    
+
 
 
 
