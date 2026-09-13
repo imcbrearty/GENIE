@@ -3254,7 +3254,7 @@ def initialize_sensor_graph(
     return G, edges_array, fiedler_vec, curvature_vec, [], degree_vec, comp_vec, G.graph.get('fiedler_value', 0.0), scale_length
 
 
-def optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn=3, max_iters=200):
+def optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3, max_iters = 5000):
     locs_proj = ftrns1(locs_use) / 1000.0
     locs_cart = np.copy(locs_proj)
     k_trgt = k_sta_edges
@@ -3300,7 +3300,7 @@ def optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn=3, max_iters=
     return G_sta, edges_sta
 
 
-def optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio=0.8, max_iters=200):
+def optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio = 0.8, max_iters = 5000):
     k_trgt = k_spc_edges
 
     # 1. Coordinate spatial/temporal projections & unit normalization
