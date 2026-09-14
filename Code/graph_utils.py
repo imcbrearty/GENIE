@@ -1958,6 +1958,7 @@ def convert_graph(G):
     # 4. Compute weighted degrees using NetworkX in exact nodelist order
     degree_dict = dict(G.degree(weight='weight'))
     degree_values = np.array([degree_dict[n] for n in nodelist], dtype=np.float64)
+    edges = edges[:, np.lexsort((edges[1,:], edges[0,:]))]
     
     return edges, weights, degree_values
 
