@@ -7790,7 +7790,7 @@ class SpectralProductSampler:
                 space_fill_ratio = len(retained_nodes) / float(len(self.nodes_A) * len(self.nodes_B))
                 effective_target = int(missing_count / max(0.05, (1.0 - space_fill_ratio)))
 
-            n_anchor_target = self.estimate_anchor_target_robust(
+            n_anchor_target = self.estimate_anchor_target(
                 target_node_count=effective_target,
                 k_base=params["k_base"],
                 spatial_coherence_eta=spatial_coherence_eta
