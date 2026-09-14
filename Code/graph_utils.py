@@ -11917,7 +11917,7 @@ def compute_forman_ricci_curvature(G):
     for k, v in stats.items():
         print(f"{k}: {v}")   
 
-    print(f"\nCombined Mean Curvature:   {np.mean(all_curvatures):.4f}")
+    print(f"\nCombined Mean Curvature:   {np.mean(edge_curvatures):.4f}")
     print(f"  └─ Source-Source Mean:   {np.mean(source_curvatures):.4f}")
     print(f"  └─ Station-Station Mean: {np.mean(station_curvatures):.4f}")
 
