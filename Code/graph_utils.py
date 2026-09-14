@@ -7799,7 +7799,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
         Product = SpectralProductSampler(G_src, G_sta, x_grid_proj[:,0:3]/1000.0, locs_cart/1000.0) # locs_cart, srcs_cart
         # G_product = Product.build_final_subgraph(target_node_count = int(n_fraction*len(x_grid_proj)*len(locs_cart)), skip_paths = True if not use_paths else False)        
         G_product, params, n_anchor_target = Product.sample_subgraph(int(n_fraction*len(x_grid_proj)*len(locs_cart)))
-        print('Product graph params %d, %d:'%(n_anchor_target, int(n_fraction*len(x_grid_proj)*len(locs_cart))))
+        print('\nProduct graph params %d, %d:'%(n_anchor_target, int(n_fraction*len(x_grid_proj)*len(locs_cart))))
         print(params)
         A_src_in_sta = np.flip(np.vstack(list(G_product.nodes())).T, axis = 0)
         isort = np.lexsort((A_src_in_sta[0], A_src_in_sta[1]))
@@ -11793,7 +11793,7 @@ def analyze_product_graph_structure(G):
     print(f"Total Edges:         {len(edges):,}")
     print(f"Source-Source Edges: {np.sum(is_source_edge):,} ({np.mean(is_source_edge)*100:.2f}%)")
     print(f"Station-Station Edges: {np.sum(is_station_edge):,} ({np.mean(is_station_edge)*100:.2f}%)")
-    print(f"Cross-Layer Anchors:   {np.sum(is_cross_edge):,} ({np.mean(is_cross_edge)*100:.2f}%)")
+    print(f"Cross-Layer Anchors:   {np.sum(is_cross_edge):,} ({np.mean(is_cross_edge)*100:.2f}%) \n")
     
     stats = compute_comparative_metrics(adj_matrix)
 
@@ -11914,8 +11914,8 @@ def compute_forman_ricci_curvature(G):
         "edge_curvatures": edge_curvatures
     }
 
-    for k, v in stats.items():
-        print(f"{k}: {v}")   
+    for inc, (k, v) in enumerate(stats.items()):
+        print(f"%s{k}: {v}"%(\n if inc == 0 else ''))   
 
     print(f"\nCombined Mean Curvature:   {np.mean(edge_curvatures):.4f}")
     print(f"  └─ Source-Source Mean:   {np.mean(source_curvatures):.4f}")
