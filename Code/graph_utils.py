@@ -7589,7 +7589,7 @@ class SpectralProductSampler:
 
         return retained_nodes
 
-    def estimate_anchor_target(self, target_node_count, k_base=None, spatial_coherence_eta=0.7):
+    def estimate_anchor_target_backup(self, target_node_count, k_base=None, spatial_coherence_eta=0.7):
         if k_base is None:
             derived = self.derive_adaptive_sampling_params()
             k_base = derived["k_base"]
@@ -7608,6 +7608,36 @@ class SpectralProductSampler:
 
         max_sensible_anchors = max(10, int(target_node_count * 0.8))
         return int(np.clip(np.ceil(raw_n_anchors), 10, max_sensible_anchors))
+        
+    def estimate_anchor_target(self, target_node_count, k_base=None, spatial_coherence_eta=0.7):
+        """
+        Principled estimate of required anchor count using occupied volume statistics 
+        accounting for spatial overlap without arbitrary magic constants.
+        """
+        if k_base is None:
+            derived = self.derive_adaptive_sampling_params()
+            k_base = derived["k_base"]
+    
+        n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+        total_space = float(n_a * n_b)
+    
+        # 1. Expected 1-hop partial star footprint per anchor
+        ratio_a = np.sqrt(n_a / n_b)
+        ratio_b = np.sqrt(n_b / n_a)
+        star_size = 1.0 + k_base * (ratio_a + ratio_b)
+    
+        # 2. Coverage fraction in total space
+        target_ratio = min(0.999, target_node_count / total_space)
+        
+        # 3. Solved occupancy formula for effective draws required under spatial clustering
+        effective_draws = -np.log(1.0 - target_ratio) * total_space
+        
+        # 4. Convert effective draws to anchor count adjusting for spatial coherence
+        raw_anchors = effective_draws / (star_size * max(0.1, spatial_coherence_eta))
+        
+        # Upper bound physical anchors by available nodes or target budget
+        max_anchors = min(total_space, target_node_count)
+        return int(np.clip(np.ceil(raw_anchors), 10, max_anchors))
 
     def build_networkx_subgraph(self, retained_nodes):
         G_sub = nx.Graph()
@@ -7635,6 +7665,7 @@ class SpectralProductSampler:
 
         return G_sub
 
+
     def sample_subgraph(
         self,
         target_node_count,
@@ -7642,65 +7673,140 @@ class SpectralProductSampler:
         core_ratio=0.1,
         epsilon=0.2,
         k_local_scale=10,
-        spatial_coherence_eta=0.7
+        spatial_coherence_eta=0.7,
+        max_interleaved_passes=8
     ):
         params = self.derive_adaptive_sampling_params(k_local=k_local_scale)
-
-        n_anchor_target = self.estimate_anchor_target(
-            target_node_count=target_node_count,
-            k_base=params["k_base"],
-            spatial_coherence_eta=spatial_coherence_eta
-        )
-
-        anchors = self.select_anchors(
-            n_anchor_target=n_anchor_target,
-            use_cartesian_core=use_cartesian_core,
-            core_ratio=core_ratio,
-            physical_ratio=params["physical_ratio"],
-            k_local_scale=k_local_scale,
-            density_equalization_gamma=params["density_equalization_gamma"]
-        )
-
-        retained_nodes = self.expand_partial_stars(
-            anchors=anchors,
-            target_node_count=target_node_count,
-            k_base=params["k_base"],
-            epsilon=epsilon,
-            degree_headroom=params["degree_headroom"]
-        )
-
-        # Soft Safety Net Fallback
-        if len(retained_nodes) < int(target_node_count * 0.95):
+        retained_nodes = set()
+        all_sampled_anchors = set()
+        
+        pass_idx = 0
+        
+        # Interleaved Anchor Injection + 1-Hop Star Sampling Loop
+        while len(retained_nodes) < target_node_count and pass_idx < max_interleaved_passes:
+            pass_idx += 1
             missing_count = target_node_count - len(retained_nodes)
+            
+            # 1. Estimate anchor target with Occupancy physics scaling
+            # Scale missing_count by actual empirical retention yield to prevent under-sampling in dense regimes
+            effective_target = missing_count
+            if pass_idx > 1 and len(retained_nodes) > 0:
+                # Adjust target upward dynamically based on remaining space density
+                space_fill_ratio = len(retained_nodes) / float(len(self.nodes_A) * len(self.nodes_B))
+                effective_target = int(missing_count / max(0.05, (1.0 - space_fill_ratio)))
 
-            n_extra_anchors = self.estimate_anchor_target(
-                target_node_count=missing_count,
+            n_anchor_target = self.estimate_anchor_target_robust(
+                target_node_count=effective_target,
                 k_base=params["k_base"],
                 spatial_coherence_eta=spatial_coherence_eta
             )
 
-            extra_anchors = self.select_anchors(
-                n_anchor_target=n_extra_anchors,
-                use_cartesian_core=False,
+            # 2. Select fresh anchors spatially
+            # Only use Cartesian core on initial pass to anchor global structure
+            is_core_pass = use_cartesian_core if pass_idx == 1 else False
+            
+            anchors_batch = self.select_anchors(
+                n_anchor_target=n_anchor_target,
+                use_cartesian_core=is_core_pass,
+                core_ratio=core_ratio if is_core_pass else 0.0,
                 physical_ratio=params["physical_ratio"],
                 k_local_scale=k_local_scale,
                 density_equalization_gamma=params["density_equalization_gamma"]
             )
 
-            fresh_anchors = [a for a in extra_anchors if a not in retained_nodes]
+            # Filter out already selected anchors to guarantee new entry points
+            fresh_anchors = [a for a in anchors_batch if a not in all_sampled_anchors]
+            if not fresh_anchors:
+                # Fallback: draw purely random unvisited product nodes if physical sampler plateaus
+                all_possible = set(zip(np.random.choice(self.nodes_A, n_anchor_target),
+                                       np.random.choice(self.nodes_B, n_anchor_target)))
+                fresh_anchors = list(all_possible - all_sampled_anchors)
+                if not fresh_anchors:
+                    break  # Exhausted space entirely
 
-            if fresh_anchors:
-                retained_nodes = self.expand_partial_stars(
-                    anchors=fresh_anchors,
-                    target_node_count=target_node_count,
-                    k_base=params["k_base"],
-                    epsilon=epsilon,
-                    degree_headroom=params["degree_headroom"],
-                    existing_nodes=retained_nodes
-                )
+            all_sampled_anchors.update(fresh_anchors)
+
+            # 3. Strictly 1-Hop Partial Star Expansion around ONLY fresh anchors
+            retained_nodes = self.expand_partial_stars(
+                anchors=fresh_anchors,
+                target_node_count=target_node_count,
+                k_base=params["k_base"],
+                epsilon=epsilon,
+                degree_headroom=params["degree_headroom"],
+                existing_nodes=retained_nodes
+            )
 
         G_sub = self.build_networkx_subgraph(retained_nodes)
-        return G_sub, params, n_anchor_target
+        return G_sub, params, len(all_sampled_anchors)
+
+        
+        
+    # def sample_subgraph(
+    #     self,
+    #     target_node_count,
+    #     use_cartesian_core=False,
+    #     core_ratio=0.1,
+    #     epsilon=0.2,
+    #     k_local_scale=10,
+    #     spatial_coherence_eta=0.7
+    # ):
+    #     params = self.derive_adaptive_sampling_params(k_local=k_local_scale)
+
+    #     n_anchor_target = self.estimate_anchor_target(
+    #         target_node_count=target_node_count,
+    #         k_base=params["k_base"],
+    #         spatial_coherence_eta=spatial_coherence_eta
+    #     )
+
+    #     anchors = self.select_anchors(
+    #         n_anchor_target=n_anchor_target,
+    #         use_cartesian_core=use_cartesian_core,
+    #         core_ratio=core_ratio,
+    #         physical_ratio=params["physical_ratio"],
+    #         k_local_scale=k_local_scale,
+    #         density_equalization_gamma=params["density_equalization_gamma"]
+    #     )
+
+    #     retained_nodes = self.expand_partial_stars(
+    #         anchors=anchors,
+    #         target_node_count=target_node_count,
+    #         k_base=params["k_base"],
+    #         epsilon=epsilon,
+    #         degree_headroom=params["degree_headroom"]
+    #     )
+
+    #     # Soft Safety Net Fallback
+    #     if len(retained_nodes) < int(target_node_count * 0.95):
+    #         missing_count = target_node_count - len(retained_nodes)
+
+    #         n_extra_anchors = self.estimate_anchor_target(
+    #             target_node_count=missing_count,
+    #             k_base=params["k_base"],
+    #             spatial_coherence_eta=spatial_coherence_eta
+    #         )
+
+    #         extra_anchors = self.select_anchors(
+    #             n_anchor_target=n_extra_anchors,
+    #             use_cartesian_core=False,
+    #             physical_ratio=params["physical_ratio"],
+    #             k_local_scale=k_local_scale,
+    #             density_equalization_gamma=params["density_equalization_gamma"]
+    #         )
+
+    #         fresh_anchors = [a for a in extra_anchors if a not in retained_nodes]
+
+    #         if fresh_anchors:
+    #             retained_nodes = self.expand_partial_stars(
+    #                 anchors=fresh_anchors,
+    #                 target_node_count=target_node_count,
+    #                 k_base=params["k_base"],
+    #                 epsilon=epsilon,
+    #                 degree_headroom=params["degree_headroom"],
+    #                 existing_nodes=retained_nodes
+    #             )
+
+    #     G_sub = self.build_networkx_subgraph(retained_nodes)
+    #     return G_sub, params, n_anchor_target
 
 
 
