@@ -4026,7 +4026,7 @@ def compute_graph_stats(G, cnt = 0):
         if comp_id == 0 and (cnt % 50 == 0):
             G.graph['diameter'] = float(nx.algorithms.approximation.diameter(subG))
 
-    print(f"\n Fiedler value: {G.graph.get('fiedler_value', 0.0):0.3f}")
+    print(f"\nFiedler value: {G.graph.get('fiedler_value', 0.0):0.3f}")
     print(f"Diameter: {G.graph.get('diameter', 0.0):0.3f}")
     
     if len(curvature_vec) > 0:
