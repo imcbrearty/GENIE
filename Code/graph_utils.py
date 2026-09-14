@@ -6482,7 +6482,7 @@ class SpectralProductSampler:
     #     random.shuffle(anchor_list)
     #     return anchor_list
     
-    def select_anchors(
+    def select_anchors_backup(
         self,
         n_anchor_target,
         use_cartesian_core=False,
@@ -6613,6 +6613,163 @@ class SpectralProductSampler:
         anchor_list = list(anchors)
         random.shuffle(anchor_list)
         return anchor_list
+        
+    
+    def select_anchors(
+        self,
+        n_anchor_target,
+        use_cartesian_core=False,
+        core_ratio=0.1,
+        physical_ratio=None,
+        k_local_scale=10,
+        density_equalization_gamma=None
+    ):
+        # 1. Derive parameters dynamically if not explicitly provided
+        if physical_ratio is None or density_equalization_gamma is None:
+            derived = self.derive_adaptive_sampling_params(k_local=k_local_scale)
+            physical_ratio = physical_ratio if physical_ratio is not None else derived["physical_ratio"]
+            density_equalization_gamma = (
+                density_equalization_gamma if density_equalization_gamma is not None
+                else derived["density_equalization_gamma"]
+            )
+    
+        anchors = set()
+        coords_A = np.array([self.pos_A[n] for n in self.nodes_A])
+        coords_B = np.array([self.pos_B[n] for n in self.nodes_B])
+        n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+    
+        # ------------------------------------------------------------------
+        # Step A: Cartesian Core (High-Leverage Spectral Pairs)
+        # ------------------------------------------------------------------
+        n_core_target = int(n_anchor_target * core_ratio) if use_cartesian_core else 0
+        if n_core_target > 0:
+            ratio = n_a / n_b
+            k_a = min(n_a, max(1, int(np.sqrt(n_core_target * ratio))))
+            k_b = min(n_b, max(1, int(n_core_target / max(1, k_a))))
+    
+            top_a_indices = np.argsort(self.tau_A)[-k_a:]
+            top_b_indices = np.argsort(self.tau_B)[-k_b:]
+    
+            for idx_a in top_a_indices:
+                for idx_b in top_b_indices:
+                    anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
+    
+        # ------------------------------------------------------------------
+        # Step B: Symmetrical Adaptive Physical Sampling (A -> B & B -> A)
+        # ------------------------------------------------------------------
+        n_physical_target = int(n_anchor_target * physical_ratio)
+    
+        if n_physical_target > 0:
+            tree_A = cKDTree(coords_A)
+            tree_B = cKDTree(coords_B)
+    
+            # 1. Compute Local Spatial Densities for density equalization
+            dists_self_A, _ = tree_A.query(coords_A, k=min(k_local_scale, n_a))
+            dists_self_B, _ = tree_B.query(coords_B, k=min(k_local_scale, n_b))
+            if dists_self_A.ndim == 1: dists_self_A = dists_self_A[:, None]
+            if dists_self_B.ndim == 1: dists_self_B = dists_self_B[:, None]
+    
+            sigma_A = np.maximum(dists_self_A[:, -1] / 1.1774, 1e-5)
+            sigma_B = np.maximum(dists_self_B[:, -1] / 1.1774, 1e-5)
+            density_A = 1.0 / (sigma_A**2)
+            density_B = 1.0 / (sigma_B**2)
+    
+            spatial_extent = np.linalg.norm(coords_A.max(axis=0) - coords_A.min(axis=0)) + 1e-5
+    
+            # Split budget evenly between A -> B and B -> A queries
+            target_ab = n_physical_target // 2
+            target_ba = n_physical_target - target_ab
+    
+            # --- DIRECTION 1: A queries local B neighborhood ---
+            if target_ab > 0:
+                k_per_a = target_ab / max(1, n_a)
+                k_base_a = int(np.floor(k_per_a))
+                p_extra_a = k_per_a - k_base_a
+    
+                k_cand_b = min(int(np.clip(k_local_scale * 3 * np.sqrt(n_b / max(1, n_a)), 20, n_b)), n_b)
+                dists_B, indices_B = tree_B.query(coords_A, k=k_cand_b)
+                if dists_B.ndim == 1: dists_B, indices_B = dists_B[:, None], indices_B[:, None]
+    
+                scaled_dists_B = dists_B / spatial_extent
+                bw_ab = np.median(scaled_dists_B) + 1e-5
+                raw_w_ab = np.exp(- (scaled_dists_B**2) / (2 * (bw_ab**2)))
+                joint_d_ab = (density_A[:, None] * density_B[indices_B]) ** density_equalization_gamma
+                
+                eq_w_ab = np.nan_to_num(raw_w_ab / np.maximum(joint_d_ab, 1e-8), nan=0.0)
+                r_sums_a = eq_w_ab.sum(axis=1, keepdims=True)
+                p_mat_a = np.where(r_sums_a > 0, eq_w_ab / np.maximum(r_sums_a, 1e-12), 1.0 / k_cand_b)
+                p_mat_a = 0.9 * p_mat_a + (0.1 / k_cand_b)
+                p_mat_a /= p_mat_a.sum(axis=1, keepdims=True)
+    
+                draws_a = np.clip(k_base_a + (np.random.rand(n_a) < p_extra_a).astype(int), 1, k_cand_b)
+                max_d_a = draws_a.max()
+    
+                u_a = np.random.uniform(1e-10, 1.0 - 1e-10, size=(n_a, k_cand_b))
+                gumbel_a = np.log(p_mat_a) - np.log(-np.log(u_a))
+                top_cols_a = np.argsort(-gumbel_a, axis=1)[:, :max_d_a]
+    
+                _, rank_a = np.ogrid[:n_a, :max_d_a]
+                mask_a = rank_a < draws_a[:, None]
+                rows_a = np.repeat(np.arange(n_a)[:, None], max_d_a, axis=1)[mask_a]
+                cols_b = indices_B[rows_a, top_cols_a[mask_a]]
+    
+                for r_a, c_b in zip(rows_a, cols_b):
+                    anchors.add((self.nodes_A[r_a], self.nodes_B[c_b]))
+    
+            # --- DIRECTION 2: B queries local A neighborhood ---
+            if target_ba > 0:
+                k_per_b = target_ba / max(1, n_b)
+                k_base_b = int(np.floor(k_per_b))
+                p_extra_b = k_per_b - k_base_b
+    
+                k_cand_a = min(int(np.clip(k_local_scale * 3 * np.sqrt(n_a / max(1, n_b)), 20, n_a)), n_a)
+                dists_A, indices_A = tree_A.query(coords_B, k=k_cand_a)
+                if dists_A.ndim == 1: dists_A, indices_A = dists_A[:, None], indices_A[:, None]
+    
+                scaled_dists_A = dists_A / spatial_extent
+                bw_ba = np.median(scaled_dists_A) + 1e-5
+                raw_w_ba = np.exp(- (scaled_dists_A**2) / (2 * (bw_ba**2)))
+                joint_d_ba = (density_B[:, None] * density_A[indices_A]) ** density_equalization_gamma
+                
+                eq_w_ba = np.nan_to_num(raw_w_ba / np.maximum(joint_d_ba, 1e-8), nan=0.0)
+                r_sums_b = eq_w_ba.sum(axis=1, keepdims=True)
+                p_mat_b = np.where(r_sums_b > 0, eq_w_ba / np.maximum(r_sums_b, 1e-12), 1.0 / k_cand_a)
+                p_mat_b = 0.9 * p_mat_b + (0.1 / k_cand_a)
+                p_mat_b /= p_mat_b.sum(axis=1, keepdims=True)
+    
+                draws_b = np.clip(k_base_b + (np.random.rand(n_b) < p_extra_b).astype(int), 1, k_cand_a)
+                max_d_b = draws_b.max()
+    
+                u_b = np.random.uniform(1e-10, 1.0 - 1e-10, size=(n_b, k_cand_a))
+                gumbel_b = np.log(p_mat_b) - np.log(-np.log(u_b))
+                top_cols_b = np.argsort(-gumbel_b, axis=1)[:, :max_d_b]
+    
+                _, rank_b = np.ogrid[:n_b, :max_d_b]
+                mask_b = rank_b < draws_b[:, None]
+                rows_b = np.repeat(np.arange(n_b)[:, None], max_d_b, axis=1)[mask_b]
+                cols_a = indices_A[rows_b, top_cols_b[mask_b]]
+    
+                for r_b, c_a in zip(rows_b, cols_a):
+                    anchors.add((self.nodes_A[c_a], self.nodes_B[r_b]))
+    
+        # ------------------------------------------------------------------
+        # Step C: Spectral Leverage Sampling (Global Residuals)
+        # ------------------------------------------------------------------
+        n_remaining = max(0, n_anchor_target - len(anchors))
+        if n_remaining > 0:
+            sampled_a = np.random.choice(n_a, size=n_remaining * 3, replace=True, p=self.p_A)
+            sampled_b = np.random.choice(n_b, size=n_remaining * 3, replace=True, p=self.p_B)
+            for idx_a, idx_b in zip(sampled_a, sampled_b):
+                anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
+                if len(anchors) >= n_anchor_target:
+                    break
+    
+        anchor_list = list(anchors)
+        random.shuffle(anchor_list)
+        return anchor_list
+
+
+
 
     
     def expand_partial_stars_backup(self, anchors, target_node_count, k_base=None, epsilon=0.2, degree_headroom=None):
