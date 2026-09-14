@@ -6841,7 +6841,7 @@ class SpectralProductSampler:
 
         return retained_nodes
     
-    def expand_partial_stars(
+    def expand_partial_stars_backup1(
         self, 
         anchors, 
         target_node_count, 
@@ -6955,21 +6955,148 @@ class SpectralProductSampler:
     
         return retained_nodes
     
-    def estimate_anchor_target(self, target_node_count, k_base=None):
+    def expand_partial_stars(
+        self, 
+        anchors, 
+        target_node_count, 
+        k_base=None, 
+        epsilon=0.2, 
+        degree_headroom=None,
+        budget_tolerance=0.05
+    ):
+        if k_base is None or degree_headroom is None:
+            derived = self.derive_adaptive_sampling_params()
+            k_base = k_base if k_base is not None else derived["k_base"]
+            degree_headroom = degree_headroom if degree_headroom is not None else derived["degree_headroom"]
+    
+        retained_nodes = set(anchors)
+        n_anchors = max(1, len(anchors))
+        soft_budget_cap = int(target_node_count * (1.0 + budget_tolerance))
+    
+        avg_budget_per_anchor = max(2.0, (target_node_count - n_anchors) / n_anchors)
+        dynamic_max_degree = max(2, int(np.floor(degree_headroom * avg_budget_per_anchor)))
+    
+        indptr_A, indices_A = self.adj_A.indptr, self.adj_A.indices
+        indptr_B, indices_B = self.adj_B.indptr, self.adj_B.indices
+    
+        shuffled_anchors = list(anchors)
+        random.shuffle(shuffled_anchors)
+    
+        ratio_a = np.sqrt(len(self.nodes_A) / len(self.nodes_B))
+        ratio_b = np.sqrt(len(self.nodes_B) / len(self.nodes_A))
+    
+        for a, b in shuffled_anchors:
+            if len(retained_nodes) >= soft_budget_cap:
+                break
+    
+            idx_a = self.node_to_idx_A[a]
+            idx_b = self.node_to_idx_B[b]
+    
+            mult_a = np.clip(self.tau_A[idx_a] / self.mean_tau_A, 0.5, 3.0)
+            mult_b = np.clip(self.tau_B[idx_b] / self.mean_tau_B, 0.5, 3.0)
+    
+            cap_a = min(max(1, int(round(k_base * ratio_a * mult_a))), dynamic_max_degree)
+            cap_b = min(max(1, int(round(k_base * ratio_b * mult_b))), dynamic_max_degree)
+    
+            factors = ['A', 'B']
+            random.shuffle(factors)
+    
+            for factor in factors:
+                if len(retained_nodes) >= soft_budget_cap:
+                    break
+    
+                if factor == 'A':
+                    neigh_indices = indices_A[indptr_A[idx_a]:indptr_A[idx_a] + 1]
+                    unvisited = [n_idx for n_idx in neigh_indices if (self.nodes_A[n_idx], b) not in retained_nodes]
+    
+                    if unvisited:
+                        raw_tau = self.tau_A[unvisited]
+                        tau_sum = np.sum(raw_tau)
+                        probs = (1.0 - epsilon) * (raw_tau / tau_sum if tau_sum > 0 else 1.0 / len(unvisited)) + epsilon * (1.0 / len(unvisited))
+                        probs /= np.sum(probs)
+    
+                        eff_cap = min(cap_a, len(unvisited))
+                        chosen = np.random.choice(unvisited, size=eff_cap, replace=False, p=probs)
+                        for c_idx in chosen:
+                            retained_nodes.add((self.nodes_A[c_idx], b))
+    
+                elif factor == 'B':
+                    neigh_indices = indices_B[indptr_B[idx_b]:indptr_B[idx_b] + 1]
+                    unvisited = [n_idx for n_idx in neigh_indices if (a, self.nodes_B[n_idx]) not in retained_nodes]
+    
+                    if unvisited:
+                        raw_tau = self.tau_B[unvisited]
+                        tau_sum = np.sum(raw_tau)
+                        probs = (1.0 - epsilon) * (raw_tau / tau_sum if tau_sum > 0 else 1.0 / len(unvisited)) + epsilon * (1.0 / len(unvisited))
+                        probs /= np.sum(probs)
+    
+                        eff_cap = min(cap_b, len(unvisited))
+                        chosen = np.random.choice(unvisited, size=eff_cap, replace=False, p=probs)
+                        for c_idx in chosen:
+                            retained_nodes.add((a, self.nodes_B[c_idx]))
+    
+        return retained_nodes
+    
+    # def estimate_anchor_target(self, target_node_count, k_base=None):
+    #     if k_base is None:
+    #         derived = self.derive_adaptive_sampling_params()
+    #         k_base = derived["k_base"]
+
+    #     n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+    #     ratio_a = np.sqrt(n_a / n_b)
+    #     ratio_b = np.sqrt(n_b / n_a)
+
+    #     expected_yield_per_anchor = 1.0 + k_base * (ratio_a + ratio_b)
+    #     n_anchor_target = int(np.ceil(target_node_count / expected_yield_per_anchor))
+    #     max_sensible_anchors = max(10, int(target_node_count * 0.5))
+
+    #     return int(np.clip(n_anchor_target, 10, max_sensible_anchors))
+    
+    # def estimate_required_anchors(self, n_target, k_base, spatial_coherence_eta=0.7):
+    #     n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+    #     total_cartesian_space = n_a * n_b
+        
+    #     # 1. Average single star footprint size
+    #     ratio_a = np.sqrt(n_a / n_b)
+    #     ratio_b = np.sqrt(n_b / n_a)
+    #     bar_k_a = k_base * ratio_a
+    #     bar_k_b = k_base * ratio_b
+    #     star_size = 1.0 + bar_k_a + bar_k_b
+        
+    #     # 2. Invert Poisson coverage model with spatial collision discount (eta)
+    #     fraction_to_cover = min(0.99, n_target / total_cartesian_space)
+        
+    #     # -ln(1 - target/N_total) gives required effective element draws
+    #     effective_draws_needed = -np.log(1.0 - fraction_to_cover) * total_cartesian_space
+        
+    #     # Scale by single star yield and spatial overlap factor
+    #     raw_n_anchors = effective_draws_needed / (star_size * spatial_coherence_eta)
+        
+    #     return max(1, int(np.ceil(raw_n_anchors)))
+    
+    def estimate_anchor_target(self, target_node_count, k_base=None, spatial_coherence_eta=0.7):
         if k_base is None:
             derived = self.derive_adaptive_sampling_params()
             k_base = derived["k_base"]
-
+    
         n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+        total_cartesian_space = n_a * n_b
+        
+        # 1. Average single star footprint size
         ratio_a = np.sqrt(n_a / n_b)
         ratio_b = np.sqrt(n_b / n_a)
-
-        expected_yield_per_anchor = 1.0 + k_base * (ratio_a + ratio_b)
-        n_anchor_target = int(np.ceil(target_node_count / expected_yield_per_anchor))
-        max_sensible_anchors = max(10, int(target_node_count * 0.5))
-
-        return int(np.clip(n_anchor_target, 10, max_sensible_anchors))
-
+        star_size = 1.0 + k_base * (ratio_a + ratio_b)
+        
+        # 2. Invert Poisson coverage model with spatial collision discount
+        fraction_to_cover = min(0.99, target_node_count / total_cartesian_space)
+        effective_draws_needed = -np.log(1.0 - fraction_to_cover) * total_cartesian_space
+        
+        raw_n_anchors = effective_draws_needed / (star_size * spatial_coherence_eta)
+        
+        # Safety cap: don't exceed total cartesian space or reasonable limits
+        max_sensible_anchors = max(10, int(target_node_count * 0.8))
+        return int(np.clip(np.ceil(raw_n_anchors), 10, max_sensible_anchors))
+    
     def build_networkx_subgraph(self, retained_nodes):
         """Accelerated graph builder using factor indexing (< 0.05 seconds)."""
         G_sub = nx.Graph()
@@ -6997,22 +7124,26 @@ class SpectralProductSampler:
                     G_sub.add_edge((a, u), (a, v), weight=d.get('res_w', 1.0))
 
         return G_sub
-
+    
     def sample_subgraph(
         self,
         target_node_count,
         use_cartesian_core=False,
         core_ratio=0.1,
         epsilon=0.2,
-        k_local_scale=10
+        k_local_scale=10,
+        spatial_coherence_eta=0.7
     ):
         params = self.derive_adaptive_sampling_params(k_local=k_local_scale)
-
+    
+        # 1. Estimate initial anchor count with spatial overlap model
         n_anchor_target = self.estimate_anchor_target(
             target_node_count=target_node_count,
-            k_base=params["k_base"]
+            k_base=params["k_base"],
+            spatial_coherence_eta=spatial_coherence_eta
         )
-
+    
+        # 2. Select symmetric initial anchors
         anchors = self.select_anchors(
             n_anchor_target=n_anchor_target,
             use_cartesian_core=use_cartesian_core,
@@ -7021,7 +7152,8 @@ class SpectralProductSampler:
             k_local_scale=k_local_scale,
             density_equalization_gamma=params["density_equalization_gamma"]
         )
-
+    
+        # 3. Perform primary single-pass partial star expansion
         retained_nodes = self.expand_partial_stars(
             anchors=anchors,
             target_node_count=target_node_count,
@@ -7029,9 +7161,79 @@ class SpectralProductSampler:
             epsilon=epsilon,
             degree_headroom=params["degree_headroom"]
         )
-
+    
+        # 4. Dynamic Safety Fallback (fires only if local spatial coherence caused severe overlap)
+        if len(retained_nodes) < int(target_node_count * 0.95):
+            missing_count = target_node_count - len(retained_nodes)
+            
+            # Estimate additional anchors needed for the missing node deficit
+            n_extra_anchors = self.estimate_anchor_target(
+                target_node_count=missing_count,
+                k_base=params["k_base"],
+                spatial_coherence_eta=spatial_coherence_eta
+            )
+            
+            # Sample fresh physical anchors
+            extra_anchors = self.select_anchors(
+                n_anchor_target=n_extra_anchors,
+                use_cartesian_core=False,  # Fallback uses purely local spatial anchors
+                physical_ratio=params["physical_ratio"],
+                k_local_scale=k_local_scale,
+                density_equalization_gamma=params["density_equalization_gamma"]
+            )
+            
+            # Filter out any anchors already present in retained_nodes
+            fresh_anchors = [a for a in extra_anchors if a not in retained_nodes]
+            
+            if fresh_anchors:
+                # Expand only the newly added anchor set
+                extra_retained = self.expand_partial_stars(
+                    anchors=fresh_anchors,
+                    target_node_count=target_node_count,
+                    k_base=params["k_base"],
+                    epsilon=epsilon,
+                    degree_headroom=params["degree_headroom"]
+                )
+                retained_nodes.update(extra_retained)
+    
+        # 5. Build final NetworkX subgraph
         G_sub = self.build_networkx_subgraph(retained_nodes)
         return G_sub, params, n_anchor_target
+
+    # def sample_subgraph(
+    #     self,
+    #     target_node_count,
+    #     use_cartesian_core=False,
+    #     core_ratio=0.1,
+    #     epsilon=0.2,
+    #     k_local_scale=10
+    # ):
+    #     params = self.derive_adaptive_sampling_params(k_local=k_local_scale)
+
+    #     n_anchor_target = self.estimate_anchor_target(
+    #         target_node_count=target_node_count,
+    #         k_base=params["k_base"]
+    #     )
+
+    #     anchors = self.select_anchors(
+    #         n_anchor_target=n_anchor_target,
+    #         use_cartesian_core=use_cartesian_core,
+    #         core_ratio=core_ratio,
+    #         physical_ratio=params["physical_ratio"],
+    #         k_local_scale=k_local_scale,
+    #         density_equalization_gamma=params["density_equalization_gamma"]
+    #     )
+
+    #     retained_nodes = self.expand_partial_stars(
+    #         anchors=anchors,
+    #         target_node_count=target_node_count,
+    #         k_base=params["k_base"],
+    #         epsilon=epsilon,
+    #         degree_headroom=params["degree_headroom"]
+    #     )
+
+    #     G_sub = self.build_networkx_subgraph(retained_nodes)
+    #     return G_sub, params, n_anchor_target
 
 
 
