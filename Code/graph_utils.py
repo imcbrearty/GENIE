@@ -2145,11 +2145,12 @@ def soft_component_merger_backup(G, coords, sigma):
     return G
 
 
-def soft_component_merger(G, coords, scale_length=None):
+
+def soft_component_merger(G, coords, scale_length=None, min_weight=0.05):
     """
     Connects disjoint components using boundary-to-boundary minimum distances.
     Weights are computed using node-specific variable density scale factors
-    consistent with the scale-invariant Gaussian kernel framework.
+    and clamped to min_weight to preserve numerical stability and matrix consistency.
     """
     components = sorted(nx.connected_components(G), key=len, reverse=True)
     if len(components) <= 1:
@@ -2159,10 +2160,9 @@ def soft_component_merger(G, coords, scale_length=None):
     if scale_length is None:
         scale_length = G.graph.get('scale_length', 1.0)
 
-    # Pre-extract local node sigma values if available (fallback to 1.0 if not assigned)
-    # sigma_i is the local density scale factor per node
-    node_sigmas = {
-        n: G.nodes[n].get('sigma', 1.0) 
+    # 1. FIX: Read 'scale' (with fallback to 'sigma' and 1.0)
+    node_scales = {
+        n: G.nodes[n].get('scale', G.nodes[n].get('sigma', 1.0)) 
         for n in G.nodes()
     }
 
@@ -2185,7 +2185,6 @@ def soft_component_merger(G, coords, scale_length=None):
         # Search for the absolute nearest boundary node across all remaining components
         for idx, comp in enumerate(remaining_components):
             comp_nodes = list(comp)
-            # Find nearest neighbor in main body for each node in candidate component
             dists, neighbors = main_tree.query(coords[comp_nodes], k=1)
             
             local_min_idx = np.argmin(dists)
@@ -2202,20 +2201,23 @@ def soft_component_merger(G, coords, scale_length=None):
         if best_global_bridge:
             u, v = best_global_bridge
             
-            # --- Scale-Invariant Weight Formula ---
-            # Effective scale length combines global scale with local density multipliers
-            sigma_u = node_sigmas[u]
-            sigma_v = node_sigmas[v]
-            effective_scale = scale_length * np.sqrt(sigma_u * sigma_v)
+            # 2. FIX: Unified Effective Scale Calculation with 0.5 Floor
+            scale_u = node_scales[u]
+            scale_v = node_scales[v]
+            geo_scale = np.sqrt(scale_u * scale_v)
+            effective_scale = max(scale_length * geo_scale, scale_length * 0.5, 1e-4)
             
-            # Distance-decay weight safely clamped to (0, 1]
-            w = np.exp(-min_global_dist / max(effective_scale, 1e-8))
+            # 3. FIX: Compute weight and clamp bridge to AT LEAST min_weight
+            raw_w = np.exp(-min_global_dist / effective_scale)
+            w = float(max(raw_w, min_weight))  # Guarantees matrix & solver consistency
 
             G.add_edge(
                 u, v, 
                 dist=float(min_global_dist), 
-                weight=float(w), 
-                is_bridge=True
+                weight=w, 
+                step=0,
+                is_bridge=True,
+                immutable=True
             )
             
             new_bridge_edges.append((u, v))
@@ -2224,11 +2226,108 @@ def soft_component_merger(G, coords, scale_length=None):
             main_nodes.update(remaining_components.pop(best_comp_idx))
             added_bridges += 1
 
-    print(f"Soft Merger added {added_bridges} bridge edge(s) using variable-scale boundary logic.")
+    print(f"Soft Merger added {added_bridges} bridge edge(s) (clamped weight >= {min_weight}).")
     
     # Store added bridge edges in graph metadata for downstream delta updates
     G.graph['last_added_bridges'] = new_bridge_edges
     return G
+
+
+
+
+
+
+
+
+
+
+
+
+
+# def soft_component_merger(G, coords, scale_length=None):
+#     """
+#     Connects disjoint components using boundary-to-boundary minimum distances.
+#     Weights are computed using node-specific variable density scale factors
+#     consistent with the scale-invariant Gaussian kernel framework.
+#     """
+#     components = sorted(nx.connected_components(G), key=len, reverse=True)
+#     if len(components) <= 1:
+#         return G
+
+#     # Retrieve global fallback scale if scale_length is not explicitly passed
+#     if scale_length is None:
+#         scale_length = G.graph.get('scale_length', 1.0)
+
+#     # Pre-extract local node sigma values if available (fallback to 1.0 if not assigned)
+#     # sigma_i is the local density scale factor per node
+#     node_sigmas = {
+#         n: G.nodes[n].get('sigma', 1.0) 
+#         for n in G.nodes()
+#     }
+
+#     # Start with the Largest Connected Component as the main body
+#     main_nodes = set(components[0])
+#     remaining_components = components[1:]
+    
+#     added_bridges = 0
+#     new_bridge_edges = []
+
+#     while remaining_components:
+#         main_node_indices = list(main_nodes)
+#         main_coords = coords[main_node_indices]
+#         main_tree = cKDTree(main_coords)
+
+#         best_global_bridge = None
+#         min_global_dist = float('inf')
+#         best_comp_idx = -1
+
+#         # Search for the absolute nearest boundary node across all remaining components
+#         for idx, comp in enumerate(remaining_components):
+#             comp_nodes = list(comp)
+#             # Find nearest neighbor in main body for each node in candidate component
+#             dists, neighbors = main_tree.query(coords[comp_nodes], k=1)
+            
+#             local_min_idx = np.argmin(dists)
+#             local_min_dist = dists[local_min_idx]
+
+#             if local_min_dist < min_global_dist:
+#                 min_global_dist = local_min_dist
+#                 u = comp_nodes[local_min_idx]
+#                 v = main_node_indices[neighbors[local_min_idx]]
+#                 best_global_bridge = (u, v)
+#                 best_comp_idx = idx
+
+#         # Insert bridge edge
+#         if best_global_bridge:
+#             u, v = best_global_bridge
+            
+#             # --- Scale-Invariant Weight Formula ---
+#             # Effective scale length combines global scale with local density multipliers
+#             sigma_u = node_sigmas[u]
+#             sigma_v = node_sigmas[v]
+#             effective_scale = scale_length * np.sqrt(sigma_u * sigma_v)
+            
+#             # Distance-decay weight safely clamped to (0, 1]
+#             w = np.exp(-min_global_dist / max(effective_scale, 1e-8))
+
+#             G.add_edge(
+#                 u, v, 
+#                 dist=float(min_global_dist), 
+#                 weight=float(w), 
+#                 is_bridge=True
+#             )
+            
+#             new_bridge_edges.append((u, v))
+            
+#             # Merge component into main body and continue loop
+#             main_nodes.update(remaining_components.pop(best_comp_idx))
+#             added_bridges += 1
+
+#     print(f"Soft Merger added {added_bridges} bridge edge(s) using variable-scale boundary logic.")
+    
+#     # Store added bridge edges in graph metadata for downstream delta updates
+#     G.graph['last_added_bridges'] = new_bridge_edges
+#     return G
 
 
 
@@ -3754,43 +3853,65 @@ def initialize_sensor_graph(
                  float(np.linalg.norm(coords[set_initial_edges[0, i]] - coords[set_initial_edges[1, i]]))) 
                 for i in range(set_initial_edges.shape[1])
             ]
+        # --- UNIFIED WEIGHT & SCALE COMPUTATION HELPERS ---
+        def _get_effective_scale(u_scale, v_scale):
+            # Prevents scale contraction below 50% of global scale_length
+            geo_scale = np.sqrt(u_scale * v_scale)
+            return max(scale_length * geo_scale, scale_length * 0.5, 1e-4)
 
-        # Apply weights for initial structural edges
+        def _compute_edge_weight(d, u_scale, v_scale):
+            eff_scale = _get_effective_scale(u_scale, v_scale)
+            w = np.exp(-d / eff_scale)
+            return float(w) if w >= min_weight else 0.0
+
+        # ---------------------------------------------------------
+        # 1A. INITIAL STRUCTURAL EDGES (Backbone / Gabriel / RNG)
+        # ---------------------------------------------------------
         for u, v, d in initial_edges:
-            effective_scale = scale_length * np.sqrt(G.nodes[u]['scale'] * G.nodes[v]['scale'])
-            w = np.exp(-d / max(effective_scale, 1e-6))
+            w = _compute_edge_weight(d, G.nodes[u]['scale'], G.nodes[v]['scale'])
             if w >= min_weight:
-                G.add_edge(int(u), int(v), dist=d, weight=float(w), step=0, immutable=True)
+                G.add_edge(int(u), int(v), dist=float(d), weight=w, step=0, immutable=True)
 
+        # ---------------------------------------------------------
+        # 1B. EXTRA KNN EDGES (if requested)
+        # ---------------------------------------------------------
         if init_knn is not None:
             knn_dists, knn_indices = tree.query(coords, k=init_knn + 1)
             for j in range(n_nodes):
                 for idx_pos, v in enumerate(knn_indices[j, 1:]):
                     d = float(knn_dists[j, idx_pos + 1])
-                    effective_scale = scale_length * np.sqrt(G.nodes[j]['scale'] * G.nodes[v]['scale'])
-                    w = np.exp(-d / max(effective_scale, 1e-6))
+                    w = _compute_edge_weight(d, G.nodes[j]['scale'], G.nodes[v]['scale'])
                     if w >= min_weight:
-                        G.add_edge(int(j), int(v), dist=d, weight=float(w), step=0, immutable=True)
+                        G.add_edge(int(j), int(v), dist=float(d), weight=w, step=0, immutable=True)
 
-        # Connect isolated graph components
+        # ---------------------------------------------------------
+        # 1C. CONNECT ISOLATED COMPONENTS
+        # ---------------------------------------------------------
         if 'soft_component_merger' in globals():
             G = soft_component_merger(G, coords, scale_length)
-        
+
         # ---------------------------------------------------------
-        # OPTIONAL DENSE MATRICES (Only generated if optimizing)
+        # 1D. OPTIONAL DENSE MATRICES (Strictly synced with G)
         # ---------------------------------------------------------
         if requires_matrices:
-            G.graph['distances'] = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
-            scales = np.array([G.nodes[i]['scale'] for i in range(n_nodes)])
-            
-            # Vectorized Geometric Mean of Dimensionless Multipliers
-            scale_matrix = np.sqrt(scales.reshape(-1, 1) * scales.reshape(1, -1))
-            G.graph['scale_values'] = scale_length * scale_matrix
-            
-            G.graph['weights'] = np.exp(-G.graph['distances'] / np.maximum(G.graph['scale_values'], 1e-6))
+            # Pairwise Distances
+            dists = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
+            G.graph['distances'] = dists
 
-            edges_allowed = G.graph['weights'] >= min_weight
-            ilist1, ilist2 = np.where(edges_allowed)
+            # Pairwise Effective Scales (with 0.5 floor guard)
+            scales = np.array([G.nodes[i]['scale'] for i in range(n_nodes)])
+            scale_matrix = np.sqrt(scales.reshape(-1, 1) * scales.reshape(1, -1))
+            effective_scale_matrix = np.maximum(scale_length * scale_matrix, scale_length * 0.5)
+            G.graph['scale_values'] = effective_scale_matrix
+
+            # Dense Weights with STRICT min_weight Threshold Masking
+            raw_weights = np.exp(-dists / np.maximum(effective_scale_matrix, 1e-4))
+            raw_weights[raw_weights < min_weight] = 0.0  # Zero-out underflow/small weights
+            np.fill_diagonal(raw_weights, 0.0)           # Zero-out self loops
+            G.graph['weights'] = raw_weights
+
+            # Allowed Edges (Upper Triangle Only)
+            ilist1, ilist2 = np.where(raw_weights >= min_weight)
             edges_allowed = np.column_stack((ilist1, ilist2))
             G.graph['allowed_edges'] = edges_allowed[edges_allowed[:, 0] < edges_allowed[:, 1]]
 
@@ -3915,6 +4036,17 @@ def initialize_sensor_graph(
 
     return G, edges_array, fiedler_vec, curvature_vec, [], degree_vec, comp_vec, G.graph.get('fiedler_value', 0.0), scale_length
 
+
+# def compute_safe_weight(d, scale_u, scale_v, scale_length, min_weight=0.05):
+#     # Prevent scale from collapsing below 0.5 * global scale_length
+#     geo_scale = np.sqrt(scale_u * scale_v)
+#     effective_scale = max(scale_length * geo_scale, scale_length * 0.5, 1e-4)
+    
+#     # Exponent argument limit: -np.log(min_weight) ensures w >= min_weight
+#     scaled_dist = d / effective_scale
+#     w = np.exp(-scaled_dist)
+    
+#     return float(w) if w >= min_weight else 0.0
 
 
 
