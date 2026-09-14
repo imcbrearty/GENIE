@@ -1826,7 +1826,7 @@ for cnt, strs in enumerate([0]):
 				de_pop_size=75, 
 				target_vram_fraction=0.65
 			)
-			print(f"Dynamically configured MAX_BATCH_SIZE: {MAX_BATCH_SIZE}")
+			print(f"Dynamically configured MAX_BATCH_SIZE: {min(MAX_BATCH_SIZE, num_srcs)}")
 
 			def run_batched_de_in_chunks(event_list, bounds_min, bounds_max, use_path_sigma=False, chunk_size=500):
 				all_de_results = []
