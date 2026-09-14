@@ -1926,14 +1926,39 @@ def perform_ks_depth_test_ellipsoid(x_grid, depth_range, ftrns1_abs):
     return d_stat, p_val
 
 
+# def convert_graph(G):
+
+#     adj = nx.to_numpy_array(G, nodelist = sorted(G.nodes()))
+#     i1, i2 = np.where(adj > 1e-5)
+#     edges = np.concatenate((i1.reshape(1,-1), i2.reshape(1,-1)), axis = 0)
+#     weights = adj[i1,i2]
+#     degree_values = np.array([degree for node, degree in G.degree(weight = 'weight')])
+
+#     return edges, weights, degree_values
+
+
 def convert_graph(G):
-
-    adj = nx.to_numpy_array(G, nodelist = sorted(G.nodes()))
-    i1, i2 = np.where(adj > 1e-5)
-    edges = np.concatenate((i1.reshape(1,-1), i2.reshape(1,-1)), axis = 0)
-    weights = adj[i1,i2]
-    degree_values = np.array([degree for node, degree in G.degree(weight = 'weight')])
-
+    """
+    Fast, memory-efficient sparse replacement for convert_graph.
+    Returns:
+        edges: int64 array of shape (2, 2 * num_edges)
+        weights: float64 array of edge weights
+        degree_values: float64 array of weighted node degrees
+    """
+    # 1. Sort nodes for consistent indexing
+    nodelist = sorted(G.nodes())
+    
+    # 2. Extract sparse matrix directly (COO format gives COO arrays i1, i2)
+    adj_coo = nx.to_scipy_sparse_array(G, nodelist=nodelist, weight='weight', format='coo')
+    
+    # 3. Stack row and column indices into shape (2, num_entries)
+    edges = np.vstack((adj_coo.row, adj_coo.col))
+    weights = adj_coo.data
+    
+    # 4. Compute weighted degrees using NetworkX in exact nodelist order
+    degree_dict = dict(G.degree(weight='weight'))
+    degree_values = np.array([degree_dict[n] for n in nodelist], dtype=np.float64)
+    
     return edges, weights, degree_values
 
 
