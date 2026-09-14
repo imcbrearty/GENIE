@@ -11756,6 +11756,172 @@ def probe_network_sidelobes_geodetic_backup(station_latlonz, domain_lat_range, d
 
     return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
 
+
+def analyze_product_graph_structure(G):
+    """
+    Separates edge types and computes memory-efficient topological metrics.
+    """
+    # Create node-to-index lookup dictionary
+
+    adj_matrix = nx.to_scipy_sparse_array(G, format='csr')
+    nodes_list = list(G.nodes())
+
+    node_to_idx = {node: idx for idx, node in enumerate(nodes_list)}
+    
+    # Extract edge lists as numpy arrays
+    edges = list(G.edges())
+    
+    # Unpack tuple nodes: ((a1, b1), (a2, b2))
+    sources_1 = np.array([e[0][0] for e in edges])
+    stations_1 = np.array([e[0][1] for e in edges])
+    sources_2 = np.array([e[1][0] for e in edges])
+    stations_2 = np.array([e[1][1] for e in edges])
+    len_sta = max(stations_1.max(), stations_2.max()) + 1
+    len_src = max(sources_1.max(), sources_2.max()) + 1
+
+    # Mask by edge type
+    is_source_edge = (stations_1 == stations_2)  # Same station, different source
+    is_station_edge = (sources_1 == sources_2)   # Same source, different station
+    is_cross_edge = (~is_source_edge) & (~is_station_edge) # Cross-layer anchor expansion
+    
+    print("\n--- Edge Composition Breakdown ---")
+    print(f"Total Nodes:         {len(nodes_list):,}")
+    print('Possible Nodes: %d (Ratio: %0.4f)'%(len_sta*len_src, len(nodes_list)/(len_sta*len_src)))
+    print(f"Total Edges:         {len(edges):,}")
+    print(f"Source-Source Edges: {np.sum(is_source_edge):,} ({np.mean(is_source_edge)*100:.2f}%)")
+    print(f"Station-Station Edges: {np.sum(is_station_edge):,} ({np.mean(is_station_edge)*100:.2f}%)")
+    print(f"Cross-Layer Anchors:   {np.sum(is_cross_edge):,} ({np.mean(is_cross_edge)*100:.2f}%)")
+    
+    stats = compute_comparative_metrics(adj_matrix)
+
+    # for k, v in stats.items():
+    #     print(f"{k}: {v}")
+
+    curv_stats = compute_forman_ricci_curvature(G)
+
+    return adj_matrix, is_source_edge, is_station_edge
+
+def compute_comparative_metrics(adj_matrix):
+    """
+    Computes scalable topological metrics on sparse product adjacency matrices.
+    """
+    num_nodes = adj_matrix.shape[0]
+    num_edges = adj_matrix.nnz // 2
+    
+    # 1. Connected Components & Giant Component Size
+    n_components, labels = sp.csgraph.connected_components(adj_matrix, directed=False)
+    component_sizes = np.bincount(labels)
+    gcc_ratio = component_sizes.max() / num_nodes
+    
+    # 2. Approximate Fiedler Value (Algebraic Connectivity)
+    # Uses Normalized Laplacian: L_sym = I - D^{-1/2} A D^{-1/2}
+    degrees = np.array(adj_matrix.sum(axis=1)).flatten()
+    
+    # Handle isolated nodes safely if present
+    deg_inv_sqrt = np.zeros_like(degrees, dtype=float)
+    non_zero = degrees > 0
+    deg_inv_sqrt[non_zero] = 1.0 / np.sqrt(degrees[non_zero])
+    
+    D_inv_sqrt = sp.diags(deg_inv_sqrt)
+    L_sym = sp.eye(num_nodes) - D_inv_sqrt @ adj_matrix @ D_inv_sqrt
+    
+    # Compute smallest 2 eigenvalues (0 and Fiedler value lambda_2)
+    # k=2 with 'SM' (Smallest Magnitude)
+    eigvals, _ = spla.eigsh(L_sym, k=2, which='SM', tol=1e-3)
+    fiedler_value = eigvals[1] if len(eigvals) > 1 else 0.0
+
+    # 3. Graph Degree Entropy (Structural Diversity)
+    prob_deg = degrees[non_zero] / degrees.sum()
+    degree_entropy = -np.sum(prob_deg * np.log(prob_deg + 1e-12))
+
+    stats = {
+        "Total Nodes": num_nodes,
+        "Total Edges": num_edges,
+        "Components": n_components,
+        "GCC Coverage (%)": gcc_ratio * 100,
+        "Algebraic Connectivity (Fiedler)": fiedler_value,
+        "Degree Entropy": degree_entropy
+    }
+
+    for k, v in stats.items():
+        print(f"{k}: {v}")    
+
+    return stats
+
+def compute_forman_ricci_curvature(G):
+    """
+    Computes Forman-Ricci Curvature for all edges in a sparse adjacency matrix.
+    Forman Curvature for edge (u, v):
+        kappa(u, v) = 4 - deg(u) - deg(v) + 3 * triangles(u, v)
+    """
+
+    adj_matrix = nx.to_scipy_sparse_array(G, format='csr')
+    nodes_list = list(G.nodes())
+
+    adj_csr = adj_matrix.tocsr()
+    degrees = np.array(adj_csr.sum(axis=1)).flatten()
+    
+    # 1. Get edge indices from upper triangle (unidirectional)
+    adj_triu = sp.triu(adj_csr, format='csr')
+    rows, cols = adj_triu.nonzero()
+    
+    # 2. Count triangles per edge: (A^2) * A elementwise
+    # (A^2)[u, v] gives the number of common neighbors between u and v
+    A2 = adj_csr.dot(adj_csr)
+    triangles_per_edge = np.array(A2[rows, cols]).flatten()
+    
+    # 3. Compute Forman Curvature for each edge
+    deg_u = degrees[rows]
+    deg_v = degrees[cols]
+    
+    edge_curvatures = 4.0 - deg_u - deg_v + 3.0 * triangles_per_edge
+    
+    # Node-level average curvature
+    node_curvatures = np.zeros(adj_matrix.shape[0])
+    np.add.at(node_curvatures, rows, edge_curvatures)
+    np.add.at(node_curvatures, cols, edge_curvatures)
+    
+    # Normalize by node degree
+    non_zero = degrees > 0
+    node_curvatures[non_zero] /= degrees[non_zero]
+    
+    # --- STEP 2: Build Edge Type Masks ---
+    adj_triu = sp.triu(adj_matrix, format='csr')
+    rows, cols = adj_triu.nonzero()
+
+    stations_u = np.array([nodes_list[r][1] for r in rows])
+    stations_v = np.array([nodes_list[c][1] for c in cols])
+
+    sources_u = np.array([nodes_list[r][0] for r in rows])
+    sources_v = np.array([nodes_list[c][0] for c in cols])
+
+    is_source_edge = (stations_u == stations_v)
+    is_station_edge = (sources_u == sources_v)
+
+    # --- STEP 3: Slice and Print ---
+    # all_curvatures = curv_stats["edge_curvatures"]
+    source_curvatures = edge_curvatures[is_source_edge]
+    station_curvatures = edge_curvatures[is_station_edge]
+
+    stats = {
+        "mean_edge_curvature": float(np.mean(edge_curvatures)),
+        "std_edge_curvature": float(np.std(edge_curvatures)),
+        "min_edge_curvature": float(np.min(edge_curvatures)), # Worst bottleneck
+        "mean_node_curvature": float(np.mean(node_curvatures)),
+        "edge_curvatures": edge_curvatures
+    }
+
+    for k, v in stats.items():
+        print(f"{k}: {v}")   
+
+    print(f"\nCombined Mean Curvature:   {np.mean(all_curvatures):.4f}")
+    print(f"  └─ Source-Source Mean:   {np.mean(source_curvatures):.4f}")
+    print(f"  └─ Station-Station Mean: {np.mean(station_curvatures):.4f}")
+
+    return stats
+
+
+
 # def probe_network_sidelobes_geodetic2(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
 #                                      k_stations=20, vel_avg=3500.0, vel_min=2500.0,
 #                                      scan_step_m=1000.0, W_phys_m=1000.0, W_t=3.0, r_min = None, r_max = None, use_global = False, num_candidates = 50000, device='cpu'):
