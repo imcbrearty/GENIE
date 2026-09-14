@@ -4070,7 +4070,7 @@ def compute_graph_stats(G, cnt = 0):
             print(f"Edge Weight dist: {np.quantile(edge_weights, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
 
     if len(degree_vec) > 0:
-        print(f"Degree distribution: {np.quantile(degree_vec, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+        print(f"Degree distribution: {np.quantile(degree_vec, [0, 0.25, 0.5, 0.75, 1.0]).round(3)} \n")
 
 
 class SpectralProductSampler_backup:
