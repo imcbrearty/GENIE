@@ -11941,7 +11941,7 @@ def compute_forman_ricci_curvature(G):
     }
 
     for inc, (k, v) in enumerate(stats.items()):
-        print(f"%s{k}: {v}"%(\n if inc == 0 else ''))   
+        print(f"%s{k}: {v}"%('\n' if inc == 0 else ''))   
 
     print(f"\nCombined Mean Curvature:   {np.mean(edge_curvatures):.4f}")
     print(f"  └─ Source-Source Mean:   {np.mean(source_curvatures):.4f}")
