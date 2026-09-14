@@ -3967,7 +3967,7 @@ def optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3, max_iter
     edges_sta = np.flip(edges_sta, axis=0)
 
     if compute_stats:
-        print('Optimized station graph:')
+        print('\nOptimized station graph:')
         compute_graph_stats(G_sta)
     
     return G_sta, edges_sta
@@ -4027,6 +4027,7 @@ def optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio 
     edges_src = np.flip(edges_src, axis=0)
 
     if compute_stats == True:
+        print('\nOptimized source graph:')
         compute_graph_stas(G_src)
         
     return G_src, edges_src
@@ -4052,7 +4053,7 @@ def compute_graph_stats(G, cnt = 0):
         if comp_id == 0 and (cnt % 50 == 0):
             G.graph['diameter'] = float(nx.algorithms.approximation.diameter(subG))
 
-    print(f"\nFiedler value: {G.graph.get('fiedler_value', 0.0):0.3f}")
+    print(f"Fiedler value: {G.graph.get('fiedler_value', 0.0):0.3f}")
     print(f"Diameter: {G.graph.get('diameter', 0.0):0.3f}")
     
     if len(curvature_vec) > 0:
