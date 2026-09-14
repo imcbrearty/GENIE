@@ -7876,6 +7876,9 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
             print('Degree distribution (station-station): [%0.2f, %0.2f, %0.2f, %0.2f, %0.2f]' % tuple(np.quantile(degrees_sta_stas, [0, 0.25, 0.5, 0.75, 1.0])))
 
 
+        print('\nProduct graph stats:')
+        analyze_product_graph_structure(G_product)
+
         fit_local_projection = False
         if fit_local_projection == True:
 
