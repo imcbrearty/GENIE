@@ -2559,7 +2559,7 @@ def compute_local_sigma(coords, k=7):
     return local_sigmas
 
 
-def initialize_sensor_graph_backup(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt = 10, use_local_scale = True, set_initial_edges = None, edges_to_update = None, init_knn = None, use_rng = True):
+def sensor_graph_backup(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt = 10, use_local_scale = True, set_initial_edges = None, edges_to_update = None, init_knn = None, use_rng = True):
 
     n_nodes, n_dim = coords.shape
 
@@ -2820,7 +2820,7 @@ def initialize_sensor_graph_backup(coords, cnt = 0, min_weight = 0.05, G = None,
 
 
 
-def initialize_sensor_graph_backup(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt = 10, use_local_scale = True, set_initial_edges = None, edges_to_update = None, init_knn = None, use_rng = True):
+def sensor_graph_backup(coords, cnt = 0, min_weight = 0.05, G = None, k_trgt = 10, use_local_scale = True, set_initial_edges = None, edges_to_update = None, init_knn = None, use_rng = True):
 
     n_nodes, n_dim = coords.shape
 
@@ -3093,7 +3093,7 @@ import networkx as nx
 import numpy as np
 from scipy.spatial import cKDTree, Delaunay
 
-def initialize_sensor_graph_backup(
+def sensor_graph_backup(
     coords, 
     cnt=0, 
     min_weight=0.05, 
@@ -3357,7 +3357,7 @@ def initialize_sensor_graph_backup(
     return G, edges_array, fiedler_vec, curvature_vec, [], degree_vec, comp_vec, G.graph.get('fiedler_value', 0.0), scale_length
 
 
-def initialize_sensor_graph_backup(
+def sensor_graph_backup(
     coords, 
     cnt=0, 
     min_weight=0.05, 
@@ -3608,7 +3608,7 @@ import numpy as np
 import networkx as nx
 from scipy.spatial import cKDTree, Delaunay
 
-def initialize_sensor_graph(
+def sensor_graph(
     coords, 
     cnt=0, 
     min_weight=0.05, 
@@ -3897,20 +3897,20 @@ def initialize_sensor_graph(
 
 
 
-def optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3, max_iters = 5000):
+def optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3, max_iters = 5000, compute_stats = True):
     locs_proj = ftrns1(locs_use) / 1000.0
     locs_cart = np.copy(locs_proj)
     k_trgt = k_sta_edges
     target_edge_limit = len(locs_cart) * (k_trgt // 2)
 
-    G, edges, fiedler, curvature, _, degree_values, components, fiedler_value, scale_length = initialize_sensor_graph(
+    G, edges, fiedler, curvature, _, degree_values, components, fiedler_value, scale_length = sensor_graph(
         locs_cart, init_knn=init_knn, k_trgt=k_trgt, enable_optimization_matrices = True
     )
 
     edges_to_update = None
     for i in range(max_iters):
         if i > 0:
-            G, edges, fiedler, curvature, _, degree_values, components, fiedler_value, scale_length = initialize_sensor_graph(
+            G, edges, fiedler, curvature, _, degree_values, components, fiedler_value, scale_length = sensor_graph(
                 locs_cart, cnt=i, k_trgt=k_trgt, G=G, edges_to_update=edges_to_update
             )
 
@@ -3940,10 +3940,14 @@ def optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3, max_iter
     edges_sta, weights_sta, degrees_sta = convert_graph(G_sta)
     edges_sta = np.flip(edges_sta, axis=0)
 
+    if compute_stats:
+        print('Optimized station graph:')
+        compute_graph_stats(G_sta)
+    
     return G_sta, edges_sta
 
 
-def optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio = 0.8, max_iters = 5000):
+def optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio = 0.8, max_iters = 5000, compute_stats = True):
     k_trgt = k_spc_edges
 
     # 1. Coordinate spatial/temporal projections & unit normalization
@@ -3953,7 +3957,7 @@ def optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio 
     init_knn = max(1, int(k_init_ratio * k_spc_edges))
 
     # 2. Initial Graph Construction
-    G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = initialize_sensor_graph(
+    G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = sensor_graph(
         srcs_cart, init_knn=init_knn, k_trgt=k_trgt, enable_optimization_matrices = True
     )
 
@@ -3962,7 +3966,7 @@ def optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio 
     # 3. Optimization Loop
     for i in range(max_iters):
         if i > 0:
-            G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = initialize_sensor_graph(
+            G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = sensor_graph(
                 srcs_cart, cnt=i, k_trgt=k_trgt, G=G, edges_to_update=edges_to_update
             )
 
@@ -3996,8 +4000,50 @@ def optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio 
     edges_src, weights_src, degrees_src = convert_graph(G_src)
     edges_src = np.flip(edges_src, axis=0)
 
+    if compute_stats == True:
+        compute_graph_stas(G_src)
+        
     return G_src, edges_src
+    
 
+def compute_graph_stats(G, cnt = 0):
+    
+    # Full spectral calculations
+    components_list = sorted(nx.connected_components(G), key=len, reverse=True)
+    normalize_fiedler = True
+    n_nodes = len(G.nodes())
+    # nodes = list(G.nodes())
+    
+    fiedler_vec = np.array([G.nodes[i].get('fiedler', 0.0) for i in range(n_nodes)], dtype=float)
+    comp_vec = np.array([G.nodes[i].get('comp_id', 0) for i in range(n_nodes)], dtype=int)
+    curvature_vec = np.array([G.nodes[i].get('total_curvature', 0.0) for i in range(n_nodes)], dtype=float)
+    degree_vec = np.array([G.degree(i, weight='weight') for i in range(n_nodes)], dtype=float)
+    
+    for comp_id, nodes in enumerate(components_list):
+        nodes_sorted = sorted(nodes)
+        subG = G.subgraph(nodes_sorted)
+
+        if comp_id == 0 and (cnt % 50 == 0):
+            G.graph['diameter'] = float(nx.algorithms.approximation.diameter(subG))
+
+    print(f"\n Fiedler value: {G.graph.get('fiedler_value', 0.0):0.3f}")
+    print(f"Diameter: {G.graph.get('diameter', 0.0):0.3f}")
+    
+    if len(curvature_vec) > 0:
+        print(f"Curvature distribution: {np.quantile(curvature_vec, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+    
+    if G.number_of_edges() > 0:
+        # Extract metrics directly from edge attributes (works for both fast-path and optimization branches)
+        edge_ricci = [d['ricci'] for u, v, d in G.edges(data=True) if 'ricci' in d]
+        edge_weights = [d['weight'] for u, v, d in G.edges(data=True) if 'weight' in d]
+
+        if edge_ricci:
+            print(f"Edge Curvature dist: {np.quantile(edge_ricci, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+        if edge_weights:
+            print(f"Edge Weight dist: {np.quantile(edge_weights, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+
+    if len(degree_vec) > 0:
+        print(f"Degree distribution: {np.quantile(degree_vec, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
 
 
 class SpectralProductSampler_backup:
@@ -7082,7 +7128,7 @@ def get_domain_bounds(points_lla, scale=1.05, lat_range = None, lon_range = None
 #         G_sta, edges_sta = optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3)
 
 #     else:
-#         G_sta, _, _, _, _, _, _, _, _ = initialize_sensor_graph(ftrns1(locs_use)/1000.0, init_knn = k_sta_edges, k_trgt = k_sta_edges)
+#         G_sta, _, _, _, _, _, _, _, _ = sensor_graph(ftrns1(locs_use)/1000.0, init_knn = k_sta_edges, k_trgt = k_sta_edges)
 #         edges_sta, weights_sta, weights_sta = convert_graph(G_sta)
 #         # edges_sta1, weights_sta1, weights_sta1 = convert_graph(G_sta)
 #         edges_sta = np.flip(edges_sta, axis = 0)
@@ -7092,7 +7138,7 @@ def get_domain_bounds(points_lla, scale=1.05, lat_range = None, lon_range = None
 #         G_src, edges_src = optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio = 0.8)
 
 #     else:
-#         G_src, _, _, _, _, _, _, _, _ = initialize_sensor_graph(x_grid_proj/1000.0, init_knn = k_spc_edges, k_trgt = k_spc_edges)
+#         G_src, _, _, _, _, _, _, _, _ = sensor_graph(x_grid_proj/1000.0, init_knn = k_spc_edges, k_trgt = k_spc_edges)
 #         edges_src, weights_src, degrees_src = convert_graph(G_src)
 #         edges_src = np.flip(edges_src, axis = 0)
 
@@ -7729,7 +7775,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
             G_sta, edges_sta = optimize_station_graph(locs_use, ftrns1, k_sta_edges, init_knn = 3)
 
         else:
-            G_sta, _, _, _, _, _, _, _, _ = initialize_sensor_graph(ftrns1(locs_use)/1000.0, init_knn = k_sta_edges, k_trgt = k_sta_edges)
+            G_sta, _, _, _, _, _, _, _, _ = sensor_graph(ftrns1(locs_use)/1000.0, init_knn = k_sta_edges, k_trgt = k_sta_edges)
             edges_sta, weights_sta, weights_sta = convert_graph(G_sta)
             # edges_sta1, weights_sta1, weights_sta1 = convert_graph(G_sta)
             edges_sta = np.flip(edges_sta, axis = 0)
@@ -7739,7 +7785,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
             G_src, edges_src = optimize_source_graph(x_grid, ftrns1, k_spc_edges, scale_time, k_init_ratio = 0.8)
 
         else:
-            G_src, _, _, _, _, _, _, _, _ = initialize_sensor_graph(x_grid_proj/1000.0, init_knn = k_spc_edges, k_trgt = k_spc_edges)
+            G_src, _, _, _, _, _, _, _, _ = sensor_graph(x_grid_proj/1000.0, init_knn = k_spc_edges, k_trgt = k_spc_edges)
             edges_src, weights_src, degrees_src = convert_graph(G_src)
             edges_src = np.flip(edges_src, axis = 0)
 
@@ -8298,7 +8344,7 @@ def optimize_station_graph_backup(locs_use, ftrns1, k_sta_edges, init_knn = 3):
     ## Use the target number of edges per station
     k_trgt = k_sta_edges
 
-    G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = initialize_sensor_graph(locs_cart, init_knn = init_knn, k_trgt = k_trgt)
+    G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = sensor_graph(locs_cart, init_knn = init_knn, k_trgt = k_trgt)
     edges_slice = edges[0:2,:].astype('int')
     tracked_values = None
 
@@ -8306,7 +8352,7 @@ def optimize_station_graph_backup(locs_use, ftrns1, k_sta_edges, init_knn = 3):
     edges_to_update = None
     for i in range(n_new_edges):
         if i > 0:
-            G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = initialize_sensor_graph(locs_cart, cnt = i, k_trgt = k_trgt, G = G, edges_to_update = edges_to_update)
+            G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = sensor_graph(locs_cart, cnt = i, k_trgt = k_trgt, G = G, edges_to_update = edges_to_update)
 
         if len(G.edges()) > len(locs_cart)*int(k_trgt/2):
             break
@@ -8332,7 +8378,7 @@ def optimize_source_graph_backup(x_grid, ftrns1, k_spc_edges, scale_time, k_init
 
     srcs_cart = np.concatenate((ftrns1(x_grid[:,0:3]), scale_time*x_grid[:,[3]]), axis = 1)/1000.0
 
-    G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = initialize_sensor_graph(srcs_cart, init_knn = int(k_init_ratio*k_spc_edges), k_trgt = k_trgt)
+    G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = sensor_graph(srcs_cart, init_knn = int(k_init_ratio*k_spc_edges), k_trgt = k_trgt)
     edges_slice = edges[0:2,:].astype('int')
     edges_slice = np.flip(edges_slice, axis = 0)
 
@@ -8343,7 +8389,7 @@ def optimize_source_graph_backup(x_grid, ftrns1, k_spc_edges, scale_time, k_init
     for i in range(n_new_edges):
 
         if i > 0:
-            G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = initialize_sensor_graph(srcs_cart, cnt = i, k_trgt = k_trgt, G = G, edges_to_update = edges_to_update)
+            G, edges, fiedler, curvature, clustering, degree_values, components, fiedler_value, scale_length = sensor_graph(srcs_cart, cnt = i, k_trgt = k_trgt, G = G, edges_to_update = edges_to_update)
 
         if len(G.edges()) > len(srcs_cart)*int(k_trgt/2):
             break
