@@ -7947,7 +7947,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
         # print('Finished building graphs %d %d %d'%(date[0] + yr_inc, date[1], date[2]))
         if (verbose == True)*(n_grid == 0):
-            print('Finished building graphs %d'%(file_index))
+            print('\nFinished building graphs %d'%(file_index))
             print('Num nodes: %d Sta, %d Src, %d subgraph'%(len(G_sta.nodes()), len(G_src.nodes()), A_src_in_sta.shape[1]))
             print('Edges: %d Sta, %d Src, %d subgraph'%(len(G_sta.edges()), len(G_src.edges()), A_prod_src_src.shape[1] + A_prod_sta_sta.shape[1]))
 
