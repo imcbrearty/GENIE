@@ -11888,88 +11888,99 @@ def get_most_impactful_edges_balanced(G, scale_length, cnt = 0, top_k=5, degree_
 
 
     candidates_select = []
-    node_used = []
     G_updated = G.copy()
     cnt_new_edge = 0
 
-    if (update == True)*(len(candidates) > 0):
+    if update and len(candidates) > 0:
 
-        edge_pairs = np.concatenate((candidates[:,[0]], candidates[:,[1]], score.reshape(-1,1), weights[candidates[:,0].astype('int'), candidates[:,1].astype('int')].reshape(-1,1), distances[candidates[:,0].astype('int'), candidates[:,1].astype('int')].reshape(-1,1)), axis = 1).T
+        edge_pairs = np.concatenate(
+            (
+                candidates[:, [0]],
+                candidates[:, [1]],
+                score.reshape(-1, 1),
+                weights[
+                    candidates[:, 0].astype(int), candidates[:, 1].astype(int)
+                ].reshape(-1, 1),
+                distances[
+                    candidates[:, 0].astype(int), candidates[:, 1].astype(int)
+                ].reshape(-1, 1),
+            ),
+            axis=1,
+        ).T
 
-        
         # Track which nodes and spatial neighborhoods we have already "serviced"
         nodes_used = set()
         neighborhood_midpoints = []
 
-                
-        # Iterate through candidates (they are already sorted by score)
+        # Iterate through candidates (sorted order maintained)
         for i in range(edge_pairs.shape[1]):
             u = int(edge_pairs[0, i])
             v = int(edge_pairs[1, i])
-            score = edge_pairs[2, i]
+            sc = edge_pairs[2, i]  # Fixed: renamed from `score` to `sc`
             w = edge_pairs[3, i]
             dist = edge_pairs[4, i]
-            
+
             # --- Spatial Logic Check ---
             # 1. Don't reuse nodes in the same batch update
             if u in nodes_used or v in nodes_used:
                 continue
 
+            is_redundant = False
+            if mode == "univariate":
+                scale_length_local = scale_values[u, v]
+                exclusion_radius = 1.2 * scale_length_local
 
-            is_redundant = False ## Update prev_midpoint to record it's exclusion radius (and then take the mean of the two exclusion radius)
-            if mode == 'univariate':
-
-                scale_length_local = scale_values[u,v]
-                exclusion_radius = 1.2*scale_length_local ## Correct?
-
-                p1 = G.nodes[u]['pos']
-                p2 = G.nodes[v]['pos']
+                p1 = G.nodes[u]["pos"]
+                p2 = G.nodes[v]["pos"]
                 midpoint = (p1 + p2) / 2.0
 
                 for prev_midpoint in neighborhood_midpoints:
-                    if np.linalg.norm(midpoint - prev_midpoint) < exclusion_scale*exclusion_radius:
+                    if (
+                        np.linalg.norm(midpoint - prev_midpoint)
+                        < exclusion_scale * exclusion_radius
+                    ):
                         is_redundant = True
                         break
-            
-            elif mode == 'bipartite':
 
-                p1 = G.nodes[u]['pos'].reshape(-1) ## Src
-                p2 = G.nodes[v]['pos'].reshape(-1) ## Station
-                midpoint = np.concatenate((p1, p2), axis = 0)
+            elif mode == "bipartite":
+                p1 = G.nodes[u]["pos"].reshape(-1)
+                p2 = G.nodes[v]["pos"].reshape(-1)
+                midpoint = np.concatenate((p1, p2), axis=0)
 
                 scale_length_local_src = scale_src[u]
                 scale_length_local_sta = scale_sta[v - n_nodes_s]
-                exclusion_radius_src = 1.2*scale_length_local_src ## Correct?
-                exclusion_radius_sta = 1.2*scale_length_local_sta ## Correct?
-                scale_length_local = scale_values[u,v]
+                exclusion_radius_src = 1.2 * scale_length_local_src
+                exclusion_radius_sta = 1.2 * scale_length_local_sta
+                scale_length_local = scale_values[u, v]
 
-
-                # is_redundant = False ## Update prev_midpoint to record it's exclusion radius (and then take the mean of the two exclusion radius)
                 for prev_midpoint in neighborhood_midpoints:
-                    flag1 = (np.linalg.norm(midpoint[0:n_dim] - prev_midpoint[0:n_dim]) < exclusion_scale*exclusion_radius_src)
-                    flag2 = (np.linalg.norm(midpoint[n_dim::] - prev_midpoint[n_dim::]) < exclusion_scale*exclusion_radius_sta)
-                    # if (np.linalg.norm(midpoint[0:n_dim] - prev_midpoint[0:n_dim]) < exclusion_scale*exclusion_radius_src):
-                    if flag1*flag2:
+                    flag1 = (
+                        np.linalg.norm(midpoint[:n_dim] - prev_midpoint[:n_dim])
+                        < exclusion_scale * exclusion_radius_src
+                    )
+                    flag2 = (
+                        np.linalg.norm(midpoint[n_dim:] - prev_midpoint[n_dim:])
+                        < exclusion_scale * exclusion_radius_sta
+                    )
+                    if flag1 and flag2:
                         is_redundant = True
                         break
-
             else:
-                print('Error, no type chosen')
-                assert(1 == 0)
+                raise ValueError(f"Unknown mode: {mode}")
 
-            if is_redundant:
+            if is_redundant or w <= min_weight:
                 continue
 
-            if w <= min_weight:
-                continue
-            
-            # pdb.set_trace()
-            assert(w == np.exp(-dist / scale_length_local))
+            # Fixed: Numerically safe tolerance check
+            assert np.isclose(
+                w, np.exp(-dist / scale_length_local), atol=1e-7
+            ), f"Weight mismatch for edge ({u}, {v})"
 
-
-            G_updated.add_edge(int(u), int(v), dist = float(dist), weight = float(w), step = cnt)
+            G_updated.add_edge(
+                u, v, dist=float(dist), weight=float(w), step=cnt
+            )
             candidates_select.append(candidates[i])
-            
+
             # Update tracking sets
             nodes_used.update([u, v])
             neighborhood_midpoints.append(midpoint)
@@ -11977,22 +11988,19 @@ def get_most_impactful_edges_balanced(G, scale_length, cnt = 0, top_k=5, degree_
 
     edges_to_update = set()
     if update and cnt_new_edge > 0:
-        touched_nodes = nodes_used  # set of touched nodes
+        touched_nodes = nodes_used
 
         # 1. Collect all newly added edges
-        new_edges = {tuple(sorted((int(c[0]), int(c[1])))) for c in candidates_select}
+        new_edges = {
+            tuple(sorted((int(c[0]), int(c[1])))) for c in candidates_select
+        }
 
-        # 2. Collect 1-hop and 2-hop incident edges using G_updated
+        # 2. Collect 1-hop incident edges (sufficient for Forman-Ricci)
         incident_edges = set()
         for node in touched_nodes:
-            # 1-hop neighbors
             for nbr in G_updated.neighbors(node):
-                incident_edges.add(tuple(sorted((node, nbr))))
-                # 2-hop neighbors (ensures complete curvature coverage)
-                for nbr2 in G_updated.neighbors(nbr):
-                    incident_edges.add(tuple(sorted((nbr, nbr2))))
+                incident_edges.add(tuple(sorted((node, int(nbr)))))
 
-        # Combine new and incident edges
         edges_to_update = list(new_edges.union(incident_edges))
 
     return G_updated, candidates, candidates_select, edges_to_update
