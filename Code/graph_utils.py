@@ -4669,6 +4669,7 @@ def initialize_sensor_graph(
     # ---------------------------------------------------------
     # 1. INITIAL GRAPH CONSTRUCTION (Runs only when G is None)
     # ---------------------------------------------------------
+
     if G is None:
         G = nx.Graph()
         G.add_nodes_from(range(n_nodes))
@@ -4677,13 +4678,19 @@ def initialize_sensor_graph(
 
         tree = cKDTree(coords)
         k_query = min(k_trgt + 1, n_nodes)
-        knn_dists_raw = tree.query(coords, k=k_query)[0][:, -1]
 
-        scale_base = float(np.quantile(knn_dists_raw, 0.75))
+        # Query distances up to k_trgt
+        knn_dists_all = tree.query(coords, k=k_query)[0]  # Shape: (n_nodes, k_query)
+
+        # Smooth local scale: mean distance across local k-nearest neighbors
+        local_scales = np.mean(knn_dists_all[:, 1:], axis=1)
+
+        # Base scale: 75th percentile of k-th neighbor distances
+        scale_base = float(np.quantile(knn_dists_all[:, -1], 0.75))
 
         if use_local_scale:
             for i in range(n_nodes):
-                G.nodes[i]["scale"] = float(knn_dists_raw[i])
+                G.nodes[i]["scale"] = float(local_scales[i])
         else:
             for i in range(n_nodes):
                 G.nodes[i]["scale"] = 1.0
@@ -4729,8 +4736,7 @@ def initialize_sensor_graph(
                                     continue
                                 if (
                                     np.linalg.norm(p_i - coords[v_idx]) < d_ij
-                                    and np.linalg.norm(p_j - coords[v_idx])
-                                    < d_ij
+                                    and np.linalg.norm(p_j - coords[v_idx]) < d_ij
                                 ):
                                     is_rng = False
                                     break
@@ -4791,7 +4797,6 @@ def initialize_sensor_graph(
 
         def _compute_edge_weight(d, u_scale, v_scale):
             if use_local_scale:
-                # Geometric mean of local node scale bounds
                 geo_local = np.sqrt(u_scale * v_scale)
                 eff_scale = float(
                     np.clip(geo_local, scale_length * 0.25, scale_length * 2.0)
@@ -4801,25 +4806,23 @@ def initialize_sensor_graph(
 
             eff_scale = max(eff_scale, 1e-8)
             raw_w = np.exp(-d / eff_scale)
-            # Clip weights to enforce minimum threshold bounds
-            return float(np.clip(raw_w, min_weight, 1.0))
+            return float(np.clip(raw_w, 1e-6, 1.0))
 
-        # 1A. Add Initial Backbone Edges
+        # 1A. Add Initial Backbone Edges (Always preserved; floored at min_weight)
         for u, v, d in initial_edges:
             w = _compute_edge_weight(
                 d, G.nodes[u]["scale"], G.nodes[v]["scale"]
             )
-            if w >= min_weight:
-                G.add_edge(
-                    int(u),
-                    int(v),
-                    dist=float(d),
-                    weight=w,
-                    step=0,
-                    immutable=True,
-                )
+            G.add_edge(
+                int(u),
+                int(v),
+                dist=float(d),
+                weight=max(w, min_weight),
+                step=0,
+                immutable=True,
+            )
 
-        # 1B. Add KNN Edges
+        # 1B. Add KNN Edges (Filtered by min_weight to control density)
         if init_knn is not None:
             knn_k = min(init_knn + 1, n_nodes)
             knn_dists, knn_indices = tree.query(coords, k=knn_k)
@@ -4839,7 +4842,7 @@ def initialize_sensor_graph(
                             immutable=True,
                         )
 
-        # 1C. Soft Component Merger
+        # 1C. Soft Component Merger (Guarantees single connected component)
         if "soft_component_merger" in globals():
             G = soft_component_merger(
                 G, coords, scale_length, min_weight=min_weight
@@ -11949,10 +11952,12 @@ def get_most_impactful_edges_balanced(G, scale_length, cnt = 0, top_k=5, degree_
             if is_redundant:
                 continue
 
+            if w <= min_weight:
+                continue
+            
             # pdb.set_trace()
             assert(w == np.exp(-dist / scale_length_local))
-            if w < min_weight:
-                continue
+
 
             G_updated.add_edge(int(u), int(v), dist = float(dist), weight = float(w), step = cnt)
             candidates_select.append(candidates[i])
