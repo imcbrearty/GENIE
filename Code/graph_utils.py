@@ -4878,6 +4878,13 @@ def initialize_sensor_graph(
             G.graph["distances"] = dists_matrix
             G.graph["scale_values"] = scale_matrix
             G.graph["weights"] = weights_matrix
+    
+    
+            ilist1, ilist2 = np.where(weights_matrix > min_weight)
+            edges_allowed = np.column_stack((ilist1, ilist2))
+            G.graph["allowed_edges"] = edges_allowed[
+                edges_allowed[:, 0] < edges_allowed[:, 1]
+            ]
 
     # =========================================================================
     # PHASE 2: INCREMENTAL UPDATES (Iterative optimization steps)
