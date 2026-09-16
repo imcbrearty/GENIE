@@ -3811,6 +3811,81 @@ import numpy as np
 import networkx as nx
 from scipy.spatial import cKDTree, Delaunay
 
+# def soft_component_merger(G, coords, scale_length=None, min_weight=0.05):
+#     """
+#     Connects disjoint components using boundary-to-boundary minimum distances.
+#     Weights are computed using node-specific variable density scale factors
+#     and clamped to min_weight to preserve numerical stability and matrix consistency.
+#     """
+#     components = sorted(nx.connected_components(G), key=len, reverse=True)
+#     if len(components) <= 1:
+#         return G
+
+#     if scale_length is None:
+#         scale_length = G.graph.get('scale_length', 1.0)
+
+#     node_scales = {
+#         n: G.nodes[n].get('scale', G.nodes[n].get('sigma', 1.0)) 
+#         for n in G.nodes()
+#     }
+
+#     main_nodes = set(components[0])
+#     remaining_components = components[1:]
+    
+#     added_bridges = 0
+#     new_bridge_edges = []
+
+#     while remaining_components:
+#         main_node_indices = list(main_nodes)
+#         main_coords = coords[main_node_indices]
+#         main_tree = cKDTree(main_coords)
+
+#         best_global_bridge = None
+#         min_global_dist = float('inf')
+#         best_comp_idx = -1
+
+#         for idx, comp in enumerate(remaining_components):
+#             comp_nodes = list(comp)
+#             dists, neighbors = main_tree.query(coords[comp_nodes], k=1)
+            
+#             local_min_idx = np.argmin(dists)
+#             local_min_dist = dists[local_min_idx]
+
+#             if local_min_dist < min_global_dist:
+#                 min_global_dist = local_min_dist
+#                 u = comp_nodes[local_min_idx]
+#                 v = main_node_indices[neighbors[local_min_idx]]
+#                 best_global_bridge = (u, v)
+#                 best_comp_idx = idx
+
+#         if best_global_bridge:
+#             u, v = best_global_bridge
+            
+#             scale_u = node_scales[u]
+#             scale_v = node_scales[v]
+#             geo_scale = np.sqrt(scale_u * scale_v)
+#             effective_scale = max(scale_length * geo_scale, scale_length * 0.5, 1e-4)
+            
+#             raw_w = np.exp(-min_global_dist / effective_scale)
+#             w = float(max(raw_w, min_weight))
+
+#             G.add_edge(
+#                 u, v, 
+#                 dist=float(min_global_dist), 
+#                 weight=w, 
+#                 step=0,
+#                 is_bridge=True,
+#                 immutable=True
+#             )
+            
+#             new_bridge_edges.append((u, v))
+#             main_nodes.update(remaining_components.pop(best_comp_idx))
+#             added_bridges += 1
+
+#     print(f"Soft Merger added {added_bridges} bridge edge(s) (clamped weight >= {min_weight}).")
+#     G.graph['last_added_bridges'] = new_bridge_edges
+#     return G
+
 def soft_component_merger(G, coords, scale_length=None, min_weight=0.05):
     """
     Connects disjoint components using boundary-to-boundary minimum distances.
@@ -3829,6 +3904,10 @@ def soft_component_merger(G, coords, scale_length=None, min_weight=0.05):
         for n in G.nodes()
     }
 
+    # Map node IDs to contiguous 0..N-1 array indices for safe indexing
+    node_list = list(G.nodes())
+    node_to_idx = {node: i for i, node in enumerate(node_list)}
+
     main_nodes = set(components[0])
     remaining_components = components[1:]
     
@@ -3836,8 +3915,10 @@ def soft_component_merger(G, coords, scale_length=None, min_weight=0.05):
     new_bridge_edges = []
 
     while remaining_components:
-        main_node_indices = list(main_nodes)
-        main_coords = coords[main_node_indices]
+        main_node_list = list(main_nodes)
+        # Extract coordinates using mapped matrix indices
+        main_indices = [node_to_idx[n] for n in main_node_list]
+        main_coords = coords[main_indices]
         main_tree = cKDTree(main_coords)
 
         best_global_bridge = None
@@ -3846,15 +3927,21 @@ def soft_component_merger(G, coords, scale_length=None, min_weight=0.05):
 
         for idx, comp in enumerate(remaining_components):
             comp_nodes = list(comp)
-            dists, neighbors = main_tree.query(coords[comp_nodes], k=1)
+            comp_indices = [node_to_idx[n] for n in comp_nodes]
             
-            local_min_idx = np.argmin(dists)
-            local_min_dist = dists[local_min_idx]
+            dists, neighbors = main_tree.query(coords[comp_indices], k=1)
+            
+            # Ensure 1D numpy array handling even for single-node components
+            dists = np.atleast_1d(dists)
+            neighbors = np.atleast_1d(neighbors)
+
+            local_min_idx = int(np.argmin(dists))
+            local_min_dist = float(dists[local_min_idx])
 
             if local_min_dist < min_global_dist:
                 min_global_dist = local_min_dist
                 u = comp_nodes[local_min_idx]
-                v = main_node_indices[neighbors[local_min_idx]]
+                v = main_node_list[neighbors[local_min_idx]]
                 best_global_bridge = (u, v)
                 best_comp_idx = idx
 
@@ -3885,7 +3972,6 @@ def soft_component_merger(G, coords, scale_length=None, min_weight=0.05):
     print(f"Soft Merger added {added_bridges} bridge edge(s) (clamped weight >= {min_weight}).")
     G.graph['last_added_bridges'] = new_bridge_edges
     return G
-
 
 def initialize_sensor_graph1(
     coords, 
