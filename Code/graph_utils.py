@@ -9414,7 +9414,9 @@ class SpectralProductSampler:
 
         existing_anchors = set(anchors)          # anchors that already exist before spectral draw
         spectral_anchors = set()
-        n_remaining = max(0, n_anchor_target - len(anchors))
+        # n_remaining = max(0, n_anchor_target - len(anchors))
+        n_remaining = max(n_spectral_target, n_anchor_target - len(anchors))
+        
         if n_remaining > 0:
             # *2 is fine after the degree correction; you can even drop to *1.5
             sampled_a = np.random.choice(n_a, size=n_remaining * 2, replace=True, p=self.p_A)
@@ -9741,8 +9743,8 @@ class SpectralProductSampler:
         G_sub = self.build_networkx_subgraph(retained_nodes)
 
         if pass_idx > 1:
-                diag = self.subgraph_diagnostics(retained_nodes, G_sub)
-                print(diag)
+            diag = self.subgraph_diagnostics(retained_nodes, G_sub)
+            print(diag)
 
         return G_sub, params, len(all_sampled_anchors)
 
