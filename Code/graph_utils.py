@@ -9129,7 +9129,9 @@ class SpectralProductSampler:
         self.nodes_B = list(self.G_B.nodes())
         self.node_to_idx_A = {node: i for i, node in enumerate(self.nodes_A)}
         self.node_to_idx_B = {node: i for i, node in enumerate(self.nodes_B)}
-
+        n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+        self.aspect = max(n_a, n_b) / max(min(n_a, n_b), 1)
+        
         self.mode_A = 'sparse' if len(G_A) > sparse_threshold else 'dense'
         self.mode_B = 'sparse' if len(G_B) > sparse_threshold else 'dense'
 
@@ -9309,9 +9311,9 @@ class SpectralProductSampler:
         # Step B: Symmetrical Adaptive Physical Sampling (A -> B & B -> A)
         # ------------------------------------------------------------------
         n_physical_target = int(n_anchor_target * physical_ratio)
-
+        
         # after computing n_physical_target
-        min_spectral_frac = 0.15 if aspect < 10 else 0.08   # never let spectral disappear
+        min_spectral_frac = 0.15 if self.aspect < 10 else 0.08   # never let spectral disappear
         n_spectral_target = max(int(n_anchor_target * min_spectral_frac),
                                 n_anchor_target - n_physical_target)
 
