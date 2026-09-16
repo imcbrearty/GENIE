@@ -4930,6 +4930,8 @@ def initialize_sensor_graph(
     )
     fiedler_graph = 0.0
 
+    scale_length = G.graph.get('scale_length', 1.0)
+
     for comp_id, nodes in enumerate(components_list):
         nodes_sorted = sorted(nodes)
         subG = G.subgraph(nodes_sorted)
@@ -5071,6 +5073,28 @@ def initialize_sensor_graph(
         if G.number_of_edges() > 0
         else np.empty((2, 0))
     )
+
+    # ---------------------------------------------------------
+    # 3. LOGGING / DIAGNOSTICS
+    # ---------------------------------------------------------
+    if cnt % 100 == 0:
+        print(f"\n[Iter {cnt}] Fiedler value: {fiedler_graph:0.3f}")
+        print(f"Diameter: {G.graph.get('diameter', 0.0):0.3f}")
+        
+        if len(curvature_vec) > 0:
+            print(f"Curvature distribution: {np.quantile(curvature_vec, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+        
+        if G.number_of_edges() > 0:
+            edge_ricci = [d['ricci'] for u, v, d in G.edges(data=True) if 'ricci' in d]
+            edge_weights = [d['weight'] for u, v, d in G.edges(data=True) if 'weight' in d]
+
+            if edge_ricci:
+                print(f"Edge Curvature dist: {np.quantile(edge_ricci, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+            if edge_weights:
+                print(f"Edge Weight dist: {np.quantile(edge_weights, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
+
+        if len(degree_vec) > 0:
+            print(f"Degree distribution: {np.quantile(degree_vec, [0, 0.25, 0.5, 0.75, 1.0]).round(3)}")
 
     return (
         G,
