@@ -5045,7 +5045,37 @@ def initialize_sensor_graph(
         )
 
 
+    # Extract return metrics
+    fiedler_vec = np.array(
+        [G.nodes[i].get("fiedler", 0.0) for i in range(n_nodes)], dtype=float
+    )
+    comp_vec = np.array(
+        [G.nodes[i].get("comp_id", 0) for i in range(n_nodes)], dtype=int
+    )
+    curvature_vec = np.array(
+        [G.nodes[i].get("total_curvature", 0.0) for i in range(n_nodes)],
+        dtype=float,
+    )
+    degree_vec = np.array(
+        [G.degree(i, weight="weight") for i in range(n_nodes)], dtype=float
+    )
+    edges_array = (
+        np.array(list(G.edges())).T
+        if G.number_of_edges() > 0
+        else np.empty((2, 0))
+    )
 
+    return (
+        G,
+        edges_array,
+        fiedler_vec,
+        curvature_vec,
+        [],
+        degree_vec,
+        comp_vec,
+        G.graph.get("fiedler_value", 0.0),
+        scale_length,
+    )
 
 
 
