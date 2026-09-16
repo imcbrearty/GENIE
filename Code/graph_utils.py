@@ -4666,10 +4666,20 @@ def initialize_sensor_graph(
 ):
     n_nodes, n_dim = coords.shape
 
-    # ---------------------------------------------------------
-    # 1. INITIAL GRAPH CONSTRUCTION (Runs only when G is None)
-    # ---------------------------------------------------------
+    # Centralized edge weight computation formula
+    def _compute_edge_weight(d, u_scale, v_scale, scale_base, scale_length):
+        if use_local_scale:
+            eff_scale = float((scale_base * u_scale * v_scale) ** (1.0 / 3.0))
+            eff_scale = max(eff_scale, scale_length * 0.1, 1e-8)
+        else:
+            eff_scale = scale_length
 
+        raw_w = np.exp(-d / eff_scale)
+        return float(np.clip(raw_w, 1e-6, 1.0))
+
+    # =========================================================================
+    # PHASE 1: ONE-TIME HEAVY INITIALIZATION (Runs ONLY once when G is None)
+    # =========================================================================
     if G is None:
         G = nx.Graph()
         G.add_nodes_from(range(n_nodes))
@@ -4679,14 +4689,12 @@ def initialize_sensor_graph(
         tree = cKDTree(coords)
         k_query = min(k_trgt + 1, n_nodes)
 
-        # Query distances up to k_trgt
-        knn_dists_all = tree.query(coords, k=k_query)[0]  # Shape: (n_nodes, k_query)
-
-        # Smooth local scale: mean distance across local k-nearest neighbors
+        # 1. Spatial scales computation (Sparse / KD-Tree based)
+        knn_dists_all = tree.query(coords, k=k_query)[0]
         local_scales = np.mean(knn_dists_all[:, 1:], axis=1)
-
-        # Base scale: 75th percentile of k-th neighbor distances
         scale_base = float(np.quantile(knn_dists_all[:, -1], 0.75))
+
+        G.graph["scale_base"] = scale_base
 
         if use_local_scale:
             for i in range(n_nodes):
@@ -4695,8 +4703,8 @@ def initialize_sensor_graph(
             for i in range(n_nodes):
                 G.nodes[i]["scale"] = 1.0
 
+        # 2. Extract initial topological backbone (RNG for 3D+, Gabriel for 2D)
         initial_edges = []
-
         if set_initial_edges is not None:
             initial_edges = [
                 (
@@ -4712,7 +4720,6 @@ def initialize_sensor_graph(
                 for i in range(set_initial_edges.shape[1])
             ]
         else:
-            # 3D+ Strategy: k-NN + RNG Check
             if n_dim >= 3:
                 k_check = min(int(n_dim * 2), n_nodes - 1)
                 distances, indices = tree.query(coords, k=k_check + 1)
@@ -4746,10 +4753,8 @@ def initialize_sensor_graph(
                         if i in indices[j, 1 : k_check + 1]:
                             u, v = sorted((int(i), int(j)))
                             initial_edges.append((u, v, float(d_ij)))
-
                 initial_edges = list(set(initial_edges))
 
-            # 2D Strategy: Gabriel Backbone
             else:
                 tri = Delaunay(coords)
                 edges_set = set()
@@ -4773,7 +4778,7 @@ def initialize_sensor_graph(
                             )
                         )
 
-        # Scale length computation
+        # 3. Global scale length estimation from MST
         G_init = nx.Graph()
         G_init.add_weighted_edges_from(initial_edges, weight="dist")
         comps = list(nx.connected_components(G_init))
@@ -4795,23 +4800,14 @@ def initialize_sensor_graph(
 
         G.graph["scale_length"] = scale_length
 
-        def _compute_edge_weight(d, u_scale, v_scale):
-            if use_local_scale:
-                geo_local = np.sqrt(u_scale * v_scale)
-                eff_scale = float(
-                    np.clip(geo_local, scale_length * 0.25, scale_length * 2.0)
-                )
-            else:
-                eff_scale = scale_length
-
-            eff_scale = max(eff_scale, 1e-8)
-            raw_w = np.exp(-d / eff_scale)
-            return float(np.clip(raw_w, 1e-6, 1.0))
-
-        # 1A. Add Initial Backbone Edges (Always preserved; floored at min_weight)
+        # 4. Add Initial Backbone Edges (Sparse dynamic weight computation)
         for u, v, d in initial_edges:
             w = _compute_edge_weight(
-                d, G.nodes[u]["scale"], G.nodes[v]["scale"]
+                d,
+                G.nodes[u]["scale"],
+                G.nodes[v]["scale"],
+                scale_base,
+                scale_length,
             )
             G.add_edge(
                 int(u),
@@ -4822,7 +4818,7 @@ def initialize_sensor_graph(
                 immutable=True,
             )
 
-        # 1B. Add KNN Edges (Filtered by min_weight to control density)
+        # 5. Add KNN Edges (Sparse dynamic weight computation)
         if init_knn is not None:
             knn_k = min(init_knn + 1, n_nodes)
             knn_dists, knn_indices = tree.query(coords, k=knn_k)
@@ -4830,7 +4826,11 @@ def initialize_sensor_graph(
                 for idx_pos, v in enumerate(knn_indices[j, 1:]):
                     d = float(knn_dists[j, idx_pos + 1])
                     w = _compute_edge_weight(
-                        d, G.nodes[j]["scale"], G.nodes[v]["scale"]
+                        d,
+                        G.nodes[j]["scale"],
+                        G.nodes[v]["scale"],
+                        scale_base,
+                        scale_length,
                     )
                     if w >= min_weight:
                         G.add_edge(
@@ -4842,50 +4842,78 @@ def initialize_sensor_graph(
                             immutable=True,
                         )
 
-        # 1C. Soft Component Merger (Guarantees single connected component)
         if "soft_component_merger" in globals():
             G = soft_component_merger(
                 G, coords, scale_length, min_weight=min_weight
             )
 
-    scale_length = G.graph.get("scale_length", 1.0)
-
-    # ---------------------------------------------------------
-    # 1D. DENSE MATRICES SYNC (Only when explicitly enabled)
-    # ---------------------------------------------------------
-    if enable_optimization_matrices:
-        dists = np.linalg.norm(
-            coords[:, None, :] - coords[None, :, :], axis=2
-        )
-        G.graph["distances"] = dists
-
-        scales = np.array([G.nodes[i]["scale"] for i in range(n_nodes)])
-        if use_local_scale:
-            geo_matrix = np.sqrt(scales.reshape(-1, 1) * scales.reshape(1, -1))
-            scale_matrix = np.clip(
-                geo_matrix, scale_length * 0.25, scale_length * 2.0
+        # ---------------------------------------------------------------------
+        # 6. OPTIONAL DENSE MATRICES (Only constructed if optimization requires it)
+        # ---------------------------------------------------------------------
+        if enable_optimization_matrices:
+            dists_matrix = np.linalg.norm(
+                coords[:, None, :] - coords[None, :, :], axis=2
             )
-        else:
-            scale_matrix = np.full((n_nodes, n_nodes), scale_length)
+            scales = np.array([G.nodes[i]["scale"] for i in range(n_nodes)])
 
-        G.graph["scale_values"] = scale_matrix
+            if use_local_scale:
+                geo_matrix = (
+                    scale_base * scales.reshape(-1, 1) * scales.reshape(1, -1)
+                ) ** (1.0 / 3.0)
+                scale_matrix = np.maximum(geo_matrix, scale_length * 0.1)
+            else:
+                scale_matrix = np.full((n_nodes, n_nodes), scale_length)
 
-        raw_weights = np.exp(-dists / np.maximum(scale_matrix, 1e-8))
-        raw_weights = np.clip(raw_weights, min_weight, 1.0)
-        raw_weights[raw_weights < min_weight] = 0.0
-        np.fill_diagonal(raw_weights, 0.0)
+            weights_matrix = np.exp(
+                -dists_matrix / np.maximum(scale_matrix, 1e-8)
+            )
+            weights_matrix = np.clip(weights_matrix, 1e-6, 1.0)
+            np.fill_diagonal(weights_matrix, 0.0)
 
-        for u, v, d in G.edges(data=True):
-            raw_weights[u, v] = d["weight"]
-            raw_weights[v, u] = d["weight"]
+            # Sync explicit graph edge weights (preserving floored backbone weights)
+            for u, v, d in G.edges(data=True):
+                weights_matrix[u, v] = d["weight"]
+                weights_matrix[v, u] = d["weight"]
 
-        G.graph["weights"] = raw_weights
+            G.graph["distances"] = dists_matrix
+            G.graph["scale_values"] = scale_matrix
+            G.graph["weights"] = weights_matrix
 
-        ilist1, ilist2 = np.where(raw_weights >= min_weight)
-        edges_allowed = np.column_stack((ilist1, ilist2))
-        G.graph["allowed_edges"] = edges_allowed[
-            edges_allowed[:, 0] < edges_allowed[:, 1]
-        ]
+    # =========================================================================
+    # PHASE 2: INCREMENTAL UPDATES (Iterative optimization steps)
+    # =========================================================================
+    else:
+        if edges_to_update is not None and len(edges_to_update) > 0:
+            # Fast O(1) Matrix Lookup Path
+            if "weights" in G.graph:
+                dists_matrix = G.graph["distances"]
+                weights_matrix = G.graph["weights"]
+
+                for u, v in edges_to_update:
+                    u, v = int(u), int(v)
+                    G.add_edge(
+                        u,
+                        v,
+                        dist=float(dists_matrix[u, v]),
+                        weight=float(weights_matrix[u, v]),
+                        step=cnt,
+                    )
+            # Dynamic On-Demand Weight Calculation Path (Fallback if dense matrices omitted)
+            else:
+                scale_base = G.graph.get("scale_base", 1.0)
+                scale_length = G.graph.get("scale_length", 1.0)
+
+                for u, v in edges_to_update:
+                    u, v = int(u), int(v)
+                    d = float(np.linalg.norm(coords[u] - coords[v]))
+                    w = _compute_edge_weight(
+                        d,
+                        G.nodes[u]["scale"],
+                        G.nodes[v]["scale"],
+                        scale_base,
+                        scale_length,
+                    )
+                    G.add_edge(u, v, dist=d, weight=w, step=cnt)
 
     # ---------------------------------------------------------
     # 2. SPECTRAL & FORMAN-RICCI CURVATURE ANALYSIS
@@ -4904,23 +4932,28 @@ def initialize_sensor_graph(
                 nx.algorithms.approximation.diameter(subG)
             )
 
-        # Detect component stability via node set equivalence
-        prev_comp_sizes = [
-            G.nodes[n].get("comp_size", 0) for n in nodes_sorted
-        ]
-        current_comp_size = len(nodes_sorted)
+        # Robust Component Identification (Tracked via canonical node set freeze)
+        node_set = set(nodes_sorted)
+        prev_comp_nodes = getattr(G, "_comp_cache", {}).get(comp_id, set())
 
-        component_is_stable = (
+        # Check topological invariance (same nodes & zero edge modifications)
+        has_new_edges = (
+            edges_to_update is not None and len(edges_to_update) > 0
+        )
+        component_is_identical = (
             cnt > 0
-            and all(s == current_comp_size for s in prev_comp_sizes)
-            and len(set(G.nodes[n].get("comp_id", -1) for n in nodes_sorted))
-            == 1
+            and node_set == prev_comp_nodes
+            and not has_new_edges  # Warm-start requires no structural topology changes
         )
 
-        # Update node metadata for next iteration
+        # Cache current topology state
+        if not hasattr(G, "_comp_cache"):
+            G._comp_cache = {}
+        G._comp_cache[comp_id] = node_set
+
         for n in nodes_sorted:
             G.nodes[n]["comp_id"] = comp_id
-            G.nodes[n]["comp_size"] = current_comp_size
+            G.nodes[n]["comp_size"] = len(nodes_sorted)
 
         if len(nodes_sorted) > 2 and (init_knn is None or init_knn != k_trgt):
             L = nx.laplacian_matrix(
@@ -4932,8 +4965,8 @@ def initialize_sensor_graph(
                 dtype=float,
             )
 
-            # Warm start ONLY if the component topology remained stable
-            if component_is_stable and np.linalg.norm(x_prev) > 1e-5:
+            # Warm-start ONLY if exact component membership and topology are static
+            if component_is_identical and np.linalg.norm(x_prev) > 1e-5:
                 fiedler_vector, fiedler_value, flag = (
                     update_fiedler_warm_start(L, x_start=x_prev)
                 )
@@ -4964,23 +4997,31 @@ def initialize_sensor_graph(
             if comp_id == 0:
                 G.graph["fiedler_value"] = 0.0
 
-    # Incremental Forman-Ricci Curvature Pass
+    # ---------------------------------------------------------
+    # INCREMENTAL FORMAN-RICCI CURVATURE (Incident Edge Propagation)
+    # ---------------------------------------------------------
+    # In initialize_sensor_graph:
     if edges_to_update is None:
-        parse_edges = list(G.edges())
+        edges_to_evaluate = set(
+            tuple(sorted((int(u), int(v)))) for u, v in G.edges()
+        )
         nodes_to_update = set(range(n_nodes))
     else:
-        parse_edges = [tuple(sorted((int(e[0]), int(e[1])))) for e in edges_to_update]
+        # edges_to_update ALREADY contains the 1-hop and 2-hop incident edges
+        # generated by get_most_impactful_edges!
+        edges_to_evaluate = {
+            tuple(sorted((int(e[0]), int(e[1])))) for e in edges_to_update
+        }
         nodes_to_update = set()
-        for u, v in parse_edges:
+        for u, v in edges_to_evaluate:
             nodes_to_update.add(u)
             nodes_to_update.add(v)
-
-    for e in parse_edges:
-        u, v = e[0], e[1]
+    
+    for u, v in edges_to_evaluate:
         if not G.has_edge(u, v):
             continue
         w_e = G[u][v]["weight"]
-
+    
         sum_u = sum(
             np.sqrt(w_e / max(G[u][n]["weight"], 1e-9))
             for n in G.neighbors(u)
@@ -4991,10 +5032,10 @@ def initialize_sensor_graph(
             for n in G.neighbors(v)
             if n != u
         )
-
+    
         G[u][v]["ricci"] = float(2.0 - sum_u - sum_v)
 
-    # Re-calculate average curvature only for touched nodes
+    # Re-calculate node average total curvature for modified neighborhoods
     for u in nodes_to_update:
         vals = [
             G[u][v]["ricci"] for v in G.neighbors(u) if "ricci" in G[u][v]
@@ -5002,39 +5043,6 @@ def initialize_sensor_graph(
         G.nodes[u]["total_curvature"] = (
             float(sum(vals) / max(1.0, len(vals))) if vals else 0.0
         )
-
-    # Extract return metrics
-    fiedler_vec = np.array(
-        [G.nodes[i].get("fiedler", 0.0) for i in range(n_nodes)], dtype=float
-    )
-    comp_vec = np.array(
-        [G.nodes[i].get("comp_id", 0) for i in range(n_nodes)], dtype=int
-    )
-    curvature_vec = np.array(
-        [G.nodes[i].get("total_curvature", 0.0) for i in range(n_nodes)],
-        dtype=float,
-    )
-    degree_vec = np.array(
-        [G.degree(i, weight="weight") for i in range(n_nodes)], dtype=float
-    )
-    edges_array = (
-        np.array(list(G.edges())).T
-        if G.number_of_edges() > 0
-        else np.empty((2, 0))
-    )
-
-    return (
-        G,
-        edges_array,
-        fiedler_vec,
-        curvature_vec,
-        [],
-        degree_vec,
-        comp_vec,
-        G.graph.get("fiedler_value", 0.0),
-        scale_length,
-    )
-
 
 
 
