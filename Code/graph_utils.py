@@ -2082,6 +2082,72 @@ def robust_fiedler_solver(L, tol=1e-4):
     return fiedler_vec, fiedler_val, True
 
 
+def update_fiedler_warm_start(
+    L, x_start, max_iter=10, tol=1e-5, alpha=1e-4
+):
+    """Extremely fast Fiedler update using the previous iteration's eigenvector.
+
+    Converges in 2-5 iterations when only a few edges are added.
+    """
+    n = L.shape[0]
+    if n <= 1:
+        return np.zeros(n), 0.0, True
+
+    # Regularize shift for numerical stability
+    L_csc = L.tocsc()
+    L_s = L_csc + alpha * sp.eye(n, format="csc")
+
+    # Factorize once per iteration
+    try:
+        solve = spla.factorized(L_s)
+    except Exception:
+        # Fallback if factorization fails
+        return robust_fiedler_solver(L)
+
+    # Use warm-start vector
+    x = x_start.copy()
+    ones = np.ones(n) / np.sqrt(n)
+
+    # Orthogonalize against constant vector (null space of Laplacian)
+    x -= np.dot(x, ones) * ones
+    norm = np.linalg.norm(x)
+    if norm > 1e-12:
+        x /= norm
+    else:
+        x = np.random.normal(size=n)
+        x -= np.dot(x, ones) * ones
+        x /= np.linalg.norm(x)
+
+    # Inverse power iteration
+    converged = False
+    for _ in range(max_iter):
+        x_prev = x.copy()
+        x = solve(x)
+        x -= np.dot(x, ones) * ones  # Project out constant component
+        norm = np.linalg.norm(x)
+        if norm > 1e-12:
+            x /= norm
+
+        if np.linalg.norm(x - x_prev) < tol:
+            converged = True
+            break
+
+    # Compute Rayleigh Quotient for algebraic connectivity
+    Lx = L_csc.dot(x)
+    fiedler_val = float(np.dot(x, Lx))
+    if fiedler_val < 1e-9:
+        fiedler_val = 0.0
+
+    # If warm start didn't converge quickly, fall back to full solver
+    if not converged:
+        return robust_fiedler_solver(L)
+
+    return x, fiedler_val, True
+
+
+
+
+
 
 def soft_component_merger_backup(G, coords, sigma):
     """
