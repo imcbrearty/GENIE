@@ -12020,7 +12020,7 @@ def get_most_impactful_edges_balanced1(G, scale_length, cnt = 0, top_k=5, degree
 # import scipy.sparse.linalg as spla
 # from collections import Counter
 
-def get_most_impactful_edges(
+def get_most_impactful_edges_balanced(
     G, scale_length, cnt=0, top_k=5, degree_p=1.0, 
     greedy_regularize=0.9, greedy_regularize_extra=0.1, 
     alpha_scale=0.75, beta_scale=0.1, min_weight=0.05, 
