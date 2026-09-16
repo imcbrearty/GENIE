@@ -8765,7 +8765,7 @@ import networkx as nx
 from collections import defaultdict
 
 
-class SpectralProductSampler:
+class SpectralProductSampler1:
     def __init__(self, G_A, G_B, pos_A, pos_B, sparse_threshold=2000, k_approx=100):
         self.G_A = G_A
         self.G_B = G_B
@@ -9108,6 +9108,687 @@ class SpectralProductSampler:
 
         return retained_nodes
 
+
+
+    
+
+
+
+
+
+
+class SpectralProductSampler:
+    def __init__(self, G_A, G_B, pos_A, pos_B, sparse_threshold=2000, k_approx=100):
+        self.G_A = G_A
+        self.G_B = G_B
+        self.pos_A = pos_A
+        self.pos_B = pos_B
+        self.k_approx = k_approx
+
+        self.nodes_A = list(self.G_A.nodes())
+        self.nodes_B = list(self.G_B.nodes())
+        self.node_to_idx_A = {node: i for i, node in enumerate(self.nodes_A)}
+        self.node_to_idx_B = {node: i for i, node in enumerate(self.nodes_B)}
+
+        self.mode_A = 'sparse' if len(G_A) > sparse_threshold else 'dense'
+        self.mode_B = 'sparse' if len(G_B) > sparse_threshold else 'dense'
+
+        self.adj_A = nx.to_scipy_sparse_array(self.G_A, format='csr', nodelist=self.nodes_A, dtype=np.float32)
+        self.adj_B = nx.to_scipy_sparse_array(self.G_B, format='csr', nodelist=self.nodes_B, dtype=np.float32)
+
+        # 1. Accelerated Spectral Leverage Scores
+        self.tau_A, self.L_A_obj = self._compute_spectral_stats(self.G_A, self.nodes_A, self.mode_A)
+        self.tau_B, self.L_B_obj = self._compute_spectral_stats(self.G_B, self.nodes_B, self.mode_B)
+
+        # 2. Vectorized Effective Resistance Edge Weights
+        self._precompute_edge_weights()
+
+        # after _compute_spectral_stats and _precompute_edge_weights
+        str_A = self._get_strengths(self.G_A, self.nodes_A)
+        str_B = self._get_strengths(self.G_B, self.nodes_B)
+
+        eps_str = 0.5
+        self.tau_A = self.tau_A / (str_A + eps_str)
+        self.tau_B = self.tau_B / (str_B + eps_str)
+
+        self.tau_A = np.maximum(self.tau_A, 1e-12)
+        self.tau_B = np.maximum(self.tau_B, 1e-12)
+
+        sum_tau_A = self.tau_A.sum()
+        sum_tau_B = self.tau_B.sum()
+        self.p_A = self.tau_A / sum_tau_A if sum_tau_A > 0 else np.full(len(self.tau_A), 1.0 / len(self.tau_A))
+        self.p_B = self.tau_B / sum_tau_B if sum_tau_B > 0 else np.full(len(self.tau_B), 1.0 / len(self.tau_B))
+
+        self.mean_tau_A = float(self.tau_A.mean())
+        self.mean_tau_B = float(self.tau_B.mean())
+
+    def _compute_spectral_stats(self, G, nodelist, mode):
+        L = nx.laplacian_matrix(G, nodelist=nodelist, weight='weight').astype(np.float64)
+        n = L.shape[0]
+
+        if mode == 'dense':
+            L_pinv = np.linalg.pinv(L.toarray())
+            tau = np.maximum(np.diag(L_pinv), 1e-12)
+            return tau, L_pinv
+        else:
+            alpha = 1e-6
+            L_s = (L + alpha * sp.eye(n, format='csc')).tocsc()
+            solve_fn = spla.factorized(L_s)
+
+            R = np.random.randn(n, self.k_approx) / np.sqrt(self.k_approx)
+            Z = np.zeros((n, self.k_approx), dtype=np.float64)
+            for i in range(self.k_approx):
+                Z[:, i] = solve_fn(R[:, i])
+
+            tau = np.maximum(np.sum(Z**2, axis=1), 1e-12)
+            return tau, L
+
+    def _get_strengths(self, G, nodelist):
+        """Return array of weighted degrees (strengths) aligned with nodelist."""
+        # NetworkX 3.x
+        try:
+            return np.array([G.degree(n, weight='weight') for n in nodelist], dtype=np.float64)
+        except TypeError:
+            # older NetworkX
+            return np.array([sum(d.get('weight', 1.0) for _, _, d in G.edges(n, data=True))
+                             for n in nodelist], dtype=np.float64)
+
+    # def _precompute_edge_weights(self):
+    #     for G, L_obj, mode, mapping, nodelist in [
+    #         (self.G_A, self.L_A_obj, self.mode_A, self.node_to_idx_A, self.nodes_A),
+    #         (self.G_B, self.L_B_obj, self.mode_B, self.node_to_idx_B, self.nodes_B)
+    #     ]:
+    #         if mode == 'dense':
+    #             diag = np.diag(L_obj)
+    #             for u, v in G.edges():
+    #                 u_idx, v_idx = mapping[u], mapping[v]
+    #                 w = max(1e-6, diag[u_idx] + diag[v_idx] - 2.0 * L_obj[u_idx, v_idx])
+    #                 G[u][v]['res_w'] = float(w)
+    #         else:
+    #             deg_map = dict(G.degree(nodelist))
+    #             for u, v in G.edges():
+    #                 w = 1.0 / np.sqrt(max(1, deg_map[u]) * max(1, deg_map[v]))
+    #                 G[u][v]['res_w'] = float(w)
+
+
+    def _precompute_edge_weights(self):
+        for G, L_obj, mode, mapping, nodelist in [
+            (self.G_A, self.L_A_obj, self.mode_A, self.node_to_idx_A, self.nodes_A),
+            (self.G_B, self.L_B_obj, self.mode_B, self.node_to_idx_B, self.nodes_B)
+        ]:
+            if mode == 'dense':
+                # already correct – uses the pseudoinverse which saw the weights
+                diag = np.diag(L_obj)
+                for u, v in G.edges():
+                    u_idx, v_idx = mapping[u], mapping[v]
+                    w = max(1e-6, diag[u_idx] + diag[v_idx] - 2.0 * L_obj[u_idx, v_idx])
+                    G[u][v]['res_w'] = float(w)
+            else:
+                # sparse approximation that respects weights
+                str_map = dict(zip(nodelist, self._get_strengths(G, nodelist)))
+                for u, v, d in G.edges(data=True):
+                    # optional: also incorporate the original edge weight
+                    orig_w = d.get('weight', 1.0)
+                    w = orig_w / np.sqrt(max(1e-6, str_map[u] * str_map[v]))
+                    G[u][v]['res_w'] = float(max(1e-6, w))
+
+
+    def derive_adaptive_sampling_params(self, k_local=10):
+        n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+        aspect_ratio = float(max(n_a, n_b)) / float(max(min(n_a, n_b), 1))
+        physical_ratio = float(np.clip(0.3 + 0.2 * np.log10(aspect_ratio), 0.3, 0.75))
+
+        coords_A = np.array([self.pos_A[n] for n in self.nodes_A])
+        tree_A = cKDTree(coords_A)
+        k_actual = min(k_local, n_a)
+
+        dists_A, _ = tree_A.query(coords_A, k=k_actual)
+        if dists_A.ndim == 1:
+            dists_A = dists_A[:, None]
+
+        sigma_A = np.maximum(dists_A[:, -1] / 1.1774, 1e-5)
+        densities_A = 1.0 / (sigma_A**2)
+        cv_density = np.std(densities_A) / np.mean(densities_A) if np.mean(densities_A) > 0 else 0.0
+
+        density_equalization_gamma = float(np.clip(0.3 + 0.3 * cv_density, 0.2, 0.8))
+
+        avg_str_A = np.mean(self._get_strengths(self.G_A, self.nodes_A)) if len(self.G_A) else 1.0
+        avg_str_B = np.mean(self._get_strengths(self.G_B, self.nodes_B)) if len(self.G_B) else 1.0
+        avg_deg = (avg_str_A + avg_str_B) / 2.0
+
+        k_base = max(1, int(np.round(np.clip(avg_deg / (1.0 + np.log10(aspect_ratio)), 1, 5))))
+        degree_headroom = float(np.clip(2.0 - 0.25 * np.log10(aspect_ratio), 1.2, 2.0))
+
+        return {
+            "physical_ratio": physical_ratio,
+            "density_equalization_gamma": density_equalization_gamma,
+            "k_base": k_base,
+            "degree_headroom": degree_headroom
+        }
+
+
+    def select_anchors(
+        self,
+        n_anchor_target,
+        use_cartesian_core=False,
+        core_ratio=0.1,
+        physical_ratio=None,
+        k_local_scale=10,
+        density_equalization_gamma=None
+    ):
+        if physical_ratio is None or density_equalization_gamma is None:
+            derived = self.derive_adaptive_sampling_params(k_local=k_local_scale)
+            physical_ratio = physical_ratio if physical_ratio is not None else derived["physical_ratio"]
+            density_equalization_gamma = (
+                density_equalization_gamma if density_equalization_gamma is not None
+                else derived["density_equalization_gamma"]
+            )
+
+        anchors = set()
+        coords_A = np.array([self.pos_A[n] for n in self.nodes_A])
+        coords_B = np.array([self.pos_B[n] for n in self.nodes_B])
+        n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+
+        # ------------------------------------------------------------------
+        # Step A: Cartesian Core (High-Leverage Spectral Pairs)
+        # ------------------------------------------------------------------
+        n_core_target = int(n_anchor_target * core_ratio) if use_cartesian_core else 0
+        if n_core_target > 0:
+            ratio = n_a / n_b
+            k_a = min(n_a, max(1, int(np.sqrt(n_core_target * ratio))))
+            k_b = min(n_b, max(1, int(n_core_target / max(1, k_a))))
+
+            top_a_indices = np.argsort(self.tau_A)[-k_a:]
+            top_b_indices = np.argsort(self.tau_B)[-k_b:]
+
+            for idx_a in top_a_indices:
+                for idx_b in top_b_indices:
+                    anchors.add((self.nodes_A[idx_a], self.nodes_B[idx_b]))
+
+        # ------------------------------------------------------------------
+        # Step B: Symmetrical Adaptive Physical Sampling (A -> B & B -> A)
+        # ------------------------------------------------------------------
+        n_physical_target = int(n_anchor_target * physical_ratio)
+
+        # after computing n_physical_target
+        min_spectral_frac = 0.15 if aspect < 10 else 0.08   # never let spectral disappear
+        n_spectral_target = max(int(n_anchor_target * min_spectral_frac),
+                                n_anchor_target - n_physical_target)
+
+        if n_physical_target > 0:
+            tree_A = cKDTree(coords_A)
+            tree_B = cKDTree(coords_B)
+
+            dists_self_A, _ = tree_A.query(coords_A, k=min(k_local_scale, n_a))
+            dists_self_B, _ = tree_B.query(coords_B, k=min(k_local_scale, n_b))
+            if dists_self_A.ndim == 1: dists_self_A = dists_self_A[:, None]
+            if dists_self_B.ndim == 1: dists_self_B = dists_self_B[:, None]
+
+            sigma_A = np.maximum(dists_self_A[:, -1] / 1.1774, 1e-5)
+            sigma_B = np.maximum(dists_self_B[:, -1] / 1.1774, 1e-5)
+            density_A = 1.0 / (sigma_A**2)
+            density_B = 1.0 / (sigma_B**2)
+
+            spatial_extent = np.linalg.norm(coords_A.max(axis=0) - coords_A.min(axis=0)) + 1e-5
+
+            target_ab = n_physical_target // 2
+            target_ba = n_physical_target - target_ab
+
+            # Direction 1: A queries B
+            if target_ab > 0:
+                k_per_a = target_ab / max(1, n_a)
+                k_base_a = int(np.floor(k_per_a))
+                p_extra_a = k_per_a - k_base_a
+
+                k_cand_b = min(int(np.clip(k_local_scale * 3 * np.sqrt(n_b / max(1, n_a)), 20, n_b)), n_b)
+                dists_B, indices_B = tree_B.query(coords_A, k=k_cand_b)
+                if dists_B.ndim == 1: dists_B, indices_B = dists_B[:, None], indices_B[:, None]
+
+                scaled_dists_B = dists_B / spatial_extent
+                bw_ab = np.median(scaled_dists_B) + 1e-5
+                raw_w_ab = np.exp(- (scaled_dists_B**2) / (2 * (bw_ab**2)))
+                joint_d_ab = (density_A[:, None] * density_B[indices_B]) ** density_equalization_gamma
+
+                eq_w_ab = np.nan_to_num(raw_w_ab / np.maximum(joint_d_ab, 1e-8), nan=0.0)
+                r_sums_a = eq_w_ab.sum(axis=1, keepdims=True)
+                p_mat_a = np.where(r_sums_a > 0, eq_w_ab / np.maximum(r_sums_a, 1e-12), 1.0 / k_cand_b)
+                p_mat_a = 0.9 * p_mat_a + (0.1 / k_cand_b)
+                p_mat_a /= p_mat_a.sum(axis=1, keepdims=True)
+
+                draws_a = np.clip(k_base_a + (np.random.rand(n_a) < p_extra_a).astype(int), 1, k_cand_b)
+                max_d_a = draws_a.max()
+
+                u_a = np.random.uniform(1e-10, 1.0 - 1e-10, size=(n_a, k_cand_b))
+                gumbel_a = np.log(p_mat_a) - np.log(-np.log(u_a))
+                top_cols_a = np.argsort(-gumbel_a, axis=1)[:, :max_d_a]
+
+                _, rank_a = np.ogrid[:n_a, :max_d_a]
+                mask_a = rank_a < draws_a[:, None]
+                rows_a = np.repeat(np.arange(n_a)[:, None], max_d_a, axis=1)[mask_a]
+                cols_b = indices_B[rows_a, top_cols_a[mask_a]]
+
+                for r_a, c_b in zip(rows_a, cols_b):
+                    anchors.add((self.nodes_A[r_a], self.nodes_B[c_b]))
+
+            # Direction 2: B queries A
+            if target_ba > 0:
+                k_per_b = target_ba / max(1, n_b)
+                k_base_b = int(np.floor(k_per_b))
+                p_extra_b = k_per_b - k_base_b
+
+                k_cand_a = min(int(np.clip(k_local_scale * 3 * np.sqrt(n_a / max(1, n_b)), 20, n_a)), n_a)
+                dists_A, indices_A = tree_A.query(coords_B, k=k_cand_a)
+                if dists_A.ndim == 1: dists_A, indices_A = dists_A[:, None], indices_A[:, None]
+
+                scaled_dists_A = dists_A / spatial_extent
+                bw_ba = np.median(scaled_dists_A) + 1e-5
+                raw_w_ba = np.exp(- (scaled_dists_A**2) / (2 * (bw_ba**2)))
+                joint_d_ba = (density_B[:, None] * density_A[indices_A]) ** density_equalization_gamma
+
+                eq_w_ba = np.nan_to_num(raw_w_ba / np.maximum(joint_d_ba, 1e-8), nan=0.0)
+                r_sums_b = eq_w_ba.sum(axis=1, keepdims=True)
+                p_mat_b = np.where(r_sums_b > 0, eq_w_ba / np.maximum(r_sums_b, 1e-12), 1.0 / k_cand_a)
+                p_mat_b = 0.9 * p_mat_b + (0.1 / k_cand_a)
+                p_mat_b /= p_mat_b.sum(axis=1, keepdims=True)
+
+                draws_b = np.clip(k_base_b + (np.random.rand(n_b) < p_extra_b).astype(int), 1, k_cand_a)
+                max_d_b = draws_b.max()
+
+                u_b = np.random.uniform(1e-10, 1.0 - 1e-10, size=(n_b, k_cand_a))
+                gumbel_b = np.log(p_mat_b) - np.log(-np.log(u_b))
+                top_cols_b = np.argsort(-gumbel_b, axis=1)[:, :max_d_b]
+
+                _, rank_b = np.ogrid[:n_b, :max_d_b]
+                mask_b = rank_b < draws_b[:, None]
+                rows_b = np.repeat(np.arange(n_b)[:, None], max_d_b, axis=1)[mask_b]
+                cols_a = indices_A[rows_b, top_cols_b[mask_b]]
+
+                for r_b, c_a in zip(rows_b, cols_a):
+                    anchors.add((self.nodes_A[c_a], self.nodes_B[r_b]))
+
+        # ------------------------------------------------------------------
+        # Step C: Spectral Leverage Sampling (Global Residuals)
+        # ------------------------------------------------------------------
+
+        existing_anchors = set(anchors)          # anchors that already exist before spectral draw
+        spectral_anchors = set()
+        n_remaining = max(0, n_anchor_target - len(anchors))
+        if n_remaining > 0:
+            # *2 is fine after the degree correction; you can even drop to *1.5
+            sampled_a = np.random.choice(n_a, size=n_remaining * 2, replace=True, p=self.p_A)
+            sampled_b = np.random.choice(n_b, size=n_remaining * 2, replace=True, p=self.p_B)
+            for idx_a, idx_b in zip(sampled_a, sampled_b):
+                pair = (self.nodes_A[idx_a], self.nodes_B[idx_b])
+                anchors.add(pair)
+                spectral_anchors.add(pair)
+                if len(anchors) >= n_anchor_target:
+                    break
+
+        only_spectral = spectral_anchors - existing_anchors   # pairs that are *new* and came from spectral
+
+        anchor_list = list(anchors)
+        random.shuffle(anchor_list)
+
+        # build mask in the *shuffled* order
+        spectral_mask = np.array([1 if pair in only_spectral else 0 for pair in anchor_list], dtype=np.int8)
+        return anchor_list, spectral_mask
+
+
+
+    def expand_partial_stars(
+        self, 
+        anchors,
+        spectral_mask, 
+        target_node_count, 
+        k_base=None, 
+        epsilon=0.2, 
+        degree_headroom=None,
+        budget_tolerance=0.05,
+        existing_nodes=None,
+        committed_anchors=None  # Tracks officially processed anchors
+    ):
+        if k_base is None or degree_headroom is None:
+            derived = self.derive_adaptive_sampling_params()
+            k_base = k_base if k_base is not None else derived["k_base"]
+            degree_headroom = degree_headroom if degree_headroom is not None else derived["degree_headroom"]
+
+        retained_nodes = set(existing_nodes) if existing_nodes else set()
+        if committed_anchors is None:
+            committed_anchors = set()
+
+        n_anchors = max(1, len(anchors))
+        soft_budget_cap = int(target_node_count * (1.0 + budget_tolerance))
+
+        avg_budget_per_anchor = max(2.0, (target_node_count - len(retained_nodes)) / n_anchors)
+        dynamic_max_degree = max(2, int(np.floor(degree_headroom * avg_budget_per_anchor)))
+
+        indptr_A, indices_A = self.adj_A.indptr, self.adj_A.indices
+        indptr_B, indices_B = self.adj_B.indptr, self.adj_B.indices
+
+        # shuffled_anchors = list(anchors)
+        # random.shuffle(shuffled_anchors)
+
+        shuffled_anchors = np.array(list(anchors), dtype=object)    
+
+        # Generate a random permutation of indices
+        p = np.random.permutation(len(shuffled_anchors))    
+
+        # Reorder both structures using the exact same permutation
+        shuffled_anchors = shuffled_anchors[p].tolist()
+        spectral_mask = spectral_mask[p]
+
+        ratio_a = np.sqrt(len(self.nodes_A) / len(self.nodes_B))
+        ratio_b = np.sqrt(len(self.nodes_B) / len(self.nodes_A))
+
+        for (a, b), mask in zip(shuffled_anchors, spectral_mask):
+            if len(retained_nodes) >= soft_budget_cap:
+                break
+
+            idx_a = self.node_to_idx_A[a]
+            idx_b = self.node_to_idx_B[b]
+
+            # 1. Fetch unvisited neighbors upfront for both factors
+            neigh_A = indices_A[indptr_A[idx_a]:indptr_A[idx_a + 1]]
+            unvisited_A = [n_idx for n_idx in neigh_A if (self.nodes_A[n_idx], b) not in retained_nodes]
+
+            neigh_B = indices_B[indptr_B[idx_b]:indptr_B[idx_b + 1]]
+            unvisited_B = [n_idx for n_idx in neigh_B if (a, self.nodes_B[n_idx]) not in retained_nodes]
+
+            # Skip candidate if it has nowhere to expand in either dimension
+            if not unvisited_A and not unvisited_B:
+                continue
+
+            # 2. Commit anchor lazily ONLY when execution actually proceeds
+            retained_nodes.add((a, b))
+            committed_anchors.add((a, b))
+
+            mult_a = np.clip(self.tau_A[idx_a] / self.mean_tau_A, 0.5, 3.0)
+            mult_b = np.clip(self.tau_B[idx_b] / self.mean_tau_B, 0.5, 3.0)
+            mult_a *= 2.5 if mask == 1 else 1.0
+            mult_b *= 2.5 if mask == 1 else 1.0
+
+            # 3. Compute caps with explicit hard lower bound of 1
+            cap_a = min(max(1, int(round(k_base * ratio_a * mult_a))), dynamic_max_degree)
+            cap_b = min(max(1, int(round(k_base * ratio_b * mult_b))), dynamic_max_degree)
+
+            factor_order = [('A', unvisited_A, cap_a), ('B', unvisited_B, cap_b)]
+            random.shuffle(factor_order)
+
+            # 4. Expand star along both factors
+            for factor, unvisited, cap in factor_order:
+                if len(retained_nodes) >= soft_budget_cap:
+                    break
+
+                if unvisited:
+                    tau_vec = self.tau_A if factor == 'A' else self.tau_B
+                    raw_tau = tau_vec[unvisited]
+                    tau_sum = np.sum(raw_tau)
+                    
+                    probs = (1.0 - epsilon) * (raw_tau / tau_sum if tau_sum > 0 else 1.0 / len(unvisited)) + epsilon * (1.0 / len(unvisited))
+                    probs /= np.sum(probs)
+
+                    eff_cap = min(cap, len(unvisited))
+                    chosen = np.random.choice(unvisited, size=eff_cap, replace=False, p=probs)
+
+                    for c_idx in chosen:
+                        node_pair = (self.nodes_A[c_idx], b) if factor == 'A' else (a, self.nodes_B[c_idx])
+                        retained_nodes.add(node_pair)
+                        if len(retained_nodes) >= soft_budget_cap:
+                            break
+
+        return retained_nodes
+
+        
+    # def estimate_anchor_target(self, target_node_count, k_base=None, spatial_coherence_eta=0.7):
+    #     """
+    #     Principled estimate of required anchor count using occupied volume statistics 
+    #     accounting for spatial overlap without arbitrary magic constants.
+    #     """
+    #     if k_base is None:
+    #         derived = self.derive_adaptive_sampling_params()
+    #         k_base = derived["k_base"]
+    
+    #     n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+    #     total_space = float(n_a * n_b)
+    
+    #     # 1. Expected 1-hop partial star footprint per anchor
+    #     ratio_a = np.sqrt(n_a / n_b)
+    #     ratio_b = np.sqrt(n_b / n_a)
+    #     star_size = 1.0 + k_base * (ratio_a + ratio_b)
+    
+    #     # 2. Coverage fraction in total space
+    #     target_ratio = min(0.999, target_node_count / total_space)
+        
+    #     # 3. Solved occupancy formula for effective draws required under spatial clustering
+    #     effective_draws = -np.log(1.0 - target_ratio) * total_space
+        
+    #     # 4. Convert effective draws to anchor count adjusting for spatial coherence
+    #     raw_anchors = effective_draws / (star_size * max(0.1, spatial_coherence_eta))
+        
+    #     # Upper bound physical anchors by available nodes or target budget
+    #     max_anchors = min(total_space, target_node_count)
+    #     return int(np.clip(np.ceil(raw_anchors), 10, max_anchors))
+
+    def estimate_anchor_target(self, target_node_count, k_base=None, spatial_coherence_eta=0.7):
+        if k_base is None:
+            derived = self.derive_adaptive_sampling_params()
+            k_base = derived["k_base"]
+
+        n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+        total_space = float(n_a * n_b)
+        aspect = max(n_a, n_b) / max(min(n_a, n_b), 1)
+
+        # 1. Expected 1-hop footprint (already aspect-aware)
+        ratio_a = np.sqrt(n_a / n_b)
+        ratio_b = np.sqrt(n_b / n_a)
+        star_size = 1.0 + k_base * (ratio_a + ratio_b)
+
+        # 2. Target coverage fraction
+        target_ratio = min(0.999, target_node_count / total_space)
+
+        # 3. Occupancy formula
+        effective_draws = -np.log(1.0 - target_ratio) * total_space
+
+        # 4. Coherence adjustment that *grows* with aspect ratio
+        #    (more clustering / more wasted volume when one side is tiny)
+        eta = spatial_coherence_eta * (1.0 + 0.15 * np.log10(max(aspect, 1.0)))
+        eta = float(np.clip(eta, 0.3, 1.5))
+
+        raw_anchors = effective_draws / (star_size * eta)
+
+        # 5. Extra safety for extreme imbalance: never ask for more anchors
+        #    than a few times the size of the smaller factor
+        max_by_small_side = 4.0 * min(n_a, n_b)
+        max_anchors = min(total_space, target_node_count, max_by_small_side)
+
+        return int(np.clip(np.ceil(raw_anchors), 10, max_anchors))
+
+    def build_networkx_subgraph(self, retained_nodes):
+        G_sub = nx.Graph()
+        G_sub.add_nodes_from(retained_nodes)
+
+        b_to_a = defaultdict(set)
+        a_to_b = defaultdict(set)
+        for a, b in retained_nodes:
+            b_to_a[b].add(a)
+            a_to_b[a].add(b)
+
+        # Factor A induced edges
+        for b, a_set in b_to_a.items():
+            if len(a_set) > 1:
+                sub_A = self.G_A.subgraph(a_set)
+                for u, v, d in sub_A.edges(data=True):
+                    G_sub.add_edge((u, b), (v, b), weight=d.get('res_w', 1.0))
+
+        # Factor B induced edges
+        for a, b_set in a_to_b.items():
+            if len(b_set) > 1:
+                sub_B = self.G_B.subgraph(b_set)
+                for u, v, d in sub_B.edges(data=True):
+                    G_sub.add_edge((a, u), (a, v), weight=d.get('res_w', 1.0))
+
+        return G_sub
+
+    def subgraph_diagnostics(self, retained_nodes, G_sub=None):
+        if G_sub is None:
+            G_sub = self.build_networkx_subgraph(retained_nodes)
+        degrees = np.array([d for _, d in G_sub.degree()])
+        n = len(retained_nodes)
+        isolates = int((degrees == 0).sum())
+        # coverage of factors
+        used_A = len({a for a, _ in retained_nodes})
+        used_B = len({b for _, b in retained_nodes})
+        return {
+            "n_nodes": n,
+            "n_edges": G_sub.number_of_edges(),
+            "frac_isolates": isolates / max(1, n),
+            "mean_deg": float(degrees.mean()) if n else 0.0,
+            "max_deg": int(degrees.max()) if n else 0,
+            "coverage_A": used_A / len(self.nodes_A),
+            "coverage_B": used_B / len(self.nodes_B),
+            "deg_cv": float(degrees.std() / (degrees.mean() + 1e-12)),
+        }
+
+    def sample_subgraph(
+        self,
+        target_node_count,
+        use_cartesian_core=False,
+        core_ratio=0.1,
+        epsilon=0.2,
+        k_local_scale=10,
+        spatial_coherence_eta=0.7,
+        max_interleaved_passes=8
+    ):
+        params = self.derive_adaptive_sampling_params(k_local=k_local_scale)
+        retained_nodes = set()
+        all_sampled_anchors = set()  # Passed to expand_partial_stars to record committed anchors
+        
+        pass_idx = 0
+        
+        # Interleaved Anchor Injection + 1-Hop Star Sampling Loop
+        while len(retained_nodes) < target_node_count and pass_idx < max_interleaved_passes:
+            pass_idx += 1
+            missing_count = target_node_count - len(retained_nodes)
+            
+            # 1. Estimate anchor target with Occupancy physics scaling
+            effective_target = missing_count
+            if pass_idx > 1 and len(retained_nodes) > 0:
+                space_fill_ratio = len(retained_nodes) / float(len(self.nodes_A) * len(self.nodes_B))
+                effective_target = int(missing_count / max(0.05, (1.0 - space_fill_ratio)))
+
+            n_anchor_target = self.estimate_anchor_target(
+                target_node_count=effective_target,
+                k_base=params["k_base"],
+                spatial_coherence_eta=spatial_coherence_eta
+            )
+
+            # 2. Select fresh candidate anchors spatially
+            is_core_pass = use_cartesian_core if pass_idx == 1 else False
+            
+            anchors_batch, spectral_mask = self.select_anchors(
+                n_anchor_target=n_anchor_target,
+                use_cartesian_core=is_core_pass,
+                core_ratio=core_ratio if is_core_pass else 0.0,
+                physical_ratio=params["physical_ratio"],
+                k_local_scale=k_local_scale,
+                density_equalization_gamma=params["density_equalization_gamma"]
+            )
+
+            # 1. Filter out COMMITTED anchors while keeping the mask in sync
+            fresh_pairs = [
+                (a, mask) for a, mask in zip(anchors_batch, spectral_mask) 
+                if a not in all_sampled_anchors
+            ]        
+
+            if fresh_pairs:
+                # Unpack into separate filtered lists
+                fresh_anchors, fresh_spectral_mask = zip(*fresh_pairs)
+                fresh_anchors = list(fresh_anchors)
+                fresh_spectral_mask = np.array(fresh_spectral_mask)
+            else:
+                # 2. Fallback: draw purely random unvisited product nodes
+                all_possible = set(zip(np.random.choice(self.nodes_A, n_anchor_target),
+                                       np.random.choice(self.nodes_B, n_anchor_target)))
+                fresh_anchors = list(all_possible - all_sampled_anchors)
+                if not fresh_anchors:
+                    break  # Exhausted space entirely
+                
+                # Fallback anchors are not spectral leverage anchors, so mark them as 0s
+                fresh_spectral_mask = np.zeros(len(fresh_anchors), dtype=int)
+
+            # REMOVED: all_sampled_anchors.update(fresh_anchors)
+            # Anchors are now committed inside expand_partial_stars as they are processed.
+
+            # 3. 1-Hop Partial Star Expansion with Lazy Anchor Commitment
+            retained_nodes = self.expand_partial_stars(
+                fresh_anchors,
+                fresh_spectral_mask,
+                target_node_count,
+                k_base=params["k_base"],
+                epsilon=epsilon,
+                degree_headroom=params["degree_headroom"],
+                existing_nodes=retained_nodes,
+                committed_anchors=all_sampled_anchors  # Mutated in-place during iteration
+            )
+
+            if pass_idx == 1:
+                G_sub = self.build_networkx_subgraph(retained_nodes)
+                diag = self.subgraph_diagnostics(retained_nodes, G_sub)
+
+
+        G_sub = self.build_networkx_subgraph(retained_nodes)
+
+        if pass_idx > 1:
+                diag = self.subgraph_diagnostics(retained_nodes, G_sub)
+                print(diag)
+
+        return G_sub, params, len(all_sampled_anchors)
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+    
+    
+    
     # def expand_partial_stars(
     #     self, 
     #     anchors, 
