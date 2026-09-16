@@ -9310,13 +9310,23 @@ class SpectralProductSampler:
         # ------------------------------------------------------------------
         # Step B: Symmetrical Adaptive Physical Sampling (A -> B & B -> A)
         # ------------------------------------------------------------------
-        n_physical_target = int(n_anchor_target * physical_ratio)
+        # n_physical_target = int(n_anchor_target * physical_ratio)
         
         # after computing n_physical_target
-        min_spectral_frac = 0.15 if self.aspect < 10 else 0.08   # never let spectral disappear
-        n_spectral_target = max(int(n_anchor_target * min_spectral_frac),
-                                n_anchor_target - n_physical_target)
+        # min_spectral_frac = 0.15 if self.aspect < 10 else 0.08   # never let spectral disappear
+        # n_spectral_target = max(int(n_anchor_target * min_spectral_frac),
+        #                        n_anchor_target - n_physical_target)
 
+        
+        n_physical_target = int(n_anchor_target * physical_ratio)
+
+        min_spectral_frac = 0.15 if self.aspect < 10 else 0.08
+        n_spectral_target = max(
+            int(n_anchor_target * min_spectral_frac),
+            n_anchor_target - n_physical_target
+        )
+        
+        
         if n_physical_target > 0:
             tree_A = cKDTree(coords_A)
             tree_B = cKDTree(coords_B)
@@ -9439,7 +9449,7 @@ class SpectralProductSampler:
 
 
 
-    def expand_partial_stars(
+    def expand_partial_stars_backup(
         self, 
         anchors,
         spectral_mask, 
@@ -9541,6 +9551,126 @@ class SpectralProductSampler:
                             break
 
         return retained_nodes
+
+
+
+
+    def expand_partial_stars(
+        self, 
+        anchors,
+        spectral_mask, 
+        target_node_count, 
+        k_base=None, 
+        epsilon=0.2, 
+        degree_headroom=None,
+        budget_tolerance=0.05,
+        existing_nodes=None,
+        committed_anchors=None  # Tracks officially processed anchors
+    ):
+        if k_base is None or degree_headroom is None:
+            derived = self.derive_adaptive_sampling_params()
+            k_base = k_base if k_base is not None else derived["k_base"]
+            degree_headroom = degree_headroom if degree_headroom is not None else derived["degree_headroom"]
+
+        retained_nodes = set(existing_nodes) if existing_nodes else set()
+        if committed_anchors is None:
+            committed_anchors = set()
+
+        n_anchors = max(1, len(anchors))
+        soft_budget_cap = int(target_node_count * (1.0 + budget_tolerance))
+
+        avg_budget_per_anchor = max(2.0, (target_node_count - len(retained_nodes)) / n_anchors)
+        dynamic_max_degree = max(2, int(np.floor(degree_headroom * avg_budget_per_anchor)))
+
+        indptr_A, indices_A = self.adj_A.indptr, self.adj_A.indices
+        indptr_B, indices_B = self.adj_B.indptr, self.adj_B.indices
+
+        # shuffled_anchors = list(anchors)
+        # random.shuffle(shuffled_anchors)
+
+        shuffled_anchors = np.array(list(anchors), dtype=object)    
+
+        # Generate a random permutation of indices
+        p = np.random.permutation(len(shuffled_anchors))    
+
+        # Reorder both structures using the exact same permutation
+        shuffled_anchors = shuffled_anchors[p].tolist()
+        spectral_mask = spectral_mask[p]
+
+        ratio_a = np.sqrt(len(self.nodes_A) / len(self.nodes_B))
+        ratio_b = np.sqrt(len(self.nodes_B) / len(self.nodes_A))
+
+        for (a, b), mask in zip(shuffled_anchors, spectral_mask):
+            idx_a = self.node_to_idx_A[a]
+            idx_b = self.node_to_idx_B[b]
+        
+            neigh_A = indices_A[indptr_A[idx_a]:indptr_A[idx_a+1]]
+            unvisited_A = [n_idx for n_idx in neigh_A if (self.nodes_A[n_idx], b) not in retained_nodes]
+            neigh_B = indices_B[indptr_B[idx_b]:indptr_B[idx_b+1]]
+            unvisited_B = [n_idx for n_idx in neigh_B if (a, self.nodes_B[n_idx]) not in retained_nodes]
+        
+            is_spectral = (mask == 1)
+            can_expand = bool(unvisited_A or unvisited_B)
+            over_budget = len(retained_nodes) >= soft_budget_cap
+        
+            # Physical: always keep
+            # Spectral: keep only if we can still expand it
+            if is_spectral and (over_budget or not can_expand):
+                continue
+        
+            # Commit
+            retained_nodes.add((a, b))
+            committed_anchors.add((a, b))
+        
+            # If over budget we already skipped spectral; physical anchors stop here
+            if over_budget:
+                continue
+        
+            # Expand (only reached when under budget)
+            mult_a = np.clip(self.tau_A[idx_a] / self.mean_tau_A, 0.5, 3.0)
+            mult_b = np.clip(self.tau_B[idx_b] / self.mean_tau_B, 0.5, 3.0)
+            mult_a *= 2.5 if is_spectral else 1.0
+            mult_b *= 2.5 if is_spectral else 1.0
+
+            # 3. Compute caps with explicit hard lower bound of 1
+            cap_a = min(max(1, int(round(k_base * ratio_a * mult_a))), dynamic_max_degree)
+            cap_b = min(max(1, int(round(k_base * ratio_b * mult_b))), dynamic_max_degree)
+
+            factor_order = [('A', unvisited_A, cap_a), ('B', unvisited_B, cap_b)]
+            random.shuffle(factor_order)
+
+            # 4. Expand star along both factors
+            for factor, unvisited, cap in factor_order:
+                if len(retained_nodes) >= soft_budget_cap:
+                    break
+
+                if unvisited:
+                    tau_vec = self.tau_A if factor == 'A' else self.tau_B
+                    raw_tau = tau_vec[unvisited]
+                    tau_sum = np.sum(raw_tau)
+                    
+                    probs = (1.0 - epsilon) * (raw_tau / tau_sum if tau_sum > 0 else 1.0 / len(unvisited)) + epsilon * (1.0 / len(unvisited))
+                    probs /= np.sum(probs)
+
+                    eff_cap = min(cap, len(unvisited))
+                    chosen = np.random.choice(unvisited, size=eff_cap, replace=False, p=probs)
+
+                    for c_idx in chosen:
+                        node_pair = (self.nodes_A[c_idx], b) if factor == 'A' else (a, self.nodes_B[c_idx])
+                        retained_nodes.add(node_pair)
+                        if len(retained_nodes) >= soft_budget_cap:
+                            break
+
+        
+        return retained_nodes
+
+
+
+
+
+
+
+
 
         
     # def estimate_anchor_target(self, target_node_count, k_base=None, spatial_coherence_eta=0.7):
