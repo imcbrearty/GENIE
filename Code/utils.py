@@ -274,6 +274,139 @@ def check_matched_events(srcs_known, srcs, matches):
 		print('\nRes [mean]: '); print(list(res.mean(0)))
 		print('Res [std]: '); print(list(res.std(0)))
 
+
+import numpy as np
+
+def pairwise_geodesic_distance_3d(sources, stations, max_iter=200, tol=1e-12):
+    """
+    Computes pairwise 3D surface arc distances on WGS84 ellipsoid.
+    
+    Parameters:
+    -----------
+    sources : np.ndarray, shape (N, 3)
+        Rows of [lat, lon, elevation_m] for N sources.
+        Note: elevation_m < 0 represents depth below sea level.
+    stations : np.ndarray, shape (M, 3)
+        Rows of [lat, lon, elevation_m] for M stations.
+        
+    Returns:
+    --------
+    arc_deg_3d : np.ndarray, shape (N, M)
+        Pairwise effective 3D distance converted to arc degrees.
+    """
+    # 1. Broad Cast Inputs to Pairwise Shapes (N, M)
+    lat1 = sources[:, 0][:, np.newaxis]   # Shape (N, 1)
+    lon1 = sources[:, 1][:, np.newaxis]
+    elev1 = sources[:, 2][:, np.newaxis]  # Elevation in meters
+
+    lat2 = stations[:, 0][np.newaxis, :]  # Shape (1, M)
+    lon2 = stations[:, 1][np.newaxis, :]
+    elev2 = stations[:, 2][np.newaxis, :] # Elevation in meters
+
+    # WGS84 Ellipsoid Constants
+    a = 6378137.0                  # semi-major axis (m)
+    f = 1.0 / 298.257223563        # flattening
+    b = (1.0 - f) * a              # semi-minor axis (m)
+    r_mean = 6371008.8             # mean Earth radius (m)
+
+    phi1, phi2 = np.radians(lat1), np.radians(lat2)
+    
+    # Handle Longitude Wrap-Around [-pi, pi] across all pairs
+    dlam = np.radians(lon2 - lon1)
+    dlam = (dlam + np.pi) % (2.0 * np.pi) - np.pi
+
+    U1 = np.arctan((1.0 - f) * np.tan(phi1))
+    U2 = np.arctan((1.0 - f) * np.tan(phi2))
+    sinU1, cosU1 = np.sin(U1), np.cos(U1)
+    sinU2, cosU2 = np.sin(U2), np.cos(U2)
+
+    L = dlam
+    lambda_lon = np.copy(L)
+
+    sin_sigma = np.zeros_like(L)
+    cos_sigma = np.zeros_like(L)
+    sigma = np.zeros_like(L)
+    sin_alpha = np.zeros_like(L)
+    cos2_alpha = np.zeros_like(L)
+    cos2_sigma_m = np.zeros_like(L)
+
+    converged = np.zeros(L.shape, dtype=bool)
+
+    # 2. Pairwise Vectorized Vincenty Iteration Loop
+    for _ in range(max_iter):
+        sin_lambda = np.sin(lambda_lon)
+        cos_lambda = np.cos(lambda_lon)
+
+        sin_sigma = np.sqrt(
+            (cosU2 * sin_lambda) ** 2 +
+            (cosU1 * sinU2 - sinU1 * cosU2 * cos_lambda) ** 2
+        )
+        
+        cos_sigma = sinU1 * sinU2 + cosU1 * cosU2 * cos_lambda
+        sigma = np.arctan2(sin_sigma, cos_sigma)
+
+        sin_alpha = np.where(sin_sigma != 0, cosU1 * cosU2 * sin_lambda / sin_sigma, 0.0)
+        cos2_alpha = 1.0 - sin_alpha ** 2
+
+        cos2_sigma_m = np.where(cos2_alpha != 0, cos_sigma - 2.0 * sinU1 * sinU2 / cos2_alpha, 0.0)
+
+        C = f / 16.0 * cos2_alpha * (4.0 + f * (4.0 - 3.0 * cos2_alpha))
+        lambda_prev = lambda_lon
+        
+        lambda_lon = L + (1.0 - C) * f * sin_alpha * (
+            sigma + C * sin_sigma * (
+                cos2_sigma_m + C * cos_sigma * (-1.0 + 2.0 * cos2_sigma_m ** 2)
+            )
+        )
+
+        diff = np.abs(lambda_lon - lambda_prev)
+        converged |= (diff < tol)
+        
+        if np.all(converged):
+            break
+
+    # 3. Surface Distance Calculation (m)
+    u2 = cos2_alpha * (a ** 2 - b ** 2) / (b ** 2)
+    A = 1.0 + u2 / 16384.0 * (4096.0 + u2 * (-768.0 + u2 * (320.0 - 175.0 * u2)))
+    B = u2 / 1024.0 * (256.0 + u2 * (-128.0 + u2 * (74.0 - 47.0 * u2)))
+    
+    delta_sigma = B * sin_sigma * (
+        cos2_sigma_m + 0.25 * B * (
+            cos_sigma * (-1.0 + 2.0 * cos2_sigma_m ** 2) -
+            (B / 6.0) * cos2_sigma_m * (-3.0 + 4.0 * sin_sigma ** 2) * (-3.0 + 4.0 * cos2_sigma_m ** 2)
+        )
+    )
+
+    s_surface = b * A * (sigma - delta_sigma)  # Surface geodesic distance (meters)
+
+    # Antipodal Fallback using Haversine
+    if not np.all(converged):
+        dphi = phi2 - phi1
+        dlam_h = np.radians(lon2 - lon1)
+        a_h = np.sin(dphi / 2.0)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlam_h / 2.0)**2
+        a_h = np.clip(a_h, 0.0, 1.0)
+        c_h = 2.0 * np.arctan2(np.sqrt(a_h), np.sqrt(1.0 - a_h))
+        s_haversine = r_mean * c_h
+        s_surface = np.where(converged, s_surface, s_haversine)
+
+    # 4. Integrate 3D Hypocentral Elevation / Depth Difference
+    # Δz = station_elevation - source_elevation (handles negative depths automatically)
+    dz = elev2 - elev1  # Shape (N, M)
+    
+    # Slant distance via Law of Cosines incorporating Earth Curvature
+    r_src = r_mean + elev1
+    r_sta = r_mean + elev2
+    central_angle = s_surface / r_mean
+    
+    # Hypocentral 3D straight-line distance (meters)
+    d_3d_meters = np.sqrt(r_src**2 + r_sta**2 - 2 * r_src * r_sta * np.cos(central_angle))
+
+    # Convert 3D meters back to effective angular arc degrees
+    arc_deg_3d = np.degrees(d_3d_meters / r_mean)
+    return arc_deg_3d
+
+
+
 ### K-means scripts
 
 def kmeans_packing(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1, lr = 0.01):
