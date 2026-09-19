@@ -1200,7 +1200,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		use_magnitude_threshold = True
 		if (use_magnitude_threshold == True) and np.isfinite(src_magnitude).all() and (src_magnitude.max() > 0):
 			delta_3d_deg, surface_m = pairwise_geodesic_distance_3d(src_positions, locs)
-			max_deg_threshold = softplus_threshold_degrees(mags)[:, np.newaxis]
+			max_deg_threshold = softplus_threshold_degrees(src_magnitude)[:, np.newaxis]
 			allowed_distance_mask = (delta_3d_deg <= max_deg_threshold).reshape(-1)
 			ifind1 = np.where((ip_query1[0] < min_sigma_multiple*sigma_p.reshape(-1))*(allowed_distance_mask == 1))[0]
 			ifind2 = np.where((ip_query2[0] < min_sigma_multiple*sigma_s.reshape(-1))*(allowed_distance_mask == 1))[0]
