@@ -3124,7 +3124,7 @@ def competitive_assignment(w, sta_inds, cost, min_val = 0.02, restrict = None, f
 import numpy as np
 import scipy.sparse as sp
 from scipy.optimize import milp, LinearConstraint, Bounds
-from time import time
+# from time import time
 
 def competitive_assignment_sparse(w, sta_inds, cost, min_val=0.02, restrict=None, force_n_sources=None, verbose=False):
     if verbose:
