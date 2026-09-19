@@ -5216,8 +5216,8 @@ for batch_idx, inputs in enumerate(loader):
 
 
 		## Make plots
-		make_plot = False
-		if make_plot == True:
+		make_plot = True
+		if make_plot == True and np.mod(i, 1000) < 20:
 			fig, ax = plt.subplots(4, 1, sharex = True)
 			for j in range(2):
 				i1 = np.where(Lbls_query[i0][:,0].cpu().detach().numpy() > 0.1)[0]
@@ -5232,12 +5232,12 @@ for batch_idx, inputs in enumerate(loader):
 				ax[2*j + 1].set_ylim(X_query[i0][:,j].amin(), X_query[i0][:,j].amax())
 
 			fig.set_size_inches(10,8)
-			fig.savefig(path_to_file + 'Plots/example_sources_%d.png'%cnt_plot)
+			fig.savefig(path_to_file + 'Plots/example_sources_%d_step_%d.png'%(cnt_plot, i))
 
 			fig, ax = plt.subplots(2, 1, sharex = True, sharey = True)
 			ax[0].scatter(X_query[i0][:,3].cpu().detach().numpy(), Lbls_query[i0][:,0].cpu().detach().numpy(), c = X_query[i0][:,0].cpu().detach().numpy())
 			ax[1].scatter(X_query[i0][:,3].cpu().detach().numpy(), out[1][:,0].cpu().detach().numpy(), c = X_query[i0][:,0].cpu().detach().numpy())
-			fig.savefig(path_to_file + 'Plots/example_sources_in_time_%d.png'%cnt_plot)
+			fig.savefig(path_to_file + 'Plots/example_sources_in_time_%d_step_%d.png'%(cnt_plot, i))
 
 
 
@@ -5270,7 +5270,7 @@ for batch_idx, inputs in enumerate(loader):
 			src_plot = ftrns2(x_src_query_cart_l[i0].cpu().detach().numpy()[iarg].reshape(1,-1))
 			ax[1,0].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
 			ax[1,1].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
-			fig.savefig(path_to_file + 'Plots/example_stations_%d.png'%cnt_plot)
+			fig.savefig(path_to_file + 'Plots/example_stations_%d_step_%d.png'%(cnt_plot, i))
 
 
 
