@@ -353,6 +353,7 @@ if (use_variable_domain == False) or (1 == 1):
 
 		ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, e = 0.0, a = earth_radius, device = device) - mn_cuda).T).T
 		ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, e = 0.0, a = earth_radius, device = device)
+		ftrns1_scaled = lambda x, scale: (rbest @ (lla2ecef_scaled(x, e = 0.0, scale_depth = scale) - mn).T).T
 
 	else:
 
@@ -362,6 +363,7 @@ if (use_variable_domain == False) or (1 == 1):
 
 		ftrns1_diff = lambda x: (rbest_cuda @ (lla2ecef_diff(x, device = device) - mn_cuda).T).T
 		ftrns2_diff = lambda x: ecef2lla_diff((rbest_cuda.T @ x.T).T + mn_cuda, device = device)
+		ftrns1_scaled = lambda x, scale: (rbest @ (lla2ecef_scaled(x, scale_depth = scale) - mn).T).T
 
 
 
@@ -1191,8 +1193,18 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		tree_picks = cKDTree(P_ref[:,0:2]*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
 		ip_query1 = tree_picks.query(np.nan_to_num(trv_time_p1[:,0:2], nan = -3600.0*24.0*1.5)*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
 		ip_query2 = tree_picks.query(np.nan_to_num(trv_time_p2[:,0:2], nan = -3600.0*24.0*1.5)*np.array([1.0, 3600.0*24.0*1.5]).reshape(1,-1))
+
 		ifind1 = np.where(ip_query1[0] < min_sigma_multiple*sigma_p.reshape(-1))[0]
 		ifind2 = np.where(ip_query2[0] < min_sigma_multiple*sigma_s.reshape(-1))[0]
+		
+		use_magnitude_threshold = True
+		if (use_magnitude_threshold == True) and np.isfinite(src_magnitude).all() and (src_magnitude.max() > 0):
+			delta_3d_deg, surface_m = pairwise_geodesic_distance_3d(src_positions, locs)
+			max_deg_threshold = softplus_threshold_degrees(mags)[:, np.newaxis]
+			allowed_distance_mask = (delta_3d_deg <= max_deg_threshold).reshape(-1)
+			ifind1 = np.where((ip_query1[0] < min_sigma_multiple*sigma_p.reshape(-1))*(allowed_distance_mask == 1))[0]
+			ifind2 = np.where((ip_query2[0] < min_sigma_multiple*sigma_s.reshape(-1))*(allowed_distance_mask == 1))[0]
+		
 		
 		## Filter the retained stations based on neighbor relationships
 		## E.g., use scatter for each source, for each station, based on neighbors, and only retain those picks that > thresh proportion of neighbors
@@ -5260,6 +5272,48 @@ for batch_idx, inputs in enumerate(loader):
 			ax[1,1].scatter(src_plot[:,1], src_plot[:,0], c = 'm')
 			fig.savefig(path_to_file + 'Plots/example_stations_%d.png'%cnt_plot)
 
+
+
+			make_scatter_plot = True
+			if make_scatter_plot == True:
+				scale_depth_clustering = 0.5
+				ftrns1_use = ftrns1 if scale_depth_clustering == 1.0 else (lambda x: ftrns1_scaled(x, scale_depth_clustering))
+				fig, ax = plt.subplots(1, figsize = [12,8])
+				mp = LocalMarching(device=device)
+				thresh_detect = 0.35
+				tc_win = src_t_kernel * 1.5
+				sp_win = src_x_kernel * 1.5
+				ip1, ip2 = np.where(lp_phases[i0] == 0)[0], np.where(lp_phases[i0] == 1)[0]
+				ip11, ip21 = np.where((lp_phases[i0] == 0)*(lp_meta[i0][:,3] > 0))[0], np.where((lp_phases[i0] == 1)*(lp_meta[i0][:,3] > 0))[0]
+				iarg_sort = np.arange(len(Locs[i0]))
+
+				if len(lp_srcs[i0]) > 0:
+					trv_out = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(lp_srcs[i0]).to(device)).cpu().detach().numpy() + lp_srcs[i0][:,3].cpu().detach().numpy().reshape(-1,1,1) # .cpu().detach().numpy()
+					iarg_sort = np.argsort(trv_out[0,:,0])
+					ax.plot(trv_out[:,iarg_sort,0].T, np.arange(len(Locs[i0])), c = 'black', zorder = 1e8)
+					ax.plot(trv_out[:,iarg_sort,1].T, np.arange(len(Locs[i0])), c = 'black', zorder = 1e8)
+
+				perm_vec = (-1*np.ones(len(Locs[i0]))).astype('int')
+				perm_vec[iarg_sort] = np.arange(len(iarg_sort))
+				ax.scatter(lp_times[i0][ip1], perm_vec[lp_stations[i0][ip1]], c = 'C0')
+				ax.scatter(lp_times[i0][ip2], perm_vec[lp_stations[i0][ip2]], c = 'C1')
+				ax.scatter(lp_times[i0][ip11], perm_vec[lp_stations[i0][ip11]], c = 'b')
+				ax.scatter(lp_times[i0][ip21], perm_vec[lp_stations[i0][ip21]], c = 'r')
+
+				if out[1].amax() >= thresh_detect:
+					# Size >= 3 or low degree filter disabled -> Run Local Marching
+					ifind = torch.where(out[1][:,0] >= thresh_detect)[0]
+					sub_srcs = torch.cat((X_query[i0].to(device)[ifind,0:4], out[1][ifind,0].detach().reshape(-1,1)), dim = 1) # out[1][out[1][:,0] >= thresh_detect] # [segment_indices[comp_mask]]
+					srcs_refined = mp(sub_srcs.cpu().detach().numpy(), ftrns1_use, tc_win = tc_win, sp_win = sp_win, scale_depth = 1.0, n_steps_max = 1, use_directed = True) # Pre-scaled in ftrns1_use
+					if len(srcs_refined) > 0:
+						trv_out = trv(torch.Tensor(Locs[i0]).to(device), torch.Tensor(srcs_refined).to(device)).cpu().detach().numpy() + srcs_refined[:,3].reshape(-1,1,1) # .cpu().detach().numpy()
+						ax.plot(trv_out[:,iarg_sort,0].T, np.arange(len(Locs[i0])), c = 'b', zorder = 1e9)
+						ax.plot(trv_out[:,iarg_sort,1].T, np.arange(len(Locs[i0])), c = 'r', zorder = 1e9)
+
+				fig.savefig(path_to_file + 'Plots/example_source_detections_%d_step_%d.png'%(cnt_plot, i))
+			
+			
+			
 
 			print('Saved figures %d'%cnt_plot)
 			cnt_plot += 1
