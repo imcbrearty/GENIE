@@ -403,36 +403,106 @@ def pairwise_geodesic_distance_3d1(sources, stations, max_iter=200, tol=1e-12):
     return s_surface_m, arc_deg, d_chord_3d_m
 
 
-def pairwise_geodesic_distance_3d(sources, stations, max_iter=200, tol=1e-12):
+# def pairwise_geodesic_distance_3d(sources, stations, max_iter=200, tol=1e-12):
+#     """
+#     Computes universal 3D angular arc distance (degrees) and surface distance (meters)
+#     for a unified local, regional, and global association scheme.
+    
+#     Parameters:
+#     -----------
+#     sources : np.ndarray, shape (N, 3) -> [lat, lon, elevation_m]
+#               Note: elevation_m < 0 is depth below sea level.
+#     stations : np.ndarray, shape (M, 3) -> [lat, lon, elevation_m]
+    
+#     Returns:
+#     --------
+#     delta_3d_deg : np.ndarray, shape (N, M)
+#         Universal 3D arc distance in degrees (accounts for depth AND spherical wrap).
+#         USE THIS TO EVALUATE YOUR SOFTPLUS MAGNITUDE THRESHOLD.
+#     s_surface_m : np.ndarray, shape (N, M)
+#         WGS84 surface geodesic distance in meters (epicentral distance).
+#     """
+#     lat1, lon1, elev1 = sources[:, 0][:, np.newaxis], sources[:, 1][:, np.newaxis], sources[:, 2][:, np.newaxis]
+#     lat2, lon2, elev2 = stations[:, 0][np.newaxis, :], stations[:, 1][np.newaxis, :], stations[:, 2][np.newaxis, :]
+
+#     # WGS84 Constants
+#     a, f = 6378137.0, 1.0 / 298.257223563
+#     b = (1.0 - f) * a
+#     r_mean = 6371008.8
+
+#     phi1, phi2 = np.radians(lat1), np.radians(lat2)
+#     dlam = np.radians(lon2 - lon1)
+#     dlam = (dlam + np.pi) % (2.0 * np.pi) - np.pi  # Wrap longitude to [-pi, pi]
+
+#     U1 = np.arctan((1.0 - f) * np.tan(phi1))
+#     U2 = np.arctan((1.0 - f) * np.tan(phi2))
+#     sinU1, cosU1 = np.sin(U1), np.cos(U1)
+#     sinU2, cosU2 = np.sin(U2), np.cos(U2)
+
+#     L = dlam
+#     lambda_lon = np.copy(L)
+#     converged = np.zeros(L.shape, dtype=bool)
+
+#     # 1. Vectorized Vincenty for Ellipsoidal Surface Path
+#     for _ in range(max_iter):
+#         sin_lambda, cos_lambda = np.sin(lambda_lon), np.cos(lambda_lon)
+#         sin_sigma = np.sqrt((cosU2 * sin_lambda)**2 + (cosU1 * sinU2 - sinU1 * cosU2 * cos_lambda)**2)
+#         cos_sigma = sinU1 * sinU2 + cosU1 * cosU2 * cos_lambda
+#         sigma = np.arctan2(sin_sigma, cos_sigma)
+
+#         sin_alpha = np.where(sin_sigma != 0, cosU1 * cosU2 * sin_lambda / sin_sigma, 0.0)
+#         cos2_alpha = 1.0 - sin_alpha**2
+#         cos2_sigma_m = np.where(cos2_alpha != 0, cos_sigma - 2.0 * sinU1 * sinU2 / cos2_alpha, 0.0)
+
+#         C = f / 16.0 * cos2_alpha * (4.0 + f * (4.0 - 3.0 * cos2_alpha))
+#         lambda_prev = lambda_lon
+#         lambda_lon = L + (1.0 - C) * f * sin_alpha * (sigma + C * sin_sigma * (cos2_sigma_m + C * cos_sigma * (-1.0 + 2.0 * cos2_sigma_m**2)))
+
+#         converged |= (np.abs(lambda_lon - lambda_prev) < tol)
+#         if np.all(converged):
+#             break
+
+#     u2 = cos2_alpha * (a**2 - b**2) / (b**2)
+#     A = 1.0 + u2 / 16384.0 * (4096.0 + u2 * (-768.0 + u2 * (320.0 - 175.0 * u2)))
+#     B = u2 / 1024.0 * (256.0 + u2 * (-128.0 + u2 * (74.0 - 47.0 * u2)))
+#     delta_sigma = B * sin_sigma * (cos2_sigma_m + 0.25 * B * (cos_sigma * (-1.0 + 2.0 * cos2_sigma_m**2) - (B / 6.0) * cos2_sigma_m * (-3.0 + 4.0 * sin_sigma**2) * (-3.0 + 4.0 * cos2_sigma_m**2)))
+
+#     s_surface_m = b * A * (sigma - delta_sigma)
+
+#     # 2. Integrate Depth and Station Elevation (3D Hypocentral Chord)
+#     r_src = r_mean + elev1
+#     r_sta = r_mean + elev2
+#     central_angle = s_surface_m / r_mean
+
+#     # 3D straight line distance in meters through the interior
+#     d_chord_3d_m = np.sqrt(r_src**2 + r_sta**2 - 2 * r_src * r_sta * np.cos(central_angle))
+
+#     # 3. Convert 3D Chord back to Universal Angular Arc Degrees
+#     # Clamp ratio within [-1, 1] to prevent arcsin numerical errors
+#     ratio = np.clip(d_chord_3d_m / (2.0 * r_mean), 0.0, 1.0)
+#     delta_3d_deg = np.degrees(2.0 * np.arcsin(ratio))
+
+#     return delta_3d_deg, s_surface_m
+
+
+import numpy as np
+
+def pairwise_geodesic_distance_3d(sources, stations, max_iter=100, tol=1e-12):
     """
     Computes universal 3D angular arc distance (degrees) and surface distance (meters)
-    for a unified local, regional, and global association scheme.
-    
-    Parameters:
-    -----------
-    sources : np.ndarray, shape (N, 3) -> [lat, lon, elevation_m]
-              Note: elevation_m < 0 is depth below sea level.
-    stations : np.ndarray, shape (M, 3) -> [lat, lon, elevation_m]
-    
-    Returns:
-    --------
-    delta_3d_deg : np.ndarray, shape (N, M)
-        Universal 3D arc distance in degrees (accounts for depth AND spherical wrap).
-        USE THIS TO EVALUATE YOUR SOFTPLUS MAGNITUDE THRESHOLD.
-    s_surface_m : np.ndarray, shape (N, M)
-        WGS84 surface geodesic distance in meters (epicentral distance).
+    handling depth and global spherical wrapping.
     """
+    # Reshape for broadcasting: Sources (N, 1, 3), Stations (1, M, 3)
     lat1, lon1, elev1 = sources[:, 0][:, np.newaxis], sources[:, 1][:, np.newaxis], sources[:, 2][:, np.newaxis]
     lat2, lon2, elev2 = stations[:, 0][np.newaxis, :], stations[:, 1][np.newaxis, :], stations[:, 2][np.newaxis, :]
 
-    # WGS84 Constants
     a, f = 6378137.0, 1.0 / 298.257223563
     b = (1.0 - f) * a
     r_mean = 6371008.8
 
     phi1, phi2 = np.radians(lat1), np.radians(lat2)
     dlam = np.radians(lon2 - lon1)
-    dlam = (dlam + np.pi) % (2.0 * np.pi) - np.pi  # Wrap longitude to [-pi, pi]
+    dlam = (dlam + np.pi) % (2.0 * np.pi) - np.pi
 
     U1 = np.arctan((1.0 - f) * np.tan(phi1))
     U2 = np.arctan((1.0 - f) * np.tan(phi2))
@@ -443,7 +513,7 @@ def pairwise_geodesic_distance_3d(sources, stations, max_iter=200, tol=1e-12):
     lambda_lon = np.copy(L)
     converged = np.zeros(L.shape, dtype=bool)
 
-    # 1. Vectorized Vincenty for Ellipsoidal Surface Path
+    # 1. Vincenty Iteration
     for _ in range(max_iter):
         sin_lambda, cos_lambda = np.sin(lambda_lon), np.cos(lambda_lon)
         sin_sigma = np.sqrt((cosU2 * sin_lambda)**2 + (cosU1 * sinU2 - sinU1 * cosU2 * cos_lambda)**2)
@@ -462,33 +532,54 @@ def pairwise_geodesic_distance_3d(sources, stations, max_iter=200, tol=1e-12):
         if np.all(converged):
             break
 
-    u2 = cos2_alpha * (a**2 - b**2) / (b**2)
-    A = 1.0 + u2 / 16384.0 * (4096.0 + u2 * (-768.0 + u2 * (320.0 - 175.0 * u2)))
-    B = u2 / 1024.0 * (256.0 + u2 * (-128.0 + u2 * (74.0 - 47.0 * u2)))
-    delta_sigma = B * sin_sigma * (cos2_sigma_m + 0.25 * B * (cos_sigma * (-1.0 + 2.0 * cos2_sigma_m**2) - (B / 6.0) * cos2_sigma_m * (-3.0 + 4.0 * sin_sigma**2) * (-3.0 + 4.0 * cos2_sigma_m**2)))
+    # Fallback to Great-Circle (Haversine) if Vincenty fails to converge
+    if not np.all(converged):
+        dphi = phi2 - phi1
+        h = np.sin(dphi / 2.0)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlam / 2.0)**2
+        s_surface_m = 2.0 * r_mean * np.arcsin(np.sqrt(h))
+    else:
+        u2 = cos2_alpha * (a**2 - b**2) / (b**2)
+        A = 1.0 + u2 / 16384.0 * (4096.0 + u2 * (-768.0 + u2 * (320.0 - 175.0 * u2)))
+        B = u2 / 1024.0 * (256.0 + u2 * (-128.0 + u2 * (74.0 - 47.0 * u2)))
+        delta_sigma = B * sin_sigma * (cos2_sigma_m + 0.25 * B * (cos_sigma * (-1.0 + 2.0 * cos2_sigma_m**2) - (B / 6.0) * cos2_sigma_m * (-3.0 + 4.0 * sin_sigma**2) * (-3.0 + 4.0 * cos2_sigma_m**2)))
+        s_surface_m = b * A * (sigma - delta_sigma)
 
-    s_surface_m = b * A * (sigma - delta_sigma)
-
-    # 2. Integrate Depth and Station Elevation (3D Hypocentral Chord)
+    # 2. 3D Hypocentral Chord
     r_src = r_mean + elev1
     r_sta = r_mean + elev2
     central_angle = s_surface_m / r_mean
 
-    # 3D straight line distance in meters through the interior
-    d_chord_3d_m = np.sqrt(r_src**2 + r_sta**2 - 2 * r_src * r_sta * np.cos(central_angle))
+    d_chord_3d_m = np.sqrt(r_src**2 + r_sta**2 - 2.0 * r_src * r_sta * np.cos(central_angle))
 
-    # 3. Convert 3D Chord back to Universal Angular Arc Degrees
-    # Clamp ratio within [-1, 1] to prevent arcsin numerical errors
+    # 3. Convert to 3D Arc Degrees
     ratio = np.clip(d_chord_3d_m / (2.0 * r_mean), 0.0, 1.0)
     delta_3d_deg = np.degrees(2.0 * np.arcsin(ratio))
 
     return delta_3d_deg, s_surface_m
 
-def softplus_threshold_deg(mags, d_min=0.5, d_cap=180.0, m0=4.5, k=1.5):
+
+
+
+
+
+
+
+def softplus_threshold_deg1(mags, d_min=0.5, d_cap=180.0, m0=4.5, k=1.5):
     """Softplus distance threshold returning max allowed distance in DEGREES."""
     softplus = np.log1p(np.exp(k * (mags - m0)))
     softplus_max = np.log1p(np.exp(k * (8.0 - m0)))
     return np.minimum(d_min + (d_cap - d_min) * (softplus / softplus_max), d_cap)
+
+
+def softplus_threshold_deg(mags, d_min=1.8, d_cap=180.0, m0=3.2, k=1.0):
+
+    mags = np.asarray(mags, dtype=np.float64)
+    
+    softplus = np.log1p(np.exp(k * (mags - m0)))
+    softplus_max = np.log1p(np.exp(k * (8.0 - m0)))
+    
+    d_max = d_min + (d_cap - d_min) * (softplus / softplus_max)
+    return np.minimum(d_max, d_cap)
 
 ### K-means scripts
 
