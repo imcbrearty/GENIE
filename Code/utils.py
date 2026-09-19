@@ -571,7 +571,7 @@ def softplus_threshold_deg1(mags, d_min=0.5, d_cap=180.0, m0=4.5, k=1.5):
     return np.minimum(d_min + (d_cap - d_min) * (softplus / softplus_max), d_cap)
 
 
-def softplus_threshold_deg(mags, d_min=1.8, d_cap=180.0, m0=3.2, k=1.0):
+def softplus_threshold_degrees(mags, d_min=1.8, d_cap=180.0, m0=3.2, k=1.0):
 
     mags = np.asarray(mags, dtype=np.float64)
     
