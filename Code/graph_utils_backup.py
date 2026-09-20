@@ -11528,7 +11528,7 @@ def probe_network_sidelobes_geodetic(
 
 		if add_travel_time_noise:
 			noise_vals, _ = generate_travel_time_noise(
-				t_obs,
+				t_obs.cpu().detach().numpy(),
 				phase_input='P',
 				distribution="laplace",
 				sigma_pick=0.15,
@@ -11559,7 +11559,7 @@ def probe_network_sidelobes_geodetic(
 
 		if add_travel_time_noise:
 			noise_vals, _ = generate_travel_time_noise(
-				t_obs,
+				t_obs.cpu().detach().numpy(),
 				phase_input='P',
 				distribution="laplace",
 				sigma_pick=0.15,
