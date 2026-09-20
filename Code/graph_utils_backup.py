@@ -8358,36 +8358,65 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 
     else:
     
-      
-        k_neighbors = min(10, len(locs_use))
-        dists_k, _ = cKDTree(ftrns1_abs(locs_use)).query(ftrns1_abs(locs_use), k=k_neighbors)
+        # 1. Compute station network geometric scales
+        sta_ecef = ftrns1_abs(locs_use)
+        dists_k, _ = cKDTree(sta_ecef).query(sta_ecef, k=min(10, len(locs_use)))
+        
         w_t_sec = domain_scale.get('W_t_s', 3.0)
         
-        # Median distance to 2nd neighbor (closest station) and 10th neighbor (local sub-cluster)
+        # Local neighbor & cluster transit times
         idx_nn = 1 if dists_k.shape[1] > 1 else 0
         nn_dists_m = dists_k[:, idx_nn]
         cluster_radii_m = dists_k[:, -1]
+        
         t_interstation_median = float(np.median(nn_dists_m) / Vc)
-        min_time_range = max(min_time_range, max(1.5 * w_t_sec, 1.0 * t_interstation_median))
-
-        # t_interstation_median = float(np.median(nn_dists_m) / Vc)
         t_cluster_transit = float(np.median(cluster_radii_m) / Vc)
         
-        # 2. Compute budget-safe max time cap
+        # --- NEW: Compute Full Array Aperture Moveout ---
+        # Total distance between furthest stations in the active array
+        array_aperture_m = float(np.max(pdist(sta_ecef))) if len(locs_use) > 1 else 0.0
+        t_array_transit = array_aperture_m / Vc
+        
+        # 1. Compute physical lower floor (Desired Minimum)
+        # Includes user minimum, kernel width, inter-station transit, and array aperture floor
+        # array_moveout_floor = max(0.15 * t_array_transit, 0.75 * t_cluster_transit)
+        # array_moveout_floor = min(5.0, max(0.03 * t_array_transit, 0.5 * t_cluster_transit))
+        array_moveout_floor = max(0.3 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
+
+        desired_min_time_range = max(
+            min_time_range,           # User argument default (e.g., 3.0s)
+            1.5 * w_t_sec,            # Kernel resolution scale floor
+            1.0 * t_interstation_median,
+            array_moveout_floor       # Physical moveout floor
+        )
+
+        # 2. Compute budget-safe max time cap (Hard Upper Ceiling)
         spacing_based_cap = max(1.5 * t_cluster_transit, 3.0 * t_interstation_median)
         kernel_based_cap = 15.0 * w_t_sec
-        
         max_time_cap = max(spacing_based_cap, kernel_based_cap)
-      
-        # Absolute ceiling (e.g., 60s or domain cap) to prevent runaway graph size on extreme sparse global networks
+        
+        # Absolute hard ceiling (domain scale override, explicit argument, or global default)
         max_time_lag = 150.0 if use_global is False else 450.0
-        max_time_cap = min(max_time_cap, domain_scale.get('max_allowed_dt_s', max_time_lag if max_time_shift_range is None else max_time_shift_range))
-    
-        # 4. Flatten all detected side-lobe offsets across Monte Carlo simulations
+        hard_max_limit = domain_scale.get('max_allowed_dt_s', max_time_lag if max_time_shift_range is None else max_time_shift_range)
+        
+        # Apply hard limit to max_time_cap
+        max_time_cap = min(max_time_cap, hard_max_limit)
+
+        # 3. RESOLVE CONFLICT: Ensure min floor NEVER exceeds the hard max cap
+        # If the ceiling is lower than the desired minimum, clamp the minimum down to the ceiling.
+        effective_min_time_range = min(desired_min_time_range, max_time_cap)
+
+        # 4. Probe Monte Carlo side-lobes...
         all_dt_offsets = []
-        max_k = max(1, int(0.65 * len(locs_use)))
-        min_k = max(1, int(0.1 * len(locs_use)))
-      
+        # max_k = max(1, int(0.65 * len(locs_use)))
+        # min_k = max(1, int(0.1 * len(locs_use)))
+
+        # Cap at 30% of total network, or a hard max of ~15-20 stations
+        # max_k = max(4, min(30, int(0.35 * len(locs_use))))
+        # min_k = max(4, int(0.08 * len(locs_use)))
+        max_k = max(4, min(25, int(0.25 * len(locs_use))))
+        min_k = max(4, min(8, int(0.05 * len(locs_use))))
+
         for i in range(n_rand_srcs):
           
           if min_k >= max_k:
@@ -8396,7 +8425,8 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
               k_choice = np.random.choice(np.arange(min_k, max_k))
           
           k_stations = min(len(locs_use), max(min(8, len(locs_use)), k_choice))
-          
+          # k_stations = max(4, k_choice)
+            
           src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(
               locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
               # k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))),
@@ -8413,18 +8443,24 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
             
           if len(side_lobes) > 0:
             all_dt_offsets.extend([abs(s['dt_offset']) for s in side_lobes])
-    
-        # 5. Extract quantile and apply physical bounds
-        # target_quantile = 0.75  # Fixed quantile over aggregate distribution
-    
+        
+        # 5. Extract quantile and apply physical bounds safely
         if len(all_dt_offsets) > 0:
             raw_time_shift = float(np.quantile(all_dt_offsets, quantile_times))
         else:
             raw_time_shift = min_time_range
-    
-        time_shift_range = np.clip(raw_time_shift, min_time_range, max_time_cap)
+
+        # Clip safely now that max_time_cap >= min_time_range is guaranteed
+        # time_shift_range = np.clip(raw_time_shift, min_time_range, max_time_cap)
+        time_shift_range = np.clip(raw_time_shift, effective_min_time_range, max_time_cap)
         time_shift_range = float(np.round(time_shift_range, 2))
 
+
+        print(f"Max dt found: {np.max(all_dt_offsets):.2f} s")
+        print(f"75th percentile dt: {np.quantile(all_dt_offsets, 0.75):.2f} s")
+        print(f"90th percentile dt: {np.quantile(all_dt_offsets, 0.90):.2f} s")
+        print('Chosen time shift range: %0.4f'%time_shift_range)
+        print('Array aperture %0.4f km; %d stations'%(array_aperture_m/1000.0, len(locs_use)))
 
 
 
@@ -8575,7 +8611,77 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
       }
 
       return domain_params
+
+
       
+        # k_neighbors = min(10, len(locs_use))
+        # dists_k, _ = cKDTree(ftrns1_abs(locs_use)).query(ftrns1_abs(locs_use), k=k_neighbors)
+        # w_t_sec = domain_scale.get('W_t_s', 3.0)
+        
+        # # Median distance to 2nd neighbor (closest station) and 10th neighbor (local sub-cluster)
+        # idx_nn = 1 if dists_k.shape[1] > 1 else 0
+        # nn_dists_m = dists_k[:, idx_nn]
+        # cluster_radii_m = dists_k[:, -1]
+        # t_interstation_median = float(np.median(nn_dists_m) / Vc)
+        # min_time_range = max(min_time_range, max(1.5 * w_t_sec, 1.0 * t_interstation_median))
+
+        # # t_interstation_median = float(np.median(nn_dists_m) / Vc)
+        # t_cluster_transit = float(np.median(cluster_radii_m) / Vc)
+        
+        # # 2. Compute budget-safe max time cap
+        # spacing_based_cap = max(1.5 * t_cluster_transit, 3.0 * t_interstation_median)
+        # kernel_based_cap = 15.0 * w_t_sec
+        
+        # max_time_cap = max(spacing_based_cap, kernel_based_cap)
+      
+        # # Absolute ceiling (e.g., 60s or domain cap) to prevent runaway graph size on extreme sparse global networks
+        # max_time_lag = 150.0 if use_global is False else 450.0
+        # max_time_cap = min(max_time_cap, domain_scale.get('max_allowed_dt_s', max_time_lag if max_time_shift_range is None else max_time_shift_range))
+    
+        # # 4. Flatten all detected side-lobe offsets across Monte Carlo simulations
+        # all_dt_offsets = []
+        # max_k = max(1, int(0.65 * len(locs_use)))
+        # min_k = max(1, int(0.1 * len(locs_use)))
+      
+        # for i in range(n_rand_srcs):
+          
+        #   if min_k >= max_k:
+        #       k_choice = max_k
+        #   else:
+        #       k_choice = np.random.choice(np.arange(min_k, max_k))
+          
+        #   k_stations = min(len(locs_use), max(min(8, len(locs_use)), k_choice))
+          
+        #   src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(
+        #       locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
+        #       # k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))),
+        #       k_stations=k_stations,
+        #       vel_avg=Vc, vel_min=Vc*0.85,
+        #       scan_step_m=domain_scale['W_phys_m']/2.0, 
+        #       W_phys_m=domain_scale['W_phys_m'], 
+        #       W_t=domain_scale['W_t_s'], 
+        #       use_global=use_global, 
+        #       r_min=r_min, 
+        #       r_max=r_max, 
+        #       device=device
+        #   )
+            
+        #   if len(side_lobes) > 0:
+        #     all_dt_offsets.extend([abs(s['dt_offset']) for s in side_lobes])
+    
+        # # 5. Extract quantile and apply physical bounds
+        # # target_quantile = 0.75  # Fixed quantile over aggregate distribution
+    
+        # if len(all_dt_offsets) > 0:
+        #     raw_time_shift = float(np.quantile(all_dt_offsets, quantile_times))
+        # else:
+        #     raw_time_shift = min_time_range
+    
+        # time_shift_range = np.clip(raw_time_shift, min_time_range, max_time_cap)
+        # time_shift_range = float(np.round(time_shift_range, 2))
+
+
+
         # np.savez_compressed('Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]), scale_time = scale_time, depth_boost = depth_boost, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, use_global = use_global)
 
 
@@ -11346,7 +11452,186 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), vel_pha
 
 
 
+
 def probe_network_sidelobes_geodetic(
+    station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, 
+    ftrns1, ftrns2, k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, 
+    W_t=3.0, vel_avg=6500.0, vel_min=4875.0, r_min=None, r_max=None, 
+    use_global=False, num_candidates=50000, device='cpu'
+):
+    device = torch.device(device)
+    station_xyz = torch.tensor(ftrns1(station_latlonz), device=device, dtype=torch.float32)
+    n_total_stations = len(station_xyz)
+    
+    # 1. Generate Ground-Truth Target Source Location First
+    src_true = np.array([
+        np.random.uniform(*domain_lat_range), 
+        np.random.uniform(*domain_lon_range), 
+        np.random.uniform(*domain_depth_range)
+    ]).reshape(1, -1)
+    src_true_xyz = torch.tensor(ftrns1(src_true), device=device, dtype=torch.float32)
+
+    # 2. Probabilistically Select K Stations (Weighted heavily toward closer stations)
+    all_dists = torch.cdist(src_true_xyz, station_xyz).squeeze(0)
+    
+    if n_total_stations <= k_stations:
+        sta_idx = torch.arange(n_total_stations, device=device)
+    else:
+        # Temperature scale (tau_m) controls spatial dispersion of selected stations
+        # Median station distance gives a natural spatial scale for regional vs. local
+        tau_m = max(25000.0, 0.3 * torch.median(all_dists).item())
+        probs = torch.softmax(-all_dists / tau_m, dim=0)
+        sta_idx = torch.multinomial(probs, num_samples=k_stations, replacement=False)
+
+    active_stas_xyz = station_xyz[sta_idx]
+
+    # 3. Compute Active Sub-Array Aperture & Velocity Scaling
+    if len(active_stas_xyz) > 1:
+        active_cluster_dists = torch.cdist(active_stas_xyz, active_stas_xyz)
+        local_aperture = torch.max(active_cluster_dists).item()
+    else:
+        local_aperture = 10000.0
+
+    override_vc = True
+    if override_vc:
+        if local_aperture < 100000.0:          # < 100 km (Local)
+            vel_avg, vel_min = 6000.0, 5500.0
+        elif local_aperture < 1000000.0:      # 100 km to 1,000 km (Regional)
+            vel_avg, vel_min = 8000.0, 7200.0
+        elif local_aperture < 3000000.0:      # 1,000 km to 3,000 km (Regional-to-Teleseismic)
+            vel_avg, vel_min = 10000.0, 8500.0
+        else:                                 # > 3,000 km (Global Teleseismic)
+            vel_avg, vel_min = 13000.0, 10500.0
+            
+    d_array = 1.2 * local_aperture
+    max_radius_m = d_array / 2.0
+    max_dt = d_array / vel_min
+
+    # 4. Generate Candidate Grid
+    trial_points, _ = regular_sobolov(
+        num_candidates, lat_range=domain_lat_range, lon_range=domain_lon_range, 
+        depth_range=domain_depth_range, time_range=max_dt, use_time=True, 
+        use_global=use_global, scale_time=vel_avg, N_target=num_candidates, 
+        buffer_scale=0.0, r_min=r_min, r_max=r_max
+    )
+    trial_points = torch.tensor(trial_points, device=device, dtype=torch.float32)
+
+    cand_xyz = torch.tensor(ftrns1(trial_points[:, :3].cpu().numpy()), device=device, dtype=torch.float32)
+    cand_dt = trial_points[:, 3]
+
+    # 5. Compute Travel Times & Inject Noise
+    add_travel_time_noise = True
+    
+    if local_aperture < 300000.0:
+        t_obs = torch.norm(active_stas_xyz - src_true_xyz, dim=1) / vel_avg
+        t_calc = torch.cdist(cand_xyz, active_stas_xyz) / vel_avg
+
+        if add_travel_time_noise:
+            noise_vals, _ = generate_travel_time_noise(
+                t_obs,
+                phase_input='P',
+                distribution="laplace",
+                sigma_pick=0.15,
+                gamma_path=0.12,
+                scale_extra=1.0,
+                s_wave_multiplier=2.0,
+                excess_threshold_sigma=2.0,
+                apply_systemic_bias=False,
+                total_bias=0.03,
+                frac_bias_s_ratio=0.3,
+                origin_shift_std=0.0,
+                return_sigma=False
+            )
+            t_obs += torch.tensor(noise_vals, device=device, dtype=torch.float32)
+
+    else:
+        a, b = 6378137.0, 6356752.3142
+        sta_norm = active_stas_xyz / torch.norm(active_stas_xyz, dim=1, keepdim=True)
+        src_true_norm = src_true_xyz / torch.norm(src_true_xyz, dim=1, keepdim=True)
+        cand_norm = cand_xyz / torch.norm(cand_xyz, dim=1, keepdim=True)
+        
+        r_stas = a * b / torch.sqrt((b * sta_norm[:, 0])**2 + (b * sta_norm[:, 1])**2 + (a * sta_norm[:, 2])**2)
+        r_src_true = a * b / torch.sqrt((b * src_true_norm[:, 0])**2 + (b * src_true_norm[:, 1])**2 + (a * src_true_norm[:, 2])**2)
+        r_cand = a * b / torch.sqrt((b * cand_norm[:, 0])**2 + (b * cand_norm[:, 1])**2 + (a * cand_norm[:, 2])**2)
+        
+        cos_theta_true = torch.clamp(torch.mm(src_true_norm, sta_norm.T), -1.0, 1.0).squeeze(0)
+        t_obs = (torch.acos(cos_theta_true) * (0.5 * (r_stas + r_src_true))) / vel_avg
+
+        if add_travel_time_noise:
+            noise_vals, _ = generate_travel_time_noise(
+                t_obs,
+                phase_input='P',
+                distribution="laplace",
+                sigma_pick=0.15,
+                gamma_path=0.12,
+                scale_extra=1.0,
+                s_wave_multiplier=2.0,
+                excess_threshold_sigma=2.0,
+                apply_systemic_bias=False,
+                total_bias=0.03,
+                frac_bias_s_ratio=0.3,
+                origin_shift_std=0.0,
+                return_sigma=False
+            )
+            t_obs += torch.tensor(noise_vals, device=device, dtype=torch.float32)
+        
+        r_avg_matrix = 0.5 * (r_cand.unsqueeze(1) + r_stas.unsqueeze(0))
+        cos_theta_cand = torch.clamp(torch.mm(cand_norm, sta_norm.T), -1.0, 1.0)
+        t_calc = (torch.acos(cos_theta_cand) * r_avg_matrix) / vel_avg
+
+    t_obs_picks = torch.cat((t_obs.view(-1, 1), sta_idx.view(-1, 1)), dim=1).cpu().numpy()
+    
+    # 6. Coherence Mapping & Main Peak Gate
+    W_t_scalar = 1.0
+    rel_threshold = len(active_stas_xyz) * 0.15                                   
+    mismatch = torch.abs((t_obs.unsqueeze(0) - t_calc) - cand_dt.unsqueeze(1))
+    coherence = torch.exp(-mismatch / (W_t_scalar * W_t)).sum(dim=1)
+
+    d_space_true = torch.norm(cand_xyz - src_true_xyz, dim=1)
+    d_time_true = torch.abs(cand_dt - 0.0)
+    
+    search_radius = 1.5 * W_phys_m
+    is_inside_spatial_core = d_space_true <= search_radius
+    is_inside_temporal_core = d_time_true <= (W_t * 1.5)
+    is_main_peak = is_inside_spatial_core & is_inside_temporal_core
+    valid_mask = (~is_main_peak) & (coherence > rel_threshold)
+    
+    candidate_indices = torch.where(valid_mask)[0]
+    srcs_init = torch.cat((trial_points[candidate_indices], coherence[candidate_indices].view(-1, 1)), dim=1)
+    peaks = []
+
+    if len(srcs_init) > int(0.02 * num_candidates):
+        max_keep = min(srcs_init.shape[0], max(int(0.02 * num_candidates), 5000))
+        _, top_indices = torch.topk(srcs_init[:, 4], k=max_keep)
+        srcs_init = srcs_init[top_indices]
+
+    # 7. Peak Suppression via Local Marching
+    if len(srcs_init) > 0:
+        mp = LocalMarching(device=device)
+        srcs_maxima = mp(
+            srcs_init.cpu().detach().numpy(), ftrns1, tc_win=1.5 * W_t, sp_win=search_radius, 
+            scale_depth=0.2, n_steps_max=5, use_directed=True
+        )
+        srcs_maxima = torch.tensor(srcs_maxima, device=device, dtype=torch.float32)
+
+        if len(srcs_maxima) > 0:
+            for i in range(len(srcs_maxima)):
+                p_coord = srcs_maxima[i]
+                p_xyz = torch.tensor(ftrns1(p_coord[:3].reshape(1, -1).cpu().detach().numpy()), device=device).reshape(-1)
+                d_s_final = torch.norm(p_xyz - src_true_xyz)
+                d_t_final = torch.abs(p_coord[3] - 0.0) * vel_avg
+                
+                peaks.append({
+                    'pos': p_xyz, 'pos_src': p_coord[:3].cpu().numpy(), 'val': p_coord[4].item(),
+                    'dt_offset': p_coord[3].item(), 'dist_offset_m': d_s_final.item(),
+                    'dist_4d_m': torch.sqrt(d_s_final**2 + d_t_final**2).item()
+                })
+
+    return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
+
+
+
+def probe_network_sidelobes_geodetic_backup(
     station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, 
     ftrns1, ftrns2, k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, 
     W_t=3.0, vel_avg=6500.0, vel_min=4875.0, r_min=None, r_max=None, 
@@ -11403,10 +11688,31 @@ def probe_network_sidelobes_geodetic(
     cand_xyz = torch.tensor(ftrns1(trial_points[:, :3].cpu().numpy()), device=device, dtype=torch.float32)
     cand_dt = trial_points[:, 3]
 
+    add_travel_times_noise = True
     # 4. Compute Travel Times
     if local_aperture < 300000.0:
         t_obs = torch.norm(active_stas_xyz - src_true_xyz, dim=1) / vel_avg
         t_calc = torch.cdist(cand_xyz, active_stas_xyz) / vel_avg
+
+        if add_travel_time_noise == True:
+			t_obs += generate_travel_time_noise(
+				t_obs,
+				phase_input='P',  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+				distribution="laplace",
+				sigma_pick=0.15,
+				gamma_path=0.12,
+				scale_extra=1.0,
+				s_wave_multiplier=2.0,
+				excess_threshold_sigma=2.0,
+				# --- Systemic Velocity Model Bias Parameters ---
+				apply_systemic_bias=False,  # Set True if applying bias inside this function
+				total_bias=0.03,  # ~3% velocity perturbation range
+				frac_bias_s_ratio=0.3,
+				origin_shift_std=0.0,  # Baseline origin shift in seconds
+				return_sigma=False)[0]
+            # t_obs += noise_values
+    
+    
     else:
         a, b = 6378137.0, 6356752.3142
         sta_norm = active_stas_xyz / torch.norm(active_stas_xyz, dim=1, keepdim=True)
@@ -11419,6 +11725,24 @@ def probe_network_sidelobes_geodetic(
         
         cos_theta_true = torch.clamp(torch.mm(src_true_norm, sta_norm.T), -1.0, 1.0).squeeze(0)
         t_obs = (torch.acos(cos_theta_true) * (0.5 * (r_stas + r_src_true))) / vel_avg
+
+        if add_travel_time_noise == True:
+			t_obs += generate_travel_time_noise(
+				t_obs,
+				phase_input='P',  # String ("P"/"S") OR array of 0s (P) and 1s (S)
+				distribution="laplace",
+				sigma_pick=0.15,
+				gamma_path=0.12,
+				scale_extra=1.0,
+				s_wave_multiplier=2.0,
+				excess_threshold_sigma=2.0,
+				# --- Systemic Velocity Model Bias Parameters ---
+				apply_systemic_bias=False,  # Set True if applying bias inside this function
+				total_bias=0.03,  # ~3% velocity perturbation range
+				frac_bias_s_ratio=0.3,
+				origin_shift_std=0.0,  # Baseline origin shift in seconds
+				return_sigma=False)[0]
+            # t_obs += noise_values
         
         r_avg_matrix = 0.5 * (r_cand.unsqueeze(1) + r_stas.unsqueeze(0))
         cos_theta_cand = torch.clamp(torch.mm(cand_norm, sta_norm.T), -1.0, 1.0)
@@ -11478,7 +11802,7 @@ def probe_network_sidelobes_geodetic(
     return src_true, peaks, t_obs_picks, [max_radius_m, max_dt]
 
 
-def probe_network_sidelobes_geodetic_backup(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
+def probe_network_sidelobes_geodetic_backup1(station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, ftrns1, ftrns2,
                                      k_stations=20, vel_avg=6500.0, vel_min=4875.0,
                                      scan_step_m=1000.0, W_phys_m=1000.0, W_t=3.0, r_min = None, r_max = None, use_global = False, num_candidates = 50000, device='cpu'): # scale_time = 3500.0
     
