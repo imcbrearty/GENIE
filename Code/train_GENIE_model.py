@@ -1414,10 +1414,10 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 				phase_input=arrivals[iz,4],  # String ("P"/"S") OR array of 0s (P) and 1s (S)
 				event_idx=None,  # Optional: Array of event IDs (e.g., [0, 0, 1, 0, 2])
 				distribution="laplace",
-				sigma_pick=0.08,
-				gamma_path=0.12,
+				sigma_pick=0.15, # 0.08
+				gamma_path=0.12, # 0.12
 				scale_extra=1.0,
-				s_wave_multiplier=2.2,
+				s_wave_multiplier=2.0, # 2.2
 				excess_threshold_sigma=2.0,
 				# --- Systemic Velocity Model Bias Parameters ---
 				apply_systemic_bias=False,  # Set True if applying bias inside this function
