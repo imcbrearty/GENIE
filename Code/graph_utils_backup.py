@@ -11652,7 +11652,7 @@ def analyze_product_graph_structure(G):
     print(f"Station-Station Edges: {np.sum(is_station_edge):,} ({np.mean(is_station_edge)*100:.2f}%)")
     print(f"Cross-Layer Anchors:   {np.sum(is_cross_edge):,} ({np.mean(is_cross_edge)*100:.2f}%) \n")
     
-    stats = compute_comparative_metrics(adj_matrix)
+    # stats = compute_comparative_metrics(adj_matrix)
 
     # for k, v in stats.items():
     #     print(f"{k}: {v}")
