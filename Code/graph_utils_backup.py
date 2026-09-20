@@ -7928,7 +7928,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
         deg_padding = domain_params['deg_padding']
         time_shift_range = domain_params['time_shift_range']
         buffer_scale = domain_params['buffer_scale']
-        if 'x_grids' in z.keys():
+        if 'x_grids' in domain_params.keys():
             x_grids = domain_params['x_grids']
         else:
             x_grids = np.expand_dims(x_grid, axis = 0)
