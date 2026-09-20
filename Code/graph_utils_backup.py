@@ -8257,7 +8257,408 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
   
 
-def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 3.0, n_rand_srcs = 250, quantile_times = 0.6, quantile_times_srcs = 0.6, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
+# def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 3.0, n_rand_srcs = 250, quantile_times = 0.6, quantile_times_srcs = 0.6, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
+
+# 	# if domain is None:
+# 	#	 domain = get_domain_bounds(locs_use, scale = scale_domain)
+
+# 	if initialize is None: # else: [lat_range, lon_range, ]
+# 		domain = get_domain_bounds(locs_use, scale = scale_domain)
+# 	else:
+# 		domain = get_domain_bounds(locs_use, scale = 1.0, lat_range = initialize[0], lon_range = initialize[1])
+
+# 	if use_global == True:
+# 		domain['lat_range'] = [-90.0, 90.0]
+# 		domain['lon_range'] = [-180.0, 180.0]
+# 		deg_padding = 0.0
+
+# 	if fixed_domain is not None:
+# 		domain['lat_range'] = fixed_domain[0]
+# 		domain['lon_range'] = fixed_domain[1]
+
+	
+# 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# 	## Temporarily define this for simplicity
+# 	def trv(locs, srcs, Vs = Vc):
+
+# 		# Equivalent, faster, and cleaner
+# 		ecef_srcs = torch.tensor(lla2ecef(srcs.cpu().numpy()), device=device)
+# 		ecef_locs = torch.tensor(lla2ecef(locs.cpu().numpy()), device=device)
+# 		trv_out = torch.cdist(ecef_srcs, ecef_locs) / Vs
+		
+# 		# return torch.Tensor(np.linalg.norm(np.expand_dims(lla2ecef(srcs.cpu().detach().numpy()), axis = 1) - np.expand_dims(lla2ecef(locs.cpu().detach().numpy()), axis = 0), axis = 2, keepdims = True)/Vs).to(srcs.device)
+# 		return trv_out
+
+
+# 	# domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20, use_global = use_global, device = device)
+# 	# Pass dynamic station sampling range (or let it compute default 5% to 75% of active stations)
+# 	domain_scale = estimate_kernel_widths(
+# 		domain, 
+# 		locs_use, 
+# 		z_range=depth_range, 
+# 		Vs=Vc, 
+# 		noise_level=0.015, 
+# 		k_range=(6, min(120, len(locs_use))),  # Sample events detected by 6 to 120 stations
+# 		use_global=use_global, 
+# 		device=device
+# 	)
+
+
+# 	lat_range, lon_range = domain['lat_range'], domain['lon_range']
+
+
+# 	if np.isfinite(np.array([deg_padding])).sum() == 0:
+# 		lat_range_extend, lon_range_extend = extend_geo_range(lat_range, lon_range, domain_scale['W_phys_m'], multiplier = extend_ratio)
+# 	else:
+# 		lat_range_extend = [lat_range[0] - deg_padding, lat_range[1] + deg_padding]
+# 		lon_range_extend = [lon_range[0] - deg_padding, lon_range[1] + deg_padding]
+		
+
+# 	deg_padding = np.mean([lat_range_extend[1] - lat_range[1], lat_range[0] - lat_range_extend[0], lon_range_extend[1] - lon_range[1], lon_range[0] - lon_range_extend[0]]) if use_global == False else 0.0
+	
+
+# 	earth_radius = 6378137.0
+# 	ftrns1_abs = lambda x: lla2ecef(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((lla2ecef(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
+# 	ftrns2_abs = lambda x: ecef2lla(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((ecef2lla(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # invert ftrns1
+
+
+# 	def optimize_r_min(lat_vals, lon_mean = np.mean(lon_range), h_min = depth_range[0]):
+# 		r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
+# 		r_val = r_surface + h_min
+# 		return r_val
+
+
+# 	def optimize_r_max(lat_vals, lon_mean = np.mean(lon_range), h_max = depth_range[1]):
+# 		r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
+# 		r_val = r_surface + h_max
+# 		return -r_val
+
+
+# 	bounds = [(lat_range_extend[0], lat_range_extend[1])]
+# 	soln = differential_evolution(optimize_r_min, bounds, popsize = 50, maxiter = 1000, disp = True if verbose == True else False)
+# 	r_min = optimize_r_min(np.array([soln.x]))[0] # ; if disp == True: print('\n')
+
+# 	bounds = [(lat_range_extend[0], lat_range_extend[1])]
+# 	soln = differential_evolution(optimize_r_max, bounds, popsize = 50, maxiter = 1000, disp = True if verbose == True else False)
+# 	r_max = -1.0*optimize_r_max(np.array([soln.x]))[0] # ; if disp == True: print('\n')
+# 	assert(r_max >= r_min)
+
+
+# 	use_previous_approach = False
+# 	if use_previous_approach == True:
+# 		Dt_offsets = []
+# 		for i in range(n_rand_srcs):
+			
+# 			src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
+# 											 k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))), vel_avg=Vc, vel_min=Vc*0.75,
+# 											 scan_step_m=domain_scale['W_phys_m']/2.0, W_phys_m = domain_scale['W_phys_m'], W_t = domain_scale['W_t_s'], use_global = use_global, r_min = r_min, r_max = r_max, device=device)
+			
+# 			if len(side_lobes) > 0:
+# 				dt_sort = np.sort(np.abs(np.array([s['dt_offset'] for s in side_lobes])))
+# 				Dt_offsets.append(np.quantile(dt_sort, quantile_times))
+# 				# trv_out = trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(src_true).to(device)).cpu().detach().numpy()
+# 				# trv_out_sidelobes = np.vstack([trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(s['pos_src'].reshape(1,-1)).to(device)).cpu().detach().numpy() + s['dt_offset'] for s in side_lobes])
+	
+	
+# 		Dt_offsets = np.array(Dt_offsets)
+# 		time_shift_range = np.round(np.quantile(Dt_offsets, quantile_times_srcs), 2) # /2.0
+	
+# 		# min_time_range = 5.0  
+# 		time_shift_range = max(time_shift_range, min_time_range)
+	
+# 		if max_time_shift_range is not None:
+# 			time_shift_range = min(time_shift_range, max_time_shift_range)
+
+# 	else:
+	
+# 		# 1. Compute station network geometric scales
+# 		sta_ecef = ftrns1_abs(locs_use)
+# 		dists_k, _ = cKDTree(sta_ecef).query(sta_ecef, k=min(10, len(locs_use)))
+		
+# 		w_t_sec = domain_scale.get('W_t_s', 3.0)
+		
+# 		# Local neighbor & cluster transit times
+# 		idx_nn = 1 if dists_k.shape[1] > 1 else 0
+# 		nn_dists_m = dists_k[:, idx_nn]
+# 		cluster_radii_m = dists_k[:, -1]
+		
+# 		t_interstation_median = float(np.median(nn_dists_m) / Vc)
+# 		t_cluster_transit = float(np.median(cluster_radii_m) / Vc)
+		
+# 		# --- NEW: Compute Full Array Aperture Moveout ---
+# 		# Total distance between furthest stations in the active array
+# 		# array_aperture_m = float(np.max(pdist(sta_ecef))) if len(locs_use) > 1 else 0.0
+# 		array_aperture_m = float(np.percentile(pd(sta_ecef), 85)) if len(locs_use) > 2 else 0.0
+# 		t_array_transit = array_aperture_m / Vc
+		
+# 		# 1. Compute physical lower floor (Desired Minimum)
+# 		# Includes user minimum, kernel width, inter-station transit, and array aperture floor
+# 		# array_moveout_floor = max(0.15 * t_array_transit, 0.75 * t_cluster_transit)
+# 		# array_moveout_floor = min(5.0, max(0.03 * t_array_transit, 0.5 * t_cluster_transit))
+# 		array_moveout_floor = max(0.3 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
+
+# 		desired_min_time_range = max(
+# 			min_time_range,		   # User argument default (e.g., 3.0s)
+# 			1.5 * w_t_sec,			# Kernel resolution scale floor
+# 			1.0 * t_interstation_median,
+# 			array_moveout_floor	   # Physical moveout floor
+# 		)
+
+# 		# 2. Compute budget-safe max time cap (Hard Upper Ceiling)
+# 		spacing_based_cap = max(1.5 * t_cluster_transit, 3.0 * t_interstation_median)
+# 		kernel_based_cap = 15.0 * w_t_sec
+# 		max_time_cap = max(spacing_based_cap, kernel_based_cap)
+		
+# 		# Absolute hard ceiling (domain scale override, explicit argument, or global default)
+# 		max_time_lag = 150.0 if use_global is False else 450.0
+# 		hard_max_limit = domain_scale.get('max_allowed_dt_s', max_time_lag if max_time_shift_range is None else max_time_shift_range)
+		
+# 		# Apply hard limit to max_time_cap
+# 		max_time_cap = min(max_time_cap, hard_max_limit)
+
+# 		# 3. RESOLVE CONFLICT: Ensure min floor NEVER exceeds the hard max cap
+# 		# If the ceiling is lower than the desired minimum, clamp the minimum down to the ceiling.
+# 		effective_min_time_range = min(desired_min_time_range, max_time_cap)
+
+# 		# 1. Compute physical lower floor (Desired Minimum)
+# 		array_moveout_floor = max(0.3 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
+
+# 		desired_min_time_range = max(
+# 			min_time_range,		   # User argument default (e.g., 3.0s)
+# 			1.5 * w_t_sec,			# Kernel resolution scale floor
+# 			1.0 * t_interstation_median,
+# 			array_moveout_floor	   # Physical moveout floor
+# 		)
+
+# 		# 2. Compute budget-safe max time cap (Hard Upper Ceiling)
+# 		# --- FIX: Incorporate sampled array moveout (max_dt) into the cap ---
+# 		# Allow search to cover at least 1.2x the maximum expected transit time across the array
+# 		aperture_based_cap = 1.25 * t_array_transit
+# 		spacing_based_cap = max(1.5 * t_cluster_transit, 3.0 * t_interstation_median)
+# 		kernel_based_cap = 15.0 * w_t_sec
+		
+# 		# Cap MUST allow physical moveout across the array/active cluster
+# 		max_time_cap = max(aperture_based_cap, spacing_based_cap, kernel_based_cap)
+		
+# 		# Absolute hard ceiling (domain scale override, explicit argument, or global default)
+# 		max_time_lag = 150.0 if use_global is False else 450.0
+# 		hard_max_limit = domain_scale.get('max_allowed_dt_s', max_time_lag if max_time_shift_range is None else max_time_shift_range)
+		
+# 		# Apply hard limit to max_time_cap
+# 		max_time_cap = min(max_time_cap, hard_max_limit)
+
+# 		# 3. RESOLVE CONFLICT: Ensure min floor NEVER exceeds the hard max cap
+# 		effective_min_time_range = min(desired_min_time_range, max_time_cap)
+
+# 		# 4. Probe Monte Carlo side-lobes...
+# 		all_dt_offsets = []
+# 		# max_k = max(1, int(0.65 * len(locs_use)))
+# 		# min_k = max(1, int(0.1 * len(locs_use)))
+
+# 		# Cap at 30% of total network, or a hard max of ~15-20 stations
+# 		# max_k = max(4, min(30, int(0.35 * len(locs_use))))
+# 		# min_k = max(4, int(0.08 * len(locs_use)))
+# 		max_k = max(4, min(25, int(0.25 * len(locs_use))))
+# 		min_k = max(4, min(8, int(0.05 * len(locs_use))))
+
+# 		for i in range(n_rand_srcs):
+		
+# 			if min_k >= max_k:
+# 				k_choice = max_k
+# 			else:
+# 				k_choice = np.random.choice(np.arange(min_k, max_k))
+		
+# 			k_stations = min(len(locs_use), max(min(8, len(locs_use)), k_choice))
+# 			# k_stations = max(4, k_choice)
+			
+# 			src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(
+# 				locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
+# 				# k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))),
+# 				k_stations=k_stations,
+# 				vel_avg=Vc, vel_min=Vc*0.85,
+# 				scan_step_m=domain_scale['W_phys_m']/2.0, 
+# 				W_phys_m=domain_scale['W_phys_m'], 
+# 				W_t=domain_scale['W_t_s'], 
+# 				use_global=use_global, 
+# 				r_min=r_min, 
+# 				r_max=r_max, 
+# 				device=device
+# 			)
+			
+# 			if len(side_lobes) > 0:
+# 				all_dt_offsets.extend([abs(s['dt_offset']) for s in side_lobes])
+		
+# 		# 5. Extract quantile and apply physical bounds safely
+# 		if len(all_dt_offsets) > 0:
+# 			raw_time_shift = float(np.quantile(all_dt_offsets, quantile_times))
+# 		else:
+# 			raw_time_shift = min_time_range
+
+# 		# Clip safely now that max_time_cap >= min_time_range is guaranteed
+# 		# time_shift_range = np.clip(raw_time_shift, min_time_range, max_time_cap)
+# 		time_shift_range = np.clip(raw_time_shift, effective_min_time_range, max_time_cap)
+# 		time_shift_range = float(np.round(time_shift_range, 2))
+
+
+# 		print(f"Max dt found: {np.max(all_dt_offsets):.2f} s")
+# 		print(f"75th percentile dt: {np.quantile(all_dt_offsets, 0.75):.2f} s")
+# 		print(f"90th percentile dt: {np.quantile(all_dt_offsets, 0.90):.2f} s")
+# 		print('Chosen time shift range: %0.4f'%time_shift_range)
+# 		print('Array aperture %0.4f km; %d stations'%(array_aperture_m/1000.0, len(locs_use)))
+
+
+
+# 	scale_time_base = domain_scale['W_phys_m']/domain_scale['W_t_s']
+
+# 	final_N, final_scale_time, final_W_phys, final_W_t = fit_domain_budget_aware(domain_scale['W_phys_m'], domain_scale['W_t_s'], lat_range_extend, lon_range_extend, depth_range, time_shift_range, 
+# 							 N_max = max_nodes, depth_boost=1.0, use_global=use_global)
+
+
+# 	## Run the auto tuning strategy to refine some scale parameters
+# 	if use_tuner == True:
+# 		m = SamplingTuner(final_N, lat_range_extend, lon_range_extend, depth_range, time_shift_range, scale_time_effective = final_scale_time, use_global = use_global, r_min = r_min, r_max = r_max)
+# 		params = m.optimize(n_calls = n_tuner_steps)
+# 		scale_time, depth_boost, buffer_scale = params['scale_t'], params['depth_boost'], params['buffer_scale']
+# 		# final_N, time_shift_range  = params['N_nodes'], params['time_range']
+
+# 	else:
+# 		depth_boost = 2.0
+# 		buffer_scale = 2.0
+# 		scale_time = final_scale_time
+
+
+# 	# 2. Final Metric Pass (Ground Truth)
+# 	metrics = compute_warped_expected_spacing(
+# 		final_N, 
+# 		lat_range=lat_range_extend, 
+# 		lon_range=lon_range_extend,
+# 		depth_range=depth_range, 
+# 		time_range=time_shift_range,
+# 		# scale_time=final_scale_time, 
+# 		scale_time=scale_time, 
+# 		# depth_boost=1.0, 
+# 		depth_boost=depth_boost, 
+# 		use_global=use_global,
+# 		r_min = r_min,
+# 		r_max = r_max
+# 	)
+
+# 	# Unpack using your exact variable names
+# 	Volume, Volume_space, Area, nominal_spacing, nominal_spacing_space, nominal_spacing_time = metrics
+# 	if initialize is None: n_grids = 1
+
+
+# 	use_time_shift = True
+# 	use_station_density = False
+# 	number_of_spatial_nodes = final_N
+# 	print('Beginning FPS sampling')
+# 	up_sample_factor = 10 if use_time_shift == False else 20 ## Could reduce to just 10 most likely
+# 	if use_station_density == True: up_sample_factor = up_sample_factor*5
+# 	number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
+
+
+# 	## Create grid:
+# 	x_grids_l = []
+# 	for n_grid in range(n_grids):
+
+# 		trial_points, mask_points = regular_sobolov(number_candidate_nodes, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = number_of_spatial_nodes, buffer_scale = buffer_scale, r_min = r_min, r_max = r_max) # lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0
+# 		x_grid = farthest_point_sampling(trial_points, number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_boost, mask_candidates = mask_points)
+# 		x_grid_cart = ftrns1(x_grid)
+# 		x_grid_proj = np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)
+# 		x_grids_l.append(np.expand_dims(x_grid, axis = 0))
+		
+# 		# x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = mask_points)
+
+# 		tol_frac = 0.01
+# 		assert(x_grid[:,0].min() >= (lat_range_extend[0] - tol_frac*np.diff(lat_range_extend)))
+# 		assert(x_grid[:,0].max() <= (lat_range_extend[1] + tol_frac*np.diff(lat_range_extend)))
+# 		assert(x_grid[:,1].min() >= (lon_range_extend[0] - tol_frac*np.diff(lon_range_extend))) if use_global == False else 1
+# 		assert(x_grid[:,1].max() <= (lon_range_extend[1] + tol_frac*np.diff(lon_range_extend))) if use_global == False else 1
+# 		assert(x_grid[:,2].min() >= (depth_range[0] - tol_frac*np.diff(depth_range)))
+# 		assert(x_grid[:,2].max() <= (depth_range[1] + tol_frac*np.diff(depth_range)))
+# 		assert(len(x_grid) == number_of_spatial_nodes)
+
+# 		if (verbose == True)*(n_grid == 0):
+# 			compute_final_grid_health(x_grid, scale_time, depth_boost, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
+# 			perform_ks_density_test(x_grid, lat_range_extend)
+# 			perform_ks_depth_test_ellipsoid(x_grid, depth_range, ftrns1_abs)
+# 			# compute_final_grid_health(x_grid, scale_time, depth_boost, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
+
+# 		k_edges = k_spc_edges # 18 ## An effective edge number in 4D
+# 		edges = np.ascontiguousarray(np.flip(sort_edge_index(remove_self_loops(knn(torch.Tensor(np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)), torch.Tensor(np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)), k = k_edges + 1))[0].flip(0)).contiguous().cpu().detach().numpy(), axis = 0))
+
+# 		dist_arg = np.argmin(np.linalg.norm(x_grid_proj[edges[0]] - x_grid_proj[edges[1]], axis = 1).reshape(-1, k_edges), axis = 1) + k_edges*np.arange(len(x_grid))
+# 		mean_nearest_neighbor = np.linalg.norm(x_grid_cart[edges[1][dist_arg]] - x_grid_cart[edges[0][dist_arg]], axis = 1).mean() # scatter(torch.Tensor(np.linalg.norm(x_grid_cart[edges[0]] - x_grid_cart[edges[1]], axis = 1)).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
+# 		mean_nearest_neighbor_t = np.abs(x_grid[edges[1][dist_arg],3] - x_grid[edges[0][dist_arg],3]).mean() # scatter(torch.Tensor(np.abs(x_grid[edges[0],3] - x_grid[edges[1],3])).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
+# 		# mean_nearest_neighbor = scatter(torch.Tensor(np.linalg.norm(x_grid_cart[edges[0]] - x_grid_cart[edges[1]], axis = 1)).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
+# 		# mean_nearest_neighbor_t = scatter(torch.Tensor(np.abs(x_grid[edges[0],3] - x_grid[edges[1],3])).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
+
+# 		final_W_phys = mean_nearest_neighbor
+# 		final_W_t = mean_nearest_neighbor_t
+
+# 		# The 4D Geometric Slack
+# 		dt_geometric = np.sqrt((final_W_t/2)**2 + (final_W_phys/(2*Vc))**2)
+# 		sigma_input = 1.0 * dt_geometric
+
+# 		source_label_width = final_W_phys*1.2
+# 		source_label_width_t = final_W_t*1.2
+
+# 		association_label_width = final_W_phys*1.2
+# 		association_label_width_t = final_W_t*1.5
+
+# 		if (verbose == True)*(n_grid == 0):
+# 			print('Num nodes: %d'%final_N)
+# 			print('scale_time: %0.4f'%scale_time)
+# 			print('Time shift range: %0.2f'%time_shift_range)
+# 			print('Degree padding: %0.2f'%deg_padding)
+# 			print('Spatial spacing: %0.4f'%final_W_phys)
+# 			print('Temporal spacing: %0.4f'%final_W_t)
+# 			# print('Input kernel: %0.4f'%sigma_input)
+
+# 			print('\nLabels widths:')
+# 			print('Source label width (space): %0.4f'%source_label_width)
+# 			print('Source label width (time): %0.4f'%source_label_width_t)
+# 			print('Association label width (space): %0.4f'%association_label_width)
+# 			print('Association label width (time): %0.4f'%association_label_width_t)
+# 			print('Input kernel: %0.4f'%sigma_input)
+# 			# print('Input kernel: %0.4f'%sigma_input)
+
+# 	if initialize is not None:
+# 		x_grids = np.vstack(x_grids_l)
+# 		os.makedirs('Grids', exist_ok = True)
+# 		np.savez_compressed('Grids/grid_parameters_ver_1.npz', scale_time = scale_time, depth_boost = depth_boost, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, x_grids = x_grids, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, use_global = use_global)
+# 		return True
+
+# 	else: ## Could add multiple grids even for non-initialize case, for averaging
+
+# 		os.makedirs('Domains', exist_ok = True)
+# 		domain_params = domain_params = {
+# 			'scale_time': scale_time,
+# 			'depth_boost': depth_boost,
+# 			'locs_use': locs_use,
+# 			'stas_use': stas_use,
+# 			'x_grid': x_grid,
+# 			'lat_range': lat_range,
+# 			'lon_range': lon_range,
+# 			'lat_range_extend': lat_range_extend,
+# 			'lon_range_extend': lon_range_extend,
+# 			'depth_range': depth_range,
+# 			'deg_padding': deg_padding,
+# 			'time_shift_range': time_shift_range,
+# 			'buffer_scale': buffer_scale,
+# 			'source_label_width': source_label_width,
+# 			'source_label_width_t': source_label_width_t,
+# 			'association_label_width': association_label_width,
+# 			'association_label_width_t': association_label_width_t,
+# 			'sigma_input': sigma_input,
+# 			'use_global': use_global,
+# 		}
+
+# 		return domain_params
+
+
+
+def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 3.0, n_rand_srcs = 250, quantile_times = 0.75, quantile_times_srcs = 0.75, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
 	# if domain is None:
 	#	 domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -8395,7 +8796,11 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		# Includes user minimum, kernel width, inter-station transit, and array aperture floor
 		# array_moveout_floor = max(0.15 * t_array_transit, 0.75 * t_cluster_transit)
 		# array_moveout_floor = min(5.0, max(0.03 * t_array_transit, 0.5 * t_cluster_transit))
-		array_moveout_floor = max(0.3 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
+		# Guarantees the range never drops below 35% of maximum array moveout
+		# array_moveout_floor = max(0.35 * t_array_transit, 0.5 * t_cluster_transit)
+
+		array_moveout_floor = max(0.35 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
+
 
 		desired_min_time_range = max(
 			min_time_range,		   # User argument default (e.g., 3.0s)
@@ -8452,24 +8857,22 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 
 		# 4. Probe Monte Carlo side-lobes...
 		all_dt_offsets = []
-		# max_k = max(1, int(0.65 * len(locs_use)))
-		# min_k = max(1, int(0.1 * len(locs_use)))
 
-		# Cap at 30% of total network, or a hard max of ~15-20 stations
-		# max_k = max(4, min(30, int(0.35 * len(locs_use))))
-		# min_k = max(4, int(0.08 * len(locs_use)))
-		max_k = max(4, min(25, int(0.25 * len(locs_use))))
-		min_k = max(4, min(8, int(0.05 * len(locs_use))))
+		# Minimum: At least 6 stations, or 10% of network
+		min_k = max(6, int(0.10 * len(locs_use)))
+
+
+		# Maximum: Up to 60% of network, but capped at 120 stations for computational efficiency
+		max_k = max(12, min(200, int(0.60 * len(locs_use))))
+
+
+		if min_k >= max_k:
+		    min_k = max(1, max_k - 1)
+
 
 		for i in range(n_rand_srcs):
 		
-			if min_k >= max_k:
-				k_choice = max_k
-			else:
-				k_choice = np.random.choice(np.arange(min_k, max_k))
-		
-			k_stations = min(len(locs_use), max(min(8, len(locs_use)), k_choice))
-			# k_stations = max(4, k_choice)
+			k_stations = int(np.random.randint(min_k, max_k + 1))
 			
 			src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(
 				locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
@@ -8657,290 +9060,292 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		return domain_params
 
 
-def fit_spatial_domain_backup(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 5.0, n_rand_srcs = 250, quantile_times = 0.4, quantile_times_srcs = 0.4, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
-	# if domain is None:
-	#	 domain = get_domain_bounds(locs_use, scale = scale_domain)
 
-	if initialize is None: # else: [lat_range, lon_range, ]
-		domain = get_domain_bounds(locs_use, scale = scale_domain)
-	else:
-		domain = get_domain_bounds(locs_use, scale = 1.0, lat_range = initialize[0], lon_range = initialize[1])
+# def fit_spatial_domain_backup(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 5.0, n_rand_srcs = 250, quantile_times = 0.4, quantile_times_srcs = 0.4, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
-	if use_global == True:
-		domain['lat_range'] = [-90.0, 90.0]
-		domain['lon_range'] = [-180.0, 180.0]
-		deg_padding = 0.0
+# 	# if domain is None:
+# 	#	 domain = get_domain_bounds(locs_use, scale = scale_domain)
 
-	if fixed_domain is not None:
-		domain['lat_range'] = fixed_domain[0]
-		domain['lon_range'] = fixed_domain[1]
+# 	if initialize is None: # else: [lat_range, lon_range, ]
+# 		domain = get_domain_bounds(locs_use, scale = scale_domain)
+# 	else:
+# 		domain = get_domain_bounds(locs_use, scale = 1.0, lat_range = initialize[0], lon_range = initialize[1])
+
+# 	if use_global == True:
+# 		domain['lat_range'] = [-90.0, 90.0]
+# 		domain['lon_range'] = [-180.0, 180.0]
+# 		deg_padding = 0.0
+
+# 	if fixed_domain is not None:
+# 		domain['lat_range'] = fixed_domain[0]
+# 		domain['lon_range'] = fixed_domain[1]
 
 	
-	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	## Temporarily define this for simplicity
-	def trv(locs, srcs, Vs = Vc):
+# 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# 	## Temporarily define this for simplicity
+# 	def trv(locs, srcs, Vs = Vc):
 
-		# Equivalent, faster, and cleaner
-		ecef_srcs = torch.tensor(lla2ecef(srcs.cpu().numpy()), device=device)
-		ecef_locs = torch.tensor(lla2ecef(locs.cpu().numpy()), device=device)
-		trv_out = torch.cdist(ecef_srcs, ecef_locs) / Vs
+# 		# Equivalent, faster, and cleaner
+# 		ecef_srcs = torch.tensor(lla2ecef(srcs.cpu().numpy()), device=device)
+# 		ecef_locs = torch.tensor(lla2ecef(locs.cpu().numpy()), device=device)
+# 		trv_out = torch.cdist(ecef_srcs, ecef_locs) / Vs
 		
-		# return torch.Tensor(np.linalg.norm(np.expand_dims(lla2ecef(srcs.cpu().detach().numpy()), axis = 1) - np.expand_dims(lla2ecef(locs.cpu().detach().numpy()), axis = 0), axis = 2, keepdims = True)/Vs).to(srcs.device)
-		return trv_out
+# 		# return torch.Tensor(np.linalg.norm(np.expand_dims(lla2ecef(srcs.cpu().detach().numpy()), axis = 1) - np.expand_dims(lla2ecef(locs.cpu().detach().numpy()), axis = 0), axis = 2, keepdims = True)/Vs).to(srcs.device)
+# 		return trv_out
 
 
-	domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20, use_global = use_global, device = device)
-	lat_range, lon_range = domain['lat_range'], domain['lon_range']
+# 	domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20, use_global = use_global, device = device)
+# 	lat_range, lon_range = domain['lat_range'], domain['lon_range']
 
 
-	if np.isfinite(np.array([deg_padding])).sum() == 0:
-		lat_range_extend, lon_range_extend = extend_geo_range(lat_range, lon_range, domain_scale['W_phys_m'], multiplier = extend_ratio)
-	else:
-		lat_range_extend = [lat_range[0] - deg_padding, lat_range[1] + deg_padding]
-		lon_range_extend = [lon_range[0] - deg_padding, lon_range[1] + deg_padding]
+# 	if np.isfinite(np.array([deg_padding])).sum() == 0:
+# 		lat_range_extend, lon_range_extend = extend_geo_range(lat_range, lon_range, domain_scale['W_phys_m'], multiplier = extend_ratio)
+# 	else:
+# 		lat_range_extend = [lat_range[0] - deg_padding, lat_range[1] + deg_padding]
+# 		lon_range_extend = [lon_range[0] - deg_padding, lon_range[1] + deg_padding]
 		
 
-	deg_padding = np.mean([lat_range_extend[1] - lat_range[1], lat_range[0] - lat_range_extend[0], lon_range_extend[1] - lon_range[1], lon_range[0] - lon_range_extend[0]]) if use_global == False else 0.0
+# 	deg_padding = np.mean([lat_range_extend[1] - lat_range[1], lat_range[0] - lat_range_extend[0], lon_range_extend[1] - lon_range[1], lon_range[0] - lon_range_extend[0]]) if use_global == False else 0.0
 	
 
-	earth_radius = 6378137.0
-	ftrns1_abs = lambda x: lla2ecef(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((lla2ecef(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
-	ftrns2_abs = lambda x: ecef2lla(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((ecef2lla(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # invert ftrns1
+# 	earth_radius = 6378137.0
+# 	ftrns1_abs = lambda x: lla2ecef(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((lla2ecef(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
+# 	ftrns2_abs = lambda x: ecef2lla(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((ecef2lla(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # invert ftrns1
 
 
-	def optimize_r_min(lat_vals, lon_mean = np.mean(lon_range), h_min = depth_range[0]):
-		r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
-		r_val = r_surface + h_min
-		return r_val
+# 	def optimize_r_min(lat_vals, lon_mean = np.mean(lon_range), h_min = depth_range[0]):
+# 		r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
+# 		r_val = r_surface + h_min
+# 		return r_val
 
 
-	def optimize_r_max(lat_vals, lon_mean = np.mean(lon_range), h_max = depth_range[1]):
-		r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
-		r_val = r_surface + h_max
-		return -r_val
+# 	def optimize_r_max(lat_vals, lon_mean = np.mean(lon_range), h_max = depth_range[1]):
+# 		r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
+# 		r_val = r_surface + h_max
+# 		return -r_val
 
 
-	bounds = [(lat_range_extend[0], lat_range_extend[1])]
-	soln = differential_evolution(optimize_r_min, bounds, popsize = 50, maxiter = 1000, disp = True if verbose == True else False)
-	r_min = optimize_r_min(np.array([soln.x]))[0] # ; if disp == True: print('\n')
+# 	bounds = [(lat_range_extend[0], lat_range_extend[1])]
+# 	soln = differential_evolution(optimize_r_min, bounds, popsize = 50, maxiter = 1000, disp = True if verbose == True else False)
+# 	r_min = optimize_r_min(np.array([soln.x]))[0] # ; if disp == True: print('\n')
 
-	bounds = [(lat_range_extend[0], lat_range_extend[1])]
-	soln = differential_evolution(optimize_r_max, bounds, popsize = 50, maxiter = 1000, disp = True if verbose == True else False)
-	r_max = -1.0*optimize_r_max(np.array([soln.x]))[0] # ; if disp == True: print('\n')
-	assert(r_max >= r_min)
+# 	bounds = [(lat_range_extend[0], lat_range_extend[1])]
+# 	soln = differential_evolution(optimize_r_max, bounds, popsize = 50, maxiter = 1000, disp = True if verbose == True else False)
+# 	r_max = -1.0*optimize_r_max(np.array([soln.x]))[0] # ; if disp == True: print('\n')
+# 	assert(r_max >= r_min)
 
 
-	use_previous_approach = False
-	if use_previous_approach == True:
-		Dt_offsets = []
-		for i in range(n_rand_srcs):
+# 	use_previous_approach = False
+# 	if use_previous_approach == True:
+# 		Dt_offsets = []
+# 		for i in range(n_rand_srcs):
 			
-			src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
-											 k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))), vel_avg=Vc, vel_min=Vc*0.75,
-											 scan_step_m=domain_scale['W_phys_m']/2.0, W_phys_m = domain_scale['W_phys_m'], W_t = domain_scale['W_t_s'], use_global = use_global, r_min = r_min, r_max = r_max, device=device)
+# 			src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
+# 											 k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))), vel_avg=Vc, vel_min=Vc*0.75,
+# 											 scan_step_m=domain_scale['W_phys_m']/2.0, W_phys_m = domain_scale['W_phys_m'], W_t = domain_scale['W_t_s'], use_global = use_global, r_min = r_min, r_max = r_max, device=device)
 			
-			if len(side_lobes) > 0:
-				dt_sort = np.sort(np.abs(np.array([s['dt_offset'] for s in side_lobes])))
-				Dt_offsets.append(np.quantile(dt_sort, quantile_times))
-				# trv_out = trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(src_true).to(device)).cpu().detach().numpy()
-				# trv_out_sidelobes = np.vstack([trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(s['pos_src'].reshape(1,-1)).to(device)).cpu().detach().numpy() + s['dt_offset'] for s in side_lobes])
+# 			if len(side_lobes) > 0:
+# 				dt_sort = np.sort(np.abs(np.array([s['dt_offset'] for s in side_lobes])))
+# 				Dt_offsets.append(np.quantile(dt_sort, quantile_times))
+# 				# trv_out = trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(src_true).to(device)).cpu().detach().numpy()
+# 				# trv_out_sidelobes = np.vstack([trv(torch.Tensor(locs_use[t_obs_picks[:,1].astype('int')]).to(device), torch.Tensor(s['pos_src'].reshape(1,-1)).to(device)).cpu().detach().numpy() + s['dt_offset'] for s in side_lobes])
 	
 	
-		Dt_offsets = np.array(Dt_offsets)
-		time_shift_range = np.round(np.quantile(Dt_offsets, quantile_times_srcs), 2) # /2.0
+# 		Dt_offsets = np.array(Dt_offsets)
+# 		time_shift_range = np.round(np.quantile(Dt_offsets, quantile_times_srcs), 2) # /2.0
 	
-		# min_time_range = 5.0  
-		time_shift_range = max(time_shift_range, min_time_range)
+# 		# min_time_range = 5.0  
+# 		time_shift_range = max(time_shift_range, min_time_range)
 	
-		if max_time_shift_range is not None:
-			time_shift_range = min(time_shift_range, max_time_shift_range)
+# 		if max_time_shift_range is not None:
+# 			time_shift_range = min(time_shift_range, max_time_shift_range)
 
-	else:
+# 	else:
 	
-		# 1. Compute inter-station distances (nearest neighbor and local cluster density)
-		nn_dists_m = cKDTree(ftrns1_abs(locs_use)).query(ftrns1_abs(locs_use), k = 2)[0][:,1]
-		# np.fill_diagonal(sta_dists, np.inf)
-		# nn_dists_m = np.min(sta_dists, axis=1)  # Distance to nearest neighbor for each station
-		# Typical inter-station travel time across adjacent stations
-		t_interstation_median = float(np.median(nn_dists_m) / Vc)
-		t_interstation_max = float(np.percentile(nn_dists_m, 90) / Vc)
+# 		# 1. Compute inter-station distances (nearest neighbor and local cluster density)
+# 		nn_dists_m = cKDTree(ftrns1_abs(locs_use)).query(ftrns1_abs(locs_use), k = 2)[0][:,1]
+# 		# np.fill_diagonal(sta_dists, np.inf)
+# 		# nn_dists_m = np.min(sta_dists, axis=1)  # Distance to nearest neighbor for each station
+# 		# Typical inter-station travel time across adjacent stations
+# 		t_interstation_median = float(np.median(nn_dists_m) / Vc)
+# 		t_interstation_max = float(np.percentile(nn_dists_m, 90) / Vc)
 	
-		# 2. Kernel baseline limits (Model's spatio-temporal scope)
-		w_t_sec = domain_scale.get('W_t_s', 3.0)
+# 		# 2. Kernel baseline limits (Model's spatio-temporal scope)
+# 		w_t_sec = domain_scale.get('W_t_s', 3.0)
 		
-		# Minimum window floor: at least 1 inter-station hop or 1.5x kernel scale
-		min_time_range = max(min_time_range, max(1.5 * w_t_sec, 1.0 * t_interstation_median))
+# 		# Minimum window floor: at least 1 inter-station hop or 1.5x kernel scale
+# 		min_time_range = max(min_time_range, max(1.5 * w_t_sec, 1.0 * t_interstation_median))
 	
-		# 3. Maximum Cap:
-		# Use max() so ultra-dense networks (like DAS with ~0.01s station transit) 
-		# don't collapse max_time_cap below the kernel prediction window.
-		spacing_based_cap = 3.0 * t_interstation_max
-		kernel_based_cap = 10.0 * w_t_sec
+# 		# 3. Maximum Cap:
+# 		# Use max() so ultra-dense networks (like DAS with ~0.01s station transit) 
+# 		# don't collapse max_time_cap below the kernel prediction window.
+# 		spacing_based_cap = 3.0 * t_interstation_max
+# 		kernel_based_cap = 10.0 * w_t_sec
 		
-		# Taking max ensures dense arrays still retain a kernel-sized prediction window
-		max_time_cap = max(spacing_based_cap, kernel_based_cap)
+# 		# Taking max ensures dense arrays still retain a kernel-sized prediction window
+# 		max_time_cap = max(spacing_based_cap, kernel_based_cap)
 		
-		# Absolute ceiling (e.g., 60s or domain cap) to prevent runaway graph size on extreme sparse global networks
-		max_time_cap = min(max_time_cap, domain_scale.get('max_allowed_dt_s', 120.0 if max_time_shift_range is None else max_time_shift_range))
+# 		# Absolute ceiling (e.g., 60s or domain cap) to prevent runaway graph size on extreme sparse global networks
+# 		max_time_cap = min(max_time_cap, domain_scale.get('max_allowed_dt_s', 120.0 if max_time_shift_range is None else max_time_shift_range))
 	
-		# 4. Flatten all detected side-lobe offsets across Monte Carlo simulations
-		all_dt_offsets = []
-		for i in range(n_rand_srcs):
-			src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(
-				locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
-				k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))),
-				vel_avg=Vc, vel_min=Vc*0.85,
-				scan_step_m=domain_scale['W_phys_m']/2.0, 
-				W_phys_m=domain_scale['W_phys_m'], 
-				W_t=domain_scale['W_t_s'], 
-				use_global=use_global, 
-				r_min=r_min, 
-				r_max=r_max, 
-				device=device
-			)
+# 		# 4. Flatten all detected side-lobe offsets across Monte Carlo simulations
+# 		all_dt_offsets = []
+# 		for i in range(n_rand_srcs):
+# 			src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(
+# 				locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
+# 				k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))),
+# 				vel_avg=Vc, vel_min=Vc*0.85,
+# 				scan_step_m=domain_scale['W_phys_m']/2.0, 
+# 				W_phys_m=domain_scale['W_phys_m'], 
+# 				W_t=domain_scale['W_t_s'], 
+# 				use_global=use_global, 
+# 				r_min=r_min, 
+# 				r_max=r_max, 
+# 				device=device
+# 			)
 			
-			if len(side_lobes) > 0:
-				all_dt_offsets.extend([abs(s['dt_offset']) for s in side_lobes])
+# 			if len(side_lobes) > 0:
+# 				all_dt_offsets.extend([abs(s['dt_offset']) for s in side_lobes])
 	
-		# 5. Extract quantile and apply physical bounds
-		# target_quantile = 0.75  # Fixed quantile over aggregate distribution
+# 		# 5. Extract quantile and apply physical bounds
+# 		# target_quantile = 0.75  # Fixed quantile over aggregate distribution
 	
-		if len(all_dt_offsets) > 0:
-			raw_time_shift = float(np.quantile(all_dt_offsets, quantile_times))
-		else:
-			raw_time_shift = min_time_range
+# 		if len(all_dt_offsets) > 0:
+# 			raw_time_shift = float(np.quantile(all_dt_offsets, quantile_times))
+# 		else:
+# 			raw_time_shift = min_time_range
 	
-		time_shift_range = np.clip(raw_time_shift, min_time_range, max_time_cap)
-		time_shift_range = float(np.round(time_shift_range, 2))
+# 		time_shift_range = np.clip(raw_time_shift, min_time_range, max_time_cap)
+# 		time_shift_range = float(np.round(time_shift_range, 2))
 
 
 
 
 
-	scale_time_base = domain_scale['W_phys_m']/domain_scale['W_t_s']
+# 	scale_time_base = domain_scale['W_phys_m']/domain_scale['W_t_s']
 
-	final_N, final_scale_time, final_W_phys, final_W_t = fit_domain_budget_aware(domain_scale['W_phys_m'], domain_scale['W_t_s'], lat_range_extend, lon_range_extend, depth_range, time_shift_range, 
-							 N_max = max_nodes, depth_boost=1.0, use_global=use_global)
-
-
-	## Run the auto tuning strategy to refine some scale parameters
-	if use_tuner == True:
-		m = SamplingTuner(final_N, lat_range_extend, lon_range_extend, depth_range, time_shift_range, scale_time_effective = final_scale_time, use_global = use_global, r_min = r_min, r_max = r_max)
-		params = m.optimize(n_calls = n_tuner_steps)
-		scale_time, depth_boost, buffer_scale = params['scale_t'], params['depth_boost'], params['buffer_scale']
-		# final_N, time_shift_range  = params['N_nodes'], params['time_range']
-
-	else:
-		depth_boost = 2.0
-		buffer_scale = 2.0
-		scale_time = final_scale_time
+# 	final_N, final_scale_time, final_W_phys, final_W_t = fit_domain_budget_aware(domain_scale['W_phys_m'], domain_scale['W_t_s'], lat_range_extend, lon_range_extend, depth_range, time_shift_range, 
+# 							 N_max = max_nodes, depth_boost=1.0, use_global=use_global)
 
 
-	# 2. Final Metric Pass (Ground Truth)
-	metrics = compute_warped_expected_spacing(
-		final_N, 
-		lat_range=lat_range_extend, 
-		lon_range=lon_range_extend,
-		depth_range=depth_range, 
-		time_range=time_shift_range,
-		# scale_time=final_scale_time, 
-		scale_time=scale_time, 
-		# depth_boost=1.0, 
-		depth_boost=depth_boost, 
-		use_global=use_global,
-		r_min = r_min,
-		r_max = r_max
-	)
+# 	## Run the auto tuning strategy to refine some scale parameters
+# 	if use_tuner == True:
+# 		m = SamplingTuner(final_N, lat_range_extend, lon_range_extend, depth_range, time_shift_range, scale_time_effective = final_scale_time, use_global = use_global, r_min = r_min, r_max = r_max)
+# 		params = m.optimize(n_calls = n_tuner_steps)
+# 		scale_time, depth_boost, buffer_scale = params['scale_t'], params['depth_boost'], params['buffer_scale']
+# 		# final_N, time_shift_range  = params['N_nodes'], params['time_range']
 
-	# Unpack using your exact variable names
-	Volume, Volume_space, Area, nominal_spacing, nominal_spacing_space, nominal_spacing_time = metrics
-	if initialize is None: n_grids = 1
+# 	else:
+# 		depth_boost = 2.0
+# 		buffer_scale = 2.0
+# 		scale_time = final_scale_time
 
 
-	use_time_shift = True
-	use_station_density = False
-	number_of_spatial_nodes = final_N
-	print('Beginning FPS sampling')
-	up_sample_factor = 10 if use_time_shift == False else 20 ## Could reduce to just 10 most likely
-	if use_station_density == True: up_sample_factor = up_sample_factor*5
-	number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
+# 	# 2. Final Metric Pass (Ground Truth)
+# 	metrics = compute_warped_expected_spacing(
+# 		final_N, 
+# 		lat_range=lat_range_extend, 
+# 		lon_range=lon_range_extend,
+# 		depth_range=depth_range, 
+# 		time_range=time_shift_range,
+# 		# scale_time=final_scale_time, 
+# 		scale_time=scale_time, 
+# 		# depth_boost=1.0, 
+# 		depth_boost=depth_boost, 
+# 		use_global=use_global,
+# 		r_min = r_min,
+# 		r_max = r_max
+# 	)
+
+# 	# Unpack using your exact variable names
+# 	Volume, Volume_space, Area, nominal_spacing, nominal_spacing_space, nominal_spacing_time = metrics
+# 	if initialize is None: n_grids = 1
 
 
-	## Create grid:
-	x_grids_l = []
-	for n_grid in range(n_grids):
+# 	use_time_shift = True
+# 	use_station_density = False
+# 	number_of_spatial_nodes = final_N
+# 	print('Beginning FPS sampling')
+# 	up_sample_factor = 10 if use_time_shift == False else 20 ## Could reduce to just 10 most likely
+# 	if use_station_density == True: up_sample_factor = up_sample_factor*5
+# 	number_candidate_nodes = up_sample_factor*number_of_spatial_nodes
 
-		trial_points, mask_points = regular_sobolov(number_candidate_nodes, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = number_of_spatial_nodes, buffer_scale = buffer_scale, r_min = r_min, r_max = r_max) # lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0
-		x_grid = farthest_point_sampling(trial_points, number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_boost, mask_candidates = mask_points)
-		x_grid_cart = ftrns1(x_grid)
-		x_grid_proj = np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)
-		x_grids_l.append(np.expand_dims(x_grid, axis = 0))
+
+# 	## Create grid:
+# 	x_grids_l = []
+# 	for n_grid in range(n_grids):
+
+# 		trial_points, mask_points = regular_sobolov(number_candidate_nodes, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = number_of_spatial_nodes, buffer_scale = buffer_scale, r_min = r_min, r_max = r_max) # lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, time_range = time_shift_range, use_time = use_time_shift, use_global = use_global, scale_time = scale_time, N_target = None, buffer_scale = 0.0
+# 		x_grid = farthest_point_sampling(trial_points, number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_boost, mask_candidates = mask_points)
+# 		x_grid_cart = ftrns1(x_grid)
+# 		x_grid_proj = np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)
+# 		x_grids_l.append(np.expand_dims(x_grid, axis = 0))
 		
-		# x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = mask_points)
+# 		# x_grid = farthest_point_sampling(ftrns1_abs(trial_points), number_of_spatial_nodes, scale_time = scale_time, depth_boost = depth_upscale_factor, mask_candidates = mask_points)
 
-		tol_frac = 0.01
-		assert(x_grid[:,0].min() >= (lat_range_extend[0] - tol_frac*np.diff(lat_range_extend)))
-		assert(x_grid[:,0].max() <= (lat_range_extend[1] + tol_frac*np.diff(lat_range_extend)))
-		assert(x_grid[:,1].min() >= (lon_range_extend[0] - tol_frac*np.diff(lon_range_extend))) if use_global == False else 1
-		assert(x_grid[:,1].max() <= (lon_range_extend[1] + tol_frac*np.diff(lon_range_extend))) if use_global == False else 1
-		assert(x_grid[:,2].min() >= (depth_range[0] - tol_frac*np.diff(depth_range)))
-		assert(x_grid[:,2].max() <= (depth_range[1] + tol_frac*np.diff(depth_range)))
-		assert(len(x_grid) == number_of_spatial_nodes)
+# 		tol_frac = 0.01
+# 		assert(x_grid[:,0].min() >= (lat_range_extend[0] - tol_frac*np.diff(lat_range_extend)))
+# 		assert(x_grid[:,0].max() <= (lat_range_extend[1] + tol_frac*np.diff(lat_range_extend)))
+# 		assert(x_grid[:,1].min() >= (lon_range_extend[0] - tol_frac*np.diff(lon_range_extend))) if use_global == False else 1
+# 		assert(x_grid[:,1].max() <= (lon_range_extend[1] + tol_frac*np.diff(lon_range_extend))) if use_global == False else 1
+# 		assert(x_grid[:,2].min() >= (depth_range[0] - tol_frac*np.diff(depth_range)))
+# 		assert(x_grid[:,2].max() <= (depth_range[1] + tol_frac*np.diff(depth_range)))
+# 		assert(len(x_grid) == number_of_spatial_nodes)
 
-		if (verbose == True)*(n_grid == 0):
-			compute_final_grid_health(x_grid, scale_time, depth_boost, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
-			perform_ks_density_test(x_grid, lat_range_extend)
-			perform_ks_depth_test_ellipsoid(x_grid, depth_range, ftrns1_abs)
-			# compute_final_grid_health(x_grid, scale_time, depth_boost, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
+# 		if (verbose == True)*(n_grid == 0):
+# 			compute_final_grid_health(x_grid, scale_time, depth_boost, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
+# 			perform_ks_density_test(x_grid, lat_range_extend)
+# 			perform_ks_depth_test_ellipsoid(x_grid, depth_range, ftrns1_abs)
+# 			# compute_final_grid_health(x_grid, scale_time, depth_boost, lat_range_extend, lon_range_extend, depth_range, time_shift_range, buffer_scale, Volume)
 
-		k_edges = k_spc_edges # 18 ## An effective edge number in 4D
-		edges = np.ascontiguousarray(np.flip(sort_edge_index(remove_self_loops(knn(torch.Tensor(np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)), torch.Tensor(np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)), k = k_edges + 1))[0].flip(0)).contiguous().cpu().detach().numpy(), axis = 0))
+# 		k_edges = k_spc_edges # 18 ## An effective edge number in 4D
+# 		edges = np.ascontiguousarray(np.flip(sort_edge_index(remove_self_loops(knn(torch.Tensor(np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)), torch.Tensor(np.concatenate((x_grid_cart, scale_time*x_grid[:,[3]]), axis = 1)), k = k_edges + 1))[0].flip(0)).contiguous().cpu().detach().numpy(), axis = 0))
 
-		dist_arg = np.argmin(np.linalg.norm(x_grid_proj[edges[0]] - x_grid_proj[edges[1]], axis = 1).reshape(-1, k_edges), axis = 1) + k_edges*np.arange(len(x_grid))
-		mean_nearest_neighbor = np.linalg.norm(x_grid_cart[edges[1][dist_arg]] - x_grid_cart[edges[0][dist_arg]], axis = 1).mean() # scatter(torch.Tensor(np.linalg.norm(x_grid_cart[edges[0]] - x_grid_cart[edges[1]], axis = 1)).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
-		mean_nearest_neighbor_t = np.abs(x_grid[edges[1][dist_arg],3] - x_grid[edges[0][dist_arg],3]).mean() # scatter(torch.Tensor(np.abs(x_grid[edges[0],3] - x_grid[edges[1],3])).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
-		# mean_nearest_neighbor = scatter(torch.Tensor(np.linalg.norm(x_grid_cart[edges[0]] - x_grid_cart[edges[1]], axis = 1)).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
-		# mean_nearest_neighbor_t = scatter(torch.Tensor(np.abs(x_grid[edges[0],3] - x_grid[edges[1],3])).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
+# 		dist_arg = np.argmin(np.linalg.norm(x_grid_proj[edges[0]] - x_grid_proj[edges[1]], axis = 1).reshape(-1, k_edges), axis = 1) + k_edges*np.arange(len(x_grid))
+# 		mean_nearest_neighbor = np.linalg.norm(x_grid_cart[edges[1][dist_arg]] - x_grid_cart[edges[0][dist_arg]], axis = 1).mean() # scatter(torch.Tensor(np.linalg.norm(x_grid_cart[edges[0]] - x_grid_cart[edges[1]], axis = 1)).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
+# 		mean_nearest_neighbor_t = np.abs(x_grid[edges[1][dist_arg],3] - x_grid[edges[0][dist_arg],3]).mean() # scatter(torch.Tensor(np.abs(x_grid[edges[0],3] - x_grid[edges[1],3])).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
+# 		# mean_nearest_neighbor = scatter(torch.Tensor(np.linalg.norm(x_grid_cart[edges[0]] - x_grid_cart[edges[1]], axis = 1)).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
+# 		# mean_nearest_neighbor_t = scatter(torch.Tensor(np.abs(x_grid[edges[0],3] - x_grid[edges[1],3])).reshape(-1,1), torch.Tensor(edges[1]).long(), dim = 0, reduce = 'min').cpu().detach().numpy().mean()
 
-		final_W_phys = mean_nearest_neighbor
-		final_W_t = mean_nearest_neighbor_t
+# 		final_W_phys = mean_nearest_neighbor
+# 		final_W_t = mean_nearest_neighbor_t
 
-		# The 4D Geometric Slack
-		dt_geometric = np.sqrt((final_W_t/2)**2 + (final_W_phys/(2*Vc))**2)
-		sigma_input = 1.0 * dt_geometric
+# 		# The 4D Geometric Slack
+# 		dt_geometric = np.sqrt((final_W_t/2)**2 + (final_W_phys/(2*Vc))**2)
+# 		sigma_input = 1.0 * dt_geometric
 
-		source_label_width = final_W_phys*1.2
-		source_label_width_t = final_W_t*1.2
+# 		source_label_width = final_W_phys*1.2
+# 		source_label_width_t = final_W_t*1.2
 
-		association_label_width = final_W_phys*1.2
-		association_label_width_t = final_W_t*1.5
+# 		association_label_width = final_W_phys*1.2
+# 		association_label_width_t = final_W_t*1.5
 
-		if (verbose == True)*(n_grid == 0):
-			print('Num nodes: %d'%final_N)
-			print('scale_time: %0.4f'%scale_time)
-			print('Time shift range: %0.2f'%time_shift_range)
-			print('Degree padding: %0.2f'%deg_padding)
-			print('Spatial spacing: %0.4f'%final_W_phys)
-			print('Temporal spacing: %0.4f'%final_W_t)
-			# print('Input kernel: %0.4f'%sigma_input)
+# 		if (verbose == True)*(n_grid == 0):
+# 			print('Num nodes: %d'%final_N)
+# 			print('scale_time: %0.4f'%scale_time)
+# 			print('Time shift range: %0.2f'%time_shift_range)
+# 			print('Degree padding: %0.2f'%deg_padding)
+# 			print('Spatial spacing: %0.4f'%final_W_phys)
+# 			print('Temporal spacing: %0.4f'%final_W_t)
+# 			# print('Input kernel: %0.4f'%sigma_input)
 
-			print('\nLabels widths:')
-			print('Source label width (space): %0.4f'%source_label_width)
-			print('Source label width (time): %0.4f'%source_label_width_t)
-			print('Association label width (space): %0.4f'%association_label_width)
-			print('Association label width (time): %0.4f'%association_label_width_t)
-			print('Input kernel: %0.4f'%sigma_input)
-			# print('Input kernel: %0.4f'%sigma_input)
+# 			print('\nLabels widths:')
+# 			print('Source label width (space): %0.4f'%source_label_width)
+# 			print('Source label width (time): %0.4f'%source_label_width_t)
+# 			print('Association label width (space): %0.4f'%association_label_width)
+# 			print('Association label width (time): %0.4f'%association_label_width_t)
+# 			print('Input kernel: %0.4f'%sigma_input)
+# 			# print('Input kernel: %0.4f'%sigma_input)
 
-	if initialize is not None:
-		x_grids = np.vstack(x_grids_l)
-		os.makedirs('Grids', exist_ok = True)
-		np.savez_compressed('Grids/grid_parameters_ver_1.npz', scale_time = scale_time, depth_boost = depth_boost, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, x_grids = x_grids, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, use_global = use_global)
+# 	if initialize is not None:
+# 		x_grids = np.vstack(x_grids_l)
+# 		os.makedirs('Grids', exist_ok = True)
+# 		np.savez_compressed('Grids/grid_parameters_ver_1.npz', scale_time = scale_time, depth_boost = depth_boost, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, x_grids = x_grids, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, use_global = use_global)
 
-	else: ## Could add multiple grids even for non-initialize case, for averaging
-		os.makedirs('Domains', exist_ok = True)
-		np.savez_compressed('Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]), scale_time = scale_time, depth_boost = depth_boost, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, use_global = use_global)
+# 	else: ## Could add multiple grids even for non-initialize case, for averaging
+# 		os.makedirs('Domains', exist_ok = True)
+# 		np.savez_compressed('Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]), scale_time = scale_time, depth_boost = depth_boost, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, use_global = use_global)
 
 
 
