@@ -73,6 +73,112 @@ def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_core
 	return tp_times, ts_times
 
 
+def compute_travel_times_parallel1(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores=10):
+    """
+    Computes 3D P and S travel time fields in parallel using Fast Marching (scikit-fmm).
+    Includes sub-grid source placement, zero-contour guards, and HPC job-array logging.
+    """
+    # -------------------------------------------------------------------------
+    # 0. Initial Validation & Grid Boundary Check
+    # -------------------------------------------------------------------------
+    n_sources = xx_r.shape[0]
+    grid_shape = x11.shape
+
+    print(f"[INFO] Initializing compute_travel_times_parallel", flush=True)
+    print(f"[INFO] Grid Shape: {grid_shape} | Total Nodes: {h.shape[0]:,}", flush=True)
+    print(f"[INFO] Total Sources to Process: {n_sources} across {num_cores} cores", flush=True)
+    print(f"[INFO] Grid Extents X: [{x11.min():.2f}, {x11.max():.2f}] | Y: [{x12.min():.2f}, {x12.max():.2f}] | Z: [{x13.min():.2f}, {x13.max():.2f}]", flush=True)
+
+    # Check for non-physical/corrupted velocities prior to job dispatch
+    v_min, v1_min = np.nanmin(h), np.nanmin(h1)
+    if v_min <= 0 or v1_min <= 0:
+        print(f"[WARNING] Velocity fields contain non-positive values (Vp_min={v_min:.1f}, Vs_min={v1_min:.1f})!", flush=True)
+        print(f"[WARNING] Negative/zero velocities will cause Fast Marching crashes. Ensure arrays are clipped prior to passing.", flush=True)
+
+    # -------------------------------------------------------------------------
+    # 1. Parallel Worker Routine
+    # -------------------------------------------------------------------------
+    def step_test(args):
+        yval, dx_v, h, h1, x11, x12, x13, ind = args
+
+        # Flush standard output immediately to prevent job-array log buffering
+        source_coords = yval.ravel()
+
+        # A. Check for NaN/Inf in source coordinates
+        if np.isnan(source_coords).any() or np.isinf(source_coords).any():
+            print(f"[ERROR][Task {ind}] Invalid source coordinates (NaN/Inf): {source_coords}. Returning NaNs.", flush=True)
+            empty = np.full(grid_shape, np.nan)
+            return empty, empty, ind
+
+        # B. Compute exact continuous Euclidean distance from off-grid source
+        phi = np.sqrt((x11 - source_coords[0])**2 +
+                      (x12 - source_coords[1])**2 +
+                      (x13 - source_coords[2])**2)
+
+        # C. Sub-grid 0-level set sphere (R0 = 0.5 * min cell width)
+        r0 = 0.5 * np.min(dx_v)
+        phi = phi - r0
+
+        # D. Zero Contour Safety Guard
+        # If source lies outside grid boundaries or floating point underflow occurs,
+        # force the single closest grid node to be negative (-r0) to ensure a valid 0-contour.
+        if not (phi < 0).any():
+            min_idx = np.unravel_index(np.argmin(phi), grid_shape)
+            min_dist = phi[min_idx] + r0
+            print(f"[WARN][Task {ind}] Source at ({source_coords[0]:.2f}, {source_coords[1]:.2f}, {source_coords[2]:.2f}) "
+                  f"has NO negative level set (Nearest node dist: {min_dist:.2f}). Forcing closest node negative.", flush=True)
+            phi[min_idx] = -r0
+
+        # E. Reshape velocity grids (using memory views, avoiding np.copy)
+        v_grid = h.reshape(grid_shape)
+        v1_grid = h1.reshape(grid_shape)
+
+        dx = [dx_v[0], dx_v[1], dx_v[2]]
+
+        # F. Compute Fast Marching travel times
+        try:
+            t = skfmm.travel_time(phi, v_grid, dx=dx)
+            t1 = skfmm.travel_time(phi, v1_grid, dx=dx)
+        except Exception as e:
+            print(f"[FATAL][Task {ind}] skfmm failed at source {source_coords}: {str(e)}", flush=True)
+            empty = np.full(grid_shape, np.nan)
+            return empty, empty, ind
+
+        # G. Local analytical source-time correction (t0 = R0 / v_source)
+        source_idx = np.unravel_index(np.argmin(phi), grid_shape)
+        t = t + (r0 / v_grid[source_idx])
+        t1 = t1 + (r0 / v1_grid[source_idx])
+
+        # Logging periodic progress markers (e.g., every 50th item)
+        if ind % 50 == 0 or ind == n_sources - 1:
+            print(f"[PROGRESS] Completed source index {ind}/{n_sources} at coords {source_coords.round(1)}", flush=True)
+
+        return t, t1, ind
+
+    # -------------------------------------------------------------------------
+    # 2. Execution & Data Assembly
+    # -------------------------------------------------------------------------
+    tp_times = np.full((h.shape[0], n_sources), np.nan, dtype=np.float32)
+    ts_times = np.full((h.shape[0], n_sources), np.nan, dtype=np.float32)
+
+    # Run Parallel execution
+    print(f"[INFO] Dispatching Parallel jobs...", flush=True)
+    results = Parallel(n_jobs=num_cores)(
+        delayed(step_test)([xx_r[i, :][None, :], dx_v, h, h1, x11, x12, x13, i])
+        for i in range(n_sources)
+    )
+
+    # Reassemble results deterministically based on station index
+    print(f"[INFO] Assembling travel time matrices...", flush=True)
+    for res in results:
+        t_p, t_s, station_ind = res[0], res[1], res[2]
+        tp_times[:, station_ind] = t_p.reshape(-1)
+        ts_times[:, station_ind] = t_s.reshape(-1)
+
+    print(f"[SUCCESS] Travel time calculations finished successfully.", flush=True)
+    return tp_times, ts_times
+
+
 
 def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = 10):
 
@@ -419,109 +525,4 @@ print("All files saved successfully!")
 print("✔ Script execution: Done")
 
 
-
-# def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores=10):
-#     """
-#     Computes 3D P and S travel time fields in parallel using Fast Marching (scikit-fmm).
-#     Includes sub-grid source placement, zero-contour guards, and HPC job-array logging.
-#     """
-#     # -------------------------------------------------------------------------
-#     # 0. Initial Validation & Grid Boundary Check
-#     # -------------------------------------------------------------------------
-#     n_sources = xx_r.shape[0]
-#     grid_shape = x11.shape
-
-#     print(f"[INFO] Initializing compute_travel_times_parallel", flush=True)
-#     print(f"[INFO] Grid Shape: {grid_shape} | Total Nodes: {h.shape[0]:,}", flush=True)
-#     print(f"[INFO] Total Sources to Process: {n_sources} across {num_cores} cores", flush=True)
-#     print(f"[INFO] Grid Extents X: [{x11.min():.2f}, {x11.max():.2f}] | Y: [{x12.min():.2f}, {x12.max():.2f}] | Z: [{x13.min():.2f}, {x13.max():.2f}]", flush=True)
-
-#     # Check for non-physical/corrupted velocities prior to job dispatch
-#     v_min, v1_min = np.nanmin(h), np.nanmin(h1)
-#     if v_min <= 0 or v1_min <= 0:
-#         print(f"[WARNING] Velocity fields contain non-positive values (Vp_min={v_min:.1f}, Vs_min={v1_min:.1f})!", flush=True)
-#         print(f"[WARNING] Negative/zero velocities will cause Fast Marching crashes. Ensure arrays are clipped prior to passing.", flush=True)
-
-#     # -------------------------------------------------------------------------
-#     # 1. Parallel Worker Routine
-#     # -------------------------------------------------------------------------
-#     def step_test(args):
-#         yval, dx_v, h, h1, x11, x12, x13, ind = args
-
-#         # Flush standard output immediately to prevent job-array log buffering
-#         source_coords = yval.ravel()
-
-#         # A. Check for NaN/Inf in source coordinates
-#         if np.isnan(source_coords).any() or np.isinf(source_coords).any():
-#             print(f"[ERROR][Task {ind}] Invalid source coordinates (NaN/Inf): {source_coords}. Returning NaNs.", flush=True)
-#             empty = np.full(grid_shape, np.nan)
-#             return empty, empty, ind
-
-#         # B. Compute exact continuous Euclidean distance from off-grid source
-#         phi = np.sqrt((x11 - source_coords[0])**2 +
-#                       (x12 - source_coords[1])**2 +
-#                       (x13 - source_coords[2])**2)
-
-#         # C. Sub-grid 0-level set sphere (R0 = 0.5 * min cell width)
-#         r0 = 0.5 * np.min(dx_v)
-#         phi = phi - r0
-
-#         # D. Zero Contour Safety Guard
-#         # If source lies outside grid boundaries or floating point underflow occurs,
-#         # force the single closest grid node to be negative (-r0) to ensure a valid 0-contour.
-#         if not (phi < 0).any():
-#             min_idx = np.unravel_index(np.argmin(phi), grid_shape)
-#             min_dist = phi[min_idx] + r0
-#             print(f"[WARN][Task {ind}] Source at ({source_coords[0]:.2f}, {source_coords[1]:.2f}, {source_coords[2]:.2f}) "
-#                   f"has NO negative level set (Nearest node dist: {min_dist:.2f}). Forcing closest node negative.", flush=True)
-#             phi[min_idx] = -r0
-
-#         # E. Reshape velocity grids (using memory views, avoiding np.copy)
-#         v_grid = h.reshape(grid_shape)
-#         v1_grid = h1.reshape(grid_shape)
-
-#         dx = [dx_v[0], dx_v[1], dx_v[2]]
-
-#         # F. Compute Fast Marching travel times
-#         try:
-#             t = skfmm.travel_time(phi, v_grid, dx=dx)
-#             t1 = skfmm.travel_time(phi, v1_grid, dx=dx)
-#         except Exception as e:
-#             print(f"[FATAL][Task {ind}] skfmm failed at source {source_coords}: {str(e)}", flush=True)
-#             empty = np.full(grid_shape, np.nan)
-#             return empty, empty, ind
-
-#         # G. Local analytical source-time correction (t0 = R0 / v_source)
-#         source_idx = np.unravel_index(np.argmin(phi), grid_shape)
-#         t = t + (r0 / v_grid[source_idx])
-#         t1 = t1 + (r0 / v1_grid[source_idx])
-
-#         # Logging periodic progress markers (e.g., every 50th item)
-#         if ind % 50 == 0 or ind == n_sources - 1:
-#             print(f"[PROGRESS] Completed source index {ind}/{n_sources} at coords {source_coords.round(1)}", flush=True)
-
-#         return t, t1, ind
-
-#     # -------------------------------------------------------------------------
-#     # 2. Execution & Data Assembly
-#     # -------------------------------------------------------------------------
-#     tp_times = np.full((h.shape[0], n_sources), np.nan, dtype=np.float32)
-#     ts_times = np.full((h.shape[0], n_sources), np.nan, dtype=np.float32)
-
-#     # Run Parallel execution
-#     print(f"[INFO] Dispatching Parallel jobs...", flush=True)
-#     results = Parallel(n_jobs=num_cores)(
-#         delayed(step_test)([xx_r[i, :][None, :], dx_v, h, h1, x11, x12, x13, i])
-#         for i in range(n_sources)
-#     )
-
-#     # Reassemble results deterministically based on station index
-#     print(f"[INFO] Assembling travel time matrices...", flush=True)
-#     for res in results:
-#         t_p, t_s, station_ind = res[0], res[1], res[2]
-#         tp_times[:, station_ind] = t_p.reshape(-1)
-#         ts_times[:, station_ind] = t_s.reshape(-1)
-
-#     print(f"[SUCCESS] Travel time calculations finished successfully.", flush=True)
-#     return tp_times, ts_times
 
