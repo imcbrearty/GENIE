@@ -899,7 +899,7 @@ class SamplingTuner:
 		# buffer_scale: multiplier for the nominal spacing
 		self.space = [
 			# Real(1e3, 100e3, prior = 'log-uniform', name='scale_t'),	
-			Real(3e3, 15e3, prior = 'log-uniform', name='scale_t'),	  ## Can increase slightly
+			Real(0.5e3, 500e3, prior = 'log-uniform', name='scale_t'),	  ## Can increase slightly
 			Real(0.5, 3.0, name='depth_boost'),   
 			Real(1.0, 2.5, name='buffer_scale')	# prior='log-uniform',
 		]
