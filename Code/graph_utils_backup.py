@@ -8189,9 +8189,9 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 	data_save['src_t_arv_kernel'] = float(np.round(association_label_width_t, precision))
 	data_save['src_depth_kernel'] = float(np.round(source_label_width, precision))
 
-  
+
 	if initialize is not None:
-  
+
 		# folder_path = "path/to/your/folder"
 		os.makedirs('Grids', exist_ok = True)
 		np.savez_compressed('Grids/%s_seismic_network_templates_ver_1.npz'%(name_of_project), **data_save) # ind_use = np.arange(len(locs_use)) # metrics_product = metrics_product
@@ -8248,12 +8248,12 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 	else:
 
 		if save_file == True:
-		  os.makedirs('Domains', exist_ok = True)
-		  np.savez_compressed('Domains/domain_file_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]), A_src_in_sta = A_src_in_sta, A_sta = A_sta, A_src = A_src, Ac = Ac, A_prod_sta_sta = A_prod_sta_sta, A_prod_src_src = A_prod_src_src, A_prod_sta_sta_weights = A_prod_sta_sta_weights, A_prod_src_src_weights = A_prod_src_src_weights, A_src_in_prod = A_src_in_prod, x_grid = x_grid, scale_time = scale_time, depth_boost = depth_boost, ichoose_grid = 0, locs_use = locs_use, stas_use = stas_use, srcs_cart = x_grid_cart, locs_cart = locs_cart, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, rbest = rbest, mn = mn) # ind_use = np.arange(len(locs_use)) # metrics_product = metrics_product
-		  return True, True
+			os.makedirs('Domains', exist_ok = True)
+			np.savez_compressed('Domains/domain_file_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]), A_src_in_sta = A_src_in_sta, A_sta = A_sta, A_src = A_src, Ac = Ac, A_prod_sta_sta = A_prod_sta_sta, A_prod_src_src = A_prod_src_src, A_prod_sta_sta_weights = A_prod_sta_sta_weights, A_prod_src_src_weights = A_prod_src_src_weights, A_src_in_prod = A_src_in_prod, x_grid = x_grid, scale_time = scale_time, depth_boost = depth_boost, ichoose_grid = 0, locs_use = locs_use, stas_use = stas_use, srcs_cart = x_grid_cart, locs_cart = locs_cart, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, rbest = rbest, mn = mn) # ind_use = np.arange(len(locs_use)) # metrics_product = metrics_product
+			return True, True
 
 		else:
-		  return data_save, domain_params
+			return data_save, domain_params
 
   
 
@@ -8290,7 +8290,20 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		return trv_out
 
 
-	domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20, use_global = use_global, device = device)
+	# domain_scale = estimate_kernel_widths(domain, locs_use, z_range = depth_range, Vs = Vc, noise_level = 0.015, n_neighbors_trgt = 20, use_global = use_global, device = device)
+	# Pass dynamic station sampling range (or let it compute default 5% to 75% of active stations)
+	domain_scale = estimate_kernel_widths(
+		domain, 
+		locs_use, 
+		z_range=depth_range, 
+		Vs=Vc, 
+		noise_level=0.015, 
+		k_range=(6, min(120, len(locs_use))),  # Sample events detected by 6 to 120 stations
+		use_global=use_global, 
+		device=device
+	)
+
+
 	lat_range, lon_range = domain['lat_range'], domain['lon_range']
 
 
@@ -8374,7 +8387,8 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		
 		# --- NEW: Compute Full Array Aperture Moveout ---
 		# Total distance between furthest stations in the active array
-		array_aperture_m = float(np.max(pd(sta_ecef))) if len(locs_use) > 1 else 0.0
+		# array_aperture_m = float(np.max(pdist(sta_ecef))) if len(locs_use) > 1 else 0.0
+		array_aperture_m = float(np.percentile(pd(sta_ecef), 85)) if len(locs_use) > 2 else 0.0
 		t_array_transit = array_aperture_m / Vc
 		
 		# 1. Compute physical lower floor (Desired Minimum)
@@ -8406,6 +8420,36 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		# If the ceiling is lower than the desired minimum, clamp the minimum down to the ceiling.
 		effective_min_time_range = min(desired_min_time_range, max_time_cap)
 
+		# 1. Compute physical lower floor (Desired Minimum)
+		array_moveout_floor = max(0.3 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
+
+		desired_min_time_range = max(
+			min_time_range,		   # User argument default (e.g., 3.0s)
+			1.5 * w_t_sec,			# Kernel resolution scale floor
+			1.0 * t_interstation_median,
+			array_moveout_floor	   # Physical moveout floor
+		)
+
+		# 2. Compute budget-safe max time cap (Hard Upper Ceiling)
+		# --- FIX: Incorporate sampled array moveout (max_dt) into the cap ---
+		# Allow search to cover at least 1.2x the maximum expected transit time across the array
+		aperture_based_cap = 1.25 * t_array_transit
+		spacing_based_cap = max(1.5 * t_cluster_transit, 3.0 * t_interstation_median)
+		kernel_based_cap = 15.0 * w_t_sec
+		
+		# Cap MUST allow physical moveout across the array/active cluster
+		max_time_cap = max(aperture_based_cap, spacing_based_cap, kernel_based_cap)
+		
+		# Absolute hard ceiling (domain scale override, explicit argument, or global default)
+		max_time_lag = 150.0 if use_global is False else 450.0
+		hard_max_limit = domain_scale.get('max_allowed_dt_s', max_time_lag if max_time_shift_range is None else max_time_shift_range)
+		
+		# Apply hard limit to max_time_cap
+		max_time_cap = min(max_time_cap, hard_max_limit)
+
+		# 3. RESOLVE CONFLICT: Ensure min floor NEVER exceeds the hard max cap
+		effective_min_time_range = min(desired_min_time_range, max_time_cap)
+
 		# 4. Probe Monte Carlo side-lobes...
 		all_dt_offsets = []
 		# max_k = max(1, int(0.65 * len(locs_use)))
@@ -8418,31 +8462,31 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		min_k = max(4, min(8, int(0.05 * len(locs_use))))
 
 		for i in range(n_rand_srcs):
-		  
-		  if min_k >= max_k:
-			  k_choice = max_k
-		  else:
-			  k_choice = np.random.choice(np.arange(min_k, max_k))
-		  
-		  k_stations = min(len(locs_use), max(min(8, len(locs_use)), k_choice))
-		  # k_stations = max(4, k_choice)
+		
+			if min_k >= max_k:
+				k_choice = max_k
+			else:
+				k_choice = np.random.choice(np.arange(min_k, max_k))
+		
+			k_stations = min(len(locs_use), max(min(8, len(locs_use)), k_choice))
+			# k_stations = max(4, k_choice)
 			
-		  src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(
-			  locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
-			  # k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))),
-			  k_stations=k_stations,
-			  vel_avg=Vc, vel_min=Vc*0.85,
-			  scan_step_m=domain_scale['W_phys_m']/2.0, 
-			  W_phys_m=domain_scale['W_phys_m'], 
-			  W_t=domain_scale['W_t_s'], 
-			  use_global=use_global, 
-			  r_min=r_min, 
-			  r_max=r_max, 
-			  device=device
-		  )
+			src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(
+				locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
+				# k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))),
+				k_stations=k_stations,
+				vel_avg=Vc, vel_min=Vc*0.85,
+				scan_step_m=domain_scale['W_phys_m']/2.0, 
+				W_phys_m=domain_scale['W_phys_m'], 
+				W_t=domain_scale['W_t_s'], 
+				use_global=use_global, 
+				r_min=r_min, 
+				r_max=r_max, 
+				device=device
+			)
 			
-		  if len(side_lobes) > 0:
-			all_dt_offsets.extend([abs(s['dt_offset']) for s in side_lobes])
+			if len(side_lobes) > 0:
+				all_dt_offsets.extend([abs(s['dt_offset']) for s in side_lobes])
 		
 		# 5. Extract quantile and apply physical bounds safely
 		if len(all_dt_offsets) > 0:
@@ -8584,105 +8628,33 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		os.makedirs('Grids', exist_ok = True)
 		np.savez_compressed('Grids/grid_parameters_ver_1.npz', scale_time = scale_time, depth_boost = depth_boost, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, x_grids = x_grids, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, use_global = use_global)
 		return True
-  
+
 	else: ## Could add multiple grids even for non-initialize case, for averaging
 
-	  os.makedirs('Domains', exist_ok = True)
-	  domain_params = domain_params = {
-		  'scale_time': scale_time,
-		  'depth_boost': depth_boost,
-		  'locs_use': locs_use,
-		  'stas_use': stas_use,
-		  'x_grid': x_grid,
-		  'lat_range': lat_range,
-		  'lon_range': lon_range,
-		  'lat_range_extend': lat_range_extend,
-		  'lon_range_extend': lon_range_extend,
-		  'depth_range': depth_range,
-		  'deg_padding': deg_padding,
-		  'time_shift_range': time_shift_range,
-		  'buffer_scale': buffer_scale,
-		  'source_label_width': source_label_width,
-		  'source_label_width_t': source_label_width_t,
-		  'association_label_width': association_label_width,
-		  'association_label_width_t': association_label_width_t,
-		  'sigma_input': sigma_input,
-		  'use_global': use_global,
-	  }
+		os.makedirs('Domains', exist_ok = True)
+		domain_params = domain_params = {
+			'scale_time': scale_time,
+			'depth_boost': depth_boost,
+			'locs_use': locs_use,
+			'stas_use': stas_use,
+			'x_grid': x_grid,
+			'lat_range': lat_range,
+			'lon_range': lon_range,
+			'lat_range_extend': lat_range_extend,
+			'lon_range_extend': lon_range_extend,
+			'depth_range': depth_range,
+			'deg_padding': deg_padding,
+			'time_shift_range': time_shift_range,
+			'buffer_scale': buffer_scale,
+			'source_label_width': source_label_width,
+			'source_label_width_t': source_label_width_t,
+			'association_label_width': association_label_width,
+			'association_label_width_t': association_label_width_t,
+			'sigma_input': sigma_input,
+			'use_global': use_global,
+		}
 
-	  return domain_params
-
-
-	  
-		# k_neighbors = min(10, len(locs_use))
-		# dists_k, _ = cKDTree(ftrns1_abs(locs_use)).query(ftrns1_abs(locs_use), k=k_neighbors)
-		# w_t_sec = domain_scale.get('W_t_s', 3.0)
-		
-		# # Median distance to 2nd neighbor (closest station) and 10th neighbor (local sub-cluster)
-		# idx_nn = 1 if dists_k.shape[1] > 1 else 0
-		# nn_dists_m = dists_k[:, idx_nn]
-		# cluster_radii_m = dists_k[:, -1]
-		# t_interstation_median = float(np.median(nn_dists_m) / Vc)
-		# min_time_range = max(min_time_range, max(1.5 * w_t_sec, 1.0 * t_interstation_median))
-
-		# # t_interstation_median = float(np.median(nn_dists_m) / Vc)
-		# t_cluster_transit = float(np.median(cluster_radii_m) / Vc)
-		
-		# # 2. Compute budget-safe max time cap
-		# spacing_based_cap = max(1.5 * t_cluster_transit, 3.0 * t_interstation_median)
-		# kernel_based_cap = 15.0 * w_t_sec
-		
-		# max_time_cap = max(spacing_based_cap, kernel_based_cap)
-	  
-		# # Absolute ceiling (e.g., 60s or domain cap) to prevent runaway graph size on extreme sparse global networks
-		# max_time_lag = 150.0 if use_global is False else 450.0
-		# max_time_cap = min(max_time_cap, domain_scale.get('max_allowed_dt_s', max_time_lag if max_time_shift_range is None else max_time_shift_range))
-	
-		# # 4. Flatten all detected side-lobe offsets across Monte Carlo simulations
-		# all_dt_offsets = []
-		# max_k = max(1, int(0.65 * len(locs_use)))
-		# min_k = max(1, int(0.1 * len(locs_use)))
-	  
-		# for i in range(n_rand_srcs):
-		  
-		#   if min_k >= max_k:
-		#	   k_choice = max_k
-		#   else:
-		#	   k_choice = np.random.choice(np.arange(min_k, max_k))
-		  
-		#   k_stations = min(len(locs_use), max(min(8, len(locs_use)), k_choice))
-		  
-		#   src_true, side_lobes, t_obs_picks, [max_radius_m, max_dt] = probe_network_sidelobes_geodetic(
-		#	   locs_use, lat_range_extend, lon_range_extend, depth_range, ftrns1, ftrns2,
-		#	   # k_stations=max(8, np.random.choice(np.arange(int(0.1*len(locs_use)), int(0.5*len(locs_use))))),
-		#	   k_stations=k_stations,
-		#	   vel_avg=Vc, vel_min=Vc*0.85,
-		#	   scan_step_m=domain_scale['W_phys_m']/2.0, 
-		#	   W_phys_m=domain_scale['W_phys_m'], 
-		#	   W_t=domain_scale['W_t_s'], 
-		#	   use_global=use_global, 
-		#	   r_min=r_min, 
-		#	   r_max=r_max, 
-		#	   device=device
-		#   )
-			
-		#   if len(side_lobes) > 0:
-		#	 all_dt_offsets.extend([abs(s['dt_offset']) for s in side_lobes])
-	
-		# # 5. Extract quantile and apply physical bounds
-		# # target_quantile = 0.75  # Fixed quantile over aggregate distribution
-	
-		# if len(all_dt_offsets) > 0:
-		#	 raw_time_shift = float(np.quantile(all_dt_offsets, quantile_times))
-		# else:
-		#	 raw_time_shift = min_time_range
-	
-		# time_shift_range = np.clip(raw_time_shift, min_time_range, max_time_cap)
-		# time_shift_range = float(np.round(time_shift_range, 2))
-
-
-
-		# np.savez_compressed('Domains/domain_parameters_%d_%d_%d_%d_ver_1.npz'%(file_index, date[0], date[1], date[2]), scale_time = scale_time, depth_boost = depth_boost, locs_use = locs_use, stas_use = stas_use, x_grid = x_grid, lat_range = lat_range, lon_range = lon_range, lat_range_extend = lat_range_extend, lon_range_extend = lon_range_extend, depth_range = depth_range, deg_padding = deg_padding, time_shift_range = time_shift_range, buffer_scale = buffer_scale, source_label_width = source_label_width, source_label_width_t = source_label_width_t, association_label_width = association_label_width, association_label_width_t = association_label_width_t, sigma_input = sigma_input, use_global = use_global)
+		return domain_params
 
 
 def fit_spatial_domain_backup(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 5.0, n_rand_srcs = 250, quantile_times = 0.4, quantile_times_srcs = 0.4, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
@@ -11278,7 +11250,360 @@ def estimate_kernel_widths_backup(domain, station_locs, z_range=(-40000, 2000), 
 
 
 
+# def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), vel_phase=6000.0, 
+# 						   noise_level=0.02, n_srcs=250, n_test_per_src=10000, 
+# 						   k_range=None, use_global=False, Vs=None, 
+# 						   overwrite_vs=True, device='cpu'):
+# 	import torch
+# 	import numpy as np
+# 	from scipy.spatial.distance import cdist
+
+# 	n_stas_total = len(station_locs)
+	
+# 	# Set default variable station range if not explicitly provided
+# 	if k_range is None:
+# 		min_k = max(4, int(0.05 * n_stas_total))
+# 		max_k = max(min_k + 1, int(0.75 * n_stas_total))
+# 		k_range = (min_k, max_k)
+
+# 	# 1. Sample Reference Sources near actual station coverage
+# 	st_ecef = lla2ecef(station_locs)
+# 	st_min, st_max = np.min(station_locs, axis=0), np.max(station_locs, axis=0)
+# 	pad_lat, pad_lon = (st_max[0] - st_min[0]) * 0.10, (st_max[1] - st_min[1]) * 0.10
+	
+# 	lats = np.random.uniform(st_min[0] - pad_lat, st_max[0] + pad_lat, n_srcs)
+# 	lons = np.random.uniform(st_min[1] - pad_lon, st_max[1] + pad_lon, n_srcs)
+# 	zs   = np.random.uniform(z_range[0], z_range[1], n_srcs)
+# 	src_refs_lla = np.stack([lats, lons, zs], axis=1)
+# 	ref_ecef = lla2ecef(src_refs_lla)
+
+# 	# 2. Calculate Adaptive Search Limits per Source with VARIABLE k
+# 	all_dists = cdist(ref_ecef, st_ecef)
+# 	nearest_idx = []
+# 	local_scales = np.zeros(n_srcs)
+# 	time_limits = np.zeros(n_srcs)
+# 	cluster_apertures = []
+# 	source_velocities = np.zeros(n_srcs)
+
+# 	for s in range(n_srcs):
+# 		s_all_dists = all_dists[s]
+		
+# 		# Sample random active station subset size for source s
+# 		k_s = np.random.randint(k_range[0], k_range[1] + 1)
+# 		chosen_idx = np.argsort(s_all_dists)[:k_s]
+# 		nearest_idx.append(chosen_idx)
+		
+# 		s_dists = s_all_dists[chosen_idx]
+# 		local_scales[s] = np.median(s_dists)
+		
+# 		cluster_stas = st_ecef[chosen_idx]
+# 		# Option A: 85th percentile pairwise distance inside this source's active sub-array
+# 		if len(cluster_stas) > 1:
+# 			pair_dists = cdist(cluster_stas, cluster_stas)
+# 			aperture_s = float(np.percentile(pair_dists, 85))
+# 		else:
+# 			aperture_s = 1000.0
+# 		cluster_apertures.append(aperture_s)
+		
+# 		# Adaptive P-Wave Velocity Scale
+# 		if overwrite_vs:
+# 			if aperture_s < 100000.0:
+# 				V_adaptive = 6000.0
+# 			elif aperture_s < 1000000.0:
+# 				V_adaptive = 8000.0
+# 			elif aperture_s < 3000000.0:
+# 				V_adaptive = 10000.0
+# 			else:
+# 				V_adaptive = 13000.0
+# 		else:
+# 			V_adaptive = Vs
+# 		source_velocities[s] = V_adaptive
+		
+# 		moveout = (s_dists[-1] - s_dists[0]) / V_adaptive
+# 		sigma_t_expected = np.mean(s_dists / V_adaptive) * noise_level
+# 		time_limits[s] = max(moveout * 0.5, sigma_t_expected * 5.0)
+
+# 	aperture_m = float(np.median(cluster_apertures))
+
+# 	# 3. Generate Geodetically Stable Local Perturbations
+# 	lat_m_per_deg = 111000.0  # Approx meters per degree latitude
+	
+# 	dx_m = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * local_scales[:, None]
+# 	dy_m = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * local_scales[:, None]
+# 	dz_m = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * (local_scales[:, None] * 0.2)  # Depth scale
+# 	time_offs = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * time_limits[:, None]
+
+# 	ref_lats = src_refs_lla[:, 0][:, None]
+# 	ref_lons = src_refs_lla[:, 1][:, None]
+# 	ref_zs   = src_refs_lla[:, 2][:, None]
+
+# 	lon_m_per_deg = lat_m_per_deg * np.cos(np.radians(ref_lats))
+
+# 	test_lats = ref_lats + (dy_m / lat_m_per_deg)
+# 	test_lons = ref_lons + (dx_m / lon_m_per_deg)
+# 	test_zs   = np.clip(ref_zs + dz_m, z_range[0], z_range[1])  # Constrain depth to Earth interior
+
+# 	test_lla_flat = np.stack([test_lats.ravel(), test_lons.ravel(), test_zs.ravel()], axis=1)
+
+# 	# 4. Execute Vectorized Travel Time Computations
+# 	t_obs_list, t_test_list = [], []
+# 	for s in range(n_srcs):
+# 		s_stas = station_locs[nearest_idx[s]]
+# 		V_s = source_velocities[s]
+		
+# 		t_r = trv(torch.Tensor(s_stas).to(device), torch.Tensor(src_refs_lla[s:s+1]).to(device), V_wave=V_s).cpu().detach().numpy()
+# 		s1, s2 = t_r.shape[0], t_r.shape[1]
+		
+# 		noise_values = generate_travel_time_noise(t_r[:,:,0], phase_input="P")[0].reshape(s1, s2)
+# 		t_obs_list.append(t_r[:, :, 0] + noise_values)
+		
+# 		t_t = trv(torch.Tensor(s_stas).to(device), torch.Tensor(test_lla_flat[s*n_test_per_src : (s+1)*n_test_per_src]).to(device), V_wave=V_s).cpu().detach().numpy()
+# 		t_test_list.append(t_t[:, :, 0])
+
+# 	t_obs = np.stack(t_obs_list, axis=0)
+# 	t_test = np.stack(t_test_list, axis=0) 
+
+# 	# 5. Vectorized Chi-Square Misfit
+# 	residuals = t_obs[:, :, None, :] - t_test[:, None, :, :]
+# 	residuals = residuals.squeeze(1) - time_offs[:, :, None]
+# 	sigma_d = np.maximum(t_test * noise_level, 1e-6)
+# 	chi_error = np.sqrt(np.mean((residuals / sigma_d)**2, axis=2)) 
+
+# 	# 6. Extract Widths with Robust Fallbacks
+# 	dist_s = np.sqrt(dx_m**2 + dy_m**2 + dz_m**2) 
+# 	mask = (chi_error > 0.1) & (chi_error < 5.0)
+
+# 	if np.any(mask):
+# 		w_phys = float(np.median(dist_s[mask] / chi_error[mask]))
+# 		w_t = float(np.median(np.abs(time_offs)[mask] / chi_error[mask]))
+# 	else:
+# 		# Fallback to mean scale if noise floor suppresses mask
+# 		w_phys = float(np.mean(local_scales) * 0.1)
+# 		w_t = float(np.mean(time_limits) * 0.1)
+
+# 	rel_scale = w_phys / aperture_m
+
+# 	print(f"\n{'='*55}")
+# 	print(f"BATCHED ADAPTIVE COHERENCY ESTIMATION")
+# 	print(f"{'='*55}")
+# 	print(f"Total Points Sampled:   {n_srcs * n_test_per_src:,}")
+# 	print(f"Spatial Width (W_phys): {w_phys/1000:.4f} km")
+# 	print(f"Temporal Width (W_t):   {w_t:.4f} s")
+# 	print(f"Computed Aperture:	  {aperture_m/1000:.2f} km")
+# 	print(f"Relative Resolution:	{rel_scale:.4%}")
+# 	print(f"Noise Level Used:	   {noise_level*100:.1f}%\n")
+	
+# 	return {"W_phys_m": w_phys, "W_t_s": w_t, "rel_scale": rel_scale}
+
+
+
+
+
+
+
 def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), vel_phase=6000.0, 
+						   noise_level=0.02, n_srcs=250, n_test_per_src=10000, 
+						   k_range=None, use_global=False, Vs=None, 
+						   overwrite_vs=True, device='cpu'):
+	import torch
+	import numpy as np
+	from scipy.spatial.distance import cdist
+
+	n_stas_total = len(station_locs)
+	device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+	
+	# Set default variable station range if not explicitly provided
+	if k_range is None:
+		min_k = max(4, int(0.05 * n_stas_total))
+		max_k = max(min_k + 1, int(0.75 * n_stas_total))
+		k_range = (min_k, max_k)
+
+	# --- Vectorized Travel Time Engine (Local Euclidean + Global Arc Distance) ---
+	def trv(locs_np, srcs_np, V_wave):
+		locs_ecef = torch.tensor(lla2ecef(locs_np), dtype=torch.float32, device=device)
+		srcs_ecef = torch.tensor(lla2ecef(srcs_np), dtype=torch.float32, device=device)
+		
+		sample_dists = torch.cdist(locs_ecef, locs_ecef)
+		batch_aperture = torch.max(sample_dists).item()
+
+		if batch_aperture < 300000.0 and not use_global:
+			# Local/Regional Mode: 3D Euclidean Space
+			t_euclidean = torch.cdist(srcs_ecef, locs_ecef) / V_wave
+			return t_euclidean.unsqueeze(2)
+		else:
+			# Global Mode: WGS84 Ellipsoidal Arc Paths
+			a, b = 6378137.0, 6356752.3142
+			locs_norm = locs_ecef / torch.norm(locs_ecef, dim=1, keepdim=True)
+			srcs_norm = srcs_ecef / torch.norm(srcs_ecef, dim=1, keepdim=True)
+			
+			r_locs = a * b / torch.sqrt((b * locs_norm[:, 0])**2 + (b * locs_norm[:, 1])**2 + (a * locs_norm[:, 2])**2)
+			r_srcs = a * b / torch.sqrt((b * srcs_norm[:, 0])**2 + (b * srcs_norm[:, 1])**2 + (a * srcs_norm[:, 2])**2)
+			r_avg = 0.5 * (r_locs.unsqueeze(0) + r_srcs.unsqueeze(1))
+			
+			cos_theta = torch.clamp(torch.mm(srcs_norm, locs_norm.T), -1.0, 1.0)
+			theta = torch.acos(cos_theta)
+			return ((theta * r_avg) / V_wave).unsqueeze(2)
+
+	# 1. Sample Reference Sources Near Active Station Coverage
+	st_ecef = lla2ecef(station_locs)
+	st_min, st_max = np.min(station_locs, axis=0), np.max(station_locs, axis=0)
+	pad_lat, pad_lon = (st_max[0] - st_min[0]) * 0.10, (st_max[1] - st_min[1]) * 0.10
+	
+	lats = np.random.uniform(st_min[0] - pad_lat, st_max[0] + pad_lat, n_srcs)
+	lons = np.random.uniform(st_min[1] - pad_lon, st_max[1] + pad_lon, n_srcs)
+	zs   = np.random.uniform(z_range[0], z_range[1], n_srcs)
+	src_refs_lla = np.stack([lats, lons, zs], axis=1)
+	ref_ecef = lla2ecef(src_refs_lla)
+
+	# 2. Calculate Adaptive Search Limits per Source with Probabilistic k Sampling
+	all_dists = cdist(ref_ecef, st_ecef)
+	nearest_idx = []
+	local_scales = np.zeros(n_srcs)
+	time_limits = np.zeros(n_srcs)
+	cluster_apertures = []
+	source_velocities = np.zeros(n_srcs)
+
+	for s in range(n_srcs):
+		s_all_dists = all_dists[s]
+		
+		# Sample random active station subset size for source s
+		k_s = np.random.randint(k_range[0], k_range[1] + 1)
+		
+		if n_stas_total <= k_s:
+			chosen_idx = np.arange(n_stas_total)
+		else:
+			# Temperature scale (tau_m) derived from local station spacing
+			tau_m = max(25000.0, 0.3 * np.median(s_all_dists))
+			
+			# Numerically stable Softmax probabilities
+			logits = -s_all_dists / tau_m
+			exp_logits = np.exp(logits - np.max(logits))
+			sum_exp = np.sum(exp_logits)
+			
+			if sum_exp > 0:
+				probs = exp_logits / sum_exp
+			else:
+				probs = np.ones(n_stas_total) / n_stas_total
+				
+			chosen_idx = np.random.choice(n_stas_total, size=k_s, replace=False, p=probs)
+
+		nearest_idx.append(chosen_idx)
+		
+		s_dists = s_all_dists[chosen_idx]
+		local_scales[s] = np.median(s_dists)
+		
+		cluster_stas = st_ecef[chosen_idx]
+		if len(cluster_stas) > 1:
+			pair_dists = cdist(cluster_stas, cluster_stas)
+			aperture_s = float(np.percentile(pair_dists, 85))
+		else:
+			aperture_s = 1000.0
+		cluster_apertures.append(aperture_s)
+		
+		# Adaptive P-Wave Velocity Scale Engine
+		if overwrite_vs:
+			if aperture_s < 100000.0:
+				V_adaptive = 6000.0
+			elif aperture_s < 1000000.0:
+				V_adaptive = 8000.0
+			elif aperture_s < 3000000.0:
+				V_adaptive = 10000.0
+			else:
+				V_adaptive = 13000.0
+		else:
+			V_adaptive = Vs
+		source_velocities[s] = V_adaptive
+		
+		moveout = (np.max(s_dists) - np.min(s_dists)) / V_adaptive
+		sigma_t_expected = np.mean(s_dists / V_adaptive) * noise_level
+		time_limits[s] = max(moveout * 0.5, sigma_t_expected * 5.0)
+
+	aperture_m = float(np.median(cluster_apertures))
+
+	# 3. Generate Geodetically Stable Local Perturbations
+	lat_m_per_deg = 111000.0  # Approx meters per degree latitude
+	
+	dx_m = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * local_scales[:, None]
+	dy_m = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * local_scales[:, None]
+	dz_m = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * (local_scales[:, None] * 0.2)
+	time_offs = np.random.uniform(-1, 1, (n_srcs, n_test_per_src)) * time_limits[:, None]
+
+	ref_lats = src_refs_lla[:, 0][:, None]
+	ref_lons = src_refs_lla[:, 1][:, None]
+	ref_zs   = src_refs_lla[:, 2][:, None]
+
+	lon_m_per_deg = lat_m_per_deg * np.cos(np.radians(ref_lats))
+
+	test_lats = ref_lats + (dy_m / lat_m_per_deg)
+	test_lons = ref_lons + (dx_m / lon_m_per_deg)
+	test_zs   = np.clip(ref_zs + dz_m, z_range[0], z_range[1])
+
+	test_lla_flat = np.stack([test_lats.ravel(), test_lons.ravel(), test_zs.ravel()], axis=1)
+
+	# 4 & 5. Travel Time Engine & Per-Source Chi-Square Misfit
+	chi_error_list = []
+
+	for s in range(n_srcs):
+		s_stas = np.asarray(station_locs)[nearest_idx[s]]
+		V_s = source_velocities[s]
+		
+		# Reference travel time for source s: shape (1, k_s, 1)
+		t_r = trv(s_stas, src_refs_lla[s:s+1], V_wave=V_s).cpu().detach().numpy()
+		s1, s2 = t_r.shape[0], t_r.shape[1]
+		
+		noise_values = generate_travel_time_noise(t_r[:, :, 0], phase_input="P")[0].reshape(s1, s2)
+		t_obs_s = t_r[:, :, 0] + noise_values  # Shape: (1, k_s)
+		
+		# Test travel time for perturbed points: shape (n_test_per_src, k_s, 1)
+		test_pts_s = test_lla_flat[s*n_test_per_src : (s+1)*n_test_per_src]
+		t_t = trv(s_stas, test_pts_s, V_wave=V_s).cpu().detach().numpy()
+		t_test_s = t_t[:, :, 0]  # Shape: (n_test_per_src, k_s)
+		
+		# Residuals across k_s active stations: (n_test_per_src, k_s)
+		residuals_s = t_obs_s - t_test_s - time_offs[s, :, None]
+		sigma_d_s = np.maximum(t_test_s * noise_level, 1e-6)
+		
+		# Reduced Chi-Square misfit across stations for source s: shape (n_test_per_src,)
+		chi_s = np.sqrt(np.mean((residuals_s / sigma_d_s)**2, axis=1))
+		chi_error_list.append(chi_s)
+
+	# Stack misfits into uniform matrix: shape (n_srcs, n_test_per_src)
+	chi_error = np.stack(chi_error_list, axis=0)
+
+	# 6. Extract Widths with Robust Fallbacks
+	dist_s = np.sqrt(dx_m**2 + dy_m**2 + dz_m**2) 
+	mask = (chi_error > 0.1) & (chi_error < 5.0)
+
+	if np.any(mask):
+		w_phys = float(np.median(dist_s[mask] / chi_error[mask]))
+		w_t = float(np.median(np.abs(time_offs)[mask] / chi_error[mask]))
+	else:
+		# Fallback to mean scale if noise floor suppresses mask
+		w_phys = float(np.mean(local_scales) * 0.1)
+		w_t = float(np.mean(time_limits) * 0.1)
+
+	rel_scale = w_phys / aperture_m
+
+	print(f"\n{'='*55}")
+	print(f"BATCHED ADAPTIVE COHERENCY ESTIMATION")
+	print(f"{'='*55}")
+	print(f"Total Points Sampled:   {n_srcs * n_test_per_src:,}")
+	print(f"Spatial Width (W_phys): {w_phys/1000:.4f} km")
+	print(f"Temporal Width (W_t):   {w_t:.4f} s")
+	print(f"Computed Aperture:	  {aperture_m/1000:.2f} km")
+	print(f"Relative Resolution:	{rel_scale:.4%}")
+	print(f"Noise Level Used:	   {noise_level*100:.1f}%\n")
+	
+	return {"W_phys_m": w_phys, "W_t_s": w_t, "rel_scale": rel_scale}
+
+
+
+
+
+
+
+
+def estimate_kernel_widths_backup_main(domain, station_locs, z_range=(-40000, 2000), vel_phase=6000.0, 
 						   noise_level=0.02, n_srcs=250, n_test_per_src=10000, 
 						   n_neighbors_trgt=20, use_global=False, Vs = None, overwrite_vs = True, device='cpu'):
 	import torch
@@ -11453,6 +11778,7 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), vel_pha
 
 
 
+
 def probe_network_sidelobes_geodetic(
 	station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, 
 	ftrns1, ftrns2, k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, 
@@ -11528,7 +11854,7 @@ def probe_network_sidelobes_geodetic(
 
 		if add_travel_time_noise:
 			noise_vals, _ = generate_travel_time_noise(
-				t_obs.cpu().detach().numpy(),
+				t_obsc.cpu().detach().numpy(),
 				phase_input='P',
 				distribution="laplace",
 				sigma_pick=0.15,
