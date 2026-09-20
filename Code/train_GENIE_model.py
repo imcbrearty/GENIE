@@ -5284,7 +5284,7 @@ for batch_idx, inputs in enumerate(loader):
 				tc_win = src_t_kernel * 1.5
 				sp_win = src_x_kernel * 1.5
 				ip1, ip2 = np.where(lp_phases[i0] == 0)[0], np.where(lp_phases[i0] == 1)[0]
-				ip11, ip21 = np.where((lp_phases[i0] == 0)*(pick_lbls.amax(0).cpu().detach().numpy() >= 0.5)[0], np.where((lp_phases[i0] == 1)*(pick_lbls.amax(0).cpu().detach().numpy() >= 0.5))[0]
+				ip11, ip21 = np.where((lp_phases[i0] == 0)*(pick_lbls.amax(0).cpu().detach().numpy() >= 0.5))[0], np.where((lp_phases[i0] == 1)*(pick_lbls.amax(0).cpu().detach().numpy() >= 0.5))[0]
 				iarg_sort = np.arange(len(Locs[i0]))
 
 				if len(lp_srcs[i0]) > 0:
