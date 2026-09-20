@@ -5217,7 +5217,7 @@ for batch_idx, inputs in enumerate(loader):
 
 		## Make plots
 		make_plot = True
-		if make_plot == True and np.mod(i, 1000) < 20:
+		if make_plot == True and (np.mod(i, 1000) < 2) and (i >= 1000):
 			fig, ax = plt.subplots(4, 1, sharex = True)
 			for j in range(2):
 				i1 = np.where(Lbls_query[i0][:,0].cpu().detach().numpy() > 0.1)[0]
