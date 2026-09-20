@@ -8179,15 +8179,15 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
     data_save['x_grid_projs'] = x_grid_projs
 
     precision = 5
-    data['degree_padding'] = float(np.round(deg_padding, precision))
+    data_save['degree_padding'] = float(np.round(deg_padding, precision))
     # data['time_shift_range'] = float(np.round(time_shift_range, precision))
-    data['scale_rel'] = float(np.round(2.0*source_label_width, precision))
-    data['kernel_sig_t'] = float(np.round(sigma_input, precision))
-    data['src_x_kernel'] = float(np.round(source_label_width, precision))
-    data['src_t_kernel'] = float(np.round(source_label_width_t, precision))
-    data['src_x_arv_kernel'] = float(np.round(association_label_width, precision))
-    data['src_t_arv_kernel'] = float(np.round(association_label_width_t, precision))
-    data['src_depth_kernel'] = float(np.round(source_label_width, precision))
+    data_save['scale_rel'] = float(np.round(2.0*source_label_width, precision))
+    data_save['kernel_sig_t'] = float(np.round(sigma_input, precision))
+    data_save['src_x_kernel'] = float(np.round(source_label_width, precision))
+    data_save['src_t_kernel'] = float(np.round(source_label_width_t, precision))
+    data_save['src_x_arv_kernel'] = float(np.round(association_label_width, precision))
+    data_save['src_t_arv_kernel'] = float(np.round(association_label_width_t, precision))
+    data_save['src_depth_kernel'] = float(np.round(source_label_width, precision))
 
   
     if initialize is not None:
