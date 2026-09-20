@@ -8374,7 +8374,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		
 		# --- NEW: Compute Full Array Aperture Moveout ---
 		# Total distance between furthest stations in the active array
-		array_aperture_m = float(np.max(pdist(sta_ecef))) if len(locs_use) > 1 else 0.0
+		array_aperture_m = float(np.max(pd(sta_ecef))) if len(locs_use) > 1 else 0.0
 		t_array_transit = array_aperture_m / Vc
 		
 		# 1. Compute physical lower floor (Desired Minimum)
