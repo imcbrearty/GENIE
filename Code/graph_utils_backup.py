@@ -8822,8 +8822,6 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 
 		# 3. RESOLVE CONFLICT: Ensure min floor NEVER exceeds the hard max cap
 		# If the ceiling is lower than the desired minimum, clamp the minimum down to the ceiling.
-		effective_min_time_range = min(desired_min_time_range, max_time_cap)
-
 		# 1. Compute physical lower floor (Desired Minimum)
 		# array_moveout_floor = max(0.3 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
 		array_moveout_floor = max(0.15 * np.sqrt(t_array_transit), 0.35 * t_cluster_transit)
@@ -8834,7 +8832,9 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 			1.0 * t_interstation_median,
 			array_moveout_floor	   # Physical moveout floor
 		)
-
+		
+		effective_min_time_range = min(desired_min_time_range, max_time_cap)
+		
 		# 2. Compute budget-safe max time cap (Hard Upper Ceiling)
 		# --- FIX: Incorporate sampled array moveout (max_dt) into the cap ---
 		# Allow search to cover at least 1.2x the maximum expected transit time across the array
