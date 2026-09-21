@@ -13613,7 +13613,127 @@ def compute_forman_ricci_curvature(G):
 	print(f"  └─ Source-Source Mean:   {np.mean(source_curvatures):.4f}")
 	print(f"  └─ Station-Station Mean: {np.mean(station_curvatures):.4f}")
 
+	# # Option A: Unweighted Average (Your current method)
+	# node_curvature_mean = np.zeros(n_nodes)
+	# np.add.at(node_curvature_mean, rows, edge_curvatures)
+	# np.add.at(node_curvature_mean, cols, edge_curvatures)
+	# degrees = np.bincount(np.concatenate([rows, cols]), minlength=n_nodes)
+	# non_zero = degrees > 0
+	# node_curvature_mean[non_zero] /= degrees[non_zero]
+
+	# # Option B: Total Curvature (Sum / Curvature Mass)
+	# # Preserves total local geometric stress; nodes with many bottleneck edges get higher negative values.
+	# node_curvature_sum = np.zeros(n_nodes)
+	# np.add.at(node_curvature_sum, rows, edge_curvatures)
+	# np.add.at(node_curvature_sum, cols, edge_curvatures)
+	
 	return stats
+
+
+def compute_weighted_forman_ricci_curvature(G, weight='weight'):
+    """
+    Computes Weighted Forman-Ricci Curvature (Augmented) for edges in G.
+    Formula per edge e=(u,v):
+        kappa(u, v) = w_uv * ( (s(u)/w_uv) + (s(v)/w_uv) - sum_{e_u ~ e} (s(u)/sqrt(w_uv * w_eu)) 
+                                                       - sum_{e_v ~ e} (s(v)/sqrt(w_uv * w_ev)) )
+                      + 3 * sum_{triangles} w_uvc
+    """
+    # 1. Get Weighted Adjacency Matrix
+    adj_matrix = nx.to_scipy_sparse_array(G, weight=weight, format='csr', dtype=float)
+    nodes_list = list(G.nodes())
+    n_nodes = adj_matrix.shape[0]
+
+    # Node Strength s(u) = sum_v w(u, v)
+    strengths = np.array(adj_matrix.sum(axis=1)).flatten()
+
+    # Get upper triangle edges (u, v)
+    adj_triu = sp.triu(adj_matrix, format='csr')
+    rows, cols = adj_triu.nonzero()
+    w_uv = np.array(adj_triu[rows, cols]).flatten()
+
+    # Avoid divide-by-zero
+    w_uv_safe = np.where(w_uv == 0, 1e-10, w_uv)
+
+    # 2. Compute Edge-Neighbor Weight Terms
+    # Matrix of sqrt(W) for neighbor edge weight normalizations
+    sqrt_adj = adj_matrix.copy()
+    sqrt_adj.data = np.sqrt(sqrt_adj.data)
+
+    # Sum of sqrt(w_eu) for all edges attached to u
+    sqrt_sum = np.array(sqrt_adj.sum(axis=1)).flatten()
+
+    # Term per node: (s(u) / w_uv) - (sqrt_sum(u) / sqrt(w_uv))
+    term_u = (strengths[rows] / w_uv_safe) - (sqrt_sum[rows] / np.sqrt(w_uv_safe))
+    term_v = (strengths[cols] / w_uv_safe) - (sqrt_sum[cols] / np.sqrt(w_uv_safe))
+
+    base_curvature = w_uv * (term_u + term_v)
+
+    # 3. Compute Weighted Triangle Contributions
+    # Geometric mean weight for triangles u-v-k: (w_uv * w_vk * w_ku)^(1/3)
+    # Fast sparse approximation via elementwise matrix product:
+    cube_root_adj = adj_matrix.copy()
+    cube_root_adj.data = cube_root_adj.data ** (1.0 / 3.0)
+    
+    # (A_1/3)^2 gives sum of w_vk^(1/3) * w_ku^(1/3) for common neighbors k
+    tri_matrix = cube_root_adj.dot(cube_root_adj)
+    weighted_triangles = np.array(tri_matrix[rows, cols]).flatten() * (w_uv ** (1.0 / 3.0))
+
+    edge_curvatures = base_curvature + 3.0 * weighted_triangles
+
+    # 4. Node-level average curvature
+    node_curvatures = np.zeros(n_nodes)
+    np.add.at(node_curvatures, rows, edge_curvatures)
+    np.add.at(node_curvatures, cols, edge_curvatures)
+
+    degrees = np.diff(adj_matrix.indptr)  # Pure unweighted degree for averaging
+    non_zero = degrees > 0
+    node_curvatures[non_zero] /= degrees[non_zero]
+
+    # --- STEP 2: Edge Type Masks for Cartesian Product ---
+    stations_u = np.array([nodes_list[r][1] for r in rows])
+    stations_v = np.array([nodes_list[c][1] for c in cols])
+
+    sources_u = np.array([nodes_list[r][0] for r in rows])
+    sources_v = np.array([nodes_list[c][0] for c in cols])
+
+    is_source_edge = (stations_u == stations_v)
+    is_station_edge = (sources_u == sources_v)
+
+    # --- STEP 3: Slice and Print ---
+    source_curvatures = edge_curvatures[is_source_edge]
+    station_curvatures = edge_curvatures[is_station_edge]
+
+    stats = {
+        "mean_edge_curvature": float(np.mean(edge_curvatures)),
+        "std_edge_curvature": float(np.std(edge_curvatures)),
+        "min_edge_curvature": float(np.min(edge_curvatures)),
+        "mean_node_curvature": float(np.mean(node_curvatures)),
+        "edge_curvatures": edge_curvatures
+    }
+
+    print(f"Combined Mean Curvature:   {np.mean(edge_curvatures):.4f}")
+    print(f"  └─ Source-Source Mean:   {np.mean(source_curvatures):.4f}" if len(source_curvatures) else "  └─ Source-Source Mean: N/A")
+    print(f"  └─ Station-Station Mean: {np.mean(station_curvatures):.4f}" if len(station_curvatures) else "  └─ Station-Station Mean: N/A")
+	
+	# # Option C: Weighted Average (Edge-Weight Proportional)
+	# # Gives more importance to heavy edges surrounding the node.
+	# node_curvature_weighted = np.zeros(n_nodes)
+	# np.add.at(node_curvature_weighted, rows, edge_curvatures * w_uv)
+	# np.add.at(node_curvature_weighted, cols, edge_curvatures * w_uv)
+	# node_weights_sum = np.zeros(n_nodes)
+	# np.add.at(node_weights_sum, rows, w_uv)
+	# np.add.at(node_weights_sum, cols, w_uv)
+	# non_zero_w = node_weights_sum > 0
+	# node_curvature_weighted[non_zero_w] /= node_weights_sum[non_zero_w]
+	
+	# # Option D: Extreme Curvatures (Min / Max Bottleneck Profile)
+	# # Useful for detecting if a node sits on ANY major bottleneck path, even if its average looks fine.
+	# node_curvature_min = np.full(n_nodes, np.inf)
+	# np.minimum.at(node_curvature_min, rows, edge_curvatures)
+	# np.minimum.at(node_curvature_min, cols, edge_curvatures)
+	# node_curvature_min[node_curvature_min == np.inf] = 0.0
+	
+    return stats
 
 
 def strings_to_tensor(string_list):
