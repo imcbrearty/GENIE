@@ -8658,7 +8658,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
 
 
-def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 3.0, n_rand_srcs = 250, quantile_times = 0.75, quantile_times_srcs = 0.75, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
+def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 1.5, n_rand_srcs = 250, quantile_times = 0.25, quantile_times_srcs = 0.25, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
 	# if domain is None:
 	#	 domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -8826,7 +8826,8 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		effective_min_time_range = min(desired_min_time_range, max_time_cap)
 
 		# 1. Compute physical lower floor (Desired Minimum)
-		array_moveout_floor = max(0.3 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
+		# array_moveout_floor = max(0.3 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
+		array_moveout_floor = max(0.15 * np.sqrt(t_array_transit), 0.35 * t_cluster_transit)
 
 		desired_min_time_range = max(
 			min_time_range,		   # User argument default (e.g., 3.0s)
