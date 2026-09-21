@@ -8658,7 +8658,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
 
 
-def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 1.5, n_rand_srcs = 250, quantile_times = 0.25, quantile_times_srcs = 0.25, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
+def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 3.0, n_rand_srcs = 250, quantile_times = 0.3, quantile_times_srcs = 0.3, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
 	# if domain is None:
 	#	 domain = get_domain_bounds(locs_use, scale = scale_domain)
@@ -8771,11 +8771,27 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 			time_shift_range = min(time_shift_range, max_time_shift_range)
 
 	else:
-	
+		
+		# 1. Compute physical lower floor (Desired Minimum)
+		# Includes user minimum, kernel width, inter-station transit, and array aperture floor
+		# array_moveout_floor = max(0.15 * t_array_transit, 0.75 * t_cluster_transit)
+		# array_moveout_floor = min(5.0, max(0.03 * t_array_transit, 0.5 * t_cluster_transit))
+		# Guarantees the range never drops below 35% of maximum array moveout
+		# array_moveout_floor = max(0.35 * t_array_transit, 0.5 * t_cluster_transit)
+
+		# array_moveout_floor = max(0.35 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
+
+
+		# desired_min_time_range = max(
+		# 	min_time_range,		   # User argument default (e.g., 3.0s)
+		# 	1.5 * w_t_sec,			# Kernel resolution scale floor
+		# 	1.0 * t_interstation_median,
+		# 	array_moveout_floor	   # Physical moveout floor
+		# )
+
 		# 1. Compute station network geometric scales
 		sta_ecef = ftrns1_abs(locs_use)
 		dists_k, _ = cKDTree(sta_ecef).query(sta_ecef, k=min(10, len(locs_use)))
-		
 		w_t_sec = domain_scale.get('W_t_s', 3.0)
 		
 		# Local neighbor & cluster transit times
@@ -8792,23 +8808,6 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		array_aperture_m = float(np.percentile(pd(sta_ecef), 85)) if len(locs_use) > 2 else 0.0
 		t_array_transit = array_aperture_m / Vc
 		
-		# 1. Compute physical lower floor (Desired Minimum)
-		# Includes user minimum, kernel width, inter-station transit, and array aperture floor
-		# array_moveout_floor = max(0.15 * t_array_transit, 0.75 * t_cluster_transit)
-		# array_moveout_floor = min(5.0, max(0.03 * t_array_transit, 0.5 * t_cluster_transit))
-		# Guarantees the range never drops below 35% of maximum array moveout
-		# array_moveout_floor = max(0.35 * t_array_transit, 0.5 * t_cluster_transit)
-
-		array_moveout_floor = max(0.35 * np.sqrt(t_array_transit), 0.5 * t_cluster_transit)
-
-
-		desired_min_time_range = max(
-			min_time_range,		   # User argument default (e.g., 3.0s)
-			1.5 * w_t_sec,			# Kernel resolution scale floor
-			1.0 * t_interstation_median,
-			array_moveout_floor	   # Physical moveout floor
-		)
-
 		# 2. Compute budget-safe max time cap (Hard Upper Ceiling)
 		spacing_based_cap = max(1.5 * t_cluster_transit, 3.0 * t_interstation_median)
 		kernel_based_cap = 15.0 * w_t_sec
@@ -8862,7 +8861,6 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		# Minimum: At least 6 stations, or 10% of network
 		min_k = min(max(6, int(0.10 * len(locs_use))), len(locs_use))
 
-
 		# Maximum: Up to 60% of network, but capped at 120 stations for computational efficiency
 		max_k = max(12, min(200, int(0.60 * len(locs_use))))
 
@@ -8886,6 +8884,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 				use_global=use_global, 
 				r_min=r_min, 
 				r_max=r_max, 
+				max_limit = 1.1*max_time_cap,
 				device=device
 			)
 			
@@ -12775,7 +12774,7 @@ def probe_network_sidelobes_geodetic(
 	station_latlonz, domain_lat_range, domain_lon_range, domain_depth_range, 
 	ftrns1, ftrns2, k_stations=20, scan_step_m=1000.0, W_phys_m=1000.0, 
 	W_t=3.0, vel_avg=6500.0, vel_min=4875.0, r_min=None, r_max=None, 
-	use_global=False, num_candidates=50000, device='cpu'
+	use_global=False, num_candidates=50000, max_limit = None, device='cpu'
 ):
 	device = torch.device(device)
 	station_xyz = torch.tensor(ftrns1(station_latlonz), device=device, dtype=torch.float32)
@@ -12819,6 +12818,8 @@ def probe_network_sidelobes_geodetic(
 	d_array = 1.2 * local_aperture
 	max_radius_m = d_array / 2.0
 	max_dt = d_array / vel_min
+	if max_limit is not None:
+		max_dt = min(max_dt, max_limit)
 
 	# 4. Generate Candidate Grid
 	trial_points, _ = regular_sobolov(
