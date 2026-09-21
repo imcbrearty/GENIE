@@ -8788,7 +8788,19 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		# 	1.0 * t_interstation_median,
 		# 	array_moveout_floor	   # Physical moveout floor
 		# )
-
+		
+		# 2. Compute budget-safe max time cap (Hard Upper Ceiling)
+		# spacing_based_cap = max(1.5 * t_cluster_transit, 3.0 * t_interstation_median)
+		# kernel_based_cap = 15.0 * w_t_sec
+		# max_time_cap = max(spacing_based_cap, kernel_based_cap)
+		
+		# Absolute hard ceiling (domain scale override, explicit argument, or global default)
+		# max_time_lag = 150.0 if use_global is False else 450.0
+		# hard_max_limit = domain_scale.get('max_allowed_dt_s', max_time_lag if max_time_shift_range is None else max_time_shift_range)
+		
+		# Apply hard limit to max_time_cap
+		# max_time_cap = min(max_time_cap, hard_max_limit)
+		
 		# 1. Compute station network geometric scales
 		sta_ecef = ftrns1_abs(locs_use)
 		dists_k, _ = cKDTree(sta_ecef).query(sta_ecef, k=min(10, len(locs_use)))
@@ -8808,18 +8820,6 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		array_aperture_m = float(np.percentile(pd(sta_ecef), 85)) if len(locs_use) > 2 else 0.0
 		t_array_transit = array_aperture_m / Vc
 		
-		# 2. Compute budget-safe max time cap (Hard Upper Ceiling)
-		spacing_based_cap = max(1.5 * t_cluster_transit, 3.0 * t_interstation_median)
-		kernel_based_cap = 15.0 * w_t_sec
-		max_time_cap = max(spacing_based_cap, kernel_based_cap)
-		
-		# Absolute hard ceiling (domain scale override, explicit argument, or global default)
-		max_time_lag = 150.0 if use_global is False else 450.0
-		hard_max_limit = domain_scale.get('max_allowed_dt_s', max_time_lag if max_time_shift_range is None else max_time_shift_range)
-		
-		# Apply hard limit to max_time_cap
-		max_time_cap = min(max_time_cap, hard_max_limit)
-
 		# 3. RESOLVE CONFLICT: Ensure min floor NEVER exceeds the hard max cap
 		# If the ceiling is lower than the desired minimum, clamp the minimum down to the ceiling.
 		# 1. Compute physical lower floor (Desired Minimum)
@@ -8832,9 +8832,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 			1.0 * t_interstation_median,
 			array_moveout_floor	   # Physical moveout floor
 		)
-		
-		effective_min_time_range = min(desired_min_time_range, max_time_cap)
-		
+				
 		# 2. Compute budget-safe max time cap (Hard Upper Ceiling)
 		# --- FIX: Incorporate sampled array moveout (max_dt) into the cap ---
 		# Allow search to cover at least 1.2x the maximum expected transit time across the array
