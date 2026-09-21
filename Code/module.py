@@ -2597,7 +2597,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			A_in_src=A_in_src_slice,
 			embed_context=self.embed_context,
 			g_embed = g_embed,
-			rel_pos_feat = rel_pos_feat,
+			relative_feat = rel_pos_feat,
 			support = support_prod,
 			pos_rel_sta=pos_rel_sta,  # Direct raw offset reuse
 			pos_rel_src=pos_rel_src   # Direct raw offset reuse
