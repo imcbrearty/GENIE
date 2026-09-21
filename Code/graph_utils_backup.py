@@ -8882,7 +8882,7 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 				use_global=use_global, 
 				r_min=r_min, 
 				r_max=r_max, 
-				max_limit = 1.1*max_time_cap,
+				# max_limit = 1.1*max_time_cap,
 				device=device
 			)
 			
