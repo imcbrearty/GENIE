@@ -1960,19 +1960,19 @@ from torch_scatter import scatter
 
 
 
-import numpy as np
-import torch
-from torch_scatter import scatter
+# import numpy as np
+# import torch
+# from torch_scatter import scatter
 
 
-import numpy as np
-import torch
-from torch_scatter import scatter
+# import numpy as np
+# import torch
+# from torch_scatter import scatter
 
 
-import numpy as np
-import torch
-from torch_scatter import scatter
+# import numpy as np
+# import torch
+# from torch_scatter import scatter
 
 
 class SeismicEmbeddingEngine:
@@ -2176,11 +2176,289 @@ class SeismicEmbeddingEngine:
 
 
 
+# import numpy as np
+# import torch
+
+
+# class TopKSeismicEmbeddingEngine:
+#     def __init__(
+#         self,
+#         P,
+#         locs,
+#         ind_use,
+#         A_src_in_sta=None,
+#         trv_times=None,
+#         x_grid=None,
+#         dt=0.19,
+#         kernel_sig_t=2.84730416,
+#         t_pad=100.0,
+#         k_nearest=2,
+#         precompute=True,
+#         device="cpu",
+#     ):
+#         self.device = device
+#         self.dt = float(dt)
+#         self.kernel_sig_t = float(kernel_sig_t)
+#         self.t_pad = float(t_pad)
+#         self.k = k_nearest
+#         self.locs = locs
+#         self.ind_use = np.asanyarray(ind_use)
+#         self.n_stations = len(locs)
+
+#         # 1. Graph Edges & Travel Times
+#         self.x_grid = x_grid
+#         if A_src_in_sta is not None:
+#             self.A_src_in_sta = A_src_in_sta
+#             self.n_edges = len(A_src_in_sta[0])
+
+#             sta_idx_local = A_src_in_sta[0]
+#             edge_global_sta = self.ind_use[sta_idx_local].astype(int)
+#             self.sta_ids_gpu = torch.as_tensor(edge_global_sta, device=self.device).long()
+
+#             src_indices = A_src_in_sta[1]
+#             self.src_ids_gpu = torch.as_tensor(src_indices, device=self.device).long()
+
+#             if trv_times is not None:
+#                 trv_sliced = trv_times[src_indices, edge_global_sta, :]
+#                 self.trv_edges_gpu = torch.as_tensor(trv_sliced, device=self.device, dtype=torch.float32)
+#             else:
+#                 self.trv_edges_gpu = None
+#         else:
+#             self.n_edges = 0
+#             self.sta_ids_gpu = None
+#             self.src_ids_gpu = None
+#             self.trv_edges_gpu = None
+
+#         # 2. Setup Picks & Build
+#         self.update_picks(P)
+#         if precompute and len(self.P) > 0:
+#             self._build_topk_global_embedding()
+
+#     def update_picks(self, P_new):
+#         """Swaps or updates the pick matrix P."""
+#         sta_mask = np.isin(P_new[:, 1].astype(int), self.ind_use)
+#         P_filtered = P_new[sta_mask]
+
+#         if len(P_filtered) == 0:
+#             self.P = np.empty((0, 5))
+#             return
+
+#         sort_idx = np.argsort(P_filtered[:, 0])
+#         self.P = P_filtered[sort_idx]
+
+#         raw_start = self.P[0, 0] - self.t_pad
+#         self.T_start = float(np.floor(raw_start / self.dt) * self.dt)
+#         self.T_end = float(np.max(self.P[:, 0]) + self.t_pad)
+#         self.n_time_series = int(np.round((self.T_end - self.T_start) / self.dt)) + 1
+
+#     def _build_topk_global_embedding(self):
+#         """Precomputes global grids storing Top-K arrivals per time bin."""
+#         abs_time_ref = self.T_start + np.arange(self.n_time_series) * self.dt
+
+#         ifind_p = np.where(self.P[:, 4] == 0)[0]
+#         ifind_s = np.where(self.P[:, 4] == 1)[0]
+
+#         num_index_extra = int(np.ceil(3.0 * self.kernel_sig_t / self.dt))
+#         vec_repeat = np.arange(-num_index_extra, num_index_extra + 1, dtype=int)
+
+#         def build_channel_topk(ifind):
+#             # Shape: (N_stations, K, N_time_series)
+#             grid = torch.zeros((self.n_stations, self.k, self.n_time_series), device=self.device)
+#             if len(ifind) == 0:
+#                 return grid
+
+#             nearest_index = np.round((self.P[ifind, 0] - self.T_start) / self.dt).astype(int)
+#             indices = nearest_index.reshape(-1, 1) + vec_repeat.reshape(1, -1)
+
+#             imask = (indices >= 0) & (indices < self.n_time_series)
+#             indices_clamped = np.clip(indices, 0, self.n_time_series - 1)
+
+#             time_vals = self.P[ifind, 0].reshape(-1, 1) - abs_time_ref[indices_clamped]
+#             vals = imask * np.exp(-0.5 * (time_vals**2) / (self.kernel_sig_t**2))
+
+#             sta_ids = self.P[ifind, 1].astype(int)
+
+#             # Insert pick responses into station grids and maintain top-k values
+#             for idx, sta_id in enumerate(sta_ids):
+#                 t_idx = indices_clamped[idx]
+#                 v_slice = torch.as_tensor(vals[idx], dtype=torch.float32, device=self.device)
+                
+#                 # Stack incoming values with current grid state and extract top-k
+#                 combined = torch.cat([grid[sta_id, :, t_idx], v_slice.unsqueeze(0)], dim=0)
+#                 grid[sta_id, :, t_idx] = torch.topk(combined, k=self.k, dim=0).values
+
+#             return grid
+
+#         self.embed_p = build_channel_topk(ifind_p)
+#         self.embed_s = build_channel_topk(ifind_s)
+
+#         # Combined phase envelope across top-k
+#         combined_all = torch.cat([self.embed_p, self.embed_s], dim=1)
+#         self.embed_all = torch.topk(combined_all, k=self.k, dim=1).values
+
+#     def extract_inputs(self, t0, min_t=0.0, max_t=300.0, t_win=10.0):
+#         t0_val = float(np.squeeze(t0))
+
+#         if self.n_edges == 0:
+#             Inpts = [torch.zeros((0, 4 * self.k), device=self.device)]
+#             Masks = [torch.zeros((0, 4 * self.k), device=self.device)]
+#             return [Inpts, Masks], [[], [], [], []]
+
+#         # Expected arrival times
+#         arrival_time_p = self.trv_edges_gpu[:, 0] + t0_val
+#         arrival_time_s = self.trv_edges_gpu[:, 1] + t0_val
+
+#         trv_out_ind_p = torch.round((arrival_time_p - self.T_start) / self.dt).long()
+#         trv_out_ind_s = torch.round((arrival_time_s - self.T_start) / self.dt).long()
+
+#         valid_p = ((trv_out_ind_p >= 0) & (trv_out_ind_p < self.n_time_series)).unsqueeze(-1)
+#         valid_s = ((trv_out_ind_s >= 0) & (trv_out_ind_s < self.n_time_series)).unsqueeze(-1)
+
+#         clamp_p = torch.clamp(trv_out_ind_p, 0, self.n_time_series - 1)
+#         clamp_s = torch.clamp(trv_out_ind_s, 0, self.n_time_series - 1)
+
+#         # Sample Top-K values per edge -> output shape: (n_edges, K)
+#         col0 = self.embed_all[self.sta_ids_gpu, :, clamp_p] * valid_p  # P-moveout against ALL
+#         col1 = self.embed_all[self.sta_ids_gpu, :, clamp_s] * valid_s  # S-moveout against ALL
+#         col2 = self.embed_p[self.sta_ids_gpu, :, clamp_p] * valid_p    # P-moveout against P
+#         col3 = self.embed_s[self.sta_ids_gpu, :, clamp_s] * valid_s    # S-moveout against S
+
+#         # Concatenate channels along feature dimension: shape -> (n_edges, 4 * K)
+#         val_embed = torch.cat((col0, col1, col2, col3), dim=-1)
+
+#         Inpts = [val_embed]
+#         Masks = [1.0 * (torch.abs(val_embed) > 0.01)]
+
+#         # Pick extraction window
+#         t_center = t0_val + min_t + (max_t - min_t) / 2.0
+#         r = float(t_win) + (max_t - min_t) / 2.0
+
+#         p_start = np.searchsorted(self.P[:, 0], t_center - r, side="left")
+#         p_end = np.searchsorted(self.P[:, 0], t_center + r, side="right")
+#         P_slice = self.P[p_start:p_end]
+
+#         perm_vec = -1 * np.ones(self.n_stations, dtype=int)
+#         perm_vec[self.ind_use] = np.arange(len(self.ind_use))
+
+#         indices = perm_vec[P_slice[:, 1].astype(int)]
+#         ineed = np.where(indices > -1)[0]
+
+#         times = P_slice[ineed, 0]
+#         indices = indices[ineed]
+#         phase_vals = P_slice[ineed, 4]
+#         meta_filtered = P_slice[ineed]
+
+#         lex_sort = np.lexsort((times, indices))
+
+#         picks = [
+#             [times[lex_sort] - t0_val],
+#             [indices[lex_sort]],
+#             [phase_vals[lex_sort]],
+#             [meta_filtered[lex_sort]],
+#         ]
+
+#         return [Inpts, Masks], picks
+
+
+# class ExactTopKSeismicEngine:
+#     """Calculates exact sub-grid Top-K nearest arrivals directly on GPU edges."""
+
+#     def __init__(
+#         self,
+#         P,
+#         locs,
+#         ind_use,
+#         A_src_in_sta=None,
+#         trv_times=None,
+#         kernel_sig_t=2.84730416,
+#         k_nearest=2,
+#         device="cpu",
+#     ):
+#         self.device = device
+#         self.kernel_sig_t = float(kernel_sig_t)
+#         self.k = k_nearest
+#         self.locs = locs
+#         self.ind_use = np.asanyarray(ind_use)
+#         self.n_stations = len(locs)
+
+#         if A_src_in_sta is not None:
+#             self.n_edges = len(A_src_in_sta[0])
+#             sta_idx_local = A_src_in_sta[0]
+#             edge_global_sta = self.ind_use[sta_idx_local].astype(int)
+#             self.sta_ids_gpu = torch.as_tensor(edge_global_sta, device=self.device).long()
+
+#             src_indices = A_src_in_sta[1]
+#             if trv_times is not None:
+#                 trv_sliced = trv_times[src_indices, edge_global_sta, :]
+#                 self.trv_edges_gpu = torch.as_tensor(trv_sliced, device=self.device, dtype=torch.float32)
+#         else:
+#             self.n_edges = 0
+
+#         self.update_picks(P)
+
+#     def update_picks(self, P_new):
+#         sta_mask = np.isin(P_new[:, 1].astype(int), self.ind_use)
+#         self.P = P_new[sta_mask]
+#         self.P_times_gpu = torch.as_tensor(self.P[:, 0], device=self.device, dtype=torch.float32)
+#         self.P_sta_gpu = torch.as_tensor(self.P[:, 1], device=self.device, dtype=torch.long)
+#         self.P_phase_gpu = torch.as_tensor(self.P[:, 4], device=self.device, dtype=torch.long)
+
+#     def _get_topk_gaussian_for_arrival(self, arrival_times, phase_filter=None):
+#         """Finds top-K nearest picks to arrival times on each station edge."""
+#         # Matrix of time differences: (N_edges, N_picks)
+#         time_diffs = torch.abs(arrival_times.unsqueeze(1) - self.P_times_gpu.unsqueeze(0))
+
+#         # Station match mask
+#         sta_match = self.sta_ids_gpu.unsqueeze(1) == self.P_sta_gpu.unsqueeze(0)
+
+#         if phase_filter is not None:
+#             phase_match = self.P_phase_gpu.unsqueeze(0) == phase_filter
+#             valid_mask = sta_match & phase_match
+#         else:
+#             valid_mask = sta_match
+
+#         # Mask out mismatched station picks with infinity
+#         time_diffs = torch.where(valid_mask, time_diffs, torch.tensor(float("inf"), device=self.device))
+
+#         # Smallest K time offsets
+#         topk_diffs, _ = torch.topk(time_diffs, k=self.k, dim=1, largest=False)
+
+#         # Convert to Gaussian misfits
+#         gaussians = torch.exp(-0.5 * (topk_diffs / self.kernel_sig_t) ** 2)
+#         return torch.nan_to_num(gaussians, nan=0.0)
+
+#     def extract_inputs(self, t0, min_t=0.0, max_t=300.0, t_win=10.0):
+#         t0_val = float(np.squeeze(t0))
+
+#         arrival_p = self.trv_edges_gpu[:, 0] + t0_val
+#         arrival_s = self.trv_edges_gpu[:, 1] + t0_val
+
+#         col0 = self._get_topk_gaussian_for_arrival(arrival_p, phase_filter=None)
+#         col1 = self._get_topk_gaussian_for_arrival(arrival_s, phase_filter=None)
+#         col2 = self._get_topk_gaussian_for_arrival(arrival_p, phase_filter=0)
+#         col3 = self._get_topk_gaussian_for_arrival(arrival_s, phase_filter=1)
+
+#         val_embed = torch.cat((col0, col1, col2, col3), dim=-1)
+#         Masks = [1.0 * (val_embed > 0.01)]
+
+#         return [val_embed, Masks]
+
+
 import numpy as np
 import torch
 
 
-class TopKSeismicEmbeddingEngine:
+class TopKEmbeddingEngine:
+    """
+    Day-scale engine: rasterize Top-K + signed residuals onto a time grid once,
+    then extract_inputs(t0) is a gather (same complexity as the original class).
+
+    val_embed shape: (n_edges, 4 * 3k)
+    layout per block (all@P, all@S, P@P, S@S):
+        [gauss_0..k-1 | tanh(z)_0..k-1 | valid_0..k-1]
+    original 4 channels == columns [0, 3k, 6k, 9k]
+    """
+
     def __init__(
         self,
         P,
@@ -2188,261 +2466,195 @@ class TopKSeismicEmbeddingEngine:
         ind_use,
         A_src_in_sta=None,
         trv_times=None,
-        x_grid=None,
         dt=0.19,
         kernel_sig_t=2.84730416,
         t_pad=100.0,
-        k_nearest=2,
-        precompute=True,
+        k_top=2,
         device="cpu",
     ):
         self.device = device
         self.dt = float(dt)
-        self.kernel_sig_t = float(kernel_sig_t)
+        self.sig_t = float(kernel_sig_t)
         self.t_pad = float(t_pad)
-        self.k = k_nearest
+        self.k = int(k_top)
         self.locs = locs
-        self.ind_use = np.asanyarray(ind_use)
+        self.ind_use = np.asarray(ind_use)
         self.n_stations = len(locs)
+        self.n_used = len(self.ind_use)
 
-        # 1. Graph Edges & Travel Times
-        self.x_grid = x_grid
+        max_sta = int(self.ind_use.max()) if self.n_used else 0
+        self.sta_id_to_local = torch.full(
+            (max_sta + 1,), -1, device=device, dtype=torch.long
+        )
+        if self.n_used:
+            self.sta_id_to_local[
+                torch.as_tensor(self.ind_use, device=device, dtype=torch.long)
+            ] = torch.arange(self.n_used, device=device, dtype=torch.long)
+
         if A_src_in_sta is not None:
-            self.A_src_in_sta = A_src_in_sta
             self.n_edges = len(A_src_in_sta[0])
-
-            sta_idx_local = A_src_in_sta[0]
-            edge_global_sta = self.ind_use[sta_idx_local].astype(int)
-            self.sta_ids_gpu = torch.as_tensor(edge_global_sta, device=self.device).long()
-
-            src_indices = A_src_in_sta[1]
-            self.src_ids_gpu = torch.as_tensor(src_indices, device=self.device).long()
-
-            if trv_times is not None:
-                trv_sliced = trv_times[src_indices, edge_global_sta, :]
-                self.trv_edges_gpu = torch.as_tensor(trv_sliced, device=self.device, dtype=torch.float32)
-            else:
-                self.trv_edges_gpu = None
+            self.edge_sta_local = torch.as_tensor(
+                A_src_in_sta[0], device=device, dtype=torch.long
+            )
+            edge_global = self.ind_use[np.asarray(A_src_in_sta[0])]
+            src_idx = np.asarray(A_src_in_sta[1])
+            self.trv_edges_gpu = (
+                torch.as_tensor(
+                    np.asarray(trv_times)[src_idx, edge_global, :],
+                    device=device,
+                    dtype=torch.float32,
+                )
+                if trv_times is not None
+                else None
+            )
         else:
             self.n_edges = 0
-            self.sta_ids_gpu = None
-            self.src_ids_gpu = None
+            self.edge_sta_local = None
             self.trv_edges_gpu = None
 
-        # 2. Setup Picks & Build
+        self.grids = None  # (3, n_used, n_bins, 3k)
+        self.T_start = 0.0
+        self.n_bins = 1
+        self.P = np.empty((0, 5))
         self.update_picks(P)
-        if precompute and len(self.P) > 0:
-            self._build_topk_global_embedding()
 
     def update_picks(self, P_new):
-        """Swaps or updates the pick matrix P."""
-        sta_mask = np.isin(P_new[:, 1].astype(int), self.ind_use)
-        P_filtered = P_new[sta_mask]
-
-        if len(P_filtered) == 0:
+        """Call when the day's pick set changes — not inside the t0 loop."""
+        P_new = np.asarray(P_new)
+        if P_new.size == 0:
             self.P = np.empty((0, 5))
+            self.T_start, self.n_bins = 0.0, 1
+            self.grids = torch.zeros(
+                (3, self.n_used, 1, 3 * self.k), device=self.device
+            )
             return
 
-        sort_idx = np.argsort(P_filtered[:, 0])
-        self.P = P_filtered[sort_idx]
+        P_f = P_new[np.isin(P_new[:, 1].astype(int), self.ind_use)]
+        if len(P_f) == 0:
+            self.P = np.empty((0, 5))
+            self.T_start, self.n_bins = 0.0, 1
+            self.grids = torch.zeros(
+                (3, self.n_used, 1, 3 * self.k), device=self.device
+            )
+            return
 
+        self.P = P_f[np.argsort(P_f[:, 0])]
         raw_start = self.P[0, 0] - self.t_pad
         self.T_start = float(np.floor(raw_start / self.dt) * self.dt)
-        self.T_end = float(np.max(self.P[:, 0]) + self.t_pad)
-        self.n_time_series = int(np.round((self.T_end - self.T_start) / self.dt)) + 1
+        T_end = float(self.P[-1, 0] + self.t_pad)
+        self.n_bins = int(np.round((T_end - self.T_start) / self.dt)) + 1
+        self._rasterize_grid()
 
-    def _build_topk_global_embedding(self):
-        """Precomputes global grids storing Top-K arrivals per time bin."""
-        abs_time_ref = self.T_start + np.arange(self.n_time_series) * self.dt
+    def _rasterize_grid(self):
+        """Vectorized Top-K raster, same splat pattern as SeismicEmbeddingEngine."""
+        k = self.k
+        n_bins = self.n_bins
+        n_used = self.n_used
+        device = self.device
+        dim_size = n_used * n_bins
 
-        ifind_p = np.where(self.P[:, 4] == 0)[0]
-        ifind_s = np.where(self.P[:, 4] == 1)[0]
+        times = torch.as_tensor(self.P[:, 0], device=device, dtype=torch.float32)
+        abs_sta = torch.as_tensor(self.P[:, 1], device=device, dtype=torch.long)
+        phases = torch.as_tensor(self.P[:, 4], device=device, dtype=torch.long)
+        local = self.sta_id_to_local[abs_sta.clamp(0, self.sta_id_to_local.numel() - 1)]
+        ok = local >= 0
+        times, local, phases = times[ok], local[ok], phases[ok]
 
-        num_index_extra = int(np.ceil(3.0 * self.kernel_sig_t / self.dt))
-        vec_repeat = np.arange(-num_index_extra, num_index_extra + 1, dtype=int)
+        scale_window = 2.0
+        # t_keep = 40.0   # seconds; 2nd/3rd picks stored out to ±t_keep
+        num_extra = int(np.ceil(scale_window * 3.0 * self.sig_t / self.dt))
 
-        def build_channel_topk(ifind):
-            # Shape: (N_stations, K, N_time_series)
-            grid = torch.zeros((self.n_stations, self.k, self.n_time_series), device=self.device)
-            if len(ifind) == 0:
-                return grid
+        # num_extra = int(np.ceil(3.0 * self.sig_t / self.dt))
+        vec = torch.arange(-num_extra, num_extra + 1, device=device)
+        grids = torch.zeros((3, n_used, n_bins, 3 * k), device=device)
 
-            nearest_index = np.round((self.P[ifind, 0] - self.T_start) / self.dt).astype(int)
-            indices = nearest_index.reshape(-1, 1) + vec_repeat.reshape(1, -1)
+        def splat_target(t_pick, sta_local):
+            if t_pick.numel() == 0:
+                return torch.zeros(n_used, n_bins, 3 * k, device=device)
 
-            imask = (indices >= 0) & (indices < self.n_time_series)
-            indices_clamped = np.clip(indices, 0, self.n_time_series - 1)
+            nearest = torch.round((t_pick - self.T_start) / self.dt).long()
+            idx = nearest.unsqueeze(1) + vec.unsqueeze(0)          # (N, W)
+            inb = (idx >= 0) & (idx < n_bins)
+            icl = idx.clamp(0, n_bins - 1)
+            grid_t = self.T_start + icl.to(torch.float32) * self.dt
+            signed = grid_t - t_pick.unsqueeze(1)                  # pred - pick
+            abs_dt = signed.abs()
 
-            time_vals = self.P[ifind, 0].reshape(-1, 1) - abs_time_ref[indices_clamped]
-            vals = imask * np.exp(-0.5 * (time_vals**2) / (self.kernel_sig_t**2))
+            write = (icl + sta_local.unsqueeze(1) * n_bins).reshape(-1)
+            signed_f = signed.reshape(-1)
+            abs_f = torch.where(inb.reshape(-1), abs_dt.reshape(-1), abs_dt.new_tensor(1e30))
+            valid_f = inb.reshape(-1)
 
-            sta_ids = self.P[ifind, 1].astype(int)
+            gauss_ch, sign_ch, val_ch = [], [], []
+            abs_work = abs_f.clone()
+            inf = abs_work.new_tensor(1e30)
 
-            # Insert pick responses into station grids and maintain top-k values
-            for idx, sta_id in enumerate(sta_ids):
-                t_idx = indices_clamped[idx]
-                v_slice = torch.as_tensor(vals[idx], dtype=torch.float32, device=self.device)
-                
-                # Stack incoming values with current grid state and extract top-k
-                combined = torch.cat([grid[sta_id, :, t_idx], v_slice.unsqueeze(0)], dim=0)
-                grid[sta_id, :, t_idx] = torch.topk(combined, k=self.k, dim=0).values
+            for rank in range(k):
+                min_abs = torch.full((dim_size,), 1e30, device=device)
+                min_abs.scatter_reduce_(0, write, abs_work, reduce="amin")
 
-            return grid
+                won = valid_f & (abs_work <= min_abs[write] + 1e-6) & (min_abs[write] < 1e29)
+                signed_acc = torch.zeros(dim_size, device=device)
+                cnt = torch.zeros(dim_size, device=device)
+                signed_acc.scatter_add_(0, write, torch.where(won, signed_f, signed_f.new_zeros(())))
+                cnt.scatter_add_(0, write, won.float())
+                signed_win = signed_acc / cnt.clamp(min=1.0)
+                good = (cnt > 0) & (min_abs < 1e29)
 
-        self.embed_p = build_channel_topk(ifind_p)
-        self.embed_s = build_channel_topk(ifind_s)
+                sig_rank = self.sig_t * (1.0 if rank == 0 else scale_window)
+                z = signed_win / sig_rank
 
-        # Combined phase envelope across top-k
-        combined_all = torch.cat([self.embed_p, self.embed_s], dim=1)
-        self.embed_all = torch.topk(combined_all, k=self.k, dim=1).values
+                # z = signed_win / self.sig_t
+                gauss_ch.append(torch.exp(-0.5 * z * z) * good.float())
+                sign_ch.append(torch.tanh(z) * good.float())
+                val_ch.append(good.float())
 
-    def extract_inputs(self, t0, min_t=0.0, max_t=300.0, t_win=10.0):
+                abs_work = torch.where(won, inf, abs_work)         # peel winner, next k
+
+            feat = torch.cat(
+                [torch.stack(gauss_ch, 1), torch.stack(sign_ch, 1), torch.stack(val_ch, 1)],
+                dim=1,
+            )  # (dim_size, 3k)
+            return feat.view(n_used, n_bins, 3 * k)
+
+        masks = (
+            torch.ones_like(phases, dtype=torch.bool),
+            phases == 0,
+            phases == 1,
+        )
+        for tgt, m in enumerate(masks):
+            grids[tgt] = splat_target(times[m], local[m])
+
+        grids[:, :, 0, :] = 0
+        grids[:, :, -1, :] = 0
+        self.grids = grids
+
+    def extract_inputs(self, t0):
         t0_val = float(np.squeeze(t0))
+        if self.n_edges == 0 or self.trv_edges_gpu is None:
+            z = torch.zeros((0, 4 * 3 * self.k), device=self.device)
+            return [z], [(z.abs() > 0.01).float()]
 
-        if self.n_edges == 0:
-            Inpts = [torch.zeros((0, 4 * self.k), device=self.device)]
-            Masks = [torch.zeros((0, 4 * self.k), device=self.device)]
-            return [Inpts, Masks], [[], [], [], []]
+        p_arr = self.trv_edges_gpu[:, 0] + t0_val
+        s_arr = self.trv_edges_gpu[:, 1] + t0_val
+        # same binning rule as the original engine
+        p_bin = torch.round((p_arr - self.T_start) / self.dt).long()
+        s_bin = torch.round((s_arr - self.T_start) / self.dt).long()
+        valid_p = (p_bin >= 0) & (p_bin < self.n_bins)
+        valid_s = (s_bin >= 0) & (s_bin < self.n_bins)
+        p_bin = p_bin.clamp(0, self.n_bins - 1)
+        s_bin = s_bin.clamp(0, self.n_bins - 1)
+        sta = self.edge_sta_local
 
-        # Expected arrival times
-        arrival_time_p = self.trv_edges_gpu[:, 0] + t0_val
-        arrival_time_s = self.trv_edges_gpu[:, 1] + t0_val
+        g0 = self.grids[0, sta, p_bin] * valid_p.unsqueeze(1)
+        g1 = self.grids[0, sta, s_bin] * valid_s.unsqueeze(1)
+        g2 = self.grids[1, sta, p_bin] * valid_p.unsqueeze(1)
+        g3 = self.grids[2, sta, s_bin] * valid_s.unsqueeze(1)
+        val = torch.cat((g0, g1, g2, g3), dim=-1)
 
-        trv_out_ind_p = torch.round((arrival_time_p - self.T_start) / self.dt).long()
-        trv_out_ind_s = torch.round((arrival_time_s - self.T_start) / self.dt).long()
-
-        valid_p = ((trv_out_ind_p >= 0) & (trv_out_ind_p < self.n_time_series)).unsqueeze(-1)
-        valid_s = ((trv_out_ind_s >= 0) & (trv_out_ind_s < self.n_time_series)).unsqueeze(-1)
-
-        clamp_p = torch.clamp(trv_out_ind_p, 0, self.n_time_series - 1)
-        clamp_s = torch.clamp(trv_out_ind_s, 0, self.n_time_series - 1)
-
-        # Sample Top-K values per edge -> output shape: (n_edges, K)
-        col0 = self.embed_all[self.sta_ids_gpu, :, clamp_p] * valid_p  # P-moveout against ALL
-        col1 = self.embed_all[self.sta_ids_gpu, :, clamp_s] * valid_s  # S-moveout against ALL
-        col2 = self.embed_p[self.sta_ids_gpu, :, clamp_p] * valid_p    # P-moveout against P
-        col3 = self.embed_s[self.sta_ids_gpu, :, clamp_s] * valid_s    # S-moveout against S
-
-        # Concatenate channels along feature dimension: shape -> (n_edges, 4 * K)
-        val_embed = torch.cat((col0, col1, col2, col3), dim=-1)
-
-        Inpts = [val_embed]
-        Masks = [1.0 * (torch.abs(val_embed) > 0.01)]
-
-        # Pick extraction window
-        t_center = t0_val + min_t + (max_t - min_t) / 2.0
-        r = float(t_win) + (max_t - min_t) / 2.0
-
-        p_start = np.searchsorted(self.P[:, 0], t_center - r, side="left")
-        p_end = np.searchsorted(self.P[:, 0], t_center + r, side="right")
-        P_slice = self.P[p_start:p_end]
-
-        perm_vec = -1 * np.ones(self.n_stations, dtype=int)
-        perm_vec[self.ind_use] = np.arange(len(self.ind_use))
-
-        indices = perm_vec[P_slice[:, 1].astype(int)]
-        ineed = np.where(indices > -1)[0]
-
-        times = P_slice[ineed, 0]
-        indices = indices[ineed]
-        phase_vals = P_slice[ineed, 4]
-        meta_filtered = P_slice[ineed]
-
-        lex_sort = np.lexsort((times, indices))
-
-        picks = [
-            [times[lex_sort] - t0_val],
-            [indices[lex_sort]],
-            [phase_vals[lex_sort]],
-            [meta_filtered[lex_sort]],
-        ]
-
-        return [Inpts, Masks], picks
-
-
-class ExactTopKSeismicEngine:
-    """Calculates exact sub-grid Top-K nearest arrivals directly on GPU edges."""
-
-    def __init__(
-        self,
-        P,
-        locs,
-        ind_use,
-        A_src_in_sta=None,
-        trv_times=None,
-        kernel_sig_t=2.84730416,
-        k_nearest=2,
-        device="cpu",
-    ):
-        self.device = device
-        self.kernel_sig_t = float(kernel_sig_t)
-        self.k = k_nearest
-        self.locs = locs
-        self.ind_use = np.asanyarray(ind_use)
-        self.n_stations = len(locs)
-
-        if A_src_in_sta is not None:
-            self.n_edges = len(A_src_in_sta[0])
-            sta_idx_local = A_src_in_sta[0]
-            edge_global_sta = self.ind_use[sta_idx_local].astype(int)
-            self.sta_ids_gpu = torch.as_tensor(edge_global_sta, device=self.device).long()
-
-            src_indices = A_src_in_sta[1]
-            if trv_times is not None:
-                trv_sliced = trv_times[src_indices, edge_global_sta, :]
-                self.trv_edges_gpu = torch.as_tensor(trv_sliced, device=self.device, dtype=torch.float32)
-        else:
-            self.n_edges = 0
-
-        self.update_picks(P)
-
-    def update_picks(self, P_new):
-        sta_mask = np.isin(P_new[:, 1].astype(int), self.ind_use)
-        self.P = P_new[sta_mask]
-        self.P_times_gpu = torch.as_tensor(self.P[:, 0], device=self.device, dtype=torch.float32)
-        self.P_sta_gpu = torch.as_tensor(self.P[:, 1], device=self.device, dtype=torch.long)
-        self.P_phase_gpu = torch.as_tensor(self.P[:, 4], device=self.device, dtype=torch.long)
-
-    def _get_topk_gaussian_for_arrival(self, arrival_times, phase_filter=None):
-        """Finds top-K nearest picks to arrival times on each station edge."""
-        # Matrix of time differences: (N_edges, N_picks)
-        time_diffs = torch.abs(arrival_times.unsqueeze(1) - self.P_times_gpu.unsqueeze(0))
-
-        # Station match mask
-        sta_match = self.sta_ids_gpu.unsqueeze(1) == self.P_sta_gpu.unsqueeze(0)
-
-        if phase_filter is not None:
-            phase_match = self.P_phase_gpu.unsqueeze(0) == phase_filter
-            valid_mask = sta_match & phase_match
-        else:
-            valid_mask = sta_match
-
-        # Mask out mismatched station picks with infinity
-        time_diffs = torch.where(valid_mask, time_diffs, torch.tensor(float("inf"), device=self.device))
-
-        # Smallest K time offsets
-        topk_diffs, _ = torch.topk(time_diffs, k=self.k, dim=1, largest=False)
-
-        # Convert to Gaussian misfits
-        gaussians = torch.exp(-0.5 * (topk_diffs / self.kernel_sig_t) ** 2)
-        return torch.nan_to_num(gaussians, nan=0.0)
-
-    def extract_inputs(self, t0, min_t=0.0, max_t=300.0, t_win=10.0):
-        t0_val = float(np.squeeze(t0))
-
-        arrival_p = self.trv_edges_gpu[:, 0] + t0_val
-        arrival_s = self.trv_edges_gpu[:, 1] + t0_val
-
-        col0 = self._get_topk_gaussian_for_arrival(arrival_p, phase_filter=None)
-        col1 = self._get_topk_gaussian_for_arrival(arrival_s, phase_filter=None)
-        col2 = self._get_topk_gaussian_for_arrival(arrival_p, phase_filter=0)
-        col3 = self._get_topk_gaussian_for_arrival(arrival_s, phase_filter=1)
-
-        val_embed = torch.cat((col0, col1, col2, col3), dim=-1)
-        Masks = [1.0 * (val_embed > 0.01)]
-
-        return [val_embed, Masks]
-
+        k = self.k
+        nearest = val[:, [0, 3 * k, 6 * k, 9 * k]]
+        return [val], [(nearest.abs() > 0.01).float()]
 
 
 
