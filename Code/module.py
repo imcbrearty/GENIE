@@ -1043,6 +1043,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		ndim_mask=1,
 		embed_dim=10,
 		n_gammas=3, # 4
+		support_dim=4,
 		baseline_gate=0.001, # 0.01
 	):
 		super(BipartiteGraphReadOutOperator, self).__init__()
@@ -1051,7 +1052,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		self.baseline_gate = baseline_gate
 
 		# 1. Edge Feature Evaluator
-		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas + 4, ndim_in)
+		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas + 8, ndim_in)
 		self.film_edge = FiLM(embed_dim, ndim_in)
 		self.act_edge = nn.PReLU()
 
@@ -1059,6 +1060,13 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		self.mask_gate = nn.Sequential(
 			nn.Linear(ndim_mask, 8), nn.PReLU(),
 			nn.Linear(8, ndim_in), nn.Sigmoid(),
+		)
+
+		# Protects against unbounded log_coverage/log_evidence values
+		self.f_support = nn.Sequential(
+			nn.Linear(support_dim, 8),
+			nn.PReLU(),
+			nn.Linear(8, 8)
 		)
 
 		# 3. Dynamic Bandwidth Predictor
@@ -1115,7 +1123,8 @@ class BipartiteGraphReadOutOperator(nn.Module):
 			edge_mask = mask
 
 		# Step 5: Direct source -> product-edge mapping
-		edge_inpt = torch.cat((inpt[source_idx], rel_pos, support), dim=-1)
+		support_proj = self.f_support(support)
+		edge_inpt = torch.cat((inpt[source_idx], rel_pos, support_proj), dim=-1)
 		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
 
 		# Step 6: Phase routing
@@ -1144,13 +1153,13 @@ class DataAggregationAssociation(nn.Module):
 	Replaces DataAggregationAssociationPhase with modular, per-layer gamma learning.
 	"""
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_latent=30, use_absolute_pos = True,
-				 n_dim_mask=4, embed_dim=10, n_embedding = 10, use_embedding = True, use_offsets = True):
+				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 4, use_embedding = True, use_offsets = True):
 		super().__init__()
 
 		# Input: Unpooled Features (s) + Encoder Latents (x_latent) + Mask + Source Mask (mask_out_1)
 		total_mask_dim = n_dim_mask + 1  # Original observation mask + source likelihood mask
 		total_in_dim = in_channels + n_dim_latent + total_mask_dim
-		extra_dim = 4 + 2*n_embedding if use_embedding else 4
+		extra_dim = 8 + 2*n_embedding if use_embedding else 8
 		extra_dim += 7 if use_absolute_pos else 0
 					 
 		self.init_trns = nn.Linear(2 * n_hidden, n_hidden)
@@ -1167,6 +1176,13 @@ class DataAggregationAssociation(nn.Module):
 		    nn.PReLU(),
 		    nn.Linear(n_hidden, n_hidden),
 			nn.PReLU()
+		)
+
+		# Protects against unbounded log_coverage/log_evidence values
+		self.f_support = nn.Sequential(
+			nn.Linear(support_dim, 8),
+			nn.PReLU(),
+			nn.Linear(8, 8) ## Maybe add layer norm
 		)
 					 
 		# Association Layer 1 (Independent per-layer gammas, no expander edges needed)
@@ -1195,7 +1211,8 @@ class DataAggregationAssociation(nn.Module):
 		# 1. Combine Masks and Latents
 		combined_mask = torch.cat((mask, mask_out_1), dim=-1)
 
-		embed_spatial = self.spatial_proj(torch.cat((g_embed, relative_feat, support), dim = 1))
+		support_proj = self.f_support(support)
+		embed_spatial = self.spatial_proj(torch.cat((g_embed, relative_feat, support_proj), dim = 1))
 		x = self.dynamic_proj(torch.cat((s, x_latent, combined_mask), dim=-1))
 
 		# 2. Project and FiLM condition
