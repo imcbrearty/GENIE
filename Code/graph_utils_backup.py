@@ -8658,7 +8658,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 
 
 
-def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 3.0, n_rand_srcs = 250, quantile_times = 0.3, quantile_times_srcs = 0.3, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
+def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, file_index = 0, date = [2000, 1, 1], rbest = None, mn = None, domain = None, initialize = None, fixed_domain = None, max_time_shift_range = None, min_time_range = 3.0, n_rand_srcs = 250, quantile_times = 0.25, quantile_times_srcs = 0.25, extend_ratio = 2.0, use_tuner = True, n_grids = 1, n_tuner_steps = 50, verbose = True, device = 'cpu'):
 
 	# if domain is None:
 	#	 domain = get_domain_bounds(locs_use, scale = scale_domain)
