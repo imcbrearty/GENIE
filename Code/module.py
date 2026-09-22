@@ -404,6 +404,206 @@ class BipartiteGraphOperator(MessagePassing):
 		return out, torch.cat((support_features, hard_support*learned_support), dim = 1).detach()
 
 
+
+class BipartiteGraphOperator1(MessagePassing):
+	"""
+	Product Graph to Source Graph Bipartite Projection Operator.
+	Features:
+	- Multi-scale dynamic spatial kernels (scaled by scale_rel).
+	- Continuous learned edge gating & distance-aware missing-station penalty.
+	- Multi-scale + Per-Phase coverage/evidence backprojection.
+	"""
+
+	def __init__(self, ndim_in, ndim_out, ndim_mask = 4, embed_dim = 10, n_gammas = 3,
+				 n_kernels = 3, scale_rel = scale_rel, scale_time = scale_time,
+				 n_phase_channels=2):  # e.g., 2 for [P, S]
+		super().__init__(aggr="add")
+
+		self.n_gammas = n_gammas
+		self.scale_rel = scale_rel
+		self.scale_time = scale_time
+		self.n_phase_channels = n_phase_channels  # [P, S]
+
+
+		self.n_dist_kernels = n_kernels
+		init_radii = torch.logspace(-2, 0.5, steps=n_kernels)   # (K,)
+		self.log_kernel_radii = nn.Parameter(init_radii.log())
+		self.f_radii = nn.Linear(embed_dim, 1 + n_kernels)
+		nn.init.normal_(self.f_radii.weight, std=0.01)
+		nn.init.zeros_(self.f_radii.bias)
+
+		# 1. Edge MLP
+		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
+		self.film_edge = FiLM(embed_dim, ndim_in)
+		self.act_edge = nn.PReLU()
+
+		# 2. Continuous Edge Support & Penalty Predictor
+		# Takes inpt + mask features + distance norm
+		self.fc_edge_gates = nn.Sequential(
+			nn.Linear(ndim_in + ndim_mask + 1, 32), nn.PReLU(),
+			nn.Linear(32, 2), nn.Sigmoid()  # [pos_support_gate, neg_penalty_gate]
+		)
+
+		# 2b. Channel-wise Feature Routing
+		self.mask_gate = nn.Sequential(
+			nn.Linear(ndim_mask, 16), nn.PReLU(),
+			nn.Linear(16, ndim_in), nn.Sigmoid()
+		)
+
+		# 3. Dynamic Bandwidth Predictor (RBF)
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
+		nn.init.normal_(self.f_gamma.weight, std=0.01)
+		nn.init.zeros_(self.f_gamma.bias)
+
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
+		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
+
+		# 4. Source-level Multi-Scale & Multi-Phase Support Gate
+		# Support channels: (N_phases + 1 [Joint]) * N_dist_kernels * 3 [log_cov, log_ev, match_frac]
+		self.n_support_groups = (self.n_phase_channels + 1) * self.n_dist_kernels
+		support_feat_dim = 3 * self.n_support_groups
+
+		self.support_gate = nn.Sequential(
+			nn.Linear(support_feat_dim, 32), nn.PReLU(),
+			nn.Linear(32, 16), nn.PReLU(),
+			nn.Linear(16, 1), nn.Sigmoid()
+		)
+		nn.init.constant_(self.support_gate[-2].bias, -1.0)
+
+		# 5. Readout
+		self.norm = RMSNorm(ndim_in)
+		self.fc_out = nn.Linear(ndim_in + support_feat_dim, ndim_out)
+		self.act_out = nn.PReLU()
+
+	def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None):
+
+		## Could re-use N instead of E_edges
+		E_edges = A_src_in_edges.edge_index.shape[1] if A_src_in_edges.edge_index.numel() > 0 else 0
+		
+		if num_target_nodes is not None:
+			M = num_target_nodes
+		else:
+			M = A_src_in_edges.edge_index[1].max().item() + 1 if E_edges > 0 else 0
+
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+		# Dynamic physical radii scaled relative to region/domain
+		# effective_radii = torch.exp(self.log_kernel_radii) * self.scale_rel  # [N_kernels]
+
+		# delta_r = self.f_radii(ctx)
+		# alpha_r = 0.5 * torch.tanh(delta_r[:, :1])		  # shared log-shift
+		# resid_r = 0.2 * torch.tanh(delta_r[:, 1:])		  # per-scale tweak
+		# log_r = self.log_kernel_radii + alpha_r + resid_r
+		# effective_radii = torch.exp(log_r)				  # (1, K) or (K,)
+
+		delta_r = self.f_radii(ctx)
+		alpha_r = 0.5 * torch.tanh(delta_r[:, :1])
+		resid_r = 0.2 * torch.tanh(delta_r[:, 1:])
+		effective_radii = torch.exp(self.log_kernel_radii + alpha_r + resid_r).reshape(-1)  # (K,)
+
+		# near_field_bias = torch.exp(-norm_pos / effective_radii[0].clamp(min=1e-6))
+		# dist_weights = torch.exp(-norm_pos / effective_radii.clamp(min=1e-6))  # (E, K)
+
+		# Step 1: Spatial geometry
+		diff_sp = A_src_in_edges.x[:, 0:3]
+		norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)  # [E_edges, 1]
+		unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
+
+		# Step 2: Scale-conditioned RBF bandwidths
+		delta = self.f_gamma(ctx)
+		alpha = 0.5 * torch.tanh(delta[:, 0:1])
+		residuals = 0.2 * torch.tanh(delta[:, 1:])
+		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+
+		# Step 3: Multi-scale spatial RBFs
+		r_sp_sq = norm_pos ** 2
+		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5)
+		rbf_decay = torch.exp(-r_aniso)
+
+		# Step 4: Edge feature fusion
+		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)
+		edge_inpt = torch.cat((inpt, rel_pos), dim=-1)
+		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
+
+		# Step 5: Continuous Learned Edge Support & Distance-Aware Penalty
+		edge_gate_in = torch.cat((inpt, mask, norm_pos), dim=-1)
+		gates = self.fc_edge_gates(edge_gate_in)
+		pos_gate = gates[:, 0:1]  # [E_edges, 1]
+		neg_gate = gates[:, 1:2]  # [E_edges, 1]
+
+		phase_routing = self.mask_gate(mask)
+
+		near_field_bias = torch.exp(-norm_pos / effective_radii[0].clamp(min=1e-6))
+		msg = (pos_gate * phase_routing * geo_features) - (neg_gate * (1.0 - pos_gate) * near_field_bias * geo_features)
+
+		# Step 6: Backprojection to Source Graph
+		target_indices = A_src_in_edges.edge_index[1]
+		stacked = scatter(msg, target_indices, dim=0, dim_size=M, reduce="sum")
+
+		# Step 7: Per-Phase + Joint Multi-Scale Support (Fully Vectorized)
+		dist_weights = torch.exp(-norm_pos / effective_radii.clamp(min=1e-6).unsqueeze(0))  # [E_edges, K_kernels]
+
+		phase_masks = mask[:, :self.n_phase_channels]  # [E_edges, N_phases]
+		joint_mask = torch.ones_like(pos_gate)		 # [E_edges, 1]
+		all_masks = torch.cat([phase_masks, joint_mask], dim=-1)  # [E_edges, P_phases]
+
+		# Expand dims for 3D broadcasting: [E_edges, P_phases, K_kernels]
+		all_masks_3d = all_masks.unsqueeze(-1)
+		pos_gate_3d = pos_gate.unsqueeze(-1)
+		dist_weights_3d = dist_weights.unsqueeze(1)
+
+		evidence_3d = (pos_gate_3d * all_masks_3d) * dist_weights_3d
+		coverage_3d = all_masks_3d * dist_weights_3d
+
+		P_phases = self.n_phase_channels + 1
+		K_kernels = self.n_dist_kernels
+
+		# Flatten both to 2D using -1 (safe for any E_edges)
+		evidence_flat = evidence_3d.view(-1, P_phases * K_kernels)
+		coverage_flat = coverage_3d.view(-1, P_phases * K_kernels)
+
+		# Stack into single tensor [E_edges, 2 * P_phases * K_kernels] for 1 single scatter call
+		combined_flat = torch.cat([evidence_flat, coverage_flat], dim=-1)
+		combined_src = scatter(combined_flat, target_indices, dim=0, dim_size=M, reduce="sum")
+
+		# Split back into evidence and coverage [M_sources, P_phases * K_kernels]
+		evidence_src, coverage_src = combined_src.chunk(2, dim=-1)
+
+		# Parallel metric computation
+		match_fraction_src = evidence_src / coverage_src.clamp(min=1e-5)
+		log_coverage_src = torch.log1p(coverage_src)
+		log_evidence_src = torch.log1p(evidence_src)
+
+		# Reshape to [M_sources, P_phases, K_kernels, 1] and interleave metrics
+		log_coverage_3d = log_coverage_src.view(M, P_phases, K_kernels, 1)
+		log_evidence_3d = log_evidence_src.view(M, P_phases, K_kernels, 1)
+		match_fraction_3d = match_fraction_src.view(M, P_phases, K_kernels, 1) ## 2 * 
+
+		multi_scale_support = torch.cat([log_coverage_3d, log_evidence_3d, match_fraction_3d], dim=-1).view(M, -1)
+
+		# Step 8: Pattern Normalization
+		# Extract global joint coverage from the last phase group (Joint) and unweighted kernel
+		global_coverage = scatter(torch.ones_like(pos_gate), target_indices, dim=0, dim_size=M, reduce="sum")
+		hard_support = (global_coverage > 0).to(inpt.dtype) ## Note global coverage is already computed
+		# # Optional: Replace Step 8 scatter with direct indexing if you add a unit kernel,
+		# OR keep it as-is if E_edges is small. The speedup from Step 7 vectorization is already ~10-15x.
+
+		stacked_normalized = stacked / torch.sqrt(global_coverage.clamp(min=1.0))
+		pattern = hard_support * self.norm(stacked_normalized)
+
+		# Step 9: Readout & Gating
+		features = torch.cat((pattern, multi_scale_support), dim=-1)
+		out = self.act_out(self.fc_out(features))
+
+		learned_support = self.support_gate(multi_scale_support)
+		out = out * learned_support
+
+		return out, torch.cat((multi_scale_support, hard_support * learned_support), dim=1).detach()
+
+
+
+
+
 use_anisotropic_spatial_aggregation = False
 if use_anisotropic_spatial_aggregation == True:
 
