@@ -702,7 +702,7 @@ else:
 			self.f_support = nn.Sequential(
 				nn.Linear(support_dim, 8),
 				nn.PReLU(),
-				nn.Linear(8, 8)
+				nn.Linear(8, 8) ## Maybe add layer norm
 			)
 	
 			self.fc1 = nn.Linear(in_channels + 8 + edge_dim + n_global, n_hidden)
