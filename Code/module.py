@@ -706,7 +706,7 @@ else:
 			)
 	
 			self.fc1 = nn.Linear(in_channels + 8 + edge_dim + n_global, n_hidden)
-			self.fc2 = nn.Linear(n_hidden + in_channels, out_channels)
+			self.fc2 = nn.Linear(n_hidden + in_channels + 8, out_channels)
 			self.fglobal = nn.Linear(in_channels, n_global)
 	
 			self.film = FiLM(embed_dim, n_hidden)
@@ -767,7 +767,7 @@ else:
 				embed_context=ctx,
 			)
 	
-			out = torch.cat((tr, aggr_out), dim=-1)
+			out = torch.cat((tr, aggr_out, support_embed), dim=-1)
 			return self.activate2(self.fc2(out))
 	
 		def message(self, x_j, support_embed_j, edge_attr, global_feat, embed_context):
