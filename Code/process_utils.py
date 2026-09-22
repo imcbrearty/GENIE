@@ -2448,6 +2448,10 @@ import numpy as np
 import torch
 
 
+
+
+
+
 class TopKEmbeddingEngine:
     """
     Day-scale engine: rasterize Top-K + signed residuals onto a time grid once,
@@ -2629,15 +2633,17 @@ class TopKEmbeddingEngine:
         grids[:, :, -1, :] = 0
         self.grids = grids
 
-    def extract_inputs(self, t0):
+
+    def extract_inputs(self, t0, min_t=0.0, max_t=300.0, t_win=10.0, skip_picks = False):
         t0_val = float(np.squeeze(t0))
+
         if self.n_edges == 0 or self.trv_edges_gpu is None:
             z = torch.zeros((0, 4 * 3 * self.k), device=self.device)
-            return [z], [(z.abs() > 0.01).float()]
+            empty_picks = [[], [], [], []]
+            return [z], [(z.abs() > 0.01).float()], empty_picks
 
         p_arr = self.trv_edges_gpu[:, 0] + t0_val
         s_arr = self.trv_edges_gpu[:, 1] + t0_val
-        # same binning rule as the original engine
         p_bin = torch.round((p_arr - self.T_start) / self.dt).long()
         s_bin = torch.round((s_arr - self.T_start) / self.dt).long()
         valid_p = (p_bin >= 0) & (p_bin < self.n_bins)
@@ -2654,9 +2660,53 @@ class TopKEmbeddingEngine:
 
         k = self.k
         nearest = val[:, [0, 3 * k, 6 * k, 9 * k]]
-        return [val], [(nearest.abs() > 0.01).float()]
+        masks = (nearest.abs() > 0.01).float()
+
+        picks = self._slice_picks(t0_val, min_t, max_t, t_win) if skip_picks == False else [[], [], [], []]
+
+        return [[val], [masks]], picks
+
+    def _slice_picks(self, t0_val, min_t, max_t, t_win):
+        if len(self.P) == 0:
+            return [[], [], [], []]
+
+        t_center = t0_val + min_t + (max_t - min_t) / 2.0
+        r = float(t_win) + (max_t - min_t) / 2.0
+        p0 = np.searchsorted(self.P[:, 0], t_center - r, side="left")
+        p1 = np.searchsorted(self.P[:, 0], t_center + r, side="right")
+        sl = self.P[p0:p1]
+        if len(sl) == 0:
+            return [[], [], [], []]
+
+        perm = -np.ones(self.n_stations, dtype=int)
+        perm[self.ind_use] = np.arange(self.n_used)
+        idx = perm[sl[:, 1].astype(int)]
+        keep = idx >= 0
+        times = sl[keep, 0]
+        indices = idx[keep]
+        phases = sl[keep, 4]
+        meta = sl[keep]
+        order = np.lexsort((times, indices))
+        return [
+            [times[order] - t0_val],
+            [indices[order]],
+            [phases[order]],
+            [meta[order]]]
 
 
+
+
+
+
+
+
+
+
+
+		# assert A_src_in_sta[0].max() == len(ind_use) - 1
+		# assert ind_use.max() < len(locs)
+		# assert engine_topk.grids.shape[1] == len(ind_use)
+		# assert engine_topk.edge_sta_local.max() < len(ind_use)
 
 
 # 4. Summary Matrix: Which Mode Should You Use?Parameter / Featureprecompute=Trueprecompute=FalseStartup / Init TimeSeveral seconds (allocates GPU matrices)$< 0.001$ seconds
