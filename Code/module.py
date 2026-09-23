@@ -53,6 +53,7 @@ scale_rel = config['scale_rel'] # 30e3
 k_sta_edges = config['k_sta_edges']
 k_spc_edges = config['k_spc_edges']
 template_ver = process_config['template_ver']
+use_top_k = config.get('use_top_k', True)
 
 
 # scale_t = train_config['kernel_sig_t']*3.0
@@ -191,7 +192,7 @@ class DataAggregationLayer(MessagePassing):
 # =====================================================================
 class DataAggregationExpanded(nn.Module):
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_mask=4, 
-				 use_absolute_pos=True, use_offsets=True, embed_dim=10, n_embedding = 10, use_expanded = use_expanded, use_embedding=True):
+				 use_absolute_pos=True, use_offsets=True, embed_dim=10, n_embedding = 10, use_expanded = use_expanded, use_top_k = use_top_k, use_embedding=True):
 		super(DataAggregationExpanded, self).__init__()
 
 		self.use_embedding = use_embedding
@@ -216,7 +217,7 @@ class DataAggregationExpanded(nn.Module):
 			in_channels += 2 * n_embedding  # Concatenate structural embedding to main input
 
 		# --- MAIN OBSERVATION GNN STACK ---
-		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37, n_hidden)
+		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37 if use_top_k == False else -17, n_hidden)
 		self.film_init = FiLM(embed_dim, n_hidden)
 		self.act_init = nn.PReLU()
 					 
@@ -272,7 +273,7 @@ class DataAggregationExpanded(nn.Module):
 		return tr, g_emb.detach()
 
 
-class BipartiteGraphOperator(MessagePassing):
+class BipartiteGraphOperator1(MessagePassing):
 	"""Product Graph to Source Graph Bipartite Projection Operator.
 
 	Maps product-space features (Source-Station pairs) onto target source nodes.
@@ -405,204 +406,7 @@ class BipartiteGraphOperator(MessagePassing):
 
 
 
-# class BipartiteGraphOperator1(MessagePassing):
-# 	"""
-# 	Product Graph to Source Graph Bipartite Projection Operator.
-# 	Features:
-# 	- Multi-scale dynamic spatial kernels (scaled by scale_rel).
-# 	- Continuous learned edge gating & distance-aware missing-station penalty.
-# 	- Multi-scale + Per-Phase coverage/evidence backprojection.
-# 	"""
-
-# 	def __init__(self, ndim_in, ndim_out, ndim_mask = 4, embed_dim = 10, n_gammas = 3,
-# 				 n_kernels = 3, scale_rel = scale_rel, scale_time = scale_time,
-# 				 n_phase_channels=2):  # e.g., 2 for [P, S]
-# 		super().__init__(aggr="add")
-
-# 		self.n_gammas = n_gammas
-# 		self.scale_rel = scale_rel
-# 		self.scale_time = scale_time
-# 		self.n_phase_channels = n_phase_channels  # [P, S]
-
-
-# 		self.n_dist_kernels = n_kernels
-# 		init_radii = torch.logspace(-2, 0.5, steps=n_kernels)   # (K,)
-# 		self.log_kernel_radii = nn.Parameter(init_radii.log())
-# 		self.f_radii = nn.Linear(embed_dim, 1 + n_kernels)
-# 		nn.init.normal_(self.f_radii.weight, std=0.01)
-# 		nn.init.zeros_(self.f_radii.bias)
-
-# 		# 1. Edge MLP
-# 		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
-# 		self.film_edge = FiLM(embed_dim, ndim_in)
-# 		self.act_edge = nn.PReLU()
-
-# 		# 2. Continuous Edge Support & Penalty Predictor
-# 		# Takes inpt + mask features + distance norm
-# 		self.fc_edge_gates = nn.Sequential(
-# 			nn.Linear(ndim_in + ndim_mask + 1, 32), nn.PReLU(),
-# 			nn.Linear(32, 2), nn.Sigmoid()  # [pos_support_gate, neg_penalty_gate]
-# 		)
-
-# 		# 2b. Channel-wise Feature Routing
-# 		self.mask_gate = nn.Sequential(
-# 			nn.Linear(ndim_mask, 16), nn.PReLU(),
-# 			nn.Linear(16, ndim_in), nn.Sigmoid()
-# 		)
-
-# 		# 3. Dynamic Bandwidth Predictor (RBF)
-# 		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
-# 		nn.init.normal_(self.f_gamma.weight, std=0.01)
-# 		nn.init.zeros_(self.f_gamma.bias)
-
-# 		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
-# 		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
-
-# 		# 4. Source-level Multi-Scale & Multi-Phase Support Gate
-# 		# Support channels: (N_phases + 1 [Joint]) * N_dist_kernels * 3 [log_cov, log_ev, match_frac]
-# 		self.n_support_groups = (self.n_phase_channels + 1) * self.n_dist_kernels
-# 		support_feat_dim = 3 * self.n_support_groups
-
-# 		self.support_gate = nn.Sequential(
-# 			nn.Linear(support_feat_dim, 32), nn.PReLU(),
-# 			nn.Linear(32, 16), nn.PReLU(),
-# 			nn.Linear(16, 1), nn.Sigmoid()
-# 		)
-# 		nn.init.constant_(self.support_gate[-2].bias, -1.0)
-
-# 		# 5. Readout
-# 		self.norm = RMSNorm(ndim_in)
-# 		self.fc_out = nn.Linear(ndim_in + support_feat_dim, ndim_out)
-# 		self.act_out = nn.PReLU()
-
-# 	def forward(self, inpt, A_src_in_edges, mask, embed_context, num_target_nodes=None):
-
-# 		## Could re-use N instead of E_edges
-# 		E_edges = A_src_in_edges.edge_index.shape[1] if A_src_in_edges.edge_index.numel() > 0 else 0
-		
-# 		if num_target_nodes is not None:
-# 			M = num_target_nodes
-# 		else:
-# 			M = A_src_in_edges.edge_index[1].max().item() + 1 if E_edges > 0 else 0
-
-# 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-
-# 		# Dynamic physical radii scaled relative to region/domain
-# 		# effective_radii = torch.exp(self.log_kernel_radii) * self.scale_rel  # [N_kernels]
-
-# 		# delta_r = self.f_radii(ctx)
-# 		# alpha_r = 0.5 * torch.tanh(delta_r[:, :1])		  # shared log-shift
-# 		# resid_r = 0.2 * torch.tanh(delta_r[:, 1:])		  # per-scale tweak
-# 		# log_r = self.log_kernel_radii + alpha_r + resid_r
-# 		# effective_radii = torch.exp(log_r)				  # (1, K) or (K,)
-
-# 		delta_r = self.f_radii(ctx)
-# 		alpha_r = 0.5 * torch.tanh(delta_r[:, :1])
-# 		resid_r = 0.2 * torch.tanh(delta_r[:, 1:])
-# 		effective_radii = torch.exp(self.log_kernel_radii + alpha_r + resid_r).reshape(-1)  # (K,)
-
-# 		# near_field_bias = torch.exp(-norm_pos / effective_radii[0].clamp(min=1e-6))
-# 		# dist_weights = torch.exp(-norm_pos / effective_radii.clamp(min=1e-6))  # (E, K)
-
-# 		# Step 1: Spatial geometry
-# 		diff_sp = A_src_in_edges.x[:, 0:3]
-# 		norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)  # [E_edges, 1]
-# 		unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
-
-# 		# Step 2: Scale-conditioned RBF bandwidths
-# 		delta = self.f_gamma(ctx)
-# 		alpha = 0.5 * torch.tanh(delta[:, 0:1])
-# 		residuals = 0.2 * torch.tanh(delta[:, 1:])
-# 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
-
-# 		# Step 3: Multi-scale spatial RBFs
-# 		r_sp_sq = norm_pos ** 2
-# 		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5)
-# 		rbf_decay = torch.exp(-r_aniso)
-
-# 		# Step 4: Edge feature fusion
-# 		rel_pos = torch.cat((unit_dir, rbf_decay), dim=-1)
-# 		edge_inpt = torch.cat((inpt, rel_pos), dim=-1)
-# 		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
-
-# 		# Step 5: Continuous Learned Edge Support & Distance-Aware Penalty
-# 		edge_gate_in = torch.cat((inpt, mask, norm_pos), dim=-1)
-# 		gates = self.fc_edge_gates(edge_gate_in)
-# 		pos_gate = gates[:, 0:1]  # [E_edges, 1]
-# 		neg_gate = gates[:, 1:2]  # [E_edges, 1]
-
-# 		phase_routing = self.mask_gate(mask)
-
-# 		near_field_bias = torch.exp(-norm_pos / effective_radii[0].clamp(min=1e-6))
-# 		msg = (pos_gate * phase_routing * geo_features) - (neg_gate * (1.0 - pos_gate) * near_field_bias * geo_features)
-
-# 		# Step 6: Backprojection to Source Graph
-# 		target_indices = A_src_in_edges.edge_index[1]
-# 		stacked = scatter(msg, target_indices, dim=0, dim_size=M, reduce="sum")
-
-# 		# Step 7: Per-Phase + Joint Multi-Scale Support (Fully Vectorized)
-# 		dist_weights = torch.exp(-norm_pos / effective_radii.clamp(min=1e-6).unsqueeze(0))  # [E_edges, K_kernels]
-
-# 		phase_masks = mask[:, :self.n_phase_channels]  # [E_edges, N_phases]
-# 		joint_mask = torch.ones_like(pos_gate)		 # [E_edges, 1]
-# 		all_masks = torch.cat([phase_masks, joint_mask], dim=-1)  # [E_edges, P_phases]
-
-# 		# Expand dims for 3D broadcasting: [E_edges, P_phases, K_kernels]
-# 		all_masks_3d = all_masks.unsqueeze(-1)
-# 		pos_gate_3d = pos_gate.unsqueeze(-1)
-# 		dist_weights_3d = dist_weights.unsqueeze(1)
-
-# 		evidence_3d = (pos_gate_3d * all_masks_3d) * dist_weights_3d
-# 		coverage_3d = all_masks_3d * dist_weights_3d
-
-# 		P_phases = self.n_phase_channels + 1
-# 		K_kernels = self.n_dist_kernels
-
-# 		# Flatten both to 2D using -1 (safe for any E_edges)
-# 		evidence_flat = evidence_3d.view(-1, P_phases * K_kernels)
-# 		coverage_flat = coverage_3d.view(-1, P_phases * K_kernels)
-
-# 		# Stack into single tensor [E_edges, 2 * P_phases * K_kernels] for 1 single scatter call
-# 		combined_flat = torch.cat([evidence_flat, coverage_flat], dim=-1)
-# 		combined_src = scatter(combined_flat, target_indices, dim=0, dim_size=M, reduce="sum")
-
-# 		# Split back into evidence and coverage [M_sources, P_phases * K_kernels]
-# 		evidence_src, coverage_src = combined_src.chunk(2, dim=-1)
-
-# 		# Parallel metric computation
-# 		match_fraction_src = evidence_src / coverage_src.clamp(min=1e-5)
-# 		log_coverage_src = torch.log1p(coverage_src)
-# 		log_evidence_src = torch.log1p(evidence_src)
-
-# 		# Reshape to [M_sources, P_phases, K_kernels, 1] and interleave metrics
-# 		log_coverage_3d = log_coverage_src.view(M, P_phases, K_kernels, 1)
-# 		log_evidence_3d = log_evidence_src.view(M, P_phases, K_kernels, 1)
-# 		match_fraction_3d = match_fraction_src.view(M, P_phases, K_kernels, 1) ## 2 * 
-
-# 		multi_scale_support = torch.cat([log_coverage_3d, log_evidence_3d, match_fraction_3d], dim=-1).view(M, -1)
-
-# 		# Step 8: Pattern Normalization
-# 		# Extract global joint coverage from the last phase group (Joint) and unweighted kernel
-# 		global_coverage = scatter(torch.ones_like(pos_gate), target_indices, dim=0, dim_size=M, reduce="sum")
-# 		hard_support = (global_coverage > 0).to(inpt.dtype) ## Note global coverage is already computed
-# 		# # Optional: Replace Step 8 scatter with direct indexing if you add a unit kernel,
-# 		# OR keep it as-is if E_edges is small. The speedup from Step 7 vectorization is already ~10-15x.
-
-# 		stacked_normalized = stacked / torch.sqrt(global_coverage.clamp(min=1.0))
-# 		pattern = hard_support * self.norm(stacked_normalized)
-
-# 		# Step 9: Readout & Gating
-# 		features = torch.cat((pattern, multi_scale_support), dim=-1)
-# 		out = self.act_out(self.fc_out(features))
-
-# 		learned_support = self.support_gate(multi_scale_support)
-# 		out = out * learned_support
-
-# 		return out, torch.cat((multi_scale_support, hard_support * learned_support), dim=1).detach()
-
-
-
-class BipartiteGraphOperator1(MessagePassing):
+class BipartiteGraphOperator(MessagePassing):
     def __init__(
         self,
         ndim_in,
@@ -807,7 +611,7 @@ else:
 	
 	class SpatialAggregation(MessagePassing):
 		def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel,
-					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=4):
+					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=11):
 			super(SpatialAggregation, self).__init__(aggr='mean')
 	
 			self.zero_offsets = zero_offsets
@@ -939,7 +743,7 @@ class SpaceTimeAttention(MessagePassing):
 	"""
 
 	def __init__(self, inpt_dim, out_channels, n_dim=4, n_latent=16, embed_dim=10,
-				 n_heads=5, support_dim=4, scale_rel=scale_rel, scale_time=scale_time):
+				 n_heads=5, support_dim=11, scale_rel=scale_rel, scale_time=scale_time):
 		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
 
 		self.n_heads = n_heads
@@ -1151,6 +955,15 @@ class SpaceTimeAttention(MessagePassing):
 		# gate = self.spatial_gate(interpolated)
 		# out = out * gate
 
+		# src, tgt = edge_index[0], edge_index[1]
+		# sup_e = self.f_support(support)[src]           # [E, n_latent] or use support raw
+		# sup_q = scatter(sup_e, tgt, dim=0, dim_size=x_query.size(0), reduce="max")
+		# gate = 0.2 + 0.8 * torch.sigmoid(self.spatial_gate[0](sup_q).mean(-1, keepdim=True))
+		# # simpler: dedicated Linear(support_dim, 1) on pooled raw support
+		# sup_raw = scatter(support[src], tgt, dim=0, dim_size=x_query.size(0), reduce="max")
+		# gate = 0.2 + 0.8 * torch.sigmoid(self.query_gate(sup_raw))  # Linear(11,1)
+		# out = out * gate
+					
 		return out
 
 
@@ -1170,7 +983,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		ndim_mask=1,
 		embed_dim=10,
 		n_gammas=3, # 4
-		support_dim=4,
+		support_dim=11,
 		baseline_gate=0.001, # 0.01
 	):
 		super(BipartiteGraphReadOutOperator, self).__init__()
@@ -1280,7 +1093,7 @@ class DataAggregationAssociation(nn.Module):
 	Replaces DataAggregationAssociationPhase with modular, per-layer gamma learning.
 	"""
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_latent=30, use_absolute_pos = True,
-				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 4, use_embedding = True, use_offsets = True):
+				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 11, use_embedding = True, use_offsets = True):
 		super().__init__()
 
 		# Input: Unpooled Features (s) + Encoder Latents (x_latent) + Mask + Source Mask (mask_out_1)
@@ -2475,7 +2288,7 @@ class RMSNorm(nn.Module):
 
 
 class GCN_Detection_Network_extended(nn.Module):
-	def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, use_embedding = use_embedding, use_src_pred = False, use_sigmoid = use_sigmoid, attach_time = attach_time, use_absolute_offset = True, trv = None, device = 'cuda'):
+	def __init__(self, ftrns1, ftrns2, scale_rel = scale_rel, scale_time = scale_time, use_absolute_pos = use_absolute_pos, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded, use_embedding = use_embedding, use_src_pred = False, use_sigmoid = use_sigmoid, attach_time = attach_time, use_absolute_offset = True, use_top_k = use_top_k, trv = None, device = 'cuda'):
 		super(GCN_Detection_Network_extended, self).__init__()
 		# Define modules and other relavent fixed objects (scaling coefficients.)
 		# self.TemporalConvolve = TemporalConvolve(2).to(device) # output size implicit, based on input dim
@@ -2550,6 +2363,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		self.use_sigmoid = use_sigmoid
 		self.use_src_pred = use_src_pred
 		self.use_absolute_offset = use_absolute_offset
+		self.use_top_k = use_top_k
 
 		# ---------------------------------------------------------------------
 		# 1. Initialize RBF Gammas for the Product Graph Offset Features
@@ -2607,7 +2421,14 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		A_in_src_slice = A_in_src[0] if self.use_expanded else A_in_src
 		pos_rel_sta, pos_rel_src = None, None
-
+		amp_inpt = Slice[:,[0,6]] if self.use_top_k else Slice[:,:2]
+		
+		# amp_inpt = Slice[:, [0, 3*(k_val := 2), 6*k_val, 9*k_val]] if self.use_top_k else Slice[:,:2]
+		
+		# if self.use_top_k:
+			# k_val = 2
+		# else:
+		# 	amp_inpt = Slice[:,:2]
 
 		# 1. Compute relative edge vectors ONLY if offsets are enabled
 		if self.use_absolute_offset: # (or self.use_offsets)
@@ -2656,7 +2477,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
 		)
 
-		x, support = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, num_target_nodes = n_temp)
+		x, support = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, amp = amp_inpt, num_target_nodes = n_temp)
 		x = self.SpatialAggregation1(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda, support = support) # x_temp_cuda_cart
 		x_local = self.SpatialAggregation2(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda, support = support)
 		if self.use_expanded == True:
@@ -2847,7 +2668,9 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		A_in_src_slice = self.A_in_src[0] if self.use_expanded else self.A_in_src
 		pos_rel_sta, pos_rel_src = None, None
-
+		amp_inpt = Slice[:,[0,6]] if self.use_top_k else Slice[:,:2]
+		
+		# amp_inpt = Slice[:, [0, 3*(k_val := 2), 6*k_val, 9*k_val]] if self.use_top_k else Slice[:,:2]
 
 		# 1. Compute relative edge vectors ONLY if offsets are enabled
 		if self.use_absolute_offset: # (or self.use_offsets)
@@ -2891,7 +2714,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
 		)
 
-		x, support = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, num_target_nodes = n_temp)
+		x, support = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, amp = amp_inpt, num_target_nodes = n_temp)
 		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda, support = support) # x_temp_cuda_cart
 		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda, support = support)
 		if self.use_expanded == True:
@@ -2974,7 +2797,9 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		A_in_src_slice = self.A_in_src[0] if self.use_expanded else self.A_in_src
 		pos_rel_sta, pos_rel_src = None, None
-
+		amp_inpt = Slice[:,[0,6]] if self.use_top_k else Slice[:,:2]
+		
+		# amp_inpt = Slice[:, [0, 3*(k_val := 2), 6*k_val, 9*k_val]] if self.use_top_k else Slice[:,:2]
 
 		# 1. Compute relative edge vectors ONLY if offsets are enabled
 		if self.use_absolute_offset: # (or self.use_offsets)
@@ -3017,7 +2842,7 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
 		)
 
-		x, support = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, num_target_nodes = n_temp)
+		x, support = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, amp = amp_inpt, num_target_nodes = n_temp)
 		x = self.SpatialAggregation1(x, self.embed_context, self.A_src, x_temp_cuda, support = support) # x_temp_cuda_cart
 		x_local = self.SpatialAggregation2(x, self.embed_context, self.A_src, x_temp_cuda, support = support)
 		if self.use_expanded == True:
