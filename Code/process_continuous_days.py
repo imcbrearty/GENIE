@@ -341,7 +341,7 @@ else:
 	# use_tuner = process_config.get("use_tuner", True)
 
 	fixed_domain = None ## Or set location range
-	build_graphs_domain(
+	z_dom = build_graphs_domain(
 		m_domain,
 		locs_use,
 		stas_use,
@@ -370,31 +370,31 @@ else:
 		use_tuner=use_tuner,
 		n_tuner_steps = n_tuner_steps, 
 		device=device,
-	)
+	)[0]
 
-	domain_output_file = DOMAINS_DIR / f"domain_file_{day_select}_{date[0]}_{date[1]}_{date[2]}_ver_1.npz"
-	with np.load(domain_output_file) as z_dom:
-		x_grids = np.expand_dims(z_dom["x_grid"], axis=0)
-		x_grids_init = np.copy(x_grids)
-		scale_time = z_dom["scale_time"] / 1000.0
-		
-		lat_range, lon_range, depth_range = z_dom["lat_range"], z_dom["lon_range"], z_dom["depth_range"]
-		lat_range_extend = z_dom["lat_range_extend"]
-		lon_range_extend = z_dom["lon_range_extend"]
-		deg_pad = z_dom["deg_padding"]
-		time_shift_range = z_dom["time_shift_range"]
+	# domain_output_file = DOMAINS_DIR / f"domain_file_{day_select}_{date[0]}_{date[1]}_{date[2]}_ver_1.npz"
+	# with np.load(domain_output_file) as z_dom:
+	x_grids = np.expand_dims(z_dom["x_grid"], axis=0)
+	x_grids_init = np.copy(x_grids)
+	scale_time = z_dom["scale_time"] / 1000.0
+	
+	lat_range, lon_range, depth_range = z_dom["lat_range"], z_dom["lon_range"], z_dom["depth_range"]
+	lat_range_extend = z_dom["lat_range_extend"]
+	lon_range_extend = z_dom["lon_range_extend"]
+	deg_pad = z_dom["deg_padding"]
+	time_shift_range = z_dom["time_shift_range"]
 
-		kernel_sig_t = z_dom["sigma_input"]
-		src_x_kernel = z_dom["source_label_width"]
-		src_depth_kernel = z_dom["source_label_width"]
-		src_t_kernel = z_dom["source_label_width_t"]
-		grid_choose = z_dom["ichoose_grid"]
+	kernel_sig_t = z_dom["sigma_input"]
+	src_x_kernel = z_dom["source_label_width"]
+	src_depth_kernel = z_dom["source_label_width"]
+	src_t_kernel = z_dom["source_label_width_t"]
+	grid_choose = z_dom["ichoose_grid"]
 
-		A_sta_sta = torch.tensor(z_dom["A_sta"][:2, :], dtype=torch.long, device=device)
-		A_src_src = torch.tensor(z_dom["A_src"][:2, :], dtype=torch.long, device=device)
-		A_src_in_sta = torch.tensor(z_dom["A_src_in_sta"][:2, :], dtype=torch.long, device=device)
+	A_sta_sta = torch.tensor(z_dom["A_sta"][:2, :], dtype=torch.long, device=device)
+	A_src_src = torch.tensor(z_dom["A_src"][:2, :], dtype=torch.long, device=device)
+	A_src_in_sta = torch.tensor(z_dom["A_src_in_sta"][:2, :], dtype=torch.long, device=device)
 
-		Ac = z_dom["Ac"] if use_expanded else False
+	Ac = z_dom["Ac"] if use_expanded else False
 
 	n_resolution = 9
 	t_win = np.round(2 * src_t_kernel, 2)
@@ -715,19 +715,33 @@ for cnt, strs in enumerate([0]):
 		A_src_in_sta_l.append(A_src_in_sta.cpu().detach().numpy())
 
 		## Pick engine
-		engine = SeismicEmbeddingEngine(
-			P=P,
-			locs=locs,
-			ind_use=ind_use,
-			A_src_in_sta=A_src_in_sta_l[i],
-			trv_times=x_grids_trv[i],
-			dt=dt_embed_discretize,
-			kernel_sig_t=kernel_sig_t,
-			t_pad=3.0*kernel_sig_t,
-			use_sign_input=use_sign_input,
-			precompute=True,  # Builds GPU global grid once for continuous O(1) sampling
-			device=device,
-		)
+		use_top_k = False
+		if use_top_k == False:
+			engine = SeismicEmbeddingEngine(
+				P=P,
+				locs=locs,
+				ind_use=ind_use,
+				A_src_in_sta=A_src_in_sta_l[i],
+				trv_times=x_grids_trv[i],
+				dt=dt_embed_discretize,
+				kernel_sig_t=kernel_sig_t,
+				t_pad=3.0*kernel_sig_t,
+				use_sign_input=use_sign_input,
+				precompute=True,  # Builds GPU global grid once for continuous O(1) sampling
+				device=device,
+			)
+		else:
+			engine = TopKEmbeddingEngine(
+				P,
+				locs,
+				ind_use,
+				A_src_in_sta_l[i],
+				x_grids_trv[i],
+				kernel_sig_t=kernel_sig_t,
+				dt=dt_embed_discretize, # kernel_sig_t/15.0
+				t_pad=3.0*kernel_sig_t,
+				device=device,
+			)
 		pick_engines.append(engine)
 
 	
