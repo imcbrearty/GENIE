@@ -7713,7 +7713,7 @@ def get_domain_bounds(points_lla, scale=1.05, lat_range = None, lon_range = None
 
 
 
-def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, max_time_shift_range = None, file_index = 0, date = [2000, 1, 1], n_grids = 1, initialize = None, fixed_domain = None, use_paths = False, rbest = None, mn = None, optimize_station_graphs = False, optimize_source_graphs = False, use_domain_approximate = False, use_tuner = True, n_tuner_steps = 50, name_of_project = '', verbose = True, save_file = True, device = 'cpu'):
+def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, k_spc_edges, k_sta_edges, depth_range, ftrns1, ftrns2, use_global = False, assign_based_on_grid = False, max_nodes = 3000, n_trgt_nodes = 200e3, Vc = 6500.0, max_time_shift_range = None, file_index = 0, date = [2000, 1, 1], n_grids = 1, initialize = None, fixed_domain = None, use_paths = False, rbest = None, mn = None, optimize_station_graphs = False, optimize_source_graphs = False, use_domain_approximate = False, use_tuner = True, n_tuner_steps = 50, name_of_project = '', verbose = True, save_file = False, device = 'cpu'):
 
 	if initialize is None: # else: [lat_range, lon_range, ]
 		domain = get_domain_bounds(locs_use, scale = scale_domain)
