@@ -249,7 +249,7 @@ if __name__ == '__main__':
     build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding, number_of_spatial_nodes, config['k_spc_edges'], config['k_sta_edges'], depth_range, 
         ftrns1, ftrns2, use_global = use_global, assign_based_on_grid = False, max_nodes = number_of_spatial_nodes, n_trgt_nodes = n_trgt_nodes, n_grids = num_grids, Vc = Vc, rbest = rbest, 
         mn = mn, file_index = 0, date = UTCDateTime(years[0], 1, 1), use_paths = use_paths, optimize_station_graphs = optimize_station_graphs, optimize_source_graphs = optimize_source_graphs, 
-        use_domain_approximate = use_domain_approximate, initialize = initialize, name_of_project = name_of_project, use_tuner = use_tuner, device = device)
+        use_domain_approximate = use_domain_approximate, initialize = initialize, name_of_project = name_of_project, use_tuner = use_tuner, save_file = True, device = device)
 
 
 
