@@ -602,6 +602,134 @@ class BipartiteGraphOperator1(MessagePassing):
 
 
 
+class BipartiteGraphOperator1(MessagePassing):
+    def __init__(
+        self,
+        ndim_in,
+        ndim_out,
+        ndim_mask=4,
+        embed_dim=10,
+        n_gammas=3,
+        n_kernels=3,
+        scale_rel=scale_rel,
+        scale_time=scale_time,
+        n_phase_channels=2,
+        gate_floor=0.3,
+    ):
+        super().__init__(aggr="add")
+        self.n_gammas = n_gammas
+        self.n_phase_channels = n_phase_channels
+        self.n_dist_kernels = n_kernels
+        self.gate_floor = gate_floor
+
+        init_radii = torch.logspace(-2, 0.5, steps=n_kernels)
+        self.log_kernel_radii = nn.Parameter(init_radii.log())
+        self.f_radii = nn.Linear(embed_dim, 1 + n_kernels)
+        nn.init.normal_(self.f_radii.weight, std=0.01)
+        nn.init.zeros_(self.f_radii.bias)
+
+        self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
+        self.film_edge = FiLM(embed_dim, ndim_in)
+        self.act_edge = nn.PReLU()
+
+        self.fc_pos_gate = nn.Sequential(
+            nn.Linear(ndim_in + ndim_mask + 1, 32), nn.PReLU(),
+            nn.Linear(32, 1), nn.Sigmoid(),
+        )
+        self.mask_gate = nn.Sequential(
+            nn.Linear(ndim_mask, 16), nn.PReLU(),
+            nn.Linear(16, ndim_in), nn.Sigmoid(),
+        )
+
+        self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
+        nn.init.normal_(self.f_gamma.weight, std=0.01)
+        nn.init.zeros_(self.f_gamma.bias)
+        init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
+        self.log_gamma_base = nn.Parameter(init_spatial.log())
+
+        # m_P (K) + m_S (K) + hole (K) + log_cov (1)
+        self.support_feat_dim = 3 * n_kernels + 1
+        self.support_gate = nn.Sequential(
+            nn.Linear(self.support_feat_dim, 16), nn.PReLU(),
+            nn.Linear(16, 1), nn.Sigmoid(),
+        )
+        nn.init.constant_(self.support_gate[-2].bias, -0.3)
+
+        self.norm = RMSNorm(ndim_in)
+        self.fc_out = nn.Linear(ndim_in + self.support_feat_dim, ndim_out)
+        self.act_out = nn.PReLU()
+
+    def forward(self, inpt, A_src_in_edges, mask, embed_context,
+                amp=None, num_target_nodes=None):
+
+        E = A_src_in_edges.edge_index.shape[1] if A_src_in_edges.edge_index.numel() else 0
+        if num_target_nodes is not None:
+            M = num_target_nodes
+        else:
+            M = int(A_src_in_edges.edge_index[1].max().item()) + 1 if E else 0
+
+        ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+        delta_r = self.f_radii(ctx)
+        radii = torch.exp(
+            self.log_kernel_radii
+            + 0.5 * torch.tanh(delta_r[:, :1])
+            + 0.2 * torch.tanh(delta_r[:, 1:])
+        ).reshape(-1).clamp(0.05, 5.0)
+
+        diff_sp = A_src_in_edges.x[:, :3]
+        norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
+        unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
+
+        delta = self.f_gamma(ctx)
+        gammas = torch.exp(
+            self.log_gamma_base
+            + 0.5 * torch.tanh(delta[:, :1])
+            + 0.2 * torch.tanh(delta[:, 1:])
+        )
+        rbf = torch.exp(-torch.sqrt(gammas * norm_pos ** 2 + 1e-5))
+        geo = self.act_edge(self.film_edge(
+            self.fc_edge(torch.cat((inpt, unit_dir, rbf), dim=-1)), ctx
+        ))
+
+        pos_gate = self.fc_pos_gate(torch.cat((inpt, mask, norm_pos), dim=-1))
+        route = self.mask_gate(mask)
+        msg = pos_gate * route * geo
+
+        src = A_src_in_edges.edge_index[1]
+        stacked = scatter(msg, src, dim=0, dim_size=M, reduce="sum")
+
+        # raw unsigned Gaussians (all@P, all@S); fall back to mask if amp omitted
+        if amp is None:
+            amp = mask
+        amp_p = amp[:, 0:1]
+        amp_s = amp[:, 1:2]
+        amp_any = torch.maximum(amp_p, amp_s)
+
+        w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
+        ev_p = scatter(pos_gate * amp_p * w, src, dim=0, dim_size=M, reduce="sum")
+        ev_s = scatter(pos_gate * amp_s * w, src, dim=0, dim_size=M, reduce="sum")
+        cov = scatter(w, src, dim=0, dim_size=M, reduce="sum")
+        hole = scatter((1.0 - amp_any) * w, src, dim=0, dim_size=M, reduce="sum")
+
+        m_p = ev_p / cov.clamp(min=1e-5)
+        m_s = ev_s / cov.clamp(min=1e-5)
+        h = hole / cov.clamp(min=1e-5)
+        log_cov = torch.log1p(cov.sum(dim=1, keepdim=True))
+        support = torch.cat((m_p, m_s, h, log_cov), dim=-1)
+
+        deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
+        hard = (deg > 0).to(inpt.dtype)
+        pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
+
+        out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
+        gate = self.support_gate(support)
+        out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
+        support = torch.cat((support, hard * gate), dim=1).detach()
+        
+        return out, support
+
+
 
 
 use_anisotropic_spatial_aggregation = False
