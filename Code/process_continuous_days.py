@@ -93,6 +93,7 @@ n_query_grid = process_config["n_query_grid"]
 thresh = process_config["thresh"]
 thresh_assoc = process_config["thresh_assoc"]
 use_restrict = process_config.get("use_restrict", False)
+use_top_k = config.get('use_top_k', True)
 
 use_quality_check = process_config["use_quality_check"]
 max_relative_error = process_config["max_relative_error"]
@@ -715,7 +716,7 @@ for cnt, strs in enumerate([0]):
 		A_src_in_sta_l.append(A_src_in_sta.cpu().detach().numpy())
 
 		## Pick engine
-		use_top_k = False
+		# use_top_k = False
 		if use_top_k == False:
 			engine = SeismicEmbeddingEngine(
 				P=P,
