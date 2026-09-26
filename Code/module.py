@@ -701,6 +701,11 @@ class BipartiteGraphOperator(MessagePassing):
             self.fc_edge(torch.cat((inpt, unit_dir, rbf), dim=-1)), ctx
         ))
 
+		# sta = A_src_in_edges.edge_index[0]          # or whichever end is the station
+		# deg_sta = scatter(torch.ones_like(pos_gate), sta, dim=0, reduce="sum")
+		# w_sta = 1.0 / deg_sta[sta].clamp(min=1.0).sqrt()    # or log1p
+		# msg = w_sta * pos_gate * route * geo
+					
         pos_gate = 0.05 + 0.90*self.fc_pos_gate(torch.cat((inpt, mask, norm_pos), dim=-1))
         route = self.mask_gate(mask)
         msg = pos_gate * route * geo
