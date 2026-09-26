@@ -701,7 +701,7 @@ class BipartiteGraphOperator(MessagePassing):
             self.fc_edge(torch.cat((inpt, unit_dir, rbf), dim=-1)), ctx
         ))
 
-		# sta = A_src_in_edges.edge_index[0]          # or whichever end is the station
+		# sta = A_src_in_sta[0]          # or whichever end is the station
 		# deg_sta = scatter(torch.ones_like(pos_gate), sta, dim=0, reduce="sum")
 		# w_sta = 1.0 / deg_sta[sta].clamp(min=1.0).sqrt()    # or log1p
 		# msg = w_sta * pos_gate * route * geo
@@ -767,6 +767,16 @@ class BipartiteGraphOperator(MessagePassing):
         hard = (deg > 0).to(inpt.dtype)
         pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
 
+
+		# hit = (a_any > 0.05).float()                      # or 0.01
+		# n_hit = scatter(hit, src, dim=0, dim_size=M, reduce="sum")   # (M, 1)
+		# # optional soft
+		# n_hit_soft = scatter(a_any, src, dim=0, dim_size=M, reduce="sum")
+		
+		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov, n_hit), dim=-1)
+		# # support_feat_dim = 5*K + 2
+		# # export + hard*gate → 5*K + 3
+					
         out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
         gate = self.support_gate(support)
         out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
