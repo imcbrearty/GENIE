@@ -296,7 +296,7 @@ class BipartiteGraphOperator1(MessagePassing):
 		scale_rel=scale_rel,
 		scale_time=scale_time,
 	):
-		super(BipartiteGraphOperator, self).__init__(aggr="add")
+		super(BipartiteGraphOperator1, self).__init__(aggr="add")
 
 		self.n_gammas = n_gammas
 		self.scale_rel = scale_rel
@@ -774,6 +774,8 @@ class BipartiteGraphOperator(MessagePassing):
 		log_cov = torch.log1p(cov.sum(1, keepdim=True))
 		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)
 
+		# qual = torch.cat((q_p, q_s, c_p[:, :1], c_s[:, :1], hole[:, :1], log_cov), dim=-1)
+			
 		qual = torch.cat((q_p, q_s, log_cov), dim=-1)          # 2*K + 1
 		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5*K + 1
 					
