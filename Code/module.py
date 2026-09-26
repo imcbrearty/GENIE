@@ -217,7 +217,7 @@ class DataAggregationExpanded(nn.Module):
 			in_channels += 2 * n_embedding  # Concatenate structural embedding to main input
 
 		# --- MAIN OBSERVATION GNN STACK ---
-		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37 if use_top_k == False else -17, // 2)
+		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37 if use_top_k == False else -17, n_hidden // 2)
 		self.init_gauss = nn.Linear(4, n_hidden // 2)
 					 
 		self.film_init = FiLM(embed_dim, n_hidden)
@@ -659,7 +659,7 @@ class BipartiteGraphOperator(MessagePassing):
 
         # m_P (K) + m_S (K) + hole (K) + log_cov (1)
         # self.support_feat_dim = 3 * n_kernels + 1
-		self.support_feat_dim = 5 * n_kernels + 1
+        self.support_feat_dim = 5 * n_kernels + 1
 		
         # self.support_gate = nn.Sequential(
         #     nn.Linear(self.support_feat_dim, 16), nn.PReLU(),
