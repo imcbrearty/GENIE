@@ -217,7 +217,9 @@ class DataAggregationExpanded(nn.Module):
 			in_channels += 2 * n_embedding  # Concatenate structural embedding to main input
 
 		# --- MAIN OBSERVATION GNN STACK ---
-		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37 if use_top_k == False else -17, n_hidden)
+		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37 if use_top_k == False else -17, // 2)
+		self.init_gauss = nn.Linear(4, n_hidden // 2)
+					 
 		self.film_init = FiLM(embed_dim, n_hidden)
 		self.act_init = nn.PReLU()
 					 
@@ -262,7 +264,8 @@ class DataAggregationExpanded(nn.Module):
 		# print(tr.shape)
 		# print(self.init_trns)
 		# print(self.film_init)
-		tr = self.act_init(self.film_init(self.init_trns(tr), embed_context))
+		# h = torch.cat((self.init_gauss(tr), self.init_trns(tr)), dim=1)
+		tr = self.act_init(self.film_init(torch.cat((self.init_gauss(tr[:,[0,6,12,18]]), self.init_trns(tr)), dim = 1), embed_context))
 		# print(tr.shape)
 
 		tr = self.layer1(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
@@ -1008,9 +1011,9 @@ class SpaceTimeAttention(MessagePassing):
 		self.film_values = FiLM(embed_dim, n_latent)
 		self.act_values = nn.PReLU()
 
-		self.f_support = nn.Sequential(
-			nn.Linear(support_dim, 8), nn.PReLU(), nn.Linear(8, n_latent)
-		)
+		# self.f_support = nn.Sequential(
+		# 	nn.Linear(support_dim, 8), nn.PReLU(), nn.Linear(8, n_latent)
+		# )
 
 		# Source-feature attention correction
 		self.f_feature_score = nn.Linear(inpt_dim, n_heads)
@@ -1118,7 +1121,7 @@ class SpaceTimeAttention(MessagePassing):
 		value_embed = self.act_values(
 			self.film_values(self.f_values(x_j), embed_context)
 		)
-		value_embed = value_embed + edge_embed + self.f_support(support_j)
+		value_embed = value_embed + edge_embed # + self.f_support(support_j)
 
 		# Pure Geometric distance attention logits
 		distance_logits = (-gammas_sp * spatial_sq - gammas_tm * temporal_sq)
