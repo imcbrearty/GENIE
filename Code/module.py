@@ -217,8 +217,9 @@ class DataAggregationExpanded(nn.Module):
 			in_channels += 2 * n_embedding  # Concatenate structural embedding to main input
 
 		# --- MAIN OBSERVATION GNN STACK ---
-		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37 if use_top_k == False else -17, n_hidden // 2)
-		self.init_gauss = nn.Linear(4, n_hidden // 2)
+		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37 if use_top_k == False else -17, n_hidden)
+		self.init_gauss = nn.Linear(4, n_hidden)
+		self.mix_inpt = nn.Linear(2*n_hidden, n_hidden)
 					 
 		self.film_init = FiLM(embed_dim, n_hidden)
 		self.act_init = nn.PReLU()
@@ -265,7 +266,8 @@ class DataAggregationExpanded(nn.Module):
 		# print(self.init_trns)
 		# print(self.film_init)
 		# h = torch.cat((self.init_gauss(tr), self.init_trns(tr)), dim=1)
-		tr = self.act_init(self.film_init(torch.cat((self.init_gauss(tr[:,[0,6,12,18]]), self.init_trns(tr)), dim = 1), embed_context))
+		tr = self.mix_inpt(torch.cat((self.init_gauss(tr[:,[0,6,12,18]]), self.init_trns(tr)), dim = 1))
+		tr = self.act_init(self.film_init(tr, embed_context))
 		# print(tr.shape)
 
 		tr = self.layer1(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
