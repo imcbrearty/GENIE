@@ -668,8 +668,13 @@ class BipartiteGraphOperator(MessagePassing):
         #     nn.Linear(16, 1), nn.Sigmoid(),
         # )
 
+		# self.support_gate = nn.Sequential(
+		#     nn.Linear(2 * n_kernels + 1, 16), nn.PReLU(),
+		#     nn.Linear(16, 1), nn.Sigmoid(),
+		# )
+
 		self.support_gate = nn.Sequential(
-		    nn.Linear(2 * n_kernels + 1, 16), nn.PReLU(),
+		    nn.Linear(2 * n_kernels + 4, 16), nn.PReLU(),
 		    nn.Linear(16, 1), nn.Sigmoid(),
 		)
 		
@@ -775,8 +780,10 @@ class BipartiteGraphOperator(MessagePassing):
 		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)
 
 		# qual = torch.cat((q_p, q_s, c_p[:, :1], c_s[:, :1], hole[:, :1], log_cov), dim=-1)
+
+		qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim = -1)   # 2*K + 4
 			
-		qual = torch.cat((q_p, q_s, log_cov), dim=-1)          # 2*K + 1
+		# qual = torch.cat((q_p, q_s, log_cov), dim=-1)          # 2*K + 1
 		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5*K + 1
 					
         deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
