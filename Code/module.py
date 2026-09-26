@@ -661,10 +661,16 @@ class BipartiteGraphOperator(MessagePassing):
         # self.support_feat_dim = 3 * n_kernels + 1
 		self.support_feat_dim = 5 * n_kernels + 1
 		
-        self.support_gate = nn.Sequential(
-            nn.Linear(self.support_feat_dim, 16), nn.PReLU(),
-            nn.Linear(16, 1), nn.Sigmoid(),
-        )
+        # self.support_gate = nn.Sequential(
+        #     nn.Linear(self.support_feat_dim, 16), nn.PReLU(),
+        #     nn.Linear(16, 1), nn.Sigmoid(),
+        # )
+
+		self.support_gate = nn.Sequential(
+		    nn.Linear(2 * n_kernels + 1, 16), nn.PReLU(),
+		    nn.Linear(16, 1), nn.Sigmoid(),
+		)
+		
         nn.init.constant_(self.support_gate[-2].bias, -0.3)
 
         self.norm = RMSNorm(ndim_in)
@@ -756,7 +762,7 @@ class BipartiteGraphOperator(MessagePassing):
 		den_s = scatter((a_s * w).clamp(min=0), src, dim=0, dim_size=M, reduce="sum")
 		q_p = ev_p / den_p.clamp(min=1e-5)
 		q_s = ev_s / den_s.clamp(min=1e-5)
-		
+
 		# completeness: vs full neighborhood (new, lobe detector)
 		cov = scatter(w, src, dim=0, dim_size=M, reduce="sum")
 		c_p = scatter(a_p * w, src, dim=0, dim_size=M, reduce="sum") / cov.clamp(min=1e-5)
@@ -764,8 +770,11 @@ class BipartiteGraphOperator(MessagePassing):
 		hole = scatter((1.0 - a_any) * w, src, dim=0, dim_size=M, reduce="sum") / cov.clamp(min=1e-5)
 		
 		log_cov = torch.log1p(cov.sum(1, keepdim=True))
-		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)
+		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)
 
+		qual = torch.cat((q_p, q_s, log_cov), dim=-1)          # 2*K + 1
+		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5*K + 1
+					
         deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
         hard = (deg > 0).to(inpt.dtype)
         pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
@@ -779,10 +788,14 @@ class BipartiteGraphOperator(MessagePassing):
 		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov, n_hit), dim=-1)
 		# # support_feat_dim = 5*K + 2
 		# # export + hard*gate → 5*K + 3
+
+		gate = self.support_gate(qual)
+		out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
+		out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
 					
-        out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
-        gate = self.support_gate(support)
-        out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
+        # out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
+        # gate = self.support_gate(support)
+        # out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
         support = torch.cat((support, hard * gate), dim=1).detach()
 
         return out, support
