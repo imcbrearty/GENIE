@@ -655,7 +655,9 @@ class BipartiteGraphOperator(MessagePassing):
         self.log_gamma_base = nn.Parameter(init_spatial.log())
 
         # m_P (K) + m_S (K) + hole (K) + log_cov (1)
-        self.support_feat_dim = 3 * n_kernels + 1
+        # self.support_feat_dim = 3 * n_kernels + 1
+		self.support_feat_dim = 5 * n_kernels + 1
+		
         self.support_gate = nn.Sequential(
             nn.Linear(self.support_feat_dim, 16), nn.PReLU(),
             nn.Linear(16, 1), nn.Sigmoid(),
@@ -709,21 +711,52 @@ class BipartiteGraphOperator(MessagePassing):
         # raw unsigned Gaussians (all@P, all@S); fall back to mask if amp omitted
         if amp is None:
             amp = mask
-        amp_p = amp[:, 0:1]
-        amp_s = amp[:, 1:2]
-        amp_any = torch.maximum(amp_p, amp_s)
+        # amp_p = amp[:, 0:1]
+        # amp_s = amp[:, 1:2]
+        # amp_any = torch.maximum(amp_p, amp_s)
 
-        w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
-        ev_p = scatter(pos_gate * amp_p * w, src, dim=0, dim_size=M, reduce="sum")
-        ev_s = scatter(pos_gate * amp_s * w, src, dim=0, dim_size=M, reduce="sum")
-        cov = scatter(w, src, dim=0, dim_size=M, reduce="sum")
-        hole = scatter((1.0 - amp_any) * w, src, dim=0, dim_size=M, reduce="sum")
+        # w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
+        # ev_p = scatter(pos_gate * amp_p * w, src, dim=0, dim_size=M, reduce="sum")
+        # ev_s = scatter(pos_gate * amp_s * w, src, dim=0, dim_size=M, reduce="sum")
+        # cov = scatter(w, src, dim=0, dim_size=M, reduce="sum")
+        # hole = scatter((1.0 - amp_any) * w, src, dim=0, dim_size=M, reduce="sum")
 
-        m_p = ev_p / cov.clamp(min=1e-5)
-        m_s = ev_s / cov.clamp(min=1e-5)
-        h = hole / cov.clamp(min=1e-5)
-        log_cov = torch.log1p(cov.sum(dim=1, keepdim=True))
-        support = torch.cat((m_p, m_s, h, log_cov), dim=-1)
+        # m_p = ev_p / cov.clamp(min=1e-5)
+        # m_s = ev_s / cov.clamp(min=1e-5)
+        # h = hole / cov.clamp(min=1e-5)
+        # log_cov = torch.log1p(cov.sum(dim=1, keepdim=True))
+        # support = torch.cat((m_p, m_s, h, log_cov), dim=-1)
+
+        # deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
+        # hard = (deg > 0).to(inpt.dtype)
+        # pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
+
+        # out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
+        # gate = self.support_gate(support)
+        # out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
+        # support = torch.cat((support, hard * gate), dim=1).detach()
+		
+		w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
+		a_p, a_s = amp[:, :1], amp[:, 1:2]          # or mask if no amp
+		a_any = torch.maximum(a_p, a_s)
+		
+		ev_p = scatter(pos_gate * a_p * w, src, dim=0, dim_size=M, reduce="sum")
+		ev_s = scatter(pos_gate * a_s * w, src, dim=0, dim_size=M, reduce="sum")
+		
+		# quality: among mass that fired (old behavior)
+		den_p = scatter((a_p * w).clamp(min=0), src, dim=0, dim_size=M, reduce="sum")
+		den_s = scatter((a_s * w).clamp(min=0), src, dim=0, dim_size=M, reduce="sum")
+		q_p = ev_p / den_p.clamp(min=1e-5)
+		q_s = ev_s / den_s.clamp(min=1e-5)
+		
+		# completeness: vs full neighborhood (new, lobe detector)
+		cov = scatter(w, src, dim=0, dim_size=M, reduce="sum")
+		c_p = scatter(a_p * w, src, dim=0, dim_size=M, reduce="sum") / cov.clamp(min=1e-5)
+		c_s = scatter(a_s * w, src, dim=0, dim_size=M, reduce="sum") / cov.clamp(min=1e-5)
+		hole = scatter((1.0 - a_any) * w, src, dim=0, dim_size=M, reduce="sum") / cov.clamp(min=1e-5)
+		
+		log_cov = torch.log1p(cov.sum(1, keepdim=True))
+		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)
 
         deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
         hard = (deg > 0).to(inpt.dtype)
@@ -814,7 +847,7 @@ else:
 	
 	class SpatialAggregation(MessagePassing):
 		def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel,
-					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=11):
+					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=17):
 			super(SpatialAggregation, self).__init__(aggr='mean')
 	
 			self.zero_offsets = zero_offsets
@@ -946,7 +979,7 @@ class SpaceTimeAttention(MessagePassing):
 	"""
 
 	def __init__(self, inpt_dim, out_channels, n_dim=4, n_latent=16, embed_dim=10,
-				 n_heads=5, support_dim=11, scale_rel=scale_rel, scale_time=scale_time):
+				 n_heads=5, support_dim=17, scale_rel=scale_rel, scale_time=scale_time):
 		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
 
 		self.n_heads = n_heads
@@ -1186,7 +1219,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		ndim_mask=1,
 		embed_dim=10,
 		n_gammas=3, # 4
-		support_dim=11,
+		support_dim=17,
 		baseline_gate=0.001, # 0.01
 	):
 		super(BipartiteGraphReadOutOperator, self).__init__()
@@ -1296,7 +1329,7 @@ class DataAggregationAssociation(nn.Module):
 	Replaces DataAggregationAssociationPhase with modular, per-layer gamma learning.
 	"""
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_latent=30, use_absolute_pos = True,
-				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 11, use_embedding = True, use_offsets = True):
+				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 17, use_embedding = True, use_offsets = True):
 		super().__init__()
 
 		# Input: Unpooled Features (s) + Encoder Latents (x_latent) + Mask + Source Mask (mask_out_1)
