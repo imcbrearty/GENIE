@@ -702,8 +702,8 @@ class BipartiteGraphOperator(MessagePassing):
         delta_r = self.f_radii(ctx)
         radii = torch.exp(
             self.log_kernel_radii
-            + 0.5 * torch.tanh(delta_r[:, :1])
-            + 0.2 * torch.tanh(delta_r[:, 1:])
+            + 0.35 * torch.tanh(delta_r[:, :1]) # 0.5
+            + 0.15 * torch.tanh(delta_r[:, 1:]) # 0.2
         ).reshape(-1).clamp(self.r_min, self.r_max)
 
         diff_sp = A_src_in_edges.x[:, :3]
@@ -713,8 +713,8 @@ class BipartiteGraphOperator(MessagePassing):
         delta = self.f_gamma(ctx)
         gammas = torch.exp(
             self.log_gamma_base
-            + 0.5 * torch.tanh(delta[:, :1])
-            + 0.2 * torch.tanh(delta[:, 1:])
+            + 0.35 * torch.tanh(delta[:, :1])
+            + 0.15 * torch.tanh(delta[:, 1:])
         )
         rbf = torch.exp(-torch.sqrt(gammas * norm_pos ** 2 + 1e-5))
         geo = self.act_edge(self.film_edge(
@@ -1327,8 +1327,8 @@ class BipartiteGraphReadOutOperator(nn.Module):
 
 		# Step 2: Scale-conditioned RBF bandwidths
 		delta = self.f_gamma(ctx)
-		alpha = 0.5 * torch.tanh(delta[:, 0:1])
-		residuals = 0.2 * torch.tanh(delta[:, 1:])
+		alpha = 0.35 * torch.tanh(delta[:, 0:1]) # 0.5
+		residuals = 0.15 * torch.tanh(delta[:, 1:]) # 0.2
 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
 
 		# Step 3: Multi-scale spatial RBFs
