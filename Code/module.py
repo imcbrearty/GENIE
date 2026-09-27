@@ -639,7 +639,9 @@ class BipartiteGraphOperator(MessagePassing):
         self.f_radii = nn.Linear(embed_dim, 1 + n_kernels)
         nn.init.normal_(self.f_radii.weight, std=0.01)
         nn.init.zeros_(self.f_radii.bias)
-		self.r_min, self.r_max = 0.08, 4.0
+		# self.r_min, self.r_max = 0.08, 4.0
+		self.register_buffer("r_min", torch.tensor(0.08))
+		self.register_buffer("r_max", torch.tensor(4.0))
 		
 
         self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
