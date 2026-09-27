@@ -190,6 +190,96 @@ class DataAggregationLayer(MessagePassing):
 # =====================================================================
 # 2. MAIN STACK MODULE: Observation Network with Optional Preconditioner
 # =====================================================================
+# class DataAggregationExpanded(nn.Module):
+# 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_mask=4, 
+# 				 use_absolute_pos=True, use_offsets=True, embed_dim=10, n_embedding = 10, use_expanded = use_expanded, use_top_k = use_top_k, use_embedding=True):
+# 		super(DataAggregationExpanded, self).__init__()
+
+# 		self.use_embedding = use_embedding
+# 		if use_absolute_pos:
+# 			in_channels += 6
+
+# 		# --- OPTIONAL GEOMETRIC PRECONDITIONER (Pre-GNN) ---
+# 		if self.use_embedding:
+# 			geom_in_dim = 1 + 7  # Bias (1D) + Relative Position Features (7D)
+# 			self.init_geom = nn.Linear(geom_in_dim, n_hidden)
+# 			self.film_geom_init = FiLM(embed_dim, n_hidden)
+# 			self.act_geom_init = nn.PReLU()
+
+# 			self.geom_layer1 = DataAggregationLayer(
+# 				in_channels=n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
+# 				embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=False
+# 			)
+# 			self.geom_layer2 = DataAggregationLayer(
+# 				in_channels=2 * n_hidden, out_channels=n_embedding, n_dim_mask=n_dim_mask, 
+# 				embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=False
+# 			)
+# 			in_channels += 2 * n_embedding  # Concatenate structural embedding to main input
+
+# 		# --- MAIN OBSERVATION GNN STACK ---
+# 		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37 if use_top_k == False else -17, n_hidden)
+# 		self.init_gauss = nn.Linear(4, n_hidden)
+# 		self.mix_inpt = nn.Linear(2*n_hidden, n_hidden)
+					 
+# 		self.film_init = FiLM(embed_dim, n_hidden)
+# 		self.act_init = nn.PReLU()
+					 
+# 		# # Calculate feature dimensions dynamically
+# 		# main_in_dim = in_channels + (2 * n_embedding if self.use_embedding else 0) + n_dim_mask
+# 		# self.init_trns = nn.Linear(main_in_dim, n_hidden)
+					 
+# 		self.layer1 = DataAggregationLayer(
+# 			in_channels=n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
+# 			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded = use_expanded
+# 		)
+# 		self.layer2 = DataAggregationLayer(
+# 			in_channels=2 * n_hidden, out_channels=n_hidden, n_dim_mask=n_dim_mask, 
+# 			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded = use_expanded
+# 		)
+# 		self.layer3 = DataAggregationLayer(
+# 			in_channels=2 * n_hidden, out_channels=out_channels, n_dim_mask=n_dim_mask, 
+# 			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded = False
+# 		)
+
+# 	def forward(self, tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None):
+# 		# 1. Run Preconditioner if Enabled
+
+# 		g_emb = None
+# 		if self.use_embedding:
+# 			ndim_slice = -7
+# 			struct_input = torch.cat(
+# 				(torch.ones(len(tr), 1, dtype=tr.dtype, device=tr.device), tr[:, ndim_slice:]), 
+# 				dim=1
+# 			)
+# 			g_emb = self.act_geom_init(self.film_geom_init(self.init_geom(struct_input), embed_context))
+# 			g_emb = self.geom_layer1(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+# 			g_emb = self.geom_layer2(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+
+# 			# Concatenate structural embedding with original observation slice
+# 			tr = torch.cat((tr, g_emb), dim=-1)
+# 			# print('Use embedding')
+# 			# print(tr.shape)
+
+# 		# 2. Main Observation Processing Stack
+# 		tr = torch.cat((tr, mask), dim=-1)
+# 		# print(tr.shape)
+# 		# print(self.init_trns)
+# 		# print(self.film_init)
+# 		# h = torch.cat((self.init_gauss(tr), self.init_trns(tr)), dim=1)
+# 		tr = self.mix_inpt(torch.cat((self.init_gauss(tr[:,[0,6,12,18]]), self.init_trns(tr)), dim = 1))
+# 		tr = self.act_init(self.film_init(tr, embed_context))
+# 		# print(tr.shape)
+
+# 		tr = self.layer1(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+# 		tr = self.layer2(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+# 		tr = self.layer3(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+# 		# print(tr.shape)
+
+# 		return tr, g_emb.detach()
+
+
+
+
 class DataAggregationExpanded(nn.Module):
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_mask=4, 
 				 use_absolute_pos=True, use_offsets=True, embed_dim=10, n_embedding = 10, use_expanded = use_expanded, use_top_k = use_top_k, use_embedding=True):
@@ -214,15 +304,29 @@ class DataAggregationExpanded(nn.Module):
 				in_channels=2 * n_hidden, out_channels=n_embedding, n_dim_mask=n_dim_mask, 
 				embed_dim=embed_dim, use_offsets=use_offsets, use_expanded=False
 			)
-			in_channels += 2 * n_embedding  # Concatenate structural embedding to main input
+			# in_channels += 2 * n_embedding  # Concatenate structural embedding to main input
 
 		# --- MAIN OBSERVATION GNN STACK ---
-		self.init_trns = nn.Linear(in_channels + n_dim_mask - 37 if use_top_k == False else -17, n_hidden)
+		n_dim_inpt = 24 if use_top_k else 4
+		# self.init_trns = nn.Sequential(nn.Linear(n_dim_inpt + n_dim_mask, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_hidden), nn.PReLU())
+		# self.init_gauss = nn.Sequential(nn.Linear(4, n_hidden), nn.PReLU())
+		# self.mix_inpt = nn.Sequential(nn.Linear(3*n_hidden, n_hidden), nn.PReLU())
+
+		self.init_trns = nn.Sequential(nn.Linear(n_dim_inpt, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_hidden))
 		self.init_gauss = nn.Linear(4, n_hidden)
-		self.mix_inpt = nn.Linear(2*n_hidden, n_hidden)
+		self.mix_inpt = nn.Linear(3*n_hidden, n_hidden)
 					 
 		self.film_init = FiLM(embed_dim, n_hidden)
 		self.act_init = nn.PReLU()
+		self.spatial_proj = nn.Linear(7 + 2 * n_embedding, n_hidden)
+
+				
+		# self.spatial_proj = nn.Sequential(
+		#     nn.Linear(7 + 2 * n_embedding, n_hidden),
+		#     nn.PReLU(),
+		#     nn.Linear(n_hidden, n_hidden),
+		# 	nn.PReLU()
+		# )
 					 
 		# # Calculate feature dimensions dynamically
 		# main_in_dim = in_channels + (2 * n_embedding if self.use_embedding else 0) + n_dim_mask
@@ -256,26 +360,32 @@ class DataAggregationExpanded(nn.Module):
 			g_emb = self.geom_layer2(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
 
 			# Concatenate structural embedding with original observation slice
-			tr = torch.cat((tr, g_emb), dim=-1)
-			# print('Use embedding')
-			# print(tr.shape)
+			# tr = torch.cat((tr, g_emb), dim=-1)
 
 		# 2. Main Observation Processing Stack
-		tr = torch.cat((tr, mask), dim=-1)
-		# print(tr.shape)
-		# print(self.init_trns)
-		# print(self.film_init)
-		# h = torch.cat((self.init_gauss(tr), self.init_trns(tr)), dim=1)
-		tr = self.mix_inpt(torch.cat((self.init_gauss(tr[:,[0,6,12,18]]), self.init_trns(tr)), dim = 1))
+
+		# proj_inpt = self.init_trns(torch.cat(tr[:,0:ndim_slice], mask), dim=-1))
+		
+		proj_geo = self.spatial_proj(torch.cat((g_emb, tr[:, ndim_slice:]), dim = 1))
+		proj_inpt = self.init_trns(tr[:,0:ndim_slice])
+		proj_gauss = self.init_gauss(tr[:,[0,6,12,18]])
+
+		# tr = torch.cat((tr, mask), dim=-1)
+
+		tr = self.mix_inpt(torch.cat((proj_gauss, proj_inpt, proj_geo), dim = 1))
 		tr = self.act_init(self.film_init(tr, embed_context))
-		# print(tr.shape)
 
 		tr = self.layer1(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
 		tr = self.layer2(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
 		tr = self.layer3(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
-		# print(tr.shape)
 
 		return tr, g_emb.detach()
+
+
+
+
+
+
 
 
 class BipartiteGraphOperator1(MessagePassing):
