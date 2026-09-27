@@ -521,7 +521,6 @@ class BipartiteGraphOperator1(MessagePassing):
 
 
 
-
 # class BipartiteGraphOperator1(MessagePassing):
 # 	"""
 # 	Product Graph to Source Graph Bipartite Projection Operator.
@@ -797,7 +796,16 @@ class BipartiteGraphOperator(MessagePassing):
 		self.norm = RMSNorm(ndim_in)
 		self.fc_out = nn.Linear(ndim_in + self.support_feat_dim, ndim_out)
 		self.act_out = nn.PReLU()
-
+	
+	def _ordered_scales(self, log_base, delta, r_min, r_max):
+	    # log_base: (K,) or (1, K)
+	    stretch = torch.exp(0.30 * torch.tanh(delta[:, :1]))
+	    resid = 0.15 * torch.tanh(delta[:, 1:])
+	    r = torch.exp(log_base.view(1, -1)) * stretch * torch.exp(resid)
+	    gaps = F.softplus(r[:, 1:] - r[:, :-1]) + 1e-3
+	    r = torch.cat((r[:, :1], r[:, :1] + gaps.cumsum(dim=1)), dim=1)
+	    return r.clamp(r_min, r_max)
+	
 	def forward(self, inpt, A_src_in_edges, mask, embed_context,
 				amp=None, num_target_nodes=None):
 
@@ -809,23 +817,38 @@ class BipartiteGraphOperator(MessagePassing):
 
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
-		delta_r = self.f_radii(ctx)
-		radii = torch.exp(
-			self.log_kernel_radii
-			+ 0.35 * torch.tanh(delta_r[:, :1]) # 0.5
-			+ 0.15 * torch.tanh(delta_r[:, 1:]) # 0.2
-		).reshape(-1).clamp(self.r_min, self.r_max)
-
+		# delta_r = self.f_radii(ctx)
+		# radii = torch.exp(
+		# 	self.log_kernel_radii
+		# 	+ 0.35 * torch.tanh(delta_r[:, :1]) # 0.5
+		# 	+ 0.15 * torch.tanh(delta_r[:, 1:]) # 0.2
+		# ).reshape(-1).clamp(self.r_min, self.r_max)
+		radii = self._ordered_scales(
+		    self.log_kernel_radii, self.f_radii(ctx), self.r_min, self.r_max
+		)
+					
 		diff_sp = A_src_in_edges.x[:, :3]
 		norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
 		unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
 
 		delta = self.f_gamma(ctx)
-		gammas = torch.exp(
-			self.log_gamma_base
-			+ 0.35 * torch.tanh(delta[:, :1])
-			+ 0.15 * torch.tanh(delta[:, 1:])
+
+		g_scale = torch.exp(
+		    self.log_gamma_base
+		    + 0.35 * torch.tanh(delta[:, :1])
+		    + 0.15 * torch.tanh(delta[:, 1:])
 		)
+		r_g = (1.0 / g_scale.clamp(min=1e-8).sqrt())          # distance units
+		gaps = F.softplus(r_g[:, 1:] - r_g[:, :-1]) + 1e-3
+		r_g = torch.cat((r_g[:, :1], r_g[:, :1] + gaps.cumsum(1)), dim=1)
+		r_g = r_g.clamp(self.r_min, self.r_max)
+		gammas = 1.0 / r_g.pow(2)
+
+		# gammas = torch.exp(
+		# 	self.log_gamma_base
+		# 	+ 0.35 * torch.tanh(delta[:, :1])
+		# 	+ 0.15 * torch.tanh(delta[:, 1:])
+		# )
 		rbf = torch.exp(-torch.sqrt(gammas * norm_pos ** 2 + 1e-5))
 		geo = self.act_edge(self.film_edge(
 			self.fc_edge(torch.cat((inpt, unit_dir, rbf), dim=-1)), ctx
@@ -1414,6 +1437,16 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		self.fc_out = nn.Linear(ndim_in, ndim_out)
 		self.act_out = nn.PReLU()
 
+	def _ordered_scales(self, log_base, delta, r_min, r_max):
+	    # log_base: (K,) or (1, K)
+	    stretch = torch.exp(0.30 * torch.tanh(delta[:, :1]))
+	    resid = 0.15 * torch.tanh(delta[:, 1:])
+	    r = torch.exp(log_base.view(1, -1)) * stretch * torch.exp(resid)
+	    gaps = F.softplus(r[:, 1:] - r[:, :-1]) + 1e-3
+	    r = torch.cat((r[:, :1], r[:, :1] + gaps.cumsum(dim=1)), dim=1)
+	    return r.clamp(r_min, r_max)
+		
+	
 	def forward(self, inpt, A_Lg_in_srcs, mask, embed_context, support, num_target_nodes=None):
 		"""Args:
 			inpt: [N_src, ndim_in] source node features
@@ -1437,10 +1470,21 @@ class BipartiteGraphReadOutOperator(nn.Module):
 
 		# Step 2: Scale-conditioned RBF bandwidths
 		delta = self.f_gamma(ctx)
-		alpha = 0.35 * torch.tanh(delta[:, 0:1]) # 0.5
-		residuals = 0.15 * torch.tanh(delta[:, 1:]) # 0.2
-		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+		# alpha = 0.35 * torch.tanh(delta[:, 0:1]) # 0.5
+		# residuals = 0.15 * torch.tanh(delta[:, 1:]) # 0.2
+		# gammas = torch.exp(self.log_gamma_base + alpha + residuals)
 
+		g_scale = torch.exp(
+		    self.log_gamma_base
+		    + 0.35 * torch.tanh(delta[:, :1])
+		    + 0.15 * torch.tanh(delta[:, 1:])
+		)
+		r_g = (1.0 / g_scale.clamp(min=1e-8).sqrt())          # distance units
+		gaps = F.softplus(r_g[:, 1:] - r_g[:, :-1]) + 1e-3
+		r_g = torch.cat((r_g[:, :1], r_g[:, :1] + gaps.cumsum(1)), dim=1)
+		r_g = r_g.clamp(self.r_min, self.r_max)
+		gammas = 1.0 / r_g.pow(2)
+		
 		# Step 3: Multi-scale spatial RBFs
 		r_sp_sq = norm_pos ** 2
 		r_aniso = torch.sqrt(gammas * r_sp_sq + 1e-5)
