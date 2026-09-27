@@ -4886,7 +4886,8 @@ if build_training_data == True:
 to_gpu = partial(move_to, device='cuda', non_blocking=True)
 to_cpu = partial(move_to, device='cpu', non_blocking=False)
 to_gpu_inplace = partial(move_to_inplace, device='cuda', non_blocking=True)
-
+init_spatial_norms = True if n_restart == False else False
+dist_norms = []
 
 ## Load Dataset
 if load_training_data == True:
@@ -5002,6 +5003,7 @@ loader = DataLoader(
 log_buffer = [] ## Append write operations to here and flush every 10 steps
 len_loader = len(loader) ## Why not loop over data until n_epochs
 out_save = None
+
 
 
 
@@ -5714,6 +5716,12 @@ for batch_idx, inputs in enumerate(loader):
 			out_plot = [out[0], out[1], out[2], out[3]]
 			visualize_predictions(out_plot, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
 
+		## Estimate scales
+		if init_spatial_norms == True:
+			diff_sp = input_tensors_l[i0][4].x[:, :3]
+	        norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim = False)
+			dist_norms.append(norm_pos)
+		
 		# if inc != (n_batch - 1):
 		# 	loss.backward(retain_graph = False)
 		# else:
@@ -5751,10 +5759,24 @@ for batch_idx, inputs in enumerate(loader):
 	if use_grad_norm == True:
 		torch.nn.utils.clip_grad_norm_(mz.parameters(), max_norm = 5.0)
 
-
-	if (loss_charbonnier_source.initialize_mass == False) and (loss_charbonnier_assoc.initialize_mass == False):
+	write_dist_scales = False
+	if (init_spatial_norms == True) and ((loss_charbonnier_source.initialize_mass == False) and (loss_charbonnier_assoc.initialize_mass == False)): ## If training begins, set the spatial scales of kernels
+		spatial_quantiles = torch.quantile(torch.cat(dist_norms).detach().float(), torch.tensor([0.2, 0.5, 0.8]).to(device))
+		spatial_quantiles = spatial_quantiles.clamp(min=1e-3)
+		with torch.no_grad():
+			mz.Bipartite_ReadIn.log_kernel_radii.copy_(spatial_quantiles.log())
+			mz.Bipartite_ReadIn.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
+			mz.BipartiteGraphReadOutOperator.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
+		mz.Bipartite_ReadIn.r_min = float(spatial_quantiles[0] * 0.5)
+		mz.Bipartite_ReadIn.r_max = float(spatial_quantiles[2] * 4.0)
+		init_spatial_norms, write_dist_scales = False, True
+		print("Bipartite radii scales q20/50/80", spatial_quantiles.tolist(), "clamp", mz.Bipartite_ReadIn.r_min, mz.Bipartite_ReadIn.r_max)
+	
+	if (loss_charbonnier_source.initialize_mass == False) and (loss_charbonnier_assoc.initialize_mass == False) and (write_dist_scales == False): ## Skip update on first write of spatial scales
 		optimizer.step()
+		
 
+	
 	losses[i] = loss_val
 	mx_trgt_1[i] = mx_trgt_val_1/n_batch_valid
 	mx_trgt_2[i] = mx_trgt_val_2/n_batch_valid
