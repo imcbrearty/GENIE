@@ -3365,7 +3365,7 @@ class SourceStationAttention(MessagePassing):
 			t_pack.view(-1, 1),
 			r=float(sig_win),
 			max_num_neighbors=13,		  # 12 + self; cap inside the window
-		)[0]
+		)
 		edges = add_self_loops(remove_self_loops(edges)[0], num_nodes=n_arv)[0]
 		edges = edges.flip(0).contiguous()  # keep your old orientation if message assumes it
 
