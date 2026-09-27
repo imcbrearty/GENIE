@@ -5761,8 +5761,14 @@ for batch_idx, inputs in enumerate(loader):
 
 	write_dist_scales = False
 	if (init_spatial_norms == True) and ((loss_charbonnier_source.initialize_mass == False) and (loss_charbonnier_assoc.initialize_mass == False)): ## If training begins, set the spatial scales of kernels
-		spatial_quantiles = torch.quantile(torch.cat(dist_norms).detach().float(), torch.tensor([0.2, 0.5, 0.8]).to(device))
-		spatial_quantiles = spatial_quantiles.clamp(min=1e-3)
+		dist_norms = torch.cat(dist_norms).detach().float()
+		quantile_far  = torch.quantile(dist_norms, 0.85).clamp(min=1e-3)
+		quantile_mid  = torch.quantile(dist_norms, 0.40).clamp(min=1e-3)
+		dist_near = dist_norms[dist_norms <= torch.quantile(dist_norms, 0.30)]
+		quantile_in   = torch.quantile(dist_near, 0.50).clamp(min=1e-3)
+		spatial_quantiles = torch.stack([quantile_in, quantile_mid, quantile_far])
+		# spatial_quantiles = torch.quantile(, torch.tensor([0.2, 0.5, 0.8]).to(device))
+		# spatial_quantiles = spatial_quantiles.clamp(min=1e-3)
 		with torch.no_grad():
 			mz.Bipartite_ReadIn.log_kernel_radii.copy_(spatial_quantiles.log())
 			mz.Bipartite_ReadIn.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
@@ -5770,7 +5776,7 @@ for batch_idx, inputs in enumerate(loader):
 		mz.Bipartite_ReadIn.r_min = float(spatial_quantiles[0] * 0.5)
 		mz.Bipartite_ReadIn.r_max = float(spatial_quantiles[2] * 4.0)
 		init_spatial_norms, write_dist_scales = False, True
-		print("Bipartite radii scales q20/50/80", spatial_quantiles.tolist(), "clamp", mz.Bipartite_ReadIn.r_min, mz.Bipartite_ReadIn.r_max)
+		print("Bipartite radii scales q15/40/85", spatial_quantiles.tolist(), "clamp", mz.Bipartite_ReadIn.r_min, mz.Bipartite_ReadIn.r_max)
 	
 	if (loss_charbonnier_source.initialize_mass == False) and (loss_charbonnier_assoc.initialize_mass == False) and (write_dist_scales == False): ## Skip update on first write of spatial scales
 		optimizer.step()
