@@ -5773,8 +5773,10 @@ for batch_idx, inputs in enumerate(loader):
 			mz.Bipartite_ReadIn.log_kernel_radii.copy_(spatial_quantiles.log())
 			mz.Bipartite_ReadIn.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
 			mz.BipartiteGraphReadOutOperator.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
-		mz.Bipartite_ReadIn.r_min = float(spatial_quantiles[0] * 0.5)
-		mz.Bipartite_ReadIn.r_max = float(spatial_quantiles[2] * 4.0)
+		# mz.Bipartite_ReadIn.r_min = float(spatial_quantiles[0] * 0.5)
+		# mz.Bipartite_ReadIn.r_max = float(spatial_quantiles[2] * 4.0)
+		mz.Bipartite_ReadIn.r_min.fill_(float(spatial_quantiles[0] * 0.5))
+		mz.Bipartite_ReadIn.r_max.fill_(float(spatial_quantiles[2] * 4.0))
 		init_spatial_norms, write_dist_scales = False, True
 		print("Bipartite radii scales q15/40/85", spatial_quantiles.tolist(), "clamp", mz.Bipartite_ReadIn.r_min, mz.Bipartite_ReadIn.r_max)
 	
