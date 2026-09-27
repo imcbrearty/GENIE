@@ -639,6 +639,8 @@ class BipartiteGraphOperator(MessagePassing):
         self.f_radii = nn.Linear(embed_dim, 1 + n_kernels)
         nn.init.normal_(self.f_radii.weight, std=0.01)
         nn.init.zeros_(self.f_radii.bias)
+		self.r_min, self.r_max = 0.08, 4.0
+		
 
         self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
         self.film_edge = FiLM(embed_dim, ndim_in)
@@ -700,7 +702,7 @@ class BipartiteGraphOperator(MessagePassing):
             self.log_kernel_radii
             + 0.5 * torch.tanh(delta_r[:, :1])
             + 0.2 * torch.tanh(delta_r[:, 1:])
-        ).reshape(-1).clamp(0.05, 5.0)
+        ).reshape(-1).clamp(self.r_min, self.r_max)
 
         diff_sp = A_src_in_edges.x[:, :3]
         norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
