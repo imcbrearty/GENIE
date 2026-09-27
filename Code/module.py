@@ -322,9 +322,9 @@ class DataAggregationExpanded(nn.Module):
 
 				
 		# self.spatial_proj = nn.Sequential(
-		#     nn.Linear(7 + 2 * n_embedding, n_hidden),
-		#     nn.PReLU(),
-		#     nn.Linear(n_hidden, n_hidden),
+		#	 nn.Linear(7 + 2 * n_embedding, n_hidden),
+		#	 nn.PReLU(),
+		#	 nn.Linear(n_hidden, n_hidden),
 		# 	nn.PReLU()
 		# )
 					 
@@ -725,154 +725,154 @@ class BipartiteGraphOperator1(MessagePassing):
 
 
 class BipartiteGraphOperator(MessagePassing):
-    def __init__(
-        self,
-        ndim_in,
-        ndim_out,
-        ndim_mask=4,
-        embed_dim=10,
-        n_gammas=3,
-        n_kernels=3,
-        scale_rel=scale_rel,
-        scale_time=scale_time,
-        n_phase_channels=2,
-        gate_floor=0.3,
-    ):
-        super().__init__(aggr="add")
-        self.n_gammas = n_gammas
-        self.n_phase_channels = n_phase_channels
-        self.n_dist_kernels = n_kernels
-        self.gate_floor = gate_floor
+	def __init__(
+		self,
+		ndim_in,
+		ndim_out,
+		ndim_mask=4,
+		embed_dim=10,
+		n_gammas=3,
+		n_kernels=3,
+		scale_rel=scale_rel,
+		scale_time=scale_time,
+		n_phase_channels=2,
+		gate_floor=0.3,
+	):
+		super().__init__(aggr="add")
+		self.n_gammas = n_gammas
+		self.n_phase_channels = n_phase_channels
+		self.n_dist_kernels = n_kernels
+		self.gate_floor = gate_floor
 
-        init_radii = torch.logspace(-2, 0.5, steps=n_kernels)
-        self.log_kernel_radii = nn.Parameter(init_radii.log())
-        self.f_radii = nn.Linear(embed_dim, 1 + n_kernels)
-        nn.init.normal_(self.f_radii.weight, std=0.01)
-        nn.init.zeros_(self.f_radii.bias)
+		init_radii = torch.logspace(-2, 0.5, steps=n_kernels)
+		self.log_kernel_radii = nn.Parameter(init_radii.log())
+		self.f_radii = nn.Linear(embed_dim, 1 + n_kernels)
+		nn.init.normal_(self.f_radii.weight, std=0.01)
+		nn.init.zeros_(self.f_radii.bias)
 		# self.r_min, self.r_max = 0.08, 4.0
 		self.register_buffer("r_min", torch.tensor(0.08))
 		self.register_buffer("r_max", torch.tensor(4.0))
 		
 
-        self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
-        self.film_edge = FiLM(embed_dim, ndim_in)
-        self.act_edge = nn.PReLU()
+		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
+		self.film_edge = FiLM(embed_dim, ndim_in)
+		self.act_edge = nn.PReLU()
 
-        self.fc_pos_gate = nn.Sequential(
-            nn.Linear(ndim_in + ndim_mask + 1, 32), nn.PReLU(),
-            nn.Linear(32, 1), nn.Sigmoid(),
-        )
-        self.mask_gate = nn.Sequential(
-            nn.Linear(ndim_mask, 16), nn.PReLU(),
-            nn.Linear(16, ndim_in), nn.Sigmoid(),
-        )
+		self.fc_pos_gate = nn.Sequential(
+			nn.Linear(ndim_in + ndim_mask + 1, 32), nn.PReLU(),
+			nn.Linear(32, 1), nn.Sigmoid(),
+		)
+		self.mask_gate = nn.Sequential(
+			nn.Linear(ndim_mask, 16), nn.PReLU(),
+			nn.Linear(16, ndim_in), nn.Sigmoid(),
+		)
 
-        self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
-        nn.init.normal_(self.f_gamma.weight, std=0.01)
-        nn.init.zeros_(self.f_gamma.bias)
-        init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
-        self.log_gamma_base = nn.Parameter(init_spatial.log())
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
+		nn.init.normal_(self.f_gamma.weight, std=0.01)
+		nn.init.zeros_(self.f_gamma.bias)
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
+		self.log_gamma_base = nn.Parameter(init_spatial.log())
 
-        # m_P (K) + m_S (K) + hole (K) + log_cov (1)
-        # self.support_feat_dim = 3 * n_kernels + 1
-        self.support_feat_dim = 5 * n_kernels + 1
+		# m_P (K) + m_S (K) + hole (K) + log_cov (1)
+		# self.support_feat_dim = 3 * n_kernels + 1
+		self.support_feat_dim = 5 * n_kernels + 1
 		
-        # self.support_gate = nn.Sequential(
-        #     nn.Linear(self.support_feat_dim, 16), nn.PReLU(),
-        #     nn.Linear(16, 1), nn.Sigmoid(),
-        # )
+		# self.support_gate = nn.Sequential(
+		#	 nn.Linear(self.support_feat_dim, 16), nn.PReLU(),
+		#	 nn.Linear(16, 1), nn.Sigmoid(),
+		# )
 
 		# self.support_gate = nn.Sequential(
-		#     nn.Linear(2 * n_kernels + 1, 16), nn.PReLU(),
-		#     nn.Linear(16, 1), nn.Sigmoid(),
+		#	 nn.Linear(2 * n_kernels + 1, 16), nn.PReLU(),
+		#	 nn.Linear(16, 1), nn.Sigmoid(),
 		# )
 
 		self.support_gate = nn.Sequential(
-		    nn.Linear(2 * n_kernels + 4, 16), nn.PReLU(),
-		    nn.Linear(16, 1), nn.Sigmoid(),
+			nn.Linear(2 * n_kernels + 4, 16), nn.PReLU(),
+			nn.Linear(16, 1), nn.Sigmoid(),
 		)
 		
-        nn.init.constant_(self.support_gate[-2].bias, -0.3)
+		nn.init.constant_(self.support_gate[-2].bias, -0.3)
 
-        self.norm = RMSNorm(ndim_in)
-        self.fc_out = nn.Linear(ndim_in + self.support_feat_dim, ndim_out)
-        self.act_out = nn.PReLU()
+		self.norm = RMSNorm(ndim_in)
+		self.fc_out = nn.Linear(ndim_in + self.support_feat_dim, ndim_out)
+		self.act_out = nn.PReLU()
 
-    def forward(self, inpt, A_src_in_edges, mask, embed_context,
-                amp=None, num_target_nodes=None):
+	def forward(self, inpt, A_src_in_edges, mask, embed_context,
+				amp=None, num_target_nodes=None):
 
-        E = A_src_in_edges.edge_index.shape[1] if A_src_in_edges.edge_index.numel() else 0
-        if num_target_nodes is not None:
-            M = num_target_nodes
-        else:
-            M = int(A_src_in_edges.edge_index[1].max().item()) + 1 if E else 0
+		E = A_src_in_edges.edge_index.shape[1] if A_src_in_edges.edge_index.numel() else 0
+		if num_target_nodes is not None:
+			M = num_target_nodes
+		else:
+			M = int(A_src_in_edges.edge_index[1].max().item()) + 1 if E else 0
 
-        ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
-        delta_r = self.f_radii(ctx)
-        radii = torch.exp(
-            self.log_kernel_radii
-            + 0.35 * torch.tanh(delta_r[:, :1]) # 0.5
-            + 0.15 * torch.tanh(delta_r[:, 1:]) # 0.2
-        ).reshape(-1).clamp(self.r_min, self.r_max)
+		delta_r = self.f_radii(ctx)
+		radii = torch.exp(
+			self.log_kernel_radii
+			+ 0.35 * torch.tanh(delta_r[:, :1]) # 0.5
+			+ 0.15 * torch.tanh(delta_r[:, 1:]) # 0.2
+		).reshape(-1).clamp(self.r_min, self.r_max)
 
-        diff_sp = A_src_in_edges.x[:, :3]
-        norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
-        unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
+		diff_sp = A_src_in_edges.x[:, :3]
+		norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
+		unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
 
-        delta = self.f_gamma(ctx)
-        gammas = torch.exp(
-            self.log_gamma_base
-            + 0.35 * torch.tanh(delta[:, :1])
-            + 0.15 * torch.tanh(delta[:, 1:])
-        )
-        rbf = torch.exp(-torch.sqrt(gammas * norm_pos ** 2 + 1e-5))
-        geo = self.act_edge(self.film_edge(
-            self.fc_edge(torch.cat((inpt, unit_dir, rbf), dim=-1)), ctx
-        ))
+		delta = self.f_gamma(ctx)
+		gammas = torch.exp(
+			self.log_gamma_base
+			+ 0.35 * torch.tanh(delta[:, :1])
+			+ 0.15 * torch.tanh(delta[:, 1:])
+		)
+		rbf = torch.exp(-torch.sqrt(gammas * norm_pos ** 2 + 1e-5))
+		geo = self.act_edge(self.film_edge(
+			self.fc_edge(torch.cat((inpt, unit_dir, rbf), dim=-1)), ctx
+		))
 
-		# sta = A_src_in_sta[0]          # or whichever end is the station
+		# sta = A_src_in_sta[0]		  # or whichever end is the station
 		# deg_sta = scatter(torch.ones_like(pos_gate), sta, dim=0, reduce="sum")
-		# w_sta = 1.0 / deg_sta[sta].clamp(min=1.0).sqrt()    # or log1p
+		# w_sta = 1.0 / deg_sta[sta].clamp(min=1.0).sqrt()	# or log1p
 		# msg = w_sta * pos_gate * route * geo
 					
-        pos_gate = 0.05 + 0.90*self.fc_pos_gate(torch.cat((inpt, mask, norm_pos), dim=-1))
-        route = self.mask_gate(mask)
-        msg = pos_gate * route * geo
+		pos_gate = 0.05 + 0.90*self.fc_pos_gate(torch.cat((inpt, mask, norm_pos), dim=-1))
+		route = self.mask_gate(mask)
+		msg = pos_gate * route * geo
 
-        src = A_src_in_edges.edge_index[1]
-        stacked = scatter(msg, src, dim=0, dim_size=M, reduce="sum")
+		src = A_src_in_edges.edge_index[1]
+		stacked = scatter(msg, src, dim=0, dim_size=M, reduce="sum")
 
-        # raw unsigned Gaussians (all@P, all@S); fall back to mask if amp omitted
-        if amp is None:
-            amp = mask
-        # amp_p = amp[:, 0:1]
-        # amp_s = amp[:, 1:2]
-        # amp_any = torch.maximum(amp_p, amp_s)
+		# raw unsigned Gaussians (all@P, all@S); fall back to mask if amp omitted
+		if amp is None:
+			amp = mask
+		# amp_p = amp[:, 0:1]
+		# amp_s = amp[:, 1:2]
+		# amp_any = torch.maximum(amp_p, amp_s)
 
-        # w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
-        # ev_p = scatter(pos_gate * amp_p * w, src, dim=0, dim_size=M, reduce="sum")
-        # ev_s = scatter(pos_gate * amp_s * w, src, dim=0, dim_size=M, reduce="sum")
-        # cov = scatter(w, src, dim=0, dim_size=M, reduce="sum")
-        # hole = scatter((1.0 - amp_any) * w, src, dim=0, dim_size=M, reduce="sum")
+		# w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
+		# ev_p = scatter(pos_gate * amp_p * w, src, dim=0, dim_size=M, reduce="sum")
+		# ev_s = scatter(pos_gate * amp_s * w, src, dim=0, dim_size=M, reduce="sum")
+		# cov = scatter(w, src, dim=0, dim_size=M, reduce="sum")
+		# hole = scatter((1.0 - amp_any) * w, src, dim=0, dim_size=M, reduce="sum")
 
-        # m_p = ev_p / cov.clamp(min=1e-5)
-        # m_s = ev_s / cov.clamp(min=1e-5)
-        # h = hole / cov.clamp(min=1e-5)
-        # log_cov = torch.log1p(cov.sum(dim=1, keepdim=True))
-        # support = torch.cat((m_p, m_s, h, log_cov), dim=-1)
+		# m_p = ev_p / cov.clamp(min=1e-5)
+		# m_s = ev_s / cov.clamp(min=1e-5)
+		# h = hole / cov.clamp(min=1e-5)
+		# log_cov = torch.log1p(cov.sum(dim=1, keepdim=True))
+		# support = torch.cat((m_p, m_s, h, log_cov), dim=-1)
 
-        # deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
-        # hard = (deg > 0).to(inpt.dtype)
-        # pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
+		# deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
+		# hard = (deg > 0).to(inpt.dtype)
+		# pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
 
-        # out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
-        # gate = self.support_gate(support)
-        # out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
-        # support = torch.cat((support, hard * gate), dim=1).detach()
+		# out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
+		# gate = self.support_gate(support)
+		# out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
+		# support = torch.cat((support, hard * gate), dim=1).detach()
 		
 		w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
-		a_p, a_s = amp[:, :1], amp[:, 1:2]          # or mask if no amp
+		a_p, a_s = amp[:, :1], amp[:, 1:2]		  # or mask if no amp
 		a_any = torch.maximum(a_p, a_s)
 		
 		ev_p = scatter(pos_gate * a_p * w, src, dim=0, dim_size=M, reduce="sum")
@@ -897,15 +897,15 @@ class BipartiteGraphOperator(MessagePassing):
 
 		qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim = -1)   # 2*K + 4
 			
-		# qual = torch.cat((q_p, q_s, log_cov), dim=-1)          # 2*K + 1
+		# qual = torch.cat((q_p, q_s, log_cov), dim=-1)		  # 2*K + 1
 		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5*K + 1
 					
-        deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
-        hard = (deg > 0).to(inpt.dtype)
-        pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
+		deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
+		hard = (deg > 0).to(inpt.dtype)
+		pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
 
 
-		# hit = (a_any > 0.05).float()                      # or 0.01
+		# hit = (a_any > 0.05).float()					  # or 0.01
 		# n_hit = scatter(hit, src, dim=0, dim_size=M, reduce="sum")   # (M, 1)
 		# # optional soft
 		# n_hit_soft = scatter(a_any, src, dim=0, dim_size=M, reduce="sum")
@@ -918,12 +918,12 @@ class BipartiteGraphOperator(MessagePassing):
 		out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
 		out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
 					
-        # out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
-        # gate = self.support_gate(support)
-        # out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
-        support = torch.cat((support, hard * gate), dim=1).detach()
+		# out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
+		# gate = self.support_gate(support)
+		# out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
+		support = torch.cat((support, hard * gate), dim=1).detach()
 
-        return out, support
+		return out, support
 
 
 
@@ -1348,7 +1348,7 @@ class SpaceTimeAttention(MessagePassing):
 		# out = out * gate
 
 		# src, tgt = edge_index[0], edge_index[1]
-		# sup_e = self.f_support(support)[src]           # [E, n_latent] or use support raw
+		# sup_e = self.f_support(support)[src]		   # [E, n_latent] or use support raw
 		# sup_q = scatter(sup_e, tgt, dim=0, dim_size=x_query.size(0), reduce="max")
 		# gate = 0.2 + 0.8 * torch.sigmoid(self.spatial_gate[0](sup_q).mean(-1, keepdim=True))
 		# # simpler: dedicated Linear(support_dim, 1) on pooled raw support
@@ -1499,14 +1499,14 @@ class DataAggregationAssociation(nn.Module):
 		self.act_init = nn.PReLU()
 
 		self.dynamic_proj = nn.Sequential(
-    		nn.Linear(total_in_dim, n_hidden),
-    		nn.PReLU()
+			nn.Linear(total_in_dim, n_hidden),
+			nn.PReLU()
 		)
 					 
 		self.spatial_proj = nn.Sequential(
-		    nn.Linear(extra_dim, n_hidden),
-		    nn.PReLU(),
-		    nn.Linear(n_hidden, n_hidden),
+			nn.Linear(extra_dim, n_hidden),
+			nn.PReLU(),
+			nn.Linear(n_hidden, n_hidden),
 			nn.PReLU()
 		)
 
@@ -2503,7 +2503,7 @@ class ArrivalEmbedding(nn.Module):
 		# sig_s = self.dilate_scale * self.kernel_sig_t # * sig_scale[1] # ) ** 2
 
 		sig_p, sig_s = self._sig_t()
-		sig_f_p = 1.25 * sig_p          # slight inflation vs feature
+		sig_f_p = 1.25 * sig_p		  # slight inflation vs feature
 		sig_f_s = 1.25 * sig_s
 		var_p = sig_f_p.pow(2)
 		var_s = sig_f_s.pow(2)
@@ -3348,10 +3348,10 @@ class SourceStationAttention(MessagePassing):
 
 		n_src, n_sta, n_arv = len(stime), trv_src.shape[1], len(tpick)
 		if not self.use_phase_types:
-		    phase_label = phase_label * 0
+			phase_label = phase_label * 0
 
 		sig_ref = sig_s if sig_s is not None else (
-		    1.5 * sig_p if sig_p is not None else tpick.new_tensor(self.kernel_sig_t)
+			1.5 * sig_p if sig_p is not None else tpick.new_tensor(self.kernel_sig_t)
 		)
 		sig_win = 3.0 * sig_ref.reshape(()).to(tpick.dtype)
 
@@ -3361,10 +3361,10 @@ class SourceStationAttention(MessagePassing):
 		t_pack = t + sta.to(t.dtype) * span
 
 		edges = radius(
-		    t_pack.view(-1, 1),
-		    t_pack.view(-1, 1),
-		    r=float(sig_win),
-		    max_num_neighbors=13,          # 12 + self; cap inside the window
+			t_pack.view(-1, 1),
+			t_pack.view(-1, 1),
+			r=float(sig_win),
+			max_num_neighbors=13,		  # 12 + self; cap inside the window
 		)[0]
 		edges = add_self_loops(remove_self_loops(edges)[0], num_nodes=n_arv)[0]
 		edges = edges.flip(0).contiguous()  # keep your old orientation if message assumes it
@@ -3376,8 +3376,8 @@ class SourceStationAttention(MessagePassing):
 		self_link = (edges[0] == edges[1]).reshape(-1, 1)
 
 		ikeep = torch.where(
-		    (mask_arv[src_index, torch.remainder(edges[0], n_arv).long()] > 0)
-		    | (edges[0] == edges[1])
+			(mask_arv[src_index, torch.remainder(edges[0], n_arv).long()] > 0)
+			| (edges[0] == edges[1])
 		)[0]
 		edges = edges[:, ikeep].contiguous()
 		src_index = src_index[ikeep]
@@ -3450,10 +3450,10 @@ class SourceStationAttention(MessagePassing):
 		inot_fake_src = ~ifake_edge_src ## Can only compute the travel time misfits for these (to avoid source overload)
 
 		if sig_p is None:
-		    sig_p = atime.new_tensor(self.kernel_sig_t)
+			sig_p = atime.new_tensor(self.kernel_sig_t)
 
 		if sig_s is None:
-		    sig_s = 1.5 * sig_p
+			sig_s = 1.5 * sig_p
 
 		ifake_edge = (edge_index[0] == num_queries)*(inot_fake_src == 1) ## Null node
 		inot_fake = ~ifake_edge
@@ -3564,8 +3564,8 @@ class SourceStationAttention(MessagePassing):
 
 				scores_src = (queries_src * contexts_src).sum(-1) / self.scale
 				scores_src[ifake_edge_src] = scores_src[ifake_edge_src] + self.self_dummy_src
-				scores_src = scores_src / temp.sqrt()          # first-branch temp
-				alpha_src = softmax(scores_src, index)         # same groups as alpha
+				scores_src = scores_src / temp.sqrt()		  # first-branch temp
+				alpha_src = softmax(scores_src, index)		 # same groups as alpha
 
 
 			attn_src = alpha_src.unsqueeze(-1)*values_src
@@ -4670,5 +4670,4 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
-
 
