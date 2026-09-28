@@ -3154,6 +3154,296 @@ class ArrivalEmbedding(nn.Module):
 		return self.norm2(results[0]), self.norm3(results[1])
 
 
+
+
+
+
+
+
+
+	# def _process_phase_branch(
+	# 	self,
+	# 	tpick,
+	# 	tlatent,			 # [N_prod, 2] -> columns 0: P, 1: S
+	# 	ipick,
+	# 	A_src_in_sta,
+	# 	x_context_cart,
+	# 	x_context_t,
+	# 	locs_use_cart,
+	# 	x,				   # [N_prod, D_x]
+	# 	phase_label,
+	# 	ctx,
+	# 	deg_srcs,
+	# 	cum_deg_srcs,
+	# ):
+	# 	device = x.device
+	# 	N_picks = len(tpick)
+	# 	N_prod = A_src_in_sta.size(1)
+
+	# 	if N_picks == 0 or N_prod == 0:
+	# 		out_dim = self.fc2[-1].out_features
+	# 		return (
+	# 			torch.zeros((N_picks, out_dim), device=device),
+	# 			torch.zeros((N_picks, out_dim), device=device),
+	# 		)
+
+	# 	# sig_scale = torch.exp(self.log_sig_t_scale)
+	# 	# sig_p = (self.scale_misfit * self.kernel_sig_t * sig_scale[0]) ** 2
+	# 	# sig_s = (self.scale_misfit * self.kernel_sig_t * sig_scale[1]) ** 2
+
+	# 	# 1. Fully Canonical Station Matching (Shared across both P and S)
+	# 	prod_sta = A_src_in_sta[0]
+	# 	prod_ctx = A_src_in_sta[1]
+
+	# 	prod_key = prod_sta.to(torch.int64) * (len(x_context_cart) + 1) + prod_ctx.to(torch.int64)
+	# 	sta_order = torch.argsort(prod_key, stable=True)
+	# 	sorted_sta = prod_sta[sta_order]
+
+	# 	p_left = torch.searchsorted(sorted_sta, ipick, side="left")
+	# 	p_right = torch.searchsorted(sorted_sta, ipick, side="right")
+
+	# 	has_match = p_right > p_left
+	# 	if not has_match.any():
+	# 		out_dim = self.fc2[-1].out_features
+	# 		return (
+	# 			torch.zeros((N_picks, out_dim), device=device),
+	# 			torch.zeros((N_picks, out_dim), device=device),
+	# 		)
+
+	# 	# valid_picks = torch.where(has_match)[0]
+	# 	# counts = p_right[valid_picks] - p_left[valid_picks]
+	# 	# starts = p_left[valid_picks]
+
+	# 	# MAX_MATCH = 2_000_000
+	# 	# if int(counts.sum()) > MAX_MATCH:
+	# 	# 	raise RuntimeError(f"ArrivalEmbedding match explosion: {int(counts.sum())}")
+	# 	# 	# or chunk valid_indices
+
+	# 	# offsets = torch.arange(counts.sum(), device=device) - torch.repeat_interleave(
+	# 	# 	torch.cumsum(counts, 0) - counts, counts
+	# 	# )
+	# 	# matched_prod_indices = sta_order[starts.repeat_interleave(counts) + offsets]
+	# 	# matched_pick_indices = valid_picks.repeat_interleave(counts)
+		
+	# 	MAX_ROWS = 400_000
+	# 	valid_picks = torch.where(has_match)[0]
+	# 	counts = p_right[valid_picks] - p_left[valid_picks]
+	# 	starts = p_left[valid_picks]
+	# 	sig_p, sig_s = self._sig_t()
+
+	# 	kept_prod, kept_pick = [], []
+	# 	if counts.numel() > 0:
+	# 		cs = counts.cumsum(0)
+	# 		i, n = 0, counts.numel()
+	# 		while i < n:
+	# 			base = cs[i] - counts[i]
+	# 			j = int(torch.searchsorted(cs, base + MAX_ROWS, right=True).item())
+	# 			j = min(max(j, i + 1), n)
+	# 			sl = slice(i, j)
+	# 			c, s0, vp = counts[sl], starts[sl], valid_picks[sl]
+	# 			off = torch.arange(int(c.sum().item()), device=device) - torch.repeat_interleave(
+	# 				c.cumsum(0) - c, c
+	# 			)
+	# 			mprod = sta_order[s0.repeat_interleave(c) + off]
+	# 			mpick = vp.repeat_interleave(c)
+	# 			dt = (tpick[mpick].unsqueeze(1) - tlatent[mprod, :2]).abs().min(1).values
+	# 			keep = dt < (3.0 * sig_s)
+	# 			kept_prod.append(mprod[keep])
+	# 			kept_pick.append(mpick[keep])
+	# 			i = j
+
+	# 	matched_prod_indices = torch.cat(kept_prod) if kept_prod else sta_order.new_empty(0)
+	# 	matched_pick_indices = torch.cat(kept_pick) if kept_pick else valid_picks.new_empty(0)
+
+	# 	if matched_pick_indices.numel() == 0:
+	# 		out_dim = self.fc2[-1].out_features
+	# 		z = torch.zeros((N_picks, out_dim), device=device)
+	# 		return z, z
+		
+	# 	# 2. Canonical Multi-Key Tie Breaking (Run per phase_idx in parallel [2, N_matched])
+	# 	# Compute dt for both P (idx 0) and S (idx 1) simultaneously -> Shape: [2, N_matched]
+	# 	dt_both = torch.abs(
+	# 		tpick[matched_pick_indices].unsqueeze(0) - tlatent[matched_prod_indices, :2].T
+	# 	)
+
+	# 	# We do top-match selection per phase
+	# 	ind_grab_sorted_list = []
+	# 	uniq_picks_sorted_list = []
+
+	# 	for phase_idx in range(2):
+	# 		dt = dt_both[phase_idx]
+	# 		dt_order = torch.argsort(dt, stable=True)
+	# 		dt_rank = torch.zeros_like(dt_order)
+	# 		dt_rank[dt_order] = torch.arange(len(dt), device=device)
+
+	# 		key = (
+	# 			matched_pick_indices.to(torch.int64) * (len(dt) * N_prod)
+	# 			+ dt_rank.to(torch.int64) * N_prod
+	# 			+ matched_prod_indices.to(torch.int64)
+	# 		)
+	# 		order = torch.argsort(key, stable=True)
+	# 		m_pick = matched_pick_indices[order]
+	# 		m_prod = matched_prod_indices[order]
+
+	# 		mask_first = torch.cat([
+	# 			torch.tensor([True], device=device),
+	# 			m_pick[1:] != m_pick[:-1],
+	# 		])
+	# 		ind_grab = m_prod[mask_first]
+	# 		uniq_picks = m_pick[mask_first]
+
+	# 		uniq_picks_sorted, sort_order = torch.sort(uniq_picks, stable=True)
+	# 		ind_grab_sorted = ind_grab[sort_order]
+
+	# 		ind_grab_sorted_list.append(ind_grab_sorted)
+	# 		uniq_picks_sorted_list.append(uniq_picks_sorted)
+
+	# 	# 3. KNN Expansion over context source per pick
+	# 	x_ctx_combined = torch.cat(
+	# 		(x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1
+	# 	)
+
+	# 	# Stack both P and S context nearest neighbors -> Shape [2 * N_uniq]
+	# 	ctx_nn_p = A_src_in_sta[1, ind_grab_sorted_list[0]]
+	# 	ctx_nn_s = A_src_in_sta[1, ind_grab_sorted_list[1]]
+	# 	ctx_nn_both = torch.cat([ctx_nn_p, ctx_nn_s], dim=0)
+
+	# 	if ctx_nn_both.numel() == 0:
+	# 		out_dim = self.fc2[-1].out_features
+	# 		z = torch.zeros((N_picks, out_dim), device=device)
+	# 		return z, z
+		
+	# 	edge_idx = knn(
+	# 		x_ctx_combined,
+	# 		x_ctx_combined[ctx_nn_both],
+	# 		k=self.k_spc_edges,
+	# 	)
+
+	# 	nbr_sources = edge_idx[1]
+		
+	# 	# Map edge sources back to P or S pick index
+	# 	uniq_picks_both = torch.cat([uniq_picks_sorted_list[0], uniq_picks_sorted_list[1]], dim=0)
+	# 	phase_owner_both = torch.cat([
+	# 		torch.zeros(len(uniq_picks_sorted_list[0]), dtype=torch.long, device=device),
+	# 		torch.ones(len(uniq_picks_sorted_list[1]), dtype=torch.long, device=device),
+	# 	], dim=0)
+
+	# 	pick_of_nbr = uniq_picks_both[edge_idx[0]]
+	# 	phase_of_nbr = phase_owner_both[edge_idx[0]]
+
+	# 	deg_nbr = deg_srcs[nbr_sources]
+	# 	start = cum_deg_srcs[nbr_sources]
+
+	# 	inc_inds = torch.arange(deg_nbr.sum(), device=device) - torch.repeat_interleave(
+	# 		torch.cumsum(deg_nbr, 0) - deg_nbr, deg_nbr
+	# 	)
+	# 	nodes_all = start.repeat_interleave(deg_nbr) + inc_inds
+	# 	pick_all = pick_of_nbr.repeat_interleave(deg_nbr)
+	# 	phase_all = phase_of_nbr.repeat_interleave(deg_nbr)
+
+	# 	station_ok = A_src_in_sta[0, nodes_all] == ipick[pick_all]
+	# 	if not station_ok.any():
+	# 		out_dim = self.fc2[-1].out_features
+	# 		return (
+	# 			torch.zeros((N_picks, out_dim), device=device),
+	# 			torch.zeros((N_picks, out_dim), device=device),
+	# 		)
+
+	# 	nodes = nodes_all[station_ok]
+	# 	inds = pick_all[station_ok]
+	# 	phases = phase_all[station_ok]
+
+	# 	sig_p, sig_s = self._sig_t()
+	# 	dt_n = (tpick[inds] - tlatent[nodes, phases]).abs()
+	# 	keep_n = dt_n < (3.0 * sig_s)
+	# 	nodes, inds, phases = nodes[keep_n], inds[keep_n], phases[keep_n]
+	# 	if nodes.numel() == 0:
+	# 		out_dim = self.fc2[-1].out_features
+	# 		z = torch.zeros((N_picks, out_dim), device=device)
+	# 		return z, z
+		
+	# 	# 4. Process P (phase=0) and S (phase=1) Edges
+	# 	results = []
+	# 	fc_layers = [self.fc2, self.fc3]
+	# 	film_layers = [self.film2, self.film3]
+	# 	f_gammas = [self.f_gamma_t2, self.f_gamma_t3]
+	# 	log_bases = [self.log_gamma_base_t2, self.log_gamma_base_t3]
+
+	# 	# sig_scale = torch.exp(self.log_sig_t_scale)
+	# 	# sig_p = (self.scale_misfit * self.kernel_sig_t * sig_scale[0]).clamp(min = 1e-3) # ) ** 2
+	# 	# sig_s = (self.scale_misfit * self.kernel_sig_t * sig_scale[1] * self.scale_s_window).clamp(min = 1e-3) # ) ** 2
+	# 	# sig_phases = [sig_p, sig_s]
+	# 	# sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1).clamp(min = 1e-3)
+
+	# 	sig_p, sig_s = self._sig_t()
+	# 	sig_phases = [sig_p, sig_s]
+
+	# 	for p_idx in range(2):
+	# 		p_mask = phases == p_idx
+	# 		if not p_mask.any():
+	# 			out_dim = fc_layers[p_idx][-1].out_features
+	# 			results.append(torch.zeros((N_picks, out_dim), device=device))
+	# 			continue
+
+	# 		p_nodes = nodes[p_mask]
+	# 		p_inds = inds[p_mask]
+
+	# 		# Canonical Sort per phase branch
+	# 		canon_order = torch.argsort(
+	# 			ipick[p_inds].to(torch.int64) * (N_picks * N_prod)
+	# 			+ p_inds.to(torch.int64) * N_prod
+	# 			+ p_nodes.to(torch.int64),
+	# 			stable=True,
+	# 		)
+	# 		p_nodes = p_nodes[canon_order]
+	# 		p_inds = p_inds[canon_order]
+
+	# 		# Feature Assembly
+	# 		diff_t = tpick[p_inds].reshape(-1, 1) - tlatent[p_nodes, p_idx].reshape(-1, 1)
+	# 		misfit_rel = torch.cat(
+	# 			[
+	# 				torch.exp(-1.0 * torch.abs(diff_t) / sig_phases[p_idx]),
+	# 				torch.tanh(diff_t / sig_phases[p_idx])
+	# 			],
+	# 			dim=1,
+	# 		)
+
+	# 		# torch.exp(-1.0 * torch.abs(diff_t) / (self.scale_misfit * self.kernel_sig_t)),
+
+	# 		off_sta = (locs_use_cart[ipick[p_inds]] - x_context_cart[A_src_in_sta[1, p_nodes]]) / (10.0 * self.scale_rel)
+	# 		norm_s = torch.linalg.vector_norm(off_sta, dim=1, keepdim=True).clamp(min=1e-6)
+	# 		gammas = self._get_gammas(f_gammas[p_idx], log_bases[p_idx], ctx)
+	# 		feat = torch.cat((off_sta / norm_s, torch.exp(-1.0 * norm_s * gammas[:, :3])), dim=1)
+
+	# 		inpt = torch.cat(
+	# 			(
+	# 				x[p_nodes],
+	# 				misfit_rel,
+	# 				feat,
+	# 				self.phase_embed(phase_label[p_inds].long()),
+	# 			),
+	# 			dim=1,
+	# 		)
+
+	# 		agg = scatter(
+	# 			film_layers[p_idx](fc_layers[p_idx](inpt), ctx.expand(len(inpt), -1)),
+	# 			p_inds,
+	# 			dim=0,
+	# 			dim_size=N_picks,
+	# 			reduce="mean",
+	# 		)
+	# 		results.append(agg)
+
+	# 	return self.norm2(results[0]), self.norm3(results[1])
+
+
+
+
+
+
+
+
+
 	def forward(
 		self,
 		x,
