@@ -5777,6 +5777,8 @@ for batch_idx, inputs in enumerate(loader):
 		# mz.Bipartite_ReadIn.r_max = float(spatial_quantiles[2] * 4.0)
 		mz.Bipartite_ReadIn.r_min.fill_(float(spatial_quantiles[0] * 0.5))
 		mz.Bipartite_ReadIn.r_max.fill_(float(spatial_quantiles[2] * 4.0))
+		mz.BipartiteGraphReadOutOperator.r_min.fill_(float(spatial_quantiles[0] * 0.5))
+		mz.BipartiteGraphReadOutOperator.r_max.fill_(float(spatial_quantiles[2] * 4.0))
 		init_spatial_norms, write_dist_scales = False, True
 		print("Bipartite radii scales q15/40/85", spatial_quantiles.tolist(), "clamp", mz.Bipartite_ReadIn.r_min, mz.Bipartite_ReadIn.r_max)
 	
