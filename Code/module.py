@@ -3097,7 +3097,7 @@ class ArrivalEmbedding(nn.Module):
 		self.min_thresh = min_thresh
 		self.scale_time = scale_time
 		self.scale_rel = scale_rel
-		self.k_spc_edges = max(int(k_spc_edges // 3), 5)
+		self.k_spc_edges = max(int((2 * k_spc_edges) // 3), 5) # k_spc_edges
 		self.scale_s_window = 1.5
 
 		self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
