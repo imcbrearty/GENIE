@@ -3317,10 +3317,15 @@ class ArrivalEmbedding(nn.Module):
 				i_pick_match = i_pick_match[match_mask]
 			
 				sig_p, sig_s = self._sig_t()
+				# dt_q = (
+				#     tpick[iarv[i_pick_match]]
+				#     - tlatent[nodes_prod[matched_prod_indices], :2]
+				# ).abs().min(1).values
 				dt_q = (
-				    tpick[iarv[i_pick_match]]
+				    tpick[iarv[i_pick_match]].unsqueeze(1)
 				    - tlatent[nodes_prod[matched_prod_indices], :2]
-				).abs().min(1).values
+				).abs().min(dim=1).values
+				
 				keep = dt_q < (3.0 * sig_s)
 				matched_prod_indices = matched_prod_indices[keep]
 				i_pick_match = i_pick_match[keep]
