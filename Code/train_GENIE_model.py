@@ -5005,6 +5005,13 @@ len_loader = len(loader) ## Why not loop over data until n_epochs
 out_save = None
 
 
+VerificationSuite.test_run("cpu"); print('\n')
+if torch.cuda.is_available():
+	VerificationSuite.test_run("cuda"); print('\n')
+
+VerificationSuite1.test_run("cpu"); print('\n')
+    if torch.cuda.is_available():
+        VerificationSuite1.test_run("cuda"); print('\n')
 
 
 # for i in range(n_restart_step, n_epochs):
@@ -5781,7 +5788,7 @@ for batch_idx, inputs in enumerate(loader):
 		mz.BipartiteGraphReadOutOperator.r_min.fill_(float(spatial_quantiles[0] * 0.5))
 		mz.BipartiteGraphReadOutOperator.r_max.fill_(float(spatial_quantiles[2] * 4.0))
 		init_spatial_norms, write_dist_scales = False, True
-		print("Bipartite radii scales q15/40/85", spatial_quantiles.tolist(), "clamp", mz.Bipartite_ReadIn.r_min, mz.Bipartite_ReadIn.r_max)
+		print("Bipartite radii scales q15/40/85", spatial_quantiles.tolist(), "clamp", mz.Bipartite_ReadIn.r_min, mz.Bipartite_ReadIn.r_max, "\n")
 	
 	if (loss_charbonnier_source.initialize_mass == False) and (loss_charbonnier_assoc.initialize_mass == False) and (write_dist_scales == False): ## Skip update on first write of spatial scales
 		optimizer.step()
