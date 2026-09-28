@@ -2812,7 +2812,7 @@ class ArrivalEmbedding(nn.Module):
 		kernel_sig_t=kernel_sig_t,
 		use_phase_types=use_phase_types,
 		scale_time=scale_time,
-		min_thresh=0.01,
+		min_thresh=0.02,
 		trv=None,
 		ftrns2=None,
 		debug_asserts=True,
