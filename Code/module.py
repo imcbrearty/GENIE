@@ -349,12 +349,12 @@ class DataAggregationExpanded(nn.Module):
 			embed_dim=embed_dim, use_offsets=use_offsets, use_expanded = False
 		)
 
-	def forward(self, tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None):
+	def forward(self, tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta = None, pos_rel_src = None, sta_norm_sp = None, src_norm_sp = None):
 		# 1. Run Preconditioner if Enabled
 
 		# Station Edges (6D: 3D Direction + 3 Spatial RBFs)
-		sta_norm_sp = torch.linalg.vector_norm(pos_rel_sta[:, 0:3], dim = 1, keepdim = True)
-		src_norm_sp = torch.linalg.vector_norm(pos_rel_src[:, 0:3], dim = 1, keepdim = True)
+		# sta_norm_sp = torch.linalg.vector_norm(pos_rel_sta[:, 0:3], dim = 1, keepdim = True)
+		# src_norm_sp = torch.linalg.vector_norm(pos_rel_src[:, 0:3], dim = 1, keepdim = True)
 		
 		g_emb = None
 		if self.use_embedding:
@@ -1855,8 +1855,8 @@ class DataAggregationAssociation(nn.Module):
 		)
 
 	## Add support, geometric embed (detached), absolute offset
-	def forward(self, s, x_latent, mask_out_1, mask, A_in_sta, A_in_src, embed_context, g_embed = None, 
-				relative_feat = None, support = None, pos_rel_sta = None, pos_rel_src = None):
+	def forward(self, s, x_latent, mask_out_1, mask, A_in_sta, A_in_src, embed_context, g_embed = None, relative_feat = None, 
+				support = None, pos_rel_sta = None, pos_rel_src = None, sta_norm_sp = None, src_norm_sp = None):
 		# 1. Combine Masks and Latents
 		combined_mask = torch.cat((mask, mask_out_1), dim=-1)
 
@@ -1868,8 +1868,8 @@ class DataAggregationAssociation(nn.Module):
 		x = self.act_init(self.film_init(self.init_trns(torch.cat((x, embed_spatial), dim = 1)), embed_context))
 
 		# 3. Association Graph Convolutions with Per-Layer Gammas
-		x = self.layer1(x, combined_mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
-		x = self.layer2(x, combined_mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+		x = self.layer1(x, combined_mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src, sta_norm_sp = sta_norm_sp)
+		x = self.layer2(x, combined_mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src, src_norm_sp = src_norm_sp)
 
 		return x
 
@@ -5341,6 +5341,9 @@ class GCN_Detection_Network_extended(nn.Module):
 				1000.0 * self.scale_time * (x_temp_cuda_t[A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_t[A_src_in_sta[1][A_in_src_slice[0]]]).view(-1, 1)
 			), dim=1) / self.scale_rel
 
+			sta_norm_sp = torch.linalg.vector_norm(pos_rel_sta[:,0:3], dim = 1, keepdim = True)
+			src_norm_sp = torch.linalg.vector_norm(pos_rel_src[:,0:3], dim = 1, keepdim = True)
+		
 		# print('Rel')
 		# print(pos_rel_sta.amin(0))
 		# print(pos_rel_sta.amax(0))
@@ -5373,7 +5376,9 @@ class GCN_Detection_Network_extended(nn.Module):
 			A_in_src=A_in_src, 
 			embed_context=embed_context, 
 			pos_rel_sta=pos_rel_sta,  # Raw 3D + dt coordinates
-			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
+			pos_rel_src=pos_rel_src,   # Raw 3D + dt coordinates
+			sta_norm_sp = sta_norm_sp,
+			src_norm_sp = src_norm_sp
 		)
 
 		x, support = self.Bipartite_ReadIn(x_latent, A_src_in_edges, Mask, embed_context, amp = amp_inpt, num_target_nodes = n_temp)
@@ -5438,7 +5443,9 @@ class GCN_Detection_Network_extended(nn.Module):
 			relative_feat = rel_pos_feat,
 			support = support_prod,
 			pos_rel_sta=pos_rel_sta,  # Direct raw offset reuse
-			pos_rel_src=pos_rel_src   # Direct raw offset reuse
+			pos_rel_src=pos_rel_src,   # Direct raw offset reuse
+			sta_norm_sp = sta_norm_sp,
+			src_norm_sp = src_norm_sp
 		)
 
 		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out = trv_out_q)
@@ -5587,6 +5594,10 @@ class GCN_Detection_Network_extended(nn.Module):
 			), dim=1) / self.scale_rel
 
 
+			sta_norm_sp = torch.linalg.vector_norm(pos_rel_sta[:,0:3], dim = 1, keepdim = True)
+			src_norm_sp = torch.linalg.vector_norm(pos_rel_src[:,0:3], dim = 1, keepdim = True)
+		
+
 		# 2. Append 7D features ONLY if the Geometric Preconditioner (use_embedding) is active
 		if self.use_embedding:
 			pos_rel_sp = self.A_src_in_edges.x[:, 0:3]
@@ -5613,7 +5624,9 @@ class GCN_Detection_Network_extended(nn.Module):
 			A_in_src=self.A_in_src, 
 			embed_context=self.embed_context, 
 			pos_rel_sta=pos_rel_sta,  # Raw 3D + dt coordinates
-			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
+			pos_rel_src=pos_rel_src,   # Raw 3D + dt coordinates
+			sta_norm_sp = sta_norm_sp,
+			src_norm_sp = src_norm_sp
 		)
 
 		x, support = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, amp = amp_inpt, num_target_nodes = n_temp)
@@ -5669,7 +5682,9 @@ class GCN_Detection_Network_extended(nn.Module):
 			relative_feat = rel_pos_feat,
 			support = support_prod,
 			pos_rel_sta=pos_rel_sta,  # Direct raw offset reuse
-			pos_rel_src=pos_rel_src   # Direct raw offset reuse
+			pos_rel_src=pos_rel_src,   # Direct raw offset reuse
+			sta_norm_sp = sta_norm_sp,
+			src_norm_sp = src_norm_sp
 		)
 
 		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, self.tlatent, self.embed_context, trv_out = trv_out_q)
@@ -5716,6 +5731,10 @@ class GCN_Detection_Network_extended(nn.Module):
 				1000.0 * self.scale_time * (x_temp_cuda_t[self.A_src_in_sta[1][A_in_src_slice[1]]] - x_temp_cuda_t[self.A_src_in_sta[1][A_in_src_slice[0]]]).view(-1, 1)
 			), dim=1) / self.scale_rel
 
+			sta_norm_sp = torch.linalg.vector_norm(pos_rel_sta[:,0:3], dim = 1, keepdim = True)
+			src_norm_sp = torch.linalg.vector_norm(pos_rel_src[:,0:3], dim = 1, keepdim = True)
+
+		
 		# 2. Append 7D features ONLY if the Geometric Preconditioner (use_embedding) is active
 		if self.use_embedding:
 			pos_rel_sp = self.A_src_in_edges.x[:, 0:3]
@@ -5742,7 +5761,11 @@ class GCN_Detection_Network_extended(nn.Module):
 			A_in_src=self.A_in_src, 
 			embed_context=self.embed_context, 
 			pos_rel_sta=pos_rel_sta,  # Raw 3D + dt coordinates
-			pos_rel_src=pos_rel_src   # Raw 3D + dt coordinates
+			pos_rel_src=pos_rel_src,   # Raw 3D + dt coordinates
+			sta_norm_sp = sta_norm_sp,
+			src_norm_sp = src_norm_sp,
+			sta_norm_sp = sta_norm_sp,
+			src_norm_sp = src_norm_sp
 		)
 
 		x, support = self.Bipartite_ReadIn(x_latent, self.A_src_in_edges, Mask, self.embed_context, amp = amp_inpt, num_target_nodes = n_temp)
