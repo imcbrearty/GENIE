@@ -5763,8 +5763,6 @@ class GCN_Detection_Network_extended(nn.Module):
 			pos_rel_sta=pos_rel_sta,  # Raw 3D + dt coordinates
 			pos_rel_src=pos_rel_src,   # Raw 3D + dt coordinates
 			sta_norm_sp = sta_norm_sp,
-			src_norm_sp = src_norm_sp,
-			sta_norm_sp = sta_norm_sp,
 			src_norm_sp = src_norm_sp
 		)
 
