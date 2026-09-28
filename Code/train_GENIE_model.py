@@ -5720,7 +5720,7 @@ for batch_idx, inputs in enumerate(loader):
 		if init_spatial_norms == True:
 			diff_sp = input_tensors_l[i0][4].x[:, :3]
 	        norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim = False)
-			dist_norms.append(norm_pos)
+			dist_norms.append(norm_pos.cpu().detach())
 		
 		# if inc != (n_batch - 1):
 		# 	loss.backward(retain_graph = False)
