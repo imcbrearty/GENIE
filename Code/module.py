@@ -3204,10 +3204,10 @@ class ArrivalEmbedding(nn.Module):
 		N_prod = A_src_in_sta.size(1)
 
 		if N_p == 0:
-        	return (
-            	x.new_zeros(N_q, 0, self.null_out.size(-1)),
-            	tpick.new_zeros(N_q, 0),
-        	)
+			return (
+				x.new_zeros(N_q, 0, self.null_out.size(-1)),
+				tpick.new_zeros(N_q, 0),
+			)
 		
 		if trv_out is None:
 			trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart))
