@@ -3203,6 +3203,12 @@ class ArrivalEmbedding(nn.Module):
 		N_p = len(tpick)
 		N_prod = A_src_in_sta.size(1)
 
+		if N_p == 0:
+        	return (
+            	x.new_zeros(N_q, 0, self.null_out.size(-1)),
+            	tpick.new_zeros(N_q, 0),
+        	)
+		
 		if trv_out is None:
 			trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart))
 		trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
@@ -3440,8 +3446,9 @@ class ArrivalEmbedding(nn.Module):
 		# 2. Scatter results into prefilled buffer initialized with trainable null_out
 		out_flat = self.null_out.expand(N_q * N_p, -1).clone()
 		out_flat[flat_active] = out_active
-		out = out_flat.view(N_q, N_p, -1)
-
+		# out = out_flat.view(N_q, N_p, -1)
+		out = out_flat.view(N_q, N_p, self.null_out.size(-1))  # not -1
+		
 		# print('Time [3] : %0.4f' % (time.time() - start_time))
 
 		return out, mask_misfit_time
