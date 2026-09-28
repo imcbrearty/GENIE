@@ -57,7 +57,7 @@ use_top_k = config.get('use_top_k', True)
 
 
 # scale_t = train_config['kernel_sig_t']*3.0
-eps = train_config['kernel_sig_t']*3.0
+# eps = train_config['kernel_sig_t']*3.0
 kernel_sig_t = train_config['kernel_sig_t']
 
 z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
