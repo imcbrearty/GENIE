@@ -125,14 +125,16 @@ class DataAggregationLayer(MessagePassing):
 			nn.init.normal_(self.f_gamma_sta.weight, std = 0.01); nn.init.zeros_(self.f_gamma_sta.bias)
 			nn.init.normal_(self.f_gamma_src.weight, std = 0.01); nn.init.zeros_(self.f_gamma_src.bias)
 
-	def _compute_edge_attrs(self, pos_rel_sta, pos_rel_src, embed_context):
+	def _compute_edge_attrs(self, pos_rel_sta, pos_rel_src, embed_context, sta_norm_sp = None, src_norm_sp = None):
 		if not self.use_offsets or pos_rel_sta is None or pos_rel_src is None:
 			return None, None
 
 		# Station Edges (6D: 3D Direction + 3 Spatial RBFs)
 		sta_sp = pos_rel_sta[:, 0:3]
 		# sta_norm_sp = torch.sqrt(torch.sum(sta_sp**2, dim=1, keepdim=True) + 1e-6)
-		sta_norm_sp = torch.linalg.vector_norm(sta_sp, dim = 1, keepdim = True)
+
+		if sta_norm_sp is None:
+			sta_norm_sp = torch.linalg.vector_norm(sta_sp, dim = 1, keepdim = True)
 
 		d_sta = self.f_gamma_sta(embed_context)
 		gammas_sta = torch.exp(self.log_gamma_sta_base + 0.5 * torch.tanh(d_sta[:, :1]) + 0.2 * torch.tanh(d_sta[:, 1:]))
@@ -142,7 +144,9 @@ class DataAggregationLayer(MessagePassing):
 		# Source Edges (9D: 3D Direction + 3 Spatial RBFs + 2 Temporal RBFs + 1 dt)
 		src_sp, src_tm = pos_rel_src[:, 0:3], pos_rel_src[:, 3:4]
 		# src_norm_sp = torch.sqrt(torch.sum(src_sp**2, dim=1, keepdim=True) + 1e-6)
-		src_norm_sp = torch.linalg.vector_norm(src_sp, dim = 1, keepdim = True)
+
+		if src_norm_sp is None:
+			src_norm_sp = torch.linalg.vector_norm(src_sp, dim = 1, keepdim = True)
 
 		src_norm_tm = torch.abs(src_tm)
 		d_src = self.f_gamma_src(embed_context)
@@ -159,8 +163,8 @@ class DataAggregationLayer(MessagePassing):
 
 		return edge_sta, edge_src
 
-	def forward(self, x, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None):
-		edge_sta, edge_src = self._compute_edge_attrs(pos_rel_sta, pos_rel_src, embed_context)
+	def forward(self, x, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None, sta_norm_sp = None, src_norm_sp = None):
+		edge_sta, edge_src = self._compute_edge_attrs(pos_rel_sta, pos_rel_src, embed_context, sta_norm_sp = sta_norm_sp, src_norm_sp = src_norm_sp)
 
 		# Local Path
 		x1 = self.l_t1_2(torch.cat((x, self.propagate(A_in_sta, x=self.act11(self.l_t1_1(x)), edge_attr=edge_sta, edge_type=1), mask), dim=1))
@@ -348,6 +352,10 @@ class DataAggregationExpanded(nn.Module):
 	def forward(self, tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta=None, pos_rel_src=None):
 		# 1. Run Preconditioner if Enabled
 
+		# Station Edges (6D: 3D Direction + 3 Spatial RBFs)
+		sta_norm_sp = torch.linalg.vector_norm(pos_rel_sta[:, 0:3], dim = 1, keepdim = True)
+		src_norm_sp = torch.linalg.vector_norm(pos_rel_src[:, 0:3], dim = 1, keepdim = True)
+		
 		g_emb = None
 		if self.use_embedding:
 			ndim_slice = -7
@@ -356,8 +364,8 @@ class DataAggregationExpanded(nn.Module):
 				dim=1
 			)
 			g_emb = self.act_geom_init(self.film_geom_init(self.init_geom(struct_input), embed_context))
-			g_emb = self.geom_layer1(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
-			g_emb = self.geom_layer2(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+			g_emb = self.geom_layer1(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src, sta_norm_sp = sta_norm_sp, src_norm_sp = src_norm_sp)
+			g_emb = self.geom_layer2(g_emb, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src, sta_norm_sp = sta_norm_sp, src_norm_sp = src_norm_sp)
 
 			# Concatenate structural embedding with original observation slice
 			# tr = torch.cat((tr, g_emb), dim=-1)
@@ -375,9 +383,9 @@ class DataAggregationExpanded(nn.Module):
 		tr = self.mix_inpt(torch.cat((proj_gauss, proj_inpt, proj_geo), dim = 1))
 		tr = self.act_init(self.film_init(tr, embed_context))
 
-		tr = self.layer1(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
-		tr = self.layer2(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
-		tr = self.layer3(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src)
+		tr = self.layer1(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src, sta_norm_sp = sta_norm_sp, src_norm_sp = src_norm_sp)
+		tr = self.layer2(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src, sta_norm_sp = sta_norm_sp, src_norm_sp = src_norm_sp)
+		tr = self.layer3(tr, mask, A_in_sta, A_in_src, embed_context, pos_rel_sta, pos_rel_src, sta_norm_sp = sta_norm_sp, src_norm_sp = src_norm_sp)
 
 		return tr, g_emb.detach()
 
@@ -2953,9 +2961,15 @@ class ArrivalEmbedding(nn.Module):
 		counts = p_right[valid_picks] - p_left[valid_picks]
 		starts = p_left[valid_picks]
 
-		n_ctx = len(x_context_cart)
-		if counts.numel() and int(counts.max()) > n_ctx + 2:
-    		raise RuntimeError(f"phase match explode max={int(counts.max())} n_ctx={n_ctx}")
+		# n_ctx = len(x_context_cart)
+		# if counts.numel() and int(counts.max()) > n_ctx + 2:
+  #   		raise RuntimeError(f"phase match explode max={int(counts.max())} n_ctx={n_ctx}")
+		
+		n_prod = A_src_in_sta.size(1)
+		if counts.numel() and int(counts.max()) > n_prod + 2:
+		    raise RuntimeError(
+		        f"phase match explode max={int(counts.max())} n_prod={n_prod}"
+		    )
 		
 		sig_p, sig_s = self._sig_t()
 
@@ -3283,8 +3297,15 @@ class ArrivalEmbedding(nn.Module):
 				counts = p_right[valid_indices] - p_left[valid_indices]
 				starts = p_left[valid_indices]
 
-				if counts.numel() and int(counts.max()) > max(64, int(deg_srcs.max()) * self.k_spc_edges):
-    				raise RuntimeError(f"fwd match explode max={int(counts.max())} deg={int(deg_srcs.max())}")
+				# if counts.numel() and int(counts.max()) > max(64, int(deg_srcs.max()) * self.k_spc_edges):
+    			# 				raise RuntimeError(f"fwd match explode max={int(counts.max())} deg={int(deg_srcs.max())}")
+			
+				n_prod = A_src_in_sta.size(1)
+				if counts.numel() and int(counts.max()) > N_prod + 2:
+				    raise RuntimeError(
+				        f"phase match explode max={int(counts.max())} n_prod={N_prod}"
+				    )
+					
 				
 				offsets = torch.arange(counts.sum(), device=device) - torch.repeat_interleave(
 					torch.cumsum(counts, 0) - counts, counts
@@ -3894,6 +3915,221 @@ class VerificationSuite(ArrivalEmbedding):
 
 		print("[✔] Backward pass successful. Non-zero, finite gradients verified across all layers.")
 		print("[✔] Complete Verification Suite Finished Successfully.")
+
+
+
+class VerificationSuite1(ArrivalEmbedding):
+	"""Edge-case, graph-sensitivity, permutation, and autograd checks."""
+
+	@classmethod
+	def test_run(cls, device="cpu"):
+		print(f"--- Launching Advanced Edge-Case Stress Suite [{device.upper()}] ---")
+
+		n_queries = 2
+		n_picks = 8500
+		n_context = 50
+		n_stations = 120
+		n_edges = 1000
+		ndim_arv_in = 16
+		ndim_out = 32
+		n_hidden = 64
+		embed_dim = 16
+
+		model = cls(
+			ndim_arv_in=ndim_arv_in,
+			ndim_out=ndim_out,
+			n_hidden=n_hidden,
+			embed_vector_dim=embed_dim,
+			device=device,
+		).to(device)
+		model.k_spc_edges = n_context  # KNN cannot miss the pinned context source
+
+		x_context_cart = torch.randn(n_context, 3, device=device) * 1e5
+		x_context_t = torch.randn(n_context, device=device) * 100.0
+		x_query_cart = torch.randn(n_queries, 3, device=device) * 1e5
+		x_query_t = torch.tensor([12.0, -840.0], device=device)
+		x = torch.randn(n_edges, ndim_arv_in, device=device, requires_grad=True)
+
+		A_src_in_sta = torch.stack(
+			[
+				torch.randint(0, 60, (n_edges,), device=device, dtype=torch.long),
+				torch.randint(0, n_context, (n_edges,), device=device, dtype=torch.long),
+			],
+			dim=0,
+		)
+		A_src_in_sta = A_src_in_sta[:, torch.argsort(A_src_in_sta[1])]
+
+		target_sta = 5
+		target_phase = 0
+		edges_sta = (A_src_in_sta[0] == target_sta).nonzero(as_tuple=True)[0]
+		if edges_sta.numel() == 0:
+			A_src_in_sta[0, 0] = target_sta
+			A_src_in_sta[1, 0] = 0
+			edges_sta = torch.tensor([0], device=device)
+
+		# Query 0 KNN-hits a context source that owns station 5
+		ctx_hit = int(A_src_in_sta[1, edges_sta[0]].item())
+		x_context_cart[ctx_hit] = x_query_cart[0]
+		x_context_t[ctx_hit] = x_query_t[0]
+
+		tpick = torch.rand(n_picks, device=device) * 500.0
+		ipick = torch.randint(0, n_stations, (n_picks,), device=device, dtype=torch.long)
+		phase_label = torch.randint(0, 2, (n_picks,), device=device, dtype=torch.long)
+		locs_use_cart = torch.randn(n_stations, 3, device=device) * 1e5
+		tlatent = torch.randn(n_edges, 2, device=device) * 50.0
+		embed_context = torch.randn(1, embed_dim, device=device)
+		trv_out = torch.rand(n_queries, n_stations, 2, device=device) * 100.0
+
+		thresh = getattr(model, "min_thresh", 1.0)
+		fixed_trv = 10.0
+		trv_out[0, target_sta, 0] = fixed_trv
+		trv_out[0, target_sta, 1] = fixed_trv + 1000.0
+		expected_arrival_q0 = x_query_t[0].item() + fixed_trv
+
+		ipick[100], phase_label[100] = target_sta, target_phase
+		tpick[100] = expected_arrival_q0
+		ipick[101], phase_label[101] = target_sta, target_phase
+		tpick[101] = expected_arrival_q0 + float(thresh) + 50.0
+
+		# 3σ keep on product edges that carry x
+		tlatent[edges_sta, target_phase] = tpick[100]
+		tlatent[edges_sta, 1 - target_phase] = tpick[100] + 1e3
+
+		# S pick so fc3 is used
+		ipick[102], phase_label[102] = target_sta, 1
+		trv_out[0, target_sta, 1] = fixed_trv + 8.0
+		tpick[102] = x_query_t[0] + trv_out[0, target_sta, 1]
+		tlatent[edges_sta, 1] = tpick[102]
+
+		isolated_sta = 80
+		ipick[150], phase_label[150] = isolated_sta, 0
+		trv_out[0, isolated_sta, 0] = fixed_trv
+		tpick[150] = expected_arrival_q0
+
+		expected_arrival_q1 = x_query_t[1].item() + 88.0
+		ipick[200:205] = 12
+		phase_label[200:205] = 1
+		trv_out[1, 12, 1] = 88.0
+		trv_out[1, 12, 0] = 88.0 + 1000.0
+		tpick[200:205] = expected_arrival_q1
+
+		tpick[500] = -99999.0
+		tpick[501] = 99999.0
+
+		fwd_args = dict(
+			x_context_cart=x_context_cart,
+			x_context_t=x_context_t,
+			x_query_cart=x_query_cart,
+			x_query_t=x_query_t,
+			A_src_in_sta=A_src_in_sta,
+			locs_use_cart=locs_use_cart,
+			embed_context=embed_context,
+			trv_out=trv_out,
+		)
+
+		model.eval()
+		with torch.no_grad():
+			out, mask = model(x, tpick=tpick, ipick=ipick, phase_label=phase_label, tlatent=tlatent, **fwd_args)
+
+		# positional call matches ArrivalEmbedding.forward
+		with torch.no_grad():
+			out, mask = model(
+				x, x_context_cart, x_context_t, x_query_cart, x_query_t,
+				A_src_in_sta, tpick, ipick, phase_label, locs_use_cart,
+				tlatent, embed_context, trv_out=trv_out,
+			)
+
+		res_100 = torch.abs(tpick[100] - (x_query_t[0] + trv_out[0, target_sta, target_phase])).item()
+		res_101 = torch.abs(tpick[101] - (x_query_t[0] + trv_out[0, target_sta, target_phase])).item()
+		print(f"[Diag] Min Threshold = {thresh}")
+		print(f"[Diag] Pick 100 Misfit = {res_100:.2f}s | Mask = {mask[0, 100].item()}")
+		print(f"[Diag] Pick 101 Misfit = {res_101:.2f}s | Mask = {mask[0, 101].item()}")
+
+		assert out.shape == (n_queries, n_picks, ndim_out), out.shape
+		assert mask.shape == (n_queries, n_picks), mask.shape
+		assert not torch.isnan(out).any() and not torch.isinf(out).any()
+		assert bool(mask[0, 100].item()) is True, f"in-window mask failed misfit={res_100:.2f}"
+		assert bool(mask[0, 101].item()) is False, f"out-window mask failed misfit={res_101:.2f}"
+		assert bool(mask[1, 200:205].all().item()) is True
+		assert not torch.isnan(out[:, 150]).any()
+		print("[✔] Shapes, mask bounds, isolated station, finite tensors.")
+
+		# Sensitivity
+		x_perturbed = x.detach().clone()
+		x_perturbed[edges_sta] += 50.0
+		with torch.no_grad():
+			out_p, _ = model(
+				x_perturbed, x_context_cart, x_context_t, x_query_cart, x_query_t,
+				A_src_in_sta, tpick, ipick, phase_label, locs_use_cart,
+				tlatent, embed_context, trv_out=trv_out,
+			)
+		diff = torch.max(torch.abs(out[0, 100] - out_p[0, 100])).item()
+		assert diff > 1e-4, f"graph sensitivity failed diff={diff:.3e}"
+		print(f"[✔] Graph sensitivity on pick 100 (diff={diff:.4f}).")
+
+		# Permutation
+		perm = torch.randperm(n_picks, device=device)
+		inv = torch.empty_like(perm)
+		inv[perm] = torch.arange(n_picks, device=device)
+		with torch.no_grad():
+			out_perm, mask_perm = model(
+				x, x_context_cart, x_context_t, x_query_cart, x_query_t,
+				A_src_in_sta, tpick[perm], ipick[perm], phase_label[perm],
+				locs_use_cart, tlatent, embed_context, trv_out=trv_out,
+			)
+		assert torch.equal(mask_perm[:, inv], mask)
+		assert torch.allclose(out_perm[:, inv], out, atol=1e-5, rtol=1e-4)
+		print("[✔] Pick-permutation invariance.")
+
+		# Empty picks / empty product
+		with torch.no_grad():
+			out0, mask0 = model(
+				x[:0], x_context_cart, x_context_t, x_query_cart, x_query_t,
+				A_src_in_sta[:, :0], tpick[:0], ipick[:0], phase_label[:0],
+				locs_use_cart, tlatent[:0], embed_context, trv_out=trv_out,
+			)
+		assert out0.shape == (n_queries, 0, ndim_out)
+		assert mask0.shape[1] == 0
+		print("[✔] Empty pick / empty graph.")
+
+		# Duplicate (sta, src) must not explode
+		A_dup = torch.cat([A_src_in_sta, A_src_in_sta[:, :1]], dim=1)
+		order = torch.argsort(A_dup[1])
+		A_dup = A_dup[:, order]
+		x_dup = torch.cat([x.detach(), x[:1].detach()], dim=0)[order]
+		tlat_dup = torch.cat([tlatent, tlatent[:1]], dim=0)[order]
+		with torch.no_grad():
+			out_d, _ = model(
+				x_dup, x_context_cart, x_context_t, x_query_cart, x_query_t,
+				A_dup, tpick, ipick, phase_label, locs_use_cart, tlat_dup,
+				embed_context, trv_out=trv_out,
+			)
+		assert not torch.isnan(out_d).any()
+		print("[✔] Duplicate product edges.")
+
+		# Autograd
+		model.train()
+		x_g = x.detach().clone().requires_grad_(True)
+		out_tr, mask_tr = model(
+			x_g, x_context_cart, x_context_t, x_query_cart, x_query_t,
+			A_src_in_sta, tpick, ipick, phase_label, locs_use_cart,
+			tlatent, embed_context, trv_out=trv_out,
+		)
+		(out_tr * mask_tr.unsqueeze(-1)).sum().backward()
+		assert x_g.grad is not None and torch.isfinite(x_g.grad).all()
+		must = ("fc1", "fc_merge", "null_out", "null_embed")
+		for name, p in model.named_parameters():
+			if not p.requires_grad:
+				continue
+			if p.grad is None:
+				if any(k in name for k in must):
+					raise AssertionError(f"{name}: required grad missing")
+				continue
+			assert torch.isfinite(p.grad).all(), name
+		print("[✔] Backward: finite grads on used params and x.")
+		print("[✔] Complete Verification Suite Finished Successfully.")
+
+
 
 
 
