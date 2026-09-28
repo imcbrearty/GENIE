@@ -5720,7 +5720,7 @@ for batch_idx, inputs in enumerate(loader):
 		if init_spatial_norms == True:
 			diff_sp = input_tensors_l[i0][4].x[:, :3]
 	        norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim = False)
-			dist_norms.append(norm_pos.cpu().detach())
+			dist_norms.append(norm_pos.cpu().detach().numpy())
 		
 		# if inc != (n_batch - 1):
 		# 	loss.backward(retain_graph = False)
@@ -5761,12 +5761,13 @@ for batch_idx, inputs in enumerate(loader):
 
 	write_dist_scales = False
 	if (init_spatial_norms == True) and ((loss_charbonnier_source.initialize_mass == False) and (loss_charbonnier_assoc.initialize_mass == False)): ## If training begins, set the spatial scales of kernels
-		dist_norms = torch.cat(dist_norms).detach().float()
-		quantile_far  = torch.quantile(dist_norms, 0.85).clamp(min=1e-3)
-		quantile_mid  = torch.quantile(dist_norms, 0.40).clamp(min=1e-3)
-		dist_near = dist_norms[dist_norms <= torch.quantile(dist_norms, 0.30)]
-		quantile_in   = torch.quantile(dist_near, 0.50).clamp(min=1e-3)
-		spatial_quantiles = torch.stack([quantile_in, quantile_mid, quantile_far])
+		dist_norms = np.hstack(dist_norms).detach() # .float()
+		if len(dist_norms) > 5e6: dist_norms = np.random.choice(dist_norms, size = int(5e6), replace = False)
+		quantile_far  = max(np.quantile(dist_norms, 0.85), 1e-3) # .clamp(min=1e-3)
+		quantile_mid  = max(np.quantile(dist_norms, 0.40), 1e-3) # .clamp(min=1e-3)
+		dist_near = dist_norms[dist_norms <= np.quantile(dist_norms, 0.30)]
+		quantile_in   = max(np.quantile(dist_near, 0.50), 1e-3) # .clamp(min=1e-3)
+		spatial_quantiles = torch.tensor([quantile_in, quantile_mid, quantile_far], device = device, dtype = torch.float32)
 		# spatial_quantiles = torch.quantile(, torch.tensor([0.2, 0.5, 0.8]).to(device))
 		# spatial_quantiles = spatial_quantiles.clamp(min=1e-3)
 		with torch.no_grad():
