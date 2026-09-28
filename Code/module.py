@@ -806,13 +806,13 @@ class BipartiteGraphOperator(MessagePassing):
 		self.act_out = nn.PReLU()
 	
 	def _ordered_scales(self, log_base, delta, r_min, r_max):
-	    # log_base: (K,) or (1, K)
-	    stretch = torch.exp(0.30 * torch.tanh(delta[:, :1]))
-	    resid = 0.15 * torch.tanh(delta[:, 1:])
-	    r = torch.exp(log_base.view(1, -1)) * stretch * torch.exp(resid)
-	    gaps = F.softplus(r[:, 1:] - r[:, :-1]) + 1e-3
-	    r = torch.cat((r[:, :1], r[:, :1] + gaps.cumsum(dim=1)), dim=1)
-	    return r.clamp(r_min, r_max)
+		# log_base: (K,) or (1, K)
+		stretch = torch.exp(0.30 * torch.tanh(delta[:, :1]))
+		resid = 0.15 * torch.tanh(delta[:, 1:])
+		r = torch.exp(log_base.view(1, -1)) * stretch * torch.exp(resid)
+		gaps = F.softplus(r[:, 1:] - r[:, :-1]) + 1e-3
+		r = torch.cat((r[:, :1], r[:, :1] + gaps.cumsum(dim=1)), dim=1)
+		return r.clamp(r_min, r_max)
 	
 	def forward(self, inpt, A_src_in_edges, mask, embed_context,
 				amp=None, num_target_nodes=None):
@@ -832,7 +832,7 @@ class BipartiteGraphOperator(MessagePassing):
 		# 	+ 0.15 * torch.tanh(delta_r[:, 1:]) # 0.2
 		# ).reshape(-1).clamp(self.r_min, self.r_max)
 		radii = self._ordered_scales(
-		    self.log_kernel_radii, self.f_radii(ctx), self.r_min, self.r_max
+			self.log_kernel_radii, self.f_radii(ctx), self.r_min, self.r_max
 		)
 					
 		diff_sp = A_src_in_edges.x[:, :3]
@@ -842,11 +842,11 @@ class BipartiteGraphOperator(MessagePassing):
 		delta = self.f_gamma(ctx)
 
 		g_scale = torch.exp(
-		    self.log_gamma_base
-		    + 0.35 * torch.tanh(delta[:, :1])
-		    + 0.15 * torch.tanh(delta[:, 1:])
+			self.log_gamma_base
+			+ 0.35 * torch.tanh(delta[:, :1])
+			+ 0.15 * torch.tanh(delta[:, 1:])
 		)
-		r_g = (1.0 / g_scale.clamp(min=1e-8).sqrt())          # distance units
+		r_g = (1.0 / g_scale.clamp(min=1e-8).sqrt())		  # distance units
 		gaps = F.softplus(r_g[:, 1:] - r_g[:, :-1]) + 1e-3
 		r_g = torch.cat((r_g[:, :1], r_g[:, :1] + gaps.cumsum(1)), dim=1)
 		r_g = r_g.clamp(self.r_min, self.r_max)
@@ -1158,6 +1158,239 @@ class SpaceTimeDirect(nn.Module):
 
 
 
+# class SpaceTimeAttention(MessagePassing):
+# 	"""Continuous 4D renderer from sparse source hypotheses.
+
+# 	Geometry strictly dictates spatial attention weights. Source support acts as an 
+# 	additive value channel without imposing sharp zero-cliffs on Gaussian tails.
+# 	"""
+
+# 	def __init__(self, inpt_dim, out_channels, n_dim=4, n_latent=16, embed_dim=10,
+# 				 n_heads=5, support_dim=17, scale_rel=scale_rel, scale_time=scale_time):
+# 		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
+
+# 		self.n_heads = n_heads
+# 		self.n_latent = n_latent
+# 		self.support_dim = support_dim
+# 		self.scale_rel = scale_rel
+# 		self.scale_time = scale_time
+
+# 		# Source value + support embedding
+# 		self.f_values = nn.Linear(inpt_dim, n_latent)
+# 		self.film_values = FiLM(embed_dim, n_latent)
+# 		self.act_values = nn.PReLU()
+
+# 		# self.f_support = nn.Sequential(
+# 		# 	nn.Linear(support_dim, 8), nn.PReLU(), nn.Linear(8, n_latent)
+# 		# )
+
+# 		# Source-feature attention correction
+# 		self.f_feature_score = nn.Linear(inpt_dim, n_heads)
+# 		self.film_score = FiLM(embed_dim, n_heads)
+
+# 		# Dynamic space-time bandwidths
+# 		self.f_gamma = nn.Linear(embed_dim, 3 + 2 * n_heads)
+# 		nn.init.normal_(self.f_gamma.weight, std=0.01)
+# 		nn.init.zeros_(self.f_gamma.bias)
+
+# 		init_spatial = torch.logspace(-1, 0.7, steps=n_heads).unsqueeze(1)
+# 		init_temporal = torch.logspace(-0.3, 1.0, steps=n_heads).unsqueeze(1)
+# 		init_gammas = torch.cat([init_spatial, init_temporal], dim=1).unsqueeze(0)
+# 		self.log_gamma_base = nn.Parameter(torch.log(init_gammas))
+
+# 		# Geometry -> latent edge embedding
+# 		rbf_edge_dim = 3 + 2 * n_heads + 1
+# 		self.edge_proj = nn.Sequential(
+# 			nn.Linear(rbf_edge_dim, n_latent), nn.PReLU(), nn.Linear(n_latent, n_latent)
+# 		)
+
+# 		# Bounded continuous-peak recovery
+# 		self.f_max_gain_cap = nn.Sequential(
+# 			nn.Linear(embed_dim, 16), nn.PReLU(), nn.Linear(16, 1), nn.Sigmoid()
+# 		)
+
+# 		# Query confidence gate
+# 		# self.spatial_gate = nn.Sequential(
+# 		# 	nn.Linear(n_latent * n_heads, 1), nn.Sigmoid()
+# 		# )
+
+# 		# Pure feature readout + FiLM context modulation
+# 		self.proj = nn.Linear(n_latent * n_heads, out_channels)
+# 		self.film_readout = FiLM(embed_dim, out_channels)
+# 		self.activate2 = nn.PReLU()
+
+# 		self.use_fixed_edges = False
+# 		self.fixed_edges = None
+# 		self.edge_features = None
+
+# 	def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=16):
+# 		ctx_4d = torch.cat((
+# 			x_context / self.scale_rel,
+# 			(1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel
+# 		), dim=1)
+# 		qry_4d = torch.cat((
+# 			x_query / self.scale_rel,
+# 			(1000.0 * self.scale_time * x_query_t).reshape(-1, 1) / self.scale_rel
+# 		), dim=1)
+
+# 		edge_index = knn(ctx_4d, qry_4d, k=k).flip(0).to(x_query.device)
+
+# 		diff_sp = (
+# 			x_query[edge_index[1], :3] - x_context[edge_index[0], :3]
+# 		) / self.scale_rel
+# 		diff_tm = (
+# 			1000.0 * self.scale_time *
+# 			(x_query_t[edge_index[1]].view(-1) - x_context_t[edge_index[0]].view(-1))
+# 		).reshape(-1, 1) / self.scale_rel
+
+# 		return edge_index, torch.cat((diff_sp, diff_tm), dim=1)
+
+# 	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=16):
+# 		self.fixed_edges, self.edge_features = self._build_edge_attr(
+# 			x_query, x_context, x_query_t, x_context_t, k=k
+# 		)
+# 		self.use_fixed_edges = True
+
+# 	def message(self, x_j, support_j, embed_context, index, edge_attr):
+# 		pos_rel_sp = edge_attr[:, :3]
+# 		pos_rel_tm = edge_attr[:, 3:4]
+
+# 		pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim=1, keepdim=True)
+# 		pos_norm_tm = torch.abs(pos_rel_tm)
+# 		spatial_sq = pos_norm_sp.square()
+# 		temporal_sq = pos_norm_tm.square()
+
+# 		# Dynamic multi-scale bandwidths
+# 		delta = self.f_gamma(embed_context)
+# 		alpha_global = 0.5 * torch.tanh(delta[:, 0:1])
+# 		alpha_space = 0.25 * torch.tanh(delta[:, 1:2])
+# 		alpha_time = 0.25 * torch.tanh(delta[:, 2:3])
+
+# 		alpha = (
+# 			alpha_global.unsqueeze(1) +
+# 			torch.cat([alpha_space, alpha_time], dim=1).unsqueeze(1)
+# 		)
+# 		residuals = 0.1 * torch.tanh(delta[:, 3:].view(-1, self.n_heads, 2))
+
+# 		gammas = torch.exp(self.log_gamma_base + alpha + residuals)
+# 		gammas_sp = torch.clamp(gammas[:, :, 0], min=1e-3, max=50.0)
+# 		gammas_tm = torch.clamp(gammas[:, :, 1], min=1e-3, max=50.0)
+
+# 		# Multi-scale geometric RBF features
+# 		rbf_spatial = torch.exp(-gammas_sp * spatial_sq)
+# 		rbf_temporal = torch.exp(-gammas_tm * temporal_sq)
+# 		unit_dir_sp = pos_rel_sp / torch.sqrt(spatial_sq + 1e-4)
+		
+# 		rbf_edge_attr = torch.cat((
+# 			unit_dir_sp, rbf_spatial, rbf_temporal, pos_rel_tm
+# 		), dim=1)
+# 		edge_embed = self.edge_proj(rbf_edge_attr)
+
+# 		# Source content + geometry + support (Additive incorporation)
+# 		value_embed = self.act_values(
+# 			self.film_values(self.f_values(x_j), embed_context)
+# 		)
+# 		value_embed = value_embed + edge_embed # + self.f_support(support_j)
+
+# 		# Pure Geometric distance attention logits
+# 		distance_logits = (-gammas_sp * spatial_sq - gammas_tm * temporal_sq)
+
+# 		# Bounded content correction
+# 		source_score = 0.2 * torch.tanh(
+# 			self.film_score(self.f_feature_score(x_j), embed_context)
+# 		)
+
+# 		logits = distance_logits + source_score
+
+# 		# KNN BOUNDARY FADING (Safe -1e9 mask)
+# 		dist_4d_sq = spatial_sq + temporal_sq
+# 		max_dist_sq = scatter(dist_4d_sq, index, dim=0, reduce="max")[index] + 1e-6
+# 		fade_factor = (1.0 - (dist_4d_sq / max_dist_sq)).clamp(min=0.0)
+
+# 		log_fade = torch.where(
+# 			fade_factor < 1e-5,
+# 			torch.full_like(fade_factor, -1e9),
+# 			torch.log(fade_factor.clamp(min=1e-5))
+# 		)
+# 		logits = logits + log_fade
+
+# 		alpha_attn = softmax(logits, index)
+
+# 		head_values = (
+# 			alpha_attn.unsqueeze(-1) * value_embed.unsqueeze(1)
+# 		).reshape(-1, self.n_heads * self.n_latent)
+
+# 		return torch.cat((
+# 			head_values,
+# 			alpha_attn.square()
+# 		), dim=1)
+
+# 	def update(self, aggr_out):
+# 		n_value = self.n_latent * self.n_heads
+# 		n_head = self.n_heads
+
+# 		agg_values = aggr_out[:, :n_value]
+# 		agg_alpha_sq = aggr_out[:, n_value:n_value + n_head]
+
+# 		# Spatial concentration and recovery
+# 		concentration = agg_alpha_sq.mean(dim=1, keepdim=True)
+		
+# 		# Peak recovery scales purely with attention dispersion (smooth continuous recovery)
+# 		recovery = (1.0 - concentration).clamp(0.0, 1.0)
+
+# 		return agg_values, recovery
+
+# 	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t,
+# 				embed_context, support, k=16):
+# 		if self.use_fixed_edges and self.fixed_edges is not None:
+# 			edge_index, edge_attr = self.fixed_edges, self.edge_features
+# 		else:
+# 			edge_index, edge_attr = self._build_edge_attr(
+# 				x_query, x_context, x_query_t, x_context_t, k=k
+# 			)
+
+# 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+# 		interpolated, recovery = self.propagate(
+# 			edge_index,
+# 			x=inpts,
+# 			support=support,
+# 			embed_context=ctx,
+# 			edge_attr=edge_attr,
+# 			size=(x_context.shape[0], x_query.shape[0])
+# 		)
+
+# 		# Bounded correction for continuous Gaussian peaks between samples
+# 		max_gain = 1.5 * self.f_max_gain_cap(ctx)
+# 		local_gain = 1.0 + max_gain * recovery
+# 		interpolated = interpolated * local_gain
+
+# 		# Readout: Pure Spatial Aggregation
+# 		out = self.proj(interpolated)
+
+# 		# FiLM Context Modulation
+# 		out = self.film_readout(out, ctx)
+
+# 		# Non-linear activation BEFORE query gating
+# 		out = self.activate2(out)
+
+# 		# Continuous learned query gate (prevents tail truncation on wide Gaussians)
+# 		# gate = self.spatial_gate(interpolated)
+# 		# out = out * gate
+
+# 		# src, tgt = edge_index[0], edge_index[1]
+# 		# sup_e = self.f_support(support)[src]		   # [E, n_latent] or use support raw
+# 		# sup_q = scatter(sup_e, tgt, dim=0, dim_size=x_query.size(0), reduce="max")
+# 		# gate = 0.2 + 0.8 * torch.sigmoid(self.spatial_gate[0](sup_q).mean(-1, keepdim=True))
+# 		# # simpler: dedicated Linear(support_dim, 1) on pooled raw support
+# 		# sup_raw = scatter(support[src], tgt, dim=0, dim_size=x_query.size(0), reduce="max")
+# 		# gate = 0.2 + 0.8 * torch.sigmoid(self.query_gate(sup_raw))  # Linear(11,1)
+# 		# out = out * gate
+					
+# 		return out
+
+
+
 class SpaceTimeAttention(MessagePassing):
 	"""Continuous 4D renderer from sparse source hypotheses.
 
@@ -1180,9 +1413,9 @@ class SpaceTimeAttention(MessagePassing):
 		self.film_values = FiLM(embed_dim, n_latent)
 		self.act_values = nn.PReLU()
 
-		# self.f_support = nn.Sequential(
-		# 	nn.Linear(support_dim, 8), nn.PReLU(), nn.Linear(8, n_latent)
-		# )
+		self.f_support = nn.Sequential(
+			nn.Linear(support_dim, 8), nn.PReLU(), nn.Linear(8, n_latent)
+		)
 
 		# Source-feature attention correction
 		self.f_feature_score = nn.Linear(inpt_dim, n_heads)
@@ -1223,7 +1456,7 @@ class SpaceTimeAttention(MessagePassing):
 		self.fixed_edges = None
 		self.edge_features = None
 
-	def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=16):
+	def _build_edge_attr(self, x_query, x_context, x_query_t, x_context_t, k=12):
 		ctx_4d = torch.cat((
 			x_context / self.scale_rel,
 			(1000.0 * self.scale_time * x_context_t).reshape(-1, 1) / self.scale_rel
@@ -1245,15 +1478,16 @@ class SpaceTimeAttention(MessagePassing):
 
 		return edge_index, torch.cat((diff_sp, diff_tm), dim=1)
 
-	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=16):
+	def set_edges(self, x_query, x_context, x_query_t, x_context_t, k=12):
 		self.fixed_edges, self.edge_features = self._build_edge_attr(
 			x_query, x_context, x_query_t, x_context_t, k=k
 		)
 		self.use_fixed_edges = True
 
-	def message(self, x_j, support_j, embed_context, index, edge_attr):
+	def message(self, val_j, scr_j, sup_j, embed_context, index, edge_attr):
 		pos_rel_sp = edge_attr[:, :3]
 		pos_rel_tm = edge_attr[:, 3:4]
+		# send_index = edge_index[0]
 
 		pos_norm_sp = torch.linalg.vector_norm(pos_rel_sp, dim=1, keepdim=True)
 		pos_norm_tm = torch.abs(pos_rel_tm)
@@ -1286,22 +1520,32 @@ class SpaceTimeAttention(MessagePassing):
 		), dim=1)
 		edge_embed = self.edge_proj(rbf_edge_attr)
 
-		# Source content + geometry + support (Additive incorporation)
-		value_embed = self.act_values(
-			self.film_values(self.f_values(x_j), embed_context)
-		)
-		value_embed = value_embed + edge_embed # + self.f_support(support_j)
-
-		# Pure Geometric distance attention logits
 		distance_logits = (-gammas_sp * spatial_sq - gammas_tm * temporal_sq)
+		value_embed = val_j + edge_embed + sup_j
+		logits = distance_logits + scr_j
+	
+		# value_embed = val_j + edge_embed + sup_j
+		# logits = distance_logits + scr_j
+		
+		# Source content + geometry + support (Additive incorporation)
+		# value_embed = self.act_values(
+		# 	self.film_values(self.f_values(x_j), embed_context)
+		# )
+		# value_embed = value_embed + edge_embed + self.f_support(support_j)
+		# value_embed = val[send_index] + edge_embed + self.f_support(support)[j]
+		
+		# Pure Geometric distance attention logits
+		# distance_logits = (-gammas_sp * spatial_sq - gammas_tm * temporal_sq)
 
 		# Bounded content correction
-		source_score = 0.2 * torch.tanh(
-			self.film_score(self.f_feature_score(x_j), embed_context)
-		)
+		# source_score = 0.2 * torch.tanh(
+		# 	self.film_score(self.f_feature_score(x_j), embed_context)
+		# )
 
-		logits = distance_logits + source_score
-
+		# logits = distance_logits + source_score
+		# logits = distance_logits + scr[send_index]	
+		
+		
 		# KNN BOUNDARY FADING (Safe -1e9 mask)
 		dist_4d_sq = spatial_sq + temporal_sq
 		max_dist_sq = scatter(dist_4d_sq, index, dim=0, reduce="max")[index] + 1e-6
@@ -1341,7 +1585,7 @@ class SpaceTimeAttention(MessagePassing):
 		return agg_values, recovery
 
 	def forward(self, inpts, x_query, x_context, x_query_t, x_context_t,
-				embed_context, support, k=16):
+				embed_context, support, k=12):
 		if self.use_fixed_edges and self.fixed_edges is not None:
 			edge_index, edge_attr = self.fixed_edges, self.edge_features
 		else:
@@ -1351,13 +1595,27 @@ class SpaceTimeAttention(MessagePassing):
 
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
 
+		# val = self.act_values(self.film_values(self.f_values(inpts), ctx))	  # (n_ctx, L)
+		# scr = 0.2 * torch.tanh(self.film_score(self.f_feature_score(inpts), ctx))  # (n_ctx, H)
+
+		val = self.act_values(self.film_values(self.f_values(inpts), ctx))
+		scr = 0.2 * torch.tanh(self.film_score(self.f_feature_score(inpts), ctx))
+		sup = self.f_support(support)   # lift this too
+					
+		# interpolated, recovery = self.propagate(
+		# 	edge_index,
+		# 	x=inpts,
+		# 	support=support,
+		# 	embed_context=ctx,
+		# 	edge_attr=edge_attr,
+		# 	size=(x_context.shape[0], x_query.shape[0])
+		# )
+
 		interpolated, recovery = self.propagate(
-			edge_index,
-			x=inpts,
-			support=support,
-			embed_context=ctx,
-			edge_attr=edge_attr,
-			size=(x_context.shape[0], x_query.shape[0])
+				edge_index,
+				val=val, scr=scr, sup=sup,
+				embed_context=ctx, edge_attr=edge_attr,
+				size=(x_context.size(0), x_query.size(0)),
 		)
 
 		# Bounded correction for continuous Gaussian peaks between samples
@@ -1388,6 +1646,10 @@ class SpaceTimeAttention(MessagePassing):
 		# out = out * gate
 					
 		return out
+
+
+
+
 
 
 
@@ -1449,13 +1711,13 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		self.act_out = nn.PReLU()
 
 	def _ordered_scales(self, log_base, delta, r_min, r_max):
-	    # log_base: (K,) or (1, K)
-	    stretch = torch.exp(0.30 * torch.tanh(delta[:, :1]))
-	    resid = 0.15 * torch.tanh(delta[:, 1:])
-	    r = torch.exp(log_base.view(1, -1)) * stretch * torch.exp(resid)
-	    gaps = F.softplus(r[:, 1:] - r[:, :-1]) + 1e-3
-	    r = torch.cat((r[:, :1], r[:, :1] + gaps.cumsum(dim=1)), dim=1)
-	    return r.clamp(r_min, r_max)
+		# log_base: (K,) or (1, K)
+		stretch = torch.exp(0.30 * torch.tanh(delta[:, :1]))
+		resid = 0.15 * torch.tanh(delta[:, 1:])
+		r = torch.exp(log_base.view(1, -1)) * stretch * torch.exp(resid)
+		gaps = F.softplus(r[:, 1:] - r[:, :-1]) + 1e-3
+		r = torch.cat((r[:, :1], r[:, :1] + gaps.cumsum(dim=1)), dim=1)
+		return r.clamp(r_min, r_max)
 		
 	
 	def forward(self, inpt, A_Lg_in_srcs, mask, embed_context, support, num_target_nodes=None):
@@ -1486,11 +1748,11 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		# gammas = torch.exp(self.log_gamma_base + alpha + residuals)
 
 		g_scale = torch.exp(
-		    self.log_gamma_base
-		    + 0.35 * torch.tanh(delta[:, :1])
-		    + 0.15 * torch.tanh(delta[:, 1:])
+			self.log_gamma_base
+			+ 0.35 * torch.tanh(delta[:, :1])
+			+ 0.15 * torch.tanh(delta[:, 1:])
 		)
-		r_g = (1.0 / g_scale.clamp(min=1e-8).sqrt())          # distance units
+		r_g = (1.0 / g_scale.clamp(min=1e-8).sqrt())		  # distance units
 		gaps = F.softplus(r_g[:, 1:] - r_g[:, :-1]) + 1e-3
 		r_g = torch.cat((r_g[:, :1], r_g[:, :1] + gaps.cumsum(1)), dim=1)
 		r_g = r_g.clamp(self.r_min, self.r_max)
@@ -2967,9 +3229,9 @@ class ArrivalEmbedding(nn.Module):
 		
 		n_prod = A_src_in_sta.size(1)
 		if counts.numel() and int(counts.max()) > n_prod + 2:
-		    raise RuntimeError(
-		        f"phase match explode max={int(counts.max())} n_prod={n_prod}"
-		    )
+			raise RuntimeError(
+				f"phase match explode max={int(counts.max())} n_prod={n_prod}"
+			)
 		
 		sig_p, sig_s = self._sig_t()
 
@@ -3304,13 +3566,13 @@ class ArrivalEmbedding(nn.Module):
 				starts = p_left[valid_indices]
 
 				# if counts.numel() and int(counts.max()) > max(64, int(deg_srcs.max()) * self.k_spc_edges):
-    			# 				raise RuntimeError(f"fwd match explode max={int(counts.max())} deg={int(deg_srcs.max())}")
+				# 				raise RuntimeError(f"fwd match explode max={int(counts.max())} deg={int(deg_srcs.max())}")
 			
 				n_prod = A_src_in_sta.size(1)
 				if counts.numel() and int(counts.max()) > N_prod + 2:
-				    raise RuntimeError(
-				        f"phase match explode max={int(counts.max())} n_prod={N_prod}"
-				    )
+					raise RuntimeError(
+						f"phase match explode max={int(counts.max())} n_prod={N_prod}"
+					)
 					
 				
 				offsets = torch.arange(counts.sum(), device=device) - torch.repeat_interleave(
@@ -3326,15 +3588,15 @@ class ArrivalEmbedding(nn.Module):
 				sig_p, sig_s = self._sig_t()
 
 				dt_q = (
-				    tpick[iarv[i_pick_match]].unsqueeze(1)
-				    - tlatent[nodes_prod[matched_prod_indices], :2]
+					tpick[iarv[i_pick_match]].unsqueeze(1)
+					- tlatent[nodes_prod[matched_prod_indices], :2]
 				).abs().min(dim=1).values
 				
 				keep = dt_q < (3.0 * sig_s)
 				matched_prod_indices = matched_prod_indices[keep]
 				i_pick_match = i_pick_match[keep]
 				if i_pick_match.numel() == 0:
-				    pass  # leave arv_flat as null
+					pass  # leave arv_flat as null
 				else:
 				
 					q_idx = isrc[i_pick_match]
@@ -3514,16 +3776,16 @@ class ArrivalEmbedding(nn.Module):
 		
 	# 	sig_p, sig_s = self._sig_t()
 	# 	dt_min = (
-	# 	    tpick[matched_pick_indices].unsqueeze(1)
-	# 	    - tlatent[matched_prod_indices, :2]
+	# 		tpick[matched_pick_indices].unsqueeze(1)
+	# 		- tlatent[matched_prod_indices, :2]
 	# 	).abs().min(dim=1).values
 	# 	keep = dt_min < (3.0 * sig_s)
 	# 	matched_prod_indices = matched_prod_indices[keep]
 	# 	matched_pick_indices = matched_pick_indices[keep]
 	# 	if matched_pick_indices.numel() == 0:
-	# 	    out_dim = self.fc2[-1].out_features
-	# 	    z = torch.zeros((N_picks, out_dim), device=device)
-	# 	    return z, z
+	# 		out_dim = self.fc2[-1].out_features
+	# 		z = torch.zeros((N_picks, out_dim), device=device)
+	# 		return z, z
 		
 	# 	# 2. Canonical Multi-Key Tie Breaking (Run per phase_idx in parallel [2, N_matched])
 	# 	# Compute dt for both P (idx 0) and S (idx 1) simultaneously -> Shape: [2, N_matched]
@@ -3574,9 +3836,9 @@ class ArrivalEmbedding(nn.Module):
 	# 	ctx_nn_both = torch.cat([ctx_nn_p, ctx_nn_s], dim=0)
 
 	# 	if ctx_nn_both.numel() == 0:
-	# 	    out_dim = self.fc2[-1].out_features
-	# 	    z = torch.zeros((N_picks, out_dim), device=device)
-	# 	    return z, z
+	# 		out_dim = self.fc2[-1].out_features
+	# 		z = torch.zeros((N_picks, out_dim), device=device)
+	# 		return z, z
 		
 	# 	edge_idx = knn(
 	# 		x_ctx_combined,
@@ -3623,9 +3885,9 @@ class ArrivalEmbedding(nn.Module):
 	# 	keep_n = dt_n < (3.0 * sig_s)
 	# 	nodes, inds, phases = nodes[keep_n], inds[keep_n], phases[keep_n]
 	# 	if nodes.numel() == 0:
-	# 	    out_dim = self.fc2[-1].out_features
-	# 	    z = torch.zeros((N_picks, out_dim), device=device)
-	# 	    return z, z
+	# 		out_dim = self.fc2[-1].out_features
+	# 		z = torch.zeros((N_picks, out_dim), device=device)
+	# 		return z, z
 		
 	# 	# 4. Process P (phase=0) and S (phase=1) Edges
 	# 	results = []
