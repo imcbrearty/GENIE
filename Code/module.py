@@ -316,7 +316,7 @@ class DataAggregationExpanded(nn.Module):
 		# self.init_gauss = nn.Sequential(nn.Linear(4, n_hidden), nn.PReLU())
 		# self.mix_inpt = nn.Sequential(nn.Linear(3*n_hidden, n_hidden), nn.PReLU())
 
-		self.init_trns = nn.Sequential(nn.Linear(n_dim_inpt, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_hidden))
+		self.init_trns = nn.Sequential(nn.Linear(n_dim_inpt + n_dim_mask, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_hidden))
 		self.init_gauss = nn.Linear(4, n_hidden)
 		self.mix_inpt = nn.Linear(3*n_hidden, n_hidden)
 					 
@@ -375,7 +375,7 @@ class DataAggregationExpanded(nn.Module):
 		# proj_inpt = self.init_trns(torch.cat(tr[:,0:ndim_slice], mask), dim=-1))
 		
 		proj_geo = self.spatial_proj(torch.cat((g_emb, tr[:, ndim_slice:]), dim = 1))
-		proj_inpt = self.init_trns(tr[:,0:ndim_slice])
+		proj_inpt = self.init_trns(torch.cat((tr[:,0:ndim_slice], mask), dim = 1))
 		proj_gauss = self.init_gauss(tr[:,[0,6,12,18]])
 
 		# tr = torch.cat((tr, mask), dim=-1)
