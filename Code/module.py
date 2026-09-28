@@ -1432,6 +1432,9 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
 		self.log_gamma_base = nn.Parameter(torch.log(init_spatial))
 
+		self.register_buffer("r_min", torch.tensor(0.08))
+		self.register_buffer("r_max", torch.tensor(4.0))
+		
 		# 4. Readout Normalization and Projection
 		# self.norm = nn.LayerNorm(ndim_in)
 		self.fc_out = nn.Linear(ndim_in, ndim_out)
