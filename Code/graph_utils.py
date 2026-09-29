@@ -4876,6 +4876,8 @@ class SpectralProductSampler:
 			int(n_anchor_target * min_spectral_frac),
 			n_anchor_target - n_physical_target
 		)
+
+		
 		
 		
 		if n_physical_target > 0:
@@ -4900,7 +4902,7 @@ class SpectralProductSampler:
 			density_A = 1.0 / (sigma_A**2)
 			density_B = 1.0 / (sigma_B**2)
 
-			spatial_extent = np.linalg.norm(coords_A.max(axis=0) - coords_A.min(axis=0)) + 1e-5
+			# spatial_extent = np.linalg.norm(coords_A.max(axis=0) - coords_A.min(axis=0)) + 1e-5
 
 			target_ab = n_physical_target // 2
 			target_ba = n_physical_target - target_ab
@@ -4920,14 +4922,19 @@ class SpectralProductSampler:
 				# bw_ab = np.median(scaled_dists_B) + 1e-5
 				# raw_w_ab = np.exp(- (scaled_dists_B**2) / (2 * (bw_ab**2)))
 
+
+				
 				k_cand_b = min(max(8, k_local_scale), n_b)
 				dists_B, indices_B = tree_B.query(coords_A, k=k_cand_b)
 				if dists_B.ndim == 1:
 				    dists_B, indices_B = dists_B[:, None], indices_B[:, None]
-				k_sig = min(4, k_cand_b)
+				# k_sig = min(4, k_cand_b)
+				# sig_ab = np.maximum(dists_B[:, k_sig - 1], 1e-5)[:, None]
+				# raw_w_ab = np.exp(-0.5 * (dists_B / sig_ab) ** 2)
+				k_sig = min(6, k_cand_b)
 				sig_ab = np.maximum(dists_B[:, k_sig - 1], 1e-5)[:, None]
-				raw_w_ab = np.exp(-0.5 * (dists_B / sig_ab) ** 2)
-
+				raw_w_ab = np.exp(-dists_B / sig_ab)
+				
 
 				joint_d_ab = (density_A[:, None] * density_B[indices_B]) ** density_equalization_gamma
 
@@ -4987,9 +4994,16 @@ class SpectralProductSampler:
 				dists_A, indices_A = tree_A.query(coords_B, k=k_cand_a)
 				if dists_A.ndim == 1:
 				    dists_A, indices_A = dists_A[:, None], indices_A[:, None]
-				k_sig = min(4, k_cand_a)
+				# k_sig = min(4, k_cand_a)
+				# sig_ba = np.maximum(dists_A[:, k_sig - 1], 1e-5)[:, None]
+				# raw_w_ba = np.exp(-0.5 * (dists_A / sig_ba) ** 2)
+
+
+				
+				k_sig = min(6, k_cand_a)
 				sig_ba = np.maximum(dists_A[:, k_sig - 1], 1e-5)[:, None]
-				raw_w_ba = np.exp(-0.5 * (dists_A / sig_ba) ** 2)
+				raw_w_ba = np.exp(-dists_A / sig_ba)
+
 				
 				joint_d_ba = (density_B[:, None] * density_A[indices_A]) ** density_equalization_gamma
 
