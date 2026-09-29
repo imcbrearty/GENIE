@@ -5195,43 +5195,66 @@ class SpectralProductSampler:
 
 
 
+	# def estimate_anchor_target(self, target_node_count, k_base=None, spatial_coherence_eta=0.7):
+	# 	if k_base is None:
+	# 		derived = self.derive_adaptive_sampling_params()
+	# 		k_base = derived["k_base"]
+
+	# 	n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+	# 	total_space = float(n_a * n_b)
+	# 	aspect = max(n_a, n_b) / max(min(n_a, n_b), 1)
+
+	# 	# 1. Expected 1-hop footprint (already aspect-aware)
+	# 	ratio_a = np.sqrt(n_a / n_b)
+	# 	ratio_b = np.sqrt(n_b / n_a)
+	# 	star_size = 1.0 + k_base * (ratio_a + ratio_b)
+
+	# 	# 2. Target coverage fraction
+	# 	target_ratio = min(0.999, target_node_count / total_space)
+
+	# 	# 3. Occupancy formula
+	# 	effective_draws = -np.log(1.0 - target_ratio) * total_space
+
+	# 	# 4. Coherence adjustment that *grows* with aspect ratio
+	# 	#	(more clustering / more wasted volume when one side is tiny)
+	# 	eta = spatial_coherence_eta * (1.0 + 0.15 * np.log10(max(aspect, 1.0)))
+	# 	eta = float(np.clip(eta, 0.3, 1.5))
+
+	# 	raw_anchors = effective_draws / (star_size * eta)
+
+	# 	# 5. Extra safety for extreme imbalance: never ask for more anchors
+	# 	#	than a few times the size of the smaller factor
+	# 	# max_by_small_side = 4.0 * min(n_a, n_b)
+	# 	# max_anchors = min(total_space, target_node_count, max_by_small_side)
+
+	# 	max_by_small_side = 8.0 * min(n_a, n_b)
+	# 	max_anchors = min(total_space, target_node_count, max_by_small_side)
+
+	# 	return int(np.clip(np.ceil(raw_anchors), 10, max_anchors))
+
+
 	def estimate_anchor_target(self, target_node_count, k_base=None, spatial_coherence_eta=0.7):
-		if k_base is None:
-			derived = self.derive_adaptive_sampling_params()
-			k_base = derived["k_base"]
-
-		n_a, n_b = len(self.nodes_A), len(self.nodes_B)
-		total_space = float(n_a * n_b)
-		aspect = max(n_a, n_b) / max(min(n_a, n_b), 1)
-
-		# 1. Expected 1-hop footprint (already aspect-aware)
-		ratio_a = np.sqrt(n_a / n_b)
-		ratio_b = np.sqrt(n_b / n_a)
-		star_size = 1.0 + k_base * (ratio_a + ratio_b)
-
-		# 2. Target coverage fraction
-		target_ratio = min(0.999, target_node_count / total_space)
-
-		# 3. Occupancy formula
-		effective_draws = -np.log(1.0 - target_ratio) * total_space
-
-		# 4. Coherence adjustment that *grows* with aspect ratio
-		#	(more clustering / more wasted volume when one side is tiny)
-		eta = spatial_coherence_eta * (1.0 + 0.15 * np.log10(max(aspect, 1.0)))
-		eta = float(np.clip(eta, 0.3, 1.5))
-
-		raw_anchors = effective_draws / (star_size * eta)
-
-		# 5. Extra safety for extreme imbalance: never ask for more anchors
-		#	than a few times the size of the smaller factor
-		# max_by_small_side = 4.0 * min(n_a, n_b)
-		# max_anchors = min(total_space, target_node_count, max_by_small_side)
-
-		max_by_small_side = 8.0 * min(n_a, n_b)
-		max_anchors = min(total_space, target_node_count, max_by_small_side)
-
-		return int(np.clip(np.ceil(raw_anchors), 10, max_anchors))
-
+		
+	    n_a, n_b = len(self.nodes_A), len(self.nodes_B)
+	    n_sta = min(n_a, n_b)
+	    total_space = float(n_a * n_b)
+	    aspect = max(n_a, n_b) / max(n_sta, 1)
+	    star_size = 1.0 + 2.0 + 8.0
+	    target_ratio = min(0.999, target_node_count / max(total_space, 1.0))
+	    effective_draws = -np.log(1.0 - target_ratio) * total_space
+		
+	    eta = float(np.clip(
+	        spatial_coherence_eta * (1.0 + 0.15 * np.log10(max(aspect, 1.0))),
+	        0.3, 1.5,
+	    ))
+		
+	    raw = 1.75 * effective_draws / (star_size * eta)
+	    lo = max(10, 4 * n_sta)
+	    hi = min(total_space, target_node_count)
+		
+	    return int(np.clip(np.ceil(raw), lo, hi))
+	
+	
 	def build_networkx_subgraph(self, retained_nodes):
 		G_sub = nx.Graph()
 		G_sub.add_nodes_from(retained_nodes)
