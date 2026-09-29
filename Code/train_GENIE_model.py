@@ -5768,7 +5768,7 @@ for batch_idx, inputs in enumerate(loader):
 
 	write_dist_scales = False
 	if (init_spatial_norms == True) and ((loss_charbonnier_source.initialize_mass == False) and (loss_charbonnier_assoc.initialize_mass == False)): ## If training begins, set the spatial scales of kernels
-		dist_norms = np.hstack(dist_norms).detach() # .float()
+		dist_norms = np.hstack(dist_norms) # .detach() # .float()
 		if len(dist_norms) > 5e6: dist_norms = np.random.choice(dist_norms, size = int(5e6), replace = False)
 		quantile_far  = max(np.quantile(dist_norms, 0.85), 1e-3) # .clamp(min=1e-3)
 		quantile_mid  = max(np.quantile(dist_norms, 0.40), 1e-3) # .clamp(min=1e-3)
