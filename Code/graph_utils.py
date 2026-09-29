@@ -5379,17 +5379,23 @@ class SpectralProductSampler:
 		n_prod = n_a * n_b
 		frac = target_node_count / max(n_prod, 1)
 
-		if frac >= 0.95:
+		if n_a * n_b <= target_node_count or frac >= 0.95:
 			retained_nodes = {(a, b) for a in self.nodes_A for b in self.nodes_B}
 			G_sub = self.build_networkx_subgraph(retained_nodes)
 			print(self.subgraph_diagnostics(retained_nodes, G_sub))
 			return G_sub, params, len(retained_nodes)
+		
+		# if frac >= 0.95:
+		# 	retained_nodes = {(a, b) for a in self.nodes_A for b in self.nodes_B}
+		# 	G_sub = self.build_networkx_subgraph(retained_nodes)
+		# 	print(self.subgraph_diagnostics(retained_nodes, G_sub))
+		# 	return G_sub, params, len(retained_nodes)
 
-		if frac >= 0.45:
-			retained_nodes = self.sample_dense_product(target_node_count, params)
-			G_sub = self.build_networkx_subgraph(retained_nodes)
-			print(self.subgraph_diagnostics(retained_nodes, G_sub))
-			return G_sub, params, len(retained_nodes)
+		# elif n_a * n_b <= target_node_count:			
+		# 	retained_nodes = self.sample_dense_product(target_node_count, params)
+		# 	G_sub = self.build_networkx_subgraph(retained_nodes)
+		# 	print(self.subgraph_diagnostics(retained_nodes, G_sub))
+		# 	return G_sub, params, len(retained_nodes)
 
 		retained_nodes = set()
 		all_sampled_anchors = set()
