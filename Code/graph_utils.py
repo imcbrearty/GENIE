@@ -5118,24 +5118,32 @@ class SpectralProductSampler:
 			if over:
 				continue
 
-			mult_a = np.clip(self.tau_A[idx_a] / self.mean_tau_A, 0.5, 3.0)
-			mult_b = np.clip(self.tau_B[idx_b] / self.mean_tau_B, 0.5, 3.0)
-			mult_a *= 2.5 if mask == 1 else 1.0
-			mult_b *= 2.5 if mask == 1 else 1.0
+			# mult_a = np.clip(self.tau_A[idx_a] / self.mean_tau_A, 0.5, 3.0)
+			# mult_b = np.clip(self.tau_B[idx_b] / self.mean_tau_B, 0.5, 3.0)
+			# mult_a *= 2.5 if mask == 1 else 1.0
+			# mult_b *= 2.5 if mask == 1 else 1.0
 
+			# damp_a = 1.0 / np.sqrt(1.0 + use_A[idx_a])
+			# damp_b = 1.0 / np.sqrt(1.0 + use_B[idx_b])
+			# # cap_a = min(max(1, int(round(k_base * ratio_a * mult_a * damp_a))), dynamic_max_degree)
+			# # cap_b = min(max(1, int(round(k_base * ratio_b * mult_b * damp_b))), dynamic_max_degree)
+			# # cap_a = min(dynamic_max_degree, max(1, int(round(
+			# #     k_base * np.clip(np.sqrt(n_b / max(n_a, 1)), 0.4, 2.0) * mult_a * damp_a
+			# # ))))
+			# # cap_b = min(dynamic_max_degree, max(3, int(round(
+			# #     k_base * np.clip(np.sqrt(n_a / max(n_b, 1)), 1.5, 6.0) * mult_b * damp_b
+			# # ))))
+			# cap_a = min(dynamic_max_degree, max(2, int(round(2 * mult_a * damp_a))))
+			# cap_b = min(dynamic_max_degree, max(4, int(round(8 * mult_b * damp_b))))
+
+			mult_a = np.clip(self.tau_A[idx_a] / self.mean_tau_A, 0.5, 2.0)
+			mult_b = np.clip(self.tau_B[idx_b] / self.mean_tau_B, 0.5, 2.0)
+			# no ×2.5
 			damp_a = 1.0 / np.sqrt(1.0 + use_A[idx_a])
 			damp_b = 1.0 / np.sqrt(1.0 + use_B[idx_b])
-			# cap_a = min(max(1, int(round(k_base * ratio_a * mult_a * damp_a))), dynamic_max_degree)
-			# cap_b = min(max(1, int(round(k_base * ratio_b * mult_b * damp_b))), dynamic_max_degree)
-			# cap_a = min(dynamic_max_degree, max(1, int(round(
-			#     k_base * np.clip(np.sqrt(n_b / max(n_a, 1)), 0.4, 2.0) * mult_a * damp_a
-			# ))))
-			# cap_b = min(dynamic_max_degree, max(3, int(round(
-			#     k_base * np.clip(np.sqrt(n_a / max(n_b, 1)), 1.5, 6.0) * mult_b * damp_b
-			# ))))
 			cap_a = min(dynamic_max_degree, max(2, int(round(2 * mult_a * damp_a))))
 			cap_b = min(dynamic_max_degree, max(4, int(round(8 * mult_b * damp_b))))
-		
+			
 
 			factor_order = [('A', unvisited_A, cap_a), ('B', unvisited_B, cap_b)]
 			random.shuffle(factor_order)
