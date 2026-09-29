@@ -5069,6 +5069,7 @@ class SpectralProductSampler:
 		# shuffled_anchors = list(anchors)
 		# random.shuffle(shuffled_anchors)
 
+		n_a, n_b = len(self.nodes_A), len(self.nodes_B)
 		use_A = np.zeros(len(self.nodes_A), dtype=np.int32)
 		use_B = np.zeros(len(self.nodes_B), dtype=np.int32)
 		for a, b in retained_nodes:
@@ -5085,8 +5086,8 @@ class SpectralProductSampler:
 		spectral_mask = spectral_mask[order]
 
 
-		ratio_a = np.sqrt(len(self.nodes_A) / len(self.nodes_B))
-		ratio_b = np.sqrt(len(self.nodes_B) / len(self.nodes_A))
+		# ratio_a = np.sqrt(len(self.nodes_A) / len(self.nodes_B))
+		# ratio_b = np.sqrt(len(self.nodes_B) / len(self.nodes_A))
 
 		n_spec_nodes = 0 if n_spec_nodes is None else int(n_spec_nodes)
 		for (a, b), mask in zip(shuffled_anchors, spectral_mask):
@@ -5124,9 +5125,17 @@ class SpectralProductSampler:
 
 			damp_a = 1.0 / np.sqrt(1.0 + use_A[idx_a])
 			damp_b = 1.0 / np.sqrt(1.0 + use_B[idx_b])
-			cap_a = min(max(1, int(round(k_base * ratio_a * mult_a * damp_a))), dynamic_max_degree)
-			cap_b = min(max(1, int(round(k_base * ratio_b * mult_b * damp_b))), dynamic_max_degree)
-
+			# cap_a = min(max(1, int(round(k_base * ratio_a * mult_a * damp_a))), dynamic_max_degree)
+			# cap_b = min(max(1, int(round(k_base * ratio_b * mult_b * damp_b))), dynamic_max_degree)
+			# cap_a = min(dynamic_max_degree, max(1, int(round(
+			#     k_base * np.clip(np.sqrt(n_b / max(n_a, 1)), 0.4, 2.0) * mult_a * damp_a
+			# ))))
+			# cap_b = min(dynamic_max_degree, max(3, int(round(
+			#     k_base * np.clip(np.sqrt(n_a / max(n_b, 1)), 1.5, 6.0) * mult_b * damp_b
+			# ))))
+			cap_a = min(dynamic_max_degree, max(2, int(round(2 * mult_a * damp_a))))
+			cap_b = min(dynamic_max_degree, max(4, int(round(8 * mult_b * damp_b))))
+		
 
 			factor_order = [('A', unvisited_A, cap_a), ('B', unvisited_B, cap_b)]
 			random.shuffle(factor_order)
