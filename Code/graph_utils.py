@@ -4882,6 +4882,14 @@ class SpectralProductSampler:
 			tree_A = cKDTree(coords_A)
 			tree_B = cKDTree(coords_B)
 
+			k_min = min(2, n_b)
+			if k_min > 0:
+			    _, nn_B = tree_B.query(coords_A, k=k_min)
+			    nn_B = np.atleast_2d(nn_B)
+			    for i in range(n_a):
+			        for j in np.atleast_1d(nn_B[i]):
+			            anchors.add((self.nodes_A[i], self.nodes_B[int(j)]))
+			
 			dists_self_A, _ = tree_A.query(coords_A, k=min(k_local_scale, n_a))
 			dists_self_B, _ = tree_B.query(coords_B, k=min(k_local_scale, n_b))
 			if dists_self_A.ndim == 1: dists_self_A = dists_self_A[:, None]
@@ -4904,13 +4912,23 @@ class SpectralProductSampler:
 				k_base_a = int(np.floor(k_per_a))
 				p_extra_a = k_per_a - k_base_a
 
-				k_cand_b = min(int(np.clip(k_local_scale * 3 * np.sqrt(n_b / max(1, n_a)), 20, n_b)), n_b)
-				dists_B, indices_B = tree_B.query(coords_A, k=k_cand_b)
-				if dists_B.ndim == 1: dists_B, indices_B = dists_B[:, None], indices_B[:, None]
+				# k_cand_b = min(int(np.clip(k_local_scale * 3 * np.sqrt(n_b / max(1, n_a)), 20, n_b)), n_b)
+				# dists_B, indices_B = tree_B.query(coords_A, k=k_cand_b)
+				# if dists_B.ndim == 1: dists_B, indices_B = dists_B[:, None], indices_B[:, None]
 
-				scaled_dists_B = dists_B / spatial_extent
-				bw_ab = np.median(scaled_dists_B) + 1e-5
-				raw_w_ab = np.exp(- (scaled_dists_B**2) / (2 * (bw_ab**2)))
+				# scaled_dists_B = dists_B / spatial_extent
+				# bw_ab = np.median(scaled_dists_B) + 1e-5
+				# raw_w_ab = np.exp(- (scaled_dists_B**2) / (2 * (bw_ab**2)))
+
+				k_cand_b = min(max(8, k_local_scale), n_b)
+				dists_B, indices_B = tree_B.query(coords_A, k=k_cand_b)
+				if dists_B.ndim == 1:
+				    dists_B, indices_B = dists_B[:, None], indices_B[:, None]
+				k_sig = min(4, k_cand_b)
+				sig_ab = np.maximum(dists_B[:, k_sig - 1], 1e-5)[:, None]
+				raw_w_ab = np.exp(-0.5 * (dists_B / sig_ab) ** 2)
+
+
 				joint_d_ab = (density_A[:, None] * density_B[indices_B]) ** density_equalization_gamma
 
 				eq_w_ab = np.nan_to_num(raw_w_ab / np.maximum(joint_d_ab, 1e-8), nan=0.0)
@@ -4957,13 +4975,22 @@ class SpectralProductSampler:
 				k_base_b = int(np.floor(k_per_b))
 				p_extra_b = k_per_b - k_base_b
 
+				# k_cand_a = min(int(np.clip(k_local_scale * 3 * np.sqrt(n_a / max(1, n_b)), 20, n_a)), n_a)
+				# dists_A, indices_A = tree_A.query(coords_B, k=k_cand_a)
+				# if dists_A.ndim == 1: dists_A, indices_A = dists_A[:, None], indices_A[:, None]
+
+				# scaled_dists_A = dists_A / spatial_extent
+				# bw_ba = np.median(scaled_dists_A) + 1e-5
+				# raw_w_ba = np.exp(- (scaled_dists_A**2) / (2 * (bw_ba**2)))
+
 				k_cand_a = min(int(np.clip(k_local_scale * 3 * np.sqrt(n_a / max(1, n_b)), 20, n_a)), n_a)
 				dists_A, indices_A = tree_A.query(coords_B, k=k_cand_a)
-				if dists_A.ndim == 1: dists_A, indices_A = dists_A[:, None], indices_A[:, None]
-
-				scaled_dists_A = dists_A / spatial_extent
-				bw_ba = np.median(scaled_dists_A) + 1e-5
-				raw_w_ba = np.exp(- (scaled_dists_A**2) / (2 * (bw_ba**2)))
+				if dists_A.ndim == 1:
+				    dists_A, indices_A = dists_A[:, None], indices_A[:, None]
+				k_sig = min(4, k_cand_a)
+				sig_ba = np.maximum(dists_A[:, k_sig - 1], 1e-5)[:, None]
+				raw_w_ba = np.exp(-0.5 * (dists_A / sig_ba) ** 2)
+				
 				joint_d_ba = (density_B[:, None] * density_A[indices_A]) ** density_equalization_gamma
 
 				eq_w_ba = np.nan_to_num(raw_w_ba / np.maximum(joint_d_ba, 1e-8), nan=0.0)
