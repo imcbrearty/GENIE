@@ -782,7 +782,8 @@ class BipartiteGraphOperator(MessagePassing):
 
 		# m_P (K) + m_S (K) + hole (K) + log_cov (1)
 		# self.support_feat_dim = 3 * n_kernels + 1
-		self.support_feat_dim = 5 * n_kernels + 1
+		# self.support_feat_dim = 5 * n_kernels + 1
+		support_feat_dim = 5 * n_kernels + 2
 		
 		# self.support_gate = nn.Sequential(
 		#	 nn.Linear(self.support_feat_dim, 16), nn.PReLU(),
@@ -922,28 +923,16 @@ class BipartiteGraphOperator(MessagePassing):
 		hole = scatter((1.0 - a_any) * w, src, dim=0, dim_size=M, reduce="sum") / cov.clamp(min=1e-5)
 		
 		log_cov = torch.log1p(cov.sum(1, keepdim=True))
-		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)
+		# qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim = -1)   # 2*K + 4
+		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5*K + 1
+		
+		n_hit = scatter((a_any > 0.05).float(), src, dim=0, dim_size=M, reduce="sum")
+		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov, torch.log1p(n_hit)), dim=-1)  # 5K+2
+		qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim=-1)  # 2K+4
 
-		# qual = torch.cat((q_p, q_s, c_p[:, :1], c_s[:, :1], hole[:, :1], log_cov), dim=-1)
-
-		qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim = -1)   # 2*K + 4
-			
-		# qual = torch.cat((q_p, q_s, log_cov), dim=-1)		  # 2*K + 1
-		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5*K + 1
-					
 		deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
 		hard = (deg > 0).to(inpt.dtype)
 		pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
-
-
-		# hit = (a_any > 0.05).float()					  # or 0.01
-		# n_hit = scatter(hit, src, dim=0, dim_size=M, reduce="sum")   # (M, 1)
-		# # optional soft
-		# n_hit_soft = scatter(a_any, src, dim=0, dim_size=M, reduce="sum")
-		
-		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov, n_hit), dim=-1)
-		# # support_feat_dim = 5*K + 2
-		# # export + hard*gate → 5*K + 3
 
 		gate = self.support_gate(qual)
 		out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
@@ -1034,7 +1023,7 @@ else:
 	
 	class SpatialAggregation(MessagePassing):
 		def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel,
-					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=17):
+					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=18):
 			super(SpatialAggregation, self).__init__(aggr='mean')
 	
 			self.zero_offsets = zero_offsets
@@ -1399,7 +1388,7 @@ class SpaceTimeAttention(MessagePassing):
 	"""
 
 	def __init__(self, inpt_dim, out_channels, n_dim=4, n_latent=16, embed_dim=10,
-				 n_heads=5, support_dim=17, scale_rel=scale_rel, scale_time=scale_time):
+				 n_heads=5, support_dim=18, scale_rel=scale_rel, scale_time=scale_time):
 		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
 
 		self.n_heads = n_heads
@@ -1668,7 +1657,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		ndim_mask=1,
 		embed_dim=10,
 		n_gammas=3, # 4
-		support_dim=17,
+		support_dim=18,
 		baseline_gate=0.001, # 0.01
 	):
 		super(BipartiteGraphReadOutOperator, self).__init__()
@@ -1802,7 +1791,7 @@ class DataAggregationAssociation(nn.Module):
 	Replaces DataAggregationAssociationPhase with modular, per-layer gamma learning.
 	"""
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_latent=30, use_absolute_pos = True,
-				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 17, use_embedding = True, use_offsets = True):
+				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 18, use_embedding = True, use_offsets = True):
 		super().__init__()
 
 		# Input: Unpooled Features (s) + Encoder Latents (x_latent) + Mask + Source Mask (mask_out_1)
