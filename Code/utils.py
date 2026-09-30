@@ -1961,44 +1961,49 @@ def compute_source_labels(
 
 
 
-def compute_pick_labels(xq_src, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, radius_frac = 0.5, mix_ratio = 0.3, sig_x = 15e3, sig_t = 6.5, use_flattening = False): # can expand kernel widths to other size if prefered
+def compute_pick_labels(xq_src, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, radius_frac = 0.5, mix_ratio = 0.3, sig_x = 15e3, sig_t = 6.5, use_flattening = False, device = 'cpu'): # can expand kernel widths to other size if prefered
 
 	iz = np.where(source_pick[:,1] > -1.0)[0]
-	lbl_trgt = torch.zeros((xq_src_cart.shape[0], source_pick.shape[0], 2)).to(device)
+	lbl_trgt = torch.zeros((xq_src.shape[0], source_pick.shape[0], 2)).to(device)
+	if len(iz) == 0:
+	    return lbl_trgt
+	
 	src_pick_indices = source_pick[iz,1].astype('int')
 	xq_src_cart = ftrns1(xq_src)
 	src_slice_cart = ftrns1(src_slice[src_pick_indices,0:3])
 	src_slice_t = src_slice[src_pick_indices,3].reshape(-1,1)
 	
-	inside_interior = ((src_slice[src_pick_indices,0] <= lat_range_interior[1])*(src_slice[src_pick_indices,0] >= lat_range_interior[0])*(src_slice[src_pick_indices,1] <= lon_range_interior[1])*(src_slice[src_pick_indices,1] >= lon_range_interior[0]))
+	inside_interior = ((src_slice[src_pick_indices,0] < lat_range_interior[1])*(src_slice[src_pick_indices,0] > lat_range_interior[0])*(src_slice[src_pick_indices,1] < lon_range_interior[1])*(src_slice[src_pick_indices,1] > lon_range_interior[0]))
+	inside_interior_query = ((xq_src[:,0] < lat_range_interior[1])*(xq_src[:,0] > lat_range_interior[0])*(xq_src[:,1] < lon_range_interior[1])*(xq_src[:,1] > lon_range_interior[0]))
 
-	if len(iz) > 0:
+	# if len(iz) > 0:
 
-		if use_flattening == False: ## Use Gaussian labels
-			d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, src_slice_cart)**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice_t)**2)/(sig_t**2))).to(device)
+	if use_flattening == False: ## Use Gaussian labels
+		d = torch.Tensor(inside_interior_query.reshape(-1,1)*inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, src_slice_cart)**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice_t)**2)/(sig_t**2))).to(device)
 
-		else: ## Use Box-cars embedded in Gaussians
+	else: ## Use Box-cars embedded in Gaussians
 
-			dist_val = pd(xq_src_cart, src_slice_cart)
-			mask_dist = dist_val > radius_frac*sig_x
-			val_dist = mask_dist*(dist_val - mask_dist*(radius_frac*sig_x)) ## If within radius, this maps to zero; else
+		dist_val = pd(xq_src_cart, src_slice_cart)
+		mask_dist = dist_val > radius_frac*sig_x
+		val_dist = mask_dist*(dist_val - mask_dist*(radius_frac*sig_x)) ## If within radius, this maps to zero; else
 
-			dist_t = pd(xq_src_t.reshape(-1,1), src_slice_t)
-			mask_t = dist_t > radius_frac*sig_t
-			val_t = mask_t*(dist_t - mask_t*(radius_frac*sig_t))
+		dist_t = pd(xq_src_t.reshape(-1,1), src_slice_t)
+		mask_t = dist_t > radius_frac*sig_t
+		val_t = mask_t*(dist_t - mask_t*(radius_frac*sig_t))
 
-			d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(val_dist**2)/(sig_x**2))*np.exp(-0.5*(val_t**2)/(sig_t**2))).to(device)
+		d = torch.Tensor(inside_interior_query.reshape(-1,1)*inside_interior.reshape(1,-1)*np.exp(-0.5*(val_dist**2)/(sig_x**2))*np.exp(-0.5*(val_t**2)/(sig_t**2))).to(device)
 
-			# if mix_ratio > 0:
-			# 	## Mix the Gaussian and box car inside the region
-			# 	# d[(1 - mask_dist)*(1 - mask_t)] = ((1.0 - mix_ratio)*d + mix_ratio*torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device))[(1 - mask_dist)*(1 - mask_t)]
-			# 	d[(1 - mask_dist)*(1 - mask_t)] = d[(1 - mask_dist)*(1 - mask_t)] + mix_ratio*torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)[(1 - mask_dist)*(1 - mask_t)]
-			# 	d = d/(1.0 + mix_ratio)
-			# 	assert(d.amax() <= 1.0)
+		# if mix_ratio > 0:
+		# 	## Mix the Gaussian and box car inside the region
+		# 	# d[(1 - mask_dist)*(1 - mask_t)] = ((1.0 - mix_ratio)*d + mix_ratio*torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device))[(1 - mask_dist)*(1 - mask_t)]
+		# 	d[(1 - mask_dist)*(1 - mask_t)] = d[(1 - mask_dist)*(1 - mask_t)] + mix_ratio*torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)[(1 - mask_dist)*(1 - mask_t)]
+		# 	d = d/(1.0 + mix_ratio)
+		# 	assert(d.amax() <= 1.0)
 
-		lbl_trgt[:,iz,0] = d*torch.Tensor((source_pick[iz,0] == 0)).to(device).float()
-		lbl_trgt[:,iz,1] = d*torch.Tensor((source_pick[iz,0] == 1)).to(device).float()
+	lbl_trgt[:,iz,0] = d*torch.Tensor((source_pick[iz,0] == 0)).to(device).float()
+	lbl_trgt[:,iz,1] = d*torch.Tensor((source_pick[iz,0] == 1)).to(device).float()
 
+	
 	return lbl_trgt
 
 
