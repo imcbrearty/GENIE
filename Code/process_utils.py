@@ -2564,7 +2564,7 @@ class TopKEmbeddingEngine:
         ok = local >= 0
         times, local, phases = times[ok], local[ok], phases[ok]
 
-        scale_window = 2.0
+        scale_window = 1.0
         # t_keep = 40.0   # seconds; 2nd/3rd picks stored out to ±t_keep
         num_extra = int(np.ceil(scale_window * 3.0 * self.sig_t / self.dt))
 
