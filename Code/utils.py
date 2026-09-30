@@ -1435,7 +1435,7 @@ def reflect_bounds(val, low, high):
 
 #     return new_lat, new_lon, new_depth, new_t
 
-def perturb_wgs84(
+def perturb_wgs841(
     base_lat_deg,
     base_lon_deg,
     base_depth_m,
@@ -1606,6 +1606,85 @@ def decompose_error_ellipsoid(cov_raw, scale_val1, scale_val2, scale_factor, dt0
 
 
 
+def _direct_sphere(lat_deg, lon_deg, dist_m, az_rad, R):
+    φ1 = np.radians(lat_deg)
+    λ1 = np.radians(lon_deg)
+    δ = np.divide(dist_m, R, out=np.zeros_like(dist_m, dtype=float), where=R > 0)
+    sinφ1, cosφ1 = np.sin(φ1), np.cos(φ1)
+    sinδ, cosδ = np.sin(δ), np.cos(δ)
+    sinaz, cosaz = np.sin(az_rad), np.cos(az_rad)
+    sinφ2 = np.clip(sinφ1 * cosδ + cosφ1 * sinδ * cosaz, -1.0, 1.0)
+    φ2 = np.arcsin(sinφ2)
+    λ2 = λ1 + np.arctan2(sinaz * sinδ * cosφ1, cosδ - sinφ1 * sinφ2)
+    return np.degrees(φ2), np.degrees(λ2)
+
+def perturb_wgs84(
+    base_lat_deg,
+    base_lon_deg,
+    base_depth_m,
+    base_t_s,
+    src_x_kernel_m,
+    src_depth_kernel_m,
+    src_t_kernel,
+    lat_range,
+    lon_range,
+    depth_range,
+    time_shift_range,
+    is_global_lon=True,
+    sampling_mode="normal",
+    clip_sigma=2.0,
+    a=6378137.0,
+    e=8.18191908426215e-2,
+):
+    n_pts = len(base_lat_deg)
+    if n_pts == 0:
+        return np.empty(0), np.empty(0), np.empty(0), np.empty(0)
+    half_t_window = time_shift_range / 2.0
+
+    if sampling_mode == "normal":
+        dE = np.random.normal(0, src_x_kernel_m, size=n_pts)
+        dN = np.random.normal(0, src_x_kernel_m, size=n_pts)
+        dz = np.random.normal(0, src_depth_kernel_m, size=n_pts)
+        dt = np.random.normal(0, src_t_kernel, size=n_pts)
+    elif sampling_mode == "clipped_normal":
+        max_x = clip_sigma * src_x_kernel_m
+        max_z = clip_sigma * src_depth_kernel_m
+        max_t = clip_sigma * src_t_kernel
+        dE = np.clip(np.random.normal(0, src_x_kernel_m, size=n_pts), -max_x, max_x)
+        dN = np.clip(np.random.normal(0, src_x_kernel_m, size=n_pts), -max_x, max_x)
+        dz = np.clip(np.random.normal(0, src_depth_kernel_m, size=n_pts), -max_z, max_z)
+        dt = np.clip(np.random.normal(0, src_t_kernel, size=n_pts), -max_t, max_t)
+    elif sampling_mode == "uniform":
+        dE = np.random.uniform(-src_x_kernel_m, src_x_kernel_m, size=n_pts)
+        dN = np.random.uniform(-src_x_kernel_m, src_x_kernel_m, size=n_pts)
+        dz = np.random.uniform(-src_depth_kernel_m, src_depth_kernel_m, size=n_pts)
+        dt = np.random.uniform(-src_t_kernel, src_t_kernel, size=n_pts)
+    else:
+        raise ValueError(sampling_mode)
+
+    dist = np.hypot(dE, dN)
+    az = np.arctan2(dE, dN)
+
+    # local Gaussian-curvature radius on WGS84 (better than using `a` alone)
+    φ = np.radians(base_lat_deg)
+    sinφ = np.sin(φ)
+    one_e2s = 1.0 - e * e * sinφ * sinφ
+    M = a * (1.0 - e * e) / one_e2s ** 1.5   # meridian
+    N = a / np.sqrt(one_e2s)                 # prime vertical
+    R = np.sqrt(M * N)
+
+    new_lat, new_lon = _direct_sphere(base_lat_deg, base_lon_deg, dist, az, R)
+
+    if is_global_lon:
+        new_lat = np.clip(new_lat, -90.0, 90.0)
+        new_lon = (new_lon + 180.0) % 360.0 - 180.0
+    else:
+        new_lon = reflect_bounds(new_lon, lon_range[0], lon_range[1])
+        new_lat = reflect_bounds(new_lat, lat_range[0], lat_range[1])
+
+    new_depth = reflect_bounds(base_depth_m + dz, depth_range[0], depth_range[1])
+    new_t = reflect_bounds(base_t_s + dt, -half_t_window, half_t_window)
+    return new_lat, new_lon, new_depth, new_t
 
 
 
