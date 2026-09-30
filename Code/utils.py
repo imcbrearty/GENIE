@@ -1900,26 +1900,90 @@ def sample_random_queries(
 # 	return x_src_query, tq_sample
 
 
-def compute_pick_labels(xq_src_cart, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, radius_frac = 0.5, mix_ratio = 0.3, sig_x = 15e3, sig_t = 6.5, use_flattening = False): # can expand kernel widths to other size if prefered
+
+def compute_source_labels(
+	x_query, x_query_t, src_x, src_t, src_spatial_kernel, src_t_kernel, ftrns1
+):
+	"""Computes Gaussian source probability labels for spatio-temporal query
+
+	points.
+
+	Parameters
+	----------
+	x_query : np.ndarray
+		Query locations in LLA coordinates [N_query, 3].
+	x_query_t : np.ndarray
+		Query timestamps [N_query].
+	src_x : np.ndarray
+		Source locations in LLA coordinates [N_src, 3].
+	src_t : np.ndarray
+		Source origin times [N_src].
+	src_spatial_kernel : float
+		Standard deviation for spatial Gaussian decay (in Cartesian units).
+	src_t_kernel : float
+		Standard deviation for temporal Gaussian decay (in seconds).
+	ftrns1 : callable
+		Projection function from LLA -> 3D Cartesian coordinates.
+
+	Returns
+	-------
+	np.ndarray
+		Maximum Gaussian label value for each query point of shape [N_query, 1].
+	"""
+	if len(src_x) == 0:
+		return np.zeros((len(x_query), 1))
+
+	# Project coordinates to Cartesian space for metric distance calculation
+	x_query_cart = ftrns1(x_query)  # [N_query, 3]
+	src_x_cart = ftrns1(src_x)  # [N_src, 3]
+
+	# Spatial Gaussian weight: exp(-0.5 * ||x_q - x_s||^2 / sigma_x^2)
+	spatial_dist_sq = (
+		(x_query_cart[:, None, :] - src_x_cart[None, :, :]) ** 2
+	).sum(axis=2)
+	spatial_weight = np.exp(-0.5 * (spatial_dist_sq / (src_spatial_kernel**2)))
+
+	# Temporal Gaussian weight: exp(-0.5 * (t_q - t_s)^2 / sigma_t^2)
+	time_diff_sq = (x_query_t.reshape(-1, 1) - src_t.reshape(1, -1)) ** 2
+	temporal_weight = np.exp(-0.5 * (time_diff_sq / (src_t_kernel**2)))
+
+	# Combined space-time label (max value across all active sources)
+	labels = (spatial_weight * temporal_weight).max(axis=1, keepdims=True)
+	return labels
+
+
+
+
+
+
+
+
+
+
+
+def compute_pick_labels(xq_src, xq_src_t, source_pick, src_slice, lat_range_interior, lon_range_interior, ftrns1, radius_frac = 0.5, mix_ratio = 0.3, sig_x = 15e3, sig_t = 6.5, use_flattening = False): # can expand kernel widths to other size if prefered
 
 	iz = np.where(source_pick[:,1] > -1.0)[0]
 	lbl_trgt = torch.zeros((xq_src_cart.shape[0], source_pick.shape[0], 2)).to(device)
 	src_pick_indices = source_pick[iz,1].astype('int')
-
+	xq_src_cart = ftrns1(xq_src)
+	src_slice_cart = ftrns1(src_slice[src_pick_indices,0:3])
+	src_slice_t = src_slice[src_pick_indices,3].reshape(-1,1)
+	
 	inside_interior = ((src_slice[src_pick_indices,0] <= lat_range_interior[1])*(src_slice[src_pick_indices,0] >= lat_range_interior[0])*(src_slice[src_pick_indices,1] <= lon_range_interior[1])*(src_slice[src_pick_indices,1] >= lon_range_interior[0]))
 
 	if len(iz) > 0:
 
 		if use_flattening == False: ## Use Gaussian labels
-			d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))**2)/(sig_t**2))).to(device)
+			d = torch.Tensor(inside_interior.reshape(1,-1)*np.exp(-0.5*(pd(xq_src_cart, src_slice_cart)**2)/(sig_x**2))*np.exp(-0.5*(pd(xq_src_t.reshape(-1,1), src_slice_t)**2)/(sig_t**2))).to(device)
 
 		else: ## Use Box-cars embedded in Gaussians
 
-			dist_val = pd(xq_src_cart, ftrns1(src_slice[src_pick_indices,0:3]))
+			dist_val = pd(xq_src_cart, src_slice_cart)
 			mask_dist = dist_val > radius_frac*sig_x
 			val_dist = mask_dist*(dist_val - mask_dist*(radius_frac*sig_x)) ## If within radius, this maps to zero; else
 
-			dist_t = pd(xq_src_t.reshape(-1,1), src_slice[src_pick_indices,3].reshape(-1,1))
+			dist_t = pd(xq_src_t.reshape(-1,1), src_slice_t)
 			mask_t = dist_t > radius_frac*sig_t
 			val_t = mask_t*(dist_t - mask_t*(radius_frac*sig_t))
 
