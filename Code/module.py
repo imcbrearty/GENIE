@@ -783,7 +783,7 @@ class BipartiteGraphOperator(MessagePassing):
 		# m_P (K) + m_S (K) + hole (K) + log_cov (1)
 		# self.support_feat_dim = 3 * n_kernels + 1
 		# self.support_feat_dim = 5 * n_kernels + 1
-		self.support_feat_dim = 5 * n_kernels + 2
+		self.support_feat_dim = 5 * n_kernels + 1
 		
 		# self.support_gate = nn.Sequential(
 		#	 nn.Linear(self.support_feat_dim, 16), nn.PReLU(),
@@ -926,8 +926,8 @@ class BipartiteGraphOperator(MessagePassing):
 		# qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim = -1)   # 2*K + 4
 		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5*K + 1
 		
-		n_hit = scatter((a_any > 0.05).float(), src, dim=0, dim_size=M, reduce="sum")
-		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov, torch.log1p(n_hit)), dim=-1)  # 5K+2
+		# n_hit = scatter((a_any > 0.05).float(), src, dim=0, dim_size=M, reduce="sum")
+		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5K+2
 		qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim=-1)  # 2K+4
 
 		deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
@@ -1023,7 +1023,7 @@ else:
 	
 	class SpatialAggregation(MessagePassing):
 		def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel,
-					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=18):
+					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=17):
 			super(SpatialAggregation, self).__init__(aggr='mean')
 	
 			self.zero_offsets = zero_offsets
@@ -1388,7 +1388,7 @@ class SpaceTimeAttention(MessagePassing):
 	"""
 
 	def __init__(self, inpt_dim, out_channels, n_dim=4, n_latent=16, embed_dim=10,
-				 n_heads=5, support_dim=18, scale_rel=scale_rel, scale_time=scale_time):
+				 n_heads=5, support_dim=17, scale_rel=scale_rel, scale_time=scale_time):
 		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
 
 		self.n_heads = n_heads
@@ -1657,7 +1657,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		ndim_mask=1,
 		embed_dim=10,
 		n_gammas=3, # 4
-		support_dim=18,
+		support_dim=17,
 		baseline_gate=0.001, # 0.01
 	):
 		super(BipartiteGraphReadOutOperator, self).__init__()
@@ -1791,7 +1791,7 @@ class DataAggregationAssociation(nn.Module):
 	Replaces DataAggregationAssociationPhase with modular, per-layer gamma learning.
 	"""
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_latent=30, use_absolute_pos = True,
-				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 18, use_embedding = True, use_offsets = True):
+				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 17, use_embedding = True, use_offsets = True):
 		super().__init__()
 
 		# Input: Unpooled Features (s) + Encoder Latents (x_latent) + Mask + Source Mask (mask_out_1)
