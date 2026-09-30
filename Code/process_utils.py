@@ -2695,9 +2695,274 @@ class TopKEmbeddingEngine:
 
 
 
+class TopKEmbeddingEngine1:
+    """
+    Day-scale engine: rasterize Top-K + signed residuals once, extract_inputs is a gather.
+    val shape (n_edges, 4 * 3k); blocks all@P, all@S, P@P, S@S
+    each block [gauss_0..k-1 | tanh_0..k-1 | valid_0..k-1]
+    original 4 channels == columns [0, 3k, 6k, 9k]
+    """
 
+    def __init__(
+        self,
+        P,
+        locs,
+        ind_use,
+        A_src_in_sta=None,
+        trv_times=None,
+        dt=0.19,
+        kernel_sig_t=2.84730416,
+        t_pad=100.0,
+        k_top=2,
+        device="cpu",
+        compute_device=None,
+        store_on_cpu=None,
+        sta_chunk=32,
+        scale_window=1.0,
+    ):
+        self.device = torch.device(device)
+        self.compute_device = torch.device(
+            compute_device if compute_device is not None else device
+        )
+        self.store_on_cpu = store_on_cpu
+        self.sta_chunk = int(sta_chunk)
+        self.scale_window = float(scale_window)
+        self.dt = float(dt)
+        self.sig_t = float(kernel_sig_t)
+        self.t_pad = float(t_pad)
+        self.k = int(k_top)
+        self.locs = locs
+        self.ind_use = np.asarray(ind_use)
+        self.n_stations = len(locs)
+        self.n_used = len(self.ind_use)
+        max_sta = int(self.ind_use.max()) if self.n_used else 0
+        self.sta_id_to_local = torch.full(
+            (max_sta + 1,), -1, device=self.compute_device, dtype=torch.long
+        )
+        if self.n_used:
+            self.sta_id_to_local[
+                torch.as_tensor(self.ind_use, device=self.compute_device, dtype=torch.long)
+            ] = torch.arange(self.n_used, device=self.compute_device, dtype=torch.long)
+        if A_src_in_sta is not None:
+            self.n_edges = len(A_src_in_sta[0])
+            self.edge_sta_local = torch.as_tensor(
+                A_src_in_sta[0], device=self.compute_device, dtype=torch.long
+            )
+            edge_global = self.ind_use[np.asarray(A_src_in_sta[0])]
+            src_idx = np.asarray(A_src_in_sta[1])
+            self.trv_edges_gpu = (
+                torch.as_tensor(
+                    np.asarray(trv_times)[src_idx, edge_global, :],
+                    device=self.compute_device,
+                    dtype=torch.float32,
+                )
+                if trv_times is not None
+                else None
+            )
+        else:
+            self.n_edges = 0
+            self.edge_sta_local = None
+            self.trv_edges_gpu = None
+        self.grids = None
+        self._store_device = self.compute_device
+        self.T_start = 0.0
+        self.n_bins = 1
+        self.P = np.empty((0, 5))
+        self.update_picks(P)
 
+    def _grid_nbytes(self, n_bins):
+        return 3 * self.n_used * n_bins * (3 * self.k) * 4
 
+    def _choose_store_cpu(self, n_bins):
+        if self.store_on_cpu is not None:
+            return bool(self.store_on_cpu)
+        return self._grid_nbytes(n_bins) > int(1.5e9) or (self.n_used * n_bins > 2_000_000)
+
+    def update_picks(self, P_new):
+        P_new = np.asarray(P_new)
+        empty = (
+            (3, self.n_used, 1, 3 * self.k)
+        )
+        if P_new.size == 0:
+            self.P = np.empty((0, 5))
+            self.T_start, self.n_bins = 0.0, 1
+            self.grids = torch.zeros(empty, device=self.compute_device)
+            return
+        P_f = P_new[np.isin(P_new[:, 1].astype(int), self.ind_use)]
+        if len(P_f) == 0:
+            self.P = np.empty((0, 5))
+            self.T_start, self.n_bins = 0.0, 1
+            self.grids = torch.zeros(empty, device=self.compute_device)
+            return
+        self.P = P_f[np.argsort(P_f[:, 0])]
+        raw_start = self.P[0, 0] - self.t_pad
+        self.T_start = float(np.floor(raw_start / self.dt) * self.dt)
+        T_end = float(self.P[-1, 0] + self.t_pad)
+        self.n_bins = int(np.round((T_end - self.T_start) / self.dt)) + 1
+        self._rasterize_grid()
+
+    def _splat_block(self, t_pick, sta_local, n_block, n_bins, vec, device):
+        k = self.k
+        dim_size = n_block * n_bins
+        if t_pick.numel() == 0:
+            return torch.zeros(n_block, n_bins, 3 * k, device=device)
+        nearest = torch.round((t_pick - self.T_start) / self.dt).long()
+        idx = nearest.unsqueeze(1) + vec.unsqueeze(0)
+        inb = (idx >= 0) & (idx < n_bins)
+        icl = idx.clamp(0, n_bins - 1)
+        grid_t = self.T_start + icl.to(torch.float32) * self.dt
+        signed = grid_t - t_pick.unsqueeze(1)
+        write = (icl + sta_local.unsqueeze(1) * n_bins).reshape(-1)
+        signed_f = signed.reshape(-1)
+        abs_work = torch.where(
+            inb.reshape(-1), signed.abs().reshape(-1), signed.new_tensor(1e30)
+        )
+        valid_f = inb.reshape(-1)
+        inf = abs_work.new_tensor(1e30)
+        gauss_ch, sign_ch, val_ch = [], [], []
+        sw = self.scale_window
+        for rank in range(k):
+            min_abs = torch.full((dim_size,), 1e30, device=device)
+            min_abs.scatter_reduce_(0, write, abs_work, reduce="amin")
+            won = (
+                valid_f
+                & (abs_work <= min_abs[write] + 1e-6)
+                & (min_abs[write] < 1e29)
+            )
+            signed_acc = torch.zeros(dim_size, device=device)
+            cnt = torch.zeros(dim_size, device=device)
+            signed_acc.scatter_add_(
+                0, write, torch.where(won, signed_f, signed_f.new_zeros(()))
+            )
+            cnt.scatter_add_(0, write, won.float())
+            signed_win = signed_acc / cnt.clamp(min=1.0)
+            good = (cnt > 0) & (min_abs < 1e29)
+            z = signed_win / (self.sig_t * (1.0 if rank == 0 else sw))
+            gauss_ch.append(torch.exp(-0.5 * z * z) * good.float())
+            sign_ch.append(torch.tanh(z) * good.float())
+            val_ch.append(good.float())
+            abs_work = torch.where(won, inf, abs_work)
+        feat = torch.cat(
+            [torch.stack(gauss_ch, 1), torch.stack(sign_ch, 1), torch.stack(val_ch, 1)],
+            dim=1,
+        )
+        return feat.view(n_block, n_bins, 3 * k)
+
+    def _rasterize_grid(self):
+        k, n_bins, n_used = self.k, self.n_bins, self.n_used
+        dev = self.compute_device
+        store_cpu = self._choose_store_cpu(n_bins)
+        out_dev = torch.device("cpu") if store_cpu else dev
+        num_extra = int(np.ceil(3.0 * self.scale_window * self.sig_t / self.dt))
+        vec = torch.arange(-num_extra, num_extra + 1, device=dev)
+
+        times = torch.as_tensor(self.P[:, 0], device=dev, dtype=torch.float32)
+        abs_sta = torch.as_tensor(self.P[:, 1], device=dev, dtype=torch.long)
+        phases = torch.as_tensor(self.P[:, 4], device=dev, dtype=torch.long)
+        local = self.sta_id_to_local[abs_sta.clamp(0, self.sta_id_to_local.numel() - 1)]
+        ok = local >= 0
+        times, local, phases = times[ok], local[ok], phases[ok]
+
+        grids = torch.zeros((3, n_used, n_bins, 3 * k), device=out_dev)
+        phase_masks = (
+            torch.ones_like(phases, dtype=torch.bool),
+            phases == 0,
+            phases == 1,
+        )
+
+        if store_cpu:
+            for tgt, m in enumerate(phase_masks):
+                t_all, s_all = times[m], local[m]
+                for s0 in range(0, n_used, self.sta_chunk):
+                    s1 = min(s0 + self.sta_chunk, n_used)
+                    sel = (s_all >= s0) & (s_all < s1)
+                    feat = self._splat_block(
+                        t_all[sel], s_all[sel] - s0, s1 - s0, n_bins, vec, dev
+                    )
+                    grids[tgt, s0:s1].copy_(feat.to(out_dev, non_blocking=False))
+                    del feat
+                if dev.type == "cuda":
+                    torch.cuda.empty_cache()
+        else:
+            for tgt, m in enumerate(phase_masks):
+                grids[tgt] = self._splat_block(
+                    times[m], local[m], n_used, n_bins, vec, dev
+                )
+
+        grids[:, :, 0, :] = 0
+        grids[:, :, -1, :] = 0
+        self.grids = grids
+        self._store_device = out_dev
+        if self.edge_sta_local is not None:
+            self.edge_sta_local = self.edge_sta_local.to(out_dev)
+        if self.trv_edges_gpu is not None:
+            self.trv_edges_gpu = self.trv_edges_gpu.to(out_dev)
+
+    def extract_inputs(
+        self, t0, min_t=0.0, max_t=300.0, t_win=10.0, skip_picks=False, out_device=None
+    ):
+        t0_val = float(np.squeeze(t0))
+        dev = self._store_device
+        if self.n_edges == 0 or self.trv_edges_gpu is None:
+            z = torch.zeros((0, 4 * 3 * self.k), device=dev)
+            return [[z], [(z.abs() > 0.01).float()]], [[], [], [], []]
+        p_arr = self.trv_edges_gpu[:, 0] + t0_val
+        s_arr = self.trv_edges_gpu[:, 1] + t0_val
+        p_bin = torch.round((p_arr - self.T_start) / self.dt).long()
+        s_bin = torch.round((s_arr - self.T_start) / self.dt).long()
+        valid_p = (p_bin >= 0) & (p_bin < self.n_bins)
+        valid_s = (s_bin >= 0) & (s_bin < self.n_bins)
+        p_bin = p_bin.clamp(0, self.n_bins - 1)
+        s_bin = s_bin.clamp(0, self.n_bins - 1)
+        sta = self.edge_sta_local
+        g0 = self.grids[0, sta, p_bin] * valid_p.unsqueeze(1)
+        g1 = self.grids[0, sta, s_bin] * valid_s.unsqueeze(1)
+        g2 = self.grids[1, sta, p_bin] * valid_p.unsqueeze(1)
+        g3 = self.grids[2, sta, s_bin] * valid_s.unsqueeze(1)
+        val = torch.cat((g0, g1, g2, g3), dim=-1)
+        k = self.k
+        nearest = val[:, [0, 3 * k, 6 * k, 9 * k]]
+        masks = (nearest.abs() > 0.01).float()
+        if out_device is not None:
+            val = val.to(out_device, non_blocking=True)
+            masks = masks.to(out_device, non_blocking=True)
+        picks = (
+            self._slice_picks(t0_val, min_t, max_t, t_win)
+            if not skip_picks
+            else [[], [], [], []]
+        )
+        return [[val], [masks]], picks
+
+    def _slice_picks(self, t0_val, min_t, max_t, t_win):
+        if len(self.P) == 0:
+            return [[], [], [], []]
+        t_center = t0_val + min_t + (max_t - min_t) / 2.0
+        r = float(t_win) + (max_t - min_t) / 2.0
+        p0 = np.searchsorted(self.P[:, 0], t_center - r, side="left")
+        p1 = np.searchsorted(self.P[:, 0], t_center + r, side="right")
+        sl = self.P[p0:p1]
+        if len(sl) == 0:
+            return [[], [], [], []]
+        perm = -np.ones(self.n_stations, dtype=int)
+        perm[self.ind_use] = np.arange(self.n_used)
+        idx = perm[sl[:, 1].astype(int)]
+        keep = idx >= 0
+        times, indices = sl[keep, 0], idx[keep]
+        phases, meta = sl[keep, 4], sl[keep]
+        order = np.lexsort((times, indices))
+        return [
+            [times[order] - t0_val],
+            [indices[order]],
+            [phases[order]],
+            [meta[order]],
+        ]
+
+# # full day
+# engine = TopKEmbeddingEngine(..., device="cuda", store_on_cpu=True, sta_chunk=32)
+# [Inpts, Masks], picks = engine.extract_inputs(t0, ..., out_device="cuda")
+
+# # small training window, stay on GPU
+# engine = TopKEmbeddingEngine(..., device="cuda", store_on_cpu=False)
 
 
 
