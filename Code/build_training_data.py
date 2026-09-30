@@ -119,7 +119,10 @@ n_real_fraction = train_config.get('n_real_fraction', 0.3)
 ## Base parameters (e.g., base kernel sizes if no adaptive domain)
 
 
+## Load pick data (for subnetworks)
 
+
+## Initialize training data distribution
 
 
 # Device Setup
@@ -193,6 +196,12 @@ if use_topography:
 		path_to_file + f"Grids/{name_of_project}_surface_elevation.npz"
 	)["surface_profile"]
 	tree_surface = cKDTree(surface_profile[:, 0:2])
+
+## Check if using full Earth, set target sampling bounds ##
+if (lat_range[0] <= -89.98)*(lat_range[1] >= 89.98)*(lon_range[0] <= -179.98)*(lon_range[1] >= 179.98):
+	use_global = True
+else:
+	use_global = False
 
 # -----------------------------------------------------------------------------
 # 3. Hyperparameter Kernels & Adaptive Windowing
@@ -309,6 +318,7 @@ def generate_synthetic_data(
 	spc_thresh_rand=8.0,
 	min_picks = 6,
 	min_sta = 4,
+	count_kernel = 250.0,
 	device = 'cpu'
 ):
 	"""Generates synthetic pick dataset along with target source labels for optional
@@ -475,10 +485,37 @@ def generate_synthetic_data(
 	## Subset active sources
 	tree = cKDTree(picks[:,2].reshape(-1,1))
 	if len(sources) > 0:
-		ip_list = tree.query_ball_point(np.arange(len(sources)).reshape(-1,1), r = 0)
-		count_picks = np.array([len(ip_list[j]) for j in range(len(ip_list))]) # np.array([len(ip) for ip in tree.query_ball_point(np.)])
-		count_sta = np.array([len(np.unique(picks[ip_list[j],1])) for j in range(len(ip_list))])
-		iwhere_source = np.where((count_picks >= min_picks)*(count_sta >= min_sta))[0]
+
+		use_soft_counts = True
+		if (use_soft_counts == True) and np.isfinite(count_kernel) and (count_kernel > 0):
+
+			tree_stas = cKDTree(locs_cart)
+			lp_radius = tree_stas.query_ball_point(locs_cart, r = 3.0*count_kernel)
+			# ifind_sta = np.where([len(j) > 0 for j in lp_radius])[0]
+			edge_sta = torch.Tensor(np.hstack([np.concatenate((np.array(lp_radius[j]).reshape(1,-1), j*np.ones((1, len(lp_radius[j])))), axis = 0) for j in range(len(locs))])).long()
+			dist_sta = torch.norm(torch.Tensor(locs_cart)[edge_sta[0]] - torch.Tensor(locs_cart)[edge_sta[1]], dim = 1, keepdim = True)
+			sta_mass = 1.0/scatter(torch.exp(-0.5*(dist_sta**2)/(count_kernel**2)), edge_sta[1], dim = 0, dim_size = len(locs_cart), reduce = 'sum').cpu().detach().numpy().reshape(-1) # scatter(msg, target_indices, dim=0, dim_size=M, reduce="sum")
+
+			ip_list = tree.query_ball_point(np.arange(len(sources)).reshape(-1,1), r = 0)
+			count_picks_weight = np.array([sum(sta_mass[picks[ip_list[j],1].astype('int')]) for j in range(len(ip_list))]) # np.array([len(ip) for ip in tree.query_ball_point(np.)])
+			count_sta_weight = np.array([sum(sta_mass[np.unique(picks[ip_list[j],1]).astype('int')]) for j in range(len(ip_list))])
+			iwhere_source = np.where((count_picks_weight >= min_picks)*(count_sta_weight >= min_sta))[0]
+
+			# # K_ss among stations that actually picked this event
+			# idx = np.unique(picks[ip, 1].astype(int))
+			# X = locs_cart[idx]
+			# d2 = ((X[:, None, :] - X[None, :, :]) ** 2).sum(-1)
+			# K = np.exp(-0.5 * d2 / count_kernel**2)
+			# neff = np.linalg.solve(K + 1e-3 * np.eye(len(idx)), np.ones(len(idx))).sum()
+
+		else:
+
+			ip_list = tree.query_ball_point(np.arange(len(sources)).reshape(-1,1), r = 0)
+			count_picks = np.array([len(ip_list[j]) for j in range(len(ip_list))]) # np.array([len(ip) for ip in tree.query_ball_point(np.)])
+			count_sta = np.array([len(np.unique(picks[ip_list[j],1])) for j in range(len(ip_list))])
+			iwhere_source = np.where((count_picks >= min_picks)*(count_sta >= min_sta))[0]
+
+
 		perm_source = (-1*np.ones(len(sources))).astype('int')
 		perm_source[iwhere_source] = np.arange(len(iwhere_source))
 		source_inds = picks[:,2].astype('int')
@@ -1021,11 +1058,13 @@ if build_training_data == True:
 				active_source_bias_prob=0.5,
 				n_frac_focused_queries=0.2,
 				n_frac_random_focused=0.2,
-				src_x_kernel=10000.0,
-				src_depth_kernel=10000.0,
-				src_t_kernel=1.5,
-				src_spatial_kernel=None,
-				use_global=False,
+				src_x_kernel = src_x_kernel,
+				src_depth_kernel = src_depth_kernel,
+				src_t_kernel = src_t_kernel,
+				src_x_arv_kernel = src_x_arv_kernel,
+				src_x_arv_kernel_t = src_x_arv_kernel_t,
+				src_spatial_kernel = src_spatial_kernel,
+				use_global = use_global,
 				# **synthetic_data_kwargs,
 				min_sta_domain = 10,
 				n_samples = n_samples,
@@ -1050,6 +1089,8 @@ if build_training_data == True:
 			## Extract input features; interleave training samples
 			for i in range(n_samples):
 
+				# engine_type = [SeismicEmbeddingEngine, TopKEmbeddingEngine]
+
 				engine = SeismicEmbeddingEngine(
 					P=sample_dict['picks_%d'%i],
 					locs=locs_use,
@@ -1065,6 +1106,16 @@ if build_training_data == True:
 				)
 
 				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = engine.extract_inputs(t0 = np.array([0.0]), min_t = min_t, max_t = max_t, t_win = 2.0*kernel_sig_t)
+
+				if use_phase_types == False:
+					if use_top_k == True:
+						Inpts[0][:,12::] = 0.0
+					else:
+						Inpts[0][:,2::] = 0.0
+
+					Masks[0][:,2::] = 0.0
+					lp_phases[0] = 0*lp_phases[0]
+
 				# sample_dict['Inpts_%d'%i] = Inpts[0]
 				# sample_dict['Masks_%d'%i] = Masks[0]
 				sample_dict['Inpts_%d'%i] = Inpts[0].detach().cpu().numpy() if hasattr(Inpts[0], 'cpu') else Inpts[0]
