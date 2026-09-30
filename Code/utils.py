@@ -1689,6 +1689,120 @@ def perturb_wgs84(
 
 
 
+def sample_random_queries(
+	lp_srcs,
+	n_src_query,
+	n_frac_focused=0.2,
+	n_frac_random_focused=0.2,
+	src_x_kernel_m=5000.0,
+	src_depth_kernel_m=5000.0,
+	src_t_kernel=1.0,
+	lat_range=(-90.0, 90.0),
+	lon_range=(-180.0, 180.0),
+	depth_range=(-700000.0, 0.0),
+	time_shift_range=10.0,
+	is_global_lon=True,
+):
+	"""Generates spatial-temporal queries via uniform equal-area sampling and target perturbations."""
+	half_t_window = time_shift_range / 2.0
+
+	# 1. Fallback: If no true sources exist, reallocate true-focused to random-focused
+	if len(lp_srcs) == 0 and n_frac_focused > 0:
+		n_frac_random_focused += n_frac_focused
+		n_frac_focused = 0.0
+
+	# Calculate exact allocation counts AFTER updating fractions
+	n_focused_true = int(n_frac_focused * n_src_query)
+	n_focused_rand = int(n_frac_random_focused * n_src_query)
+	n_total_focused = n_focused_true + n_focused_rand
+
+	# 2. Background Equal-Area Sampling (Full Set)
+	sin_min = np.sin(np.radians(lat_range[0]))
+	sin_max = np.sin(np.radians(lat_range[1]))
+	
+	u_lat = np.random.uniform(sin_min, sin_max, size=n_src_query)
+	bg_lats = np.degrees(np.arcsin(np.clip(u_lat, -1.0, 1.0)))  # Safety clip
+
+	bg_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_src_query)
+	bg_depths = np.random.uniform(depth_range[0], depth_range[1], size=n_src_query)
+	bg_times = np.random.uniform(-half_t_window, half_t_window, size=n_src_query)
+
+	x_src_query = np.column_stack((bg_lats, bg_lons, bg_depths))
+	tq_sample = bg_times
+
+	if n_total_focused > 0:
+		# Pick indices to overwrite without replacement
+		ind_overwrite_all = np.random.choice(
+			n_src_query, size=n_total_focused, replace=False
+		)
+		
+		ind_overwrite_true = ind_overwrite_all[:n_focused_true]
+		ind_overwrite_rand = ind_overwrite_all[n_focused_true:]
+
+		# -------------------------------------------------------------------------
+		# 3a. Focused Perturbation around True Sources
+		# -------------------------------------------------------------------------
+		if n_focused_true > 0 and len(lp_srcs) > 0:
+			ind_sources = np.random.choice(len(lp_srcs), size=n_focused_true)
+
+			new_lat, new_lon, new_depth, new_t = perturb_wgs84(
+				base_lat_deg=lp_srcs[ind_sources, 0],
+				base_lon_deg=lp_srcs[ind_sources, 1],
+				base_depth_m=lp_srcs[ind_sources, 2],
+				base_t_s=lp_srcs[ind_sources, 3],
+				src_x_kernel_m=src_x_kernel_m,
+				src_depth_kernel_m=src_depth_kernel_m,
+				src_t_kernel=src_t_kernel,
+				lat_range=lat_range,
+				lon_range=lon_range,
+				depth_range=depth_range,
+				time_shift_range=time_shift_range,
+				is_global_lon=is_global_lon,
+			)
+
+			x_src_query[ind_overwrite_true] = np.column_stack((new_lat, new_lon, new_depth))
+			tq_sample[ind_overwrite_true] = new_t
+
+		# -------------------------------------------------------------------------
+		# 3b. Focused Perturbation around Random Background Points
+		# -------------------------------------------------------------------------
+		if n_focused_rand > 0:
+			rand_u_lat = np.random.uniform(sin_min, sin_max, size=n_focused_rand)
+			rand_center_lats = np.degrees(np.arcsin(np.clip(rand_u_lat, -1.0, 1.0)))
+			rand_center_lons = np.random.uniform(lon_range[0], lon_range[1], size=n_focused_rand)
+			rand_center_depths = np.random.uniform(depth_range[0], depth_range[1], size=n_focused_rand)
+			rand_center_times = np.random.uniform(-half_t_window, half_t_window, size=n_focused_rand)
+
+			new_lat_r, new_lon_r, new_depth_r, new_t_r = perturb_wgs84(
+				base_lat_deg=rand_center_lats,
+				base_lon_deg=rand_center_lons,
+				base_depth_m=rand_center_depths,
+				base_t_s=rand_center_times,
+				src_x_kernel_m=src_x_kernel_m,
+				src_depth_kernel_m=src_depth_kernel_m,
+				src_t_kernel=src_t_kernel,
+				lat_range=lat_range,
+				lon_range=lon_range,
+				depth_range=depth_range,
+				time_shift_range=time_shift_range,
+				is_global_lon=is_global_lon,
+			)
+
+			x_src_query[ind_overwrite_rand] = np.column_stack((new_lat_r, new_lon_r, new_depth_r))
+			tq_sample[ind_overwrite_rand] = new_t_r
+
+	return x_src_query, tq_sample
+
+
+
+
+
+
+
+
+
+
+
 
 
 
