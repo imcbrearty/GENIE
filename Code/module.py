@@ -731,7 +731,7 @@ class BipartiteGraphOperator1(MessagePassing):
 
 
 
-class BipartiteGraphOperator(MessagePassing):
+class BipartiteGraphOperator_main(MessagePassing):
 	def __init__(
 		self,
 		ndim_in,
@@ -946,6 +946,255 @@ class BipartiteGraphOperator(MessagePassing):
 		return out, support
 
 
+class BipartiteGraphOperator(MessagePassing):
+	def __init__(
+		self,
+		ndim_in,
+		ndim_out,
+		ndim_mask=4,
+		embed_dim=10,
+		n_gammas=3,
+		n_kernels=3,
+		scale_rel=scale_rel,
+		scale_time=scale_time,
+		n_phase_channels=2,
+		gate_floor=0.3,
+	):
+		super().__init__(aggr="add")
+		self.n_gammas = n_gammas
+		self.n_phase_channels = n_phase_channels
+		self.n_dist_kernels = n_kernels
+		self.gate_floor = gate_floor
+
+		init_radii = torch.logspace(-2, 0.5, steps=n_kernels)
+		self.log_kernel_radii = nn.Parameter(init_radii.log())
+		self.f_radii = nn.Linear(embed_dim, 1 + n_kernels)
+		nn.init.normal_(self.f_radii.weight, std=0.01)
+		nn.init.zeros_(self.f_radii.bias)
+		# self.r_min, self.r_max = 0.08, 4.0
+		self.register_buffer("r_min", torch.tensor(0.08))
+		self.register_buffer("r_max", torch.tensor(4.0))
+		
+
+		self.fc_edge = nn.Linear(ndim_in + 3 + n_gammas, ndim_in)
+		self.film_edge = FiLM(embed_dim, ndim_in)
+		self.act_edge = nn.PReLU()
+
+		self.fc_pos_gate = nn.Sequential(
+			nn.Linear(ndim_in + ndim_mask + 1, 32), nn.PReLU(),
+			nn.Linear(32, 1), nn.Sigmoid(),
+		)
+		self.mask_gate = nn.Sequential(
+			nn.Linear(ndim_mask, 16), nn.PReLU(),
+			nn.Linear(16, ndim_in), nn.Sigmoid(),
+		)
+
+		self.f_gamma = nn.Linear(embed_dim, 1 + n_gammas)
+		nn.init.normal_(self.f_gamma.weight, std=0.01)
+		nn.init.zeros_(self.f_gamma.bias)
+		init_spatial = torch.logspace(-2, 0.5, steps=n_gammas).reshape(1, -1)
+		self.log_gamma_base = nn.Parameter(init_spatial.log())
+
+		# m_P (K) + m_S (K) + hole (K) + log_cov (1)
+		# self.support_feat_dim = 3 * n_kernels + 1
+		# self.support_feat_dim = 5 * n_kernels + 1
+		self.support_feat_dim = 5 * n_kernels + 1
+		
+		# self.support_gate = nn.Sequential(
+		#	 nn.Linear(self.support_feat_dim, 16), nn.PReLU(),
+		#	 nn.Linear(16, 1), nn.Sigmoid(),
+		# )
+
+		# self.support_gate = nn.Sequential(
+		#	 nn.Linear(2 * n_kernels + 1, 16), nn.PReLU(),
+		#	 nn.Linear(16, 1), nn.Sigmoid(),
+		# )
+
+		# self.support_gate = nn.Sequential(
+		# 	nn.Linear(2 * n_kernels + 4, 16), nn.PReLU(),
+		# 	nn.Linear(16, 1), nn.Sigmoid(),
+		# )
+		
+		self.support_gate = nn.Sequential(
+		    nn.Linear(2 * n_kernels, 16), nn.PReLU(),
+		    nn.Linear(16, 1), nn.Sigmoid(),
+		)
+		nn.init.constant_(self.support_gate[-2].bias, -0.3)
+		
+		
+		nn.init.constant_(self.support_gate[-2].bias, -0.3)
+
+		self.norm = RMSNorm(ndim_in)
+		self.fc_out = nn.Linear(ndim_in + self.support_feat_dim, ndim_out)
+		self.act_out = nn.PReLU()
+	
+	def _ordered_scales(self, log_base, delta, r_min, r_max):
+		# log_base: (K,) or (1, K)
+		stretch = torch.exp(0.30 * torch.tanh(delta[:, :1]))
+		resid = 0.15 * torch.tanh(delta[:, 1:])
+		r = torch.exp(log_base.view(1, -1)) * stretch * torch.exp(resid)
+		gaps = F.softplus(r[:, 1:] - r[:, :-1]) + 1e-3
+		r = torch.cat((r[:, :1], r[:, :1] + gaps.cumsum(dim=1)), dim=1)
+		return r.clamp(r_min, r_max)
+	
+	def forward(self, inpt, A_src_in_edges, mask, embed_context,
+				amp=None, num_target_nodes=None):
+
+		E = A_src_in_edges.edge_index.shape[1] if A_src_in_edges.edge_index.numel() else 0
+		if num_target_nodes is not None:
+			M = num_target_nodes
+		else:
+			M = int(A_src_in_edges.edge_index[1].max().item()) + 1 if E else 0
+
+		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
+
+		# delta_r = self.f_radii(ctx)
+		# radii = torch.exp(
+		# 	self.log_kernel_radii
+		# 	+ 0.35 * torch.tanh(delta_r[:, :1]) # 0.5
+		# 	+ 0.15 * torch.tanh(delta_r[:, 1:]) # 0.2
+		# ).reshape(-1).clamp(self.r_min, self.r_max)
+		radii = self._ordered_scales(
+			self.log_kernel_radii, self.f_radii(ctx), self.r_min, self.r_max
+		)
+					
+		diff_sp = A_src_in_edges.x[:, :3]
+		norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
+		unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
+
+		delta = self.f_gamma(ctx)
+
+		g_scale = torch.exp(
+			self.log_gamma_base
+			+ 0.35 * torch.tanh(delta[:, :1])
+			+ 0.15 * torch.tanh(delta[:, 1:])
+		)
+		r_g = (1.0 / g_scale.clamp(min=1e-8).sqrt())		  # distance units
+		gaps = F.softplus(r_g[:, 1:] - r_g[:, :-1]) + 1e-3
+		r_g = torch.cat((r_g[:, :1], r_g[:, :1] + gaps.cumsum(1)), dim=1)
+		r_g = r_g.clamp(self.r_min, self.r_max)
+		gammas = 1.0 / r_g.pow(2)
+
+		# gammas = torch.exp(
+		# 	self.log_gamma_base
+		# 	+ 0.35 * torch.tanh(delta[:, :1])
+		# 	+ 0.15 * torch.tanh(delta[:, 1:])
+		# )
+		rbf = torch.exp(-torch.sqrt(gammas * norm_pos ** 2 + 1e-5))
+		geo = self.act_edge(self.film_edge(
+			self.fc_edge(torch.cat((inpt, unit_dir, rbf), dim=-1)), ctx
+		))
+
+		# sta = A_src_in_sta[0]		  # or whichever end is the station
+		# deg_sta = scatter(torch.ones_like(pos_gate), sta, dim=0, reduce="sum")
+		# w_sta = 1.0 / deg_sta[sta].clamp(min=1.0).sqrt()	# or log1p
+		# msg = w_sta * pos_gate * route * geo
+					
+		pos_gate = 0.05 + 0.90*self.fc_pos_gate(torch.cat((inpt, mask, norm_pos), dim=-1))
+		route = self.mask_gate(mask)
+		msg = pos_gate * route * geo
+
+		src = A_src_in_edges.edge_index[1]
+		stacked = scatter(msg, src, dim=0, dim_size=M, reduce="sum")
+
+		# raw unsigned Gaussians (all@P, all@S); fall back to mask if amp omitted
+		if amp is None:
+			amp = mask
+		# amp_p = amp[:, 0:1]
+		# amp_s = amp[:, 1:2]
+		# amp_any = torch.maximum(amp_p, amp_s)
+
+		# w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
+		# ev_p = scatter(pos_gate * amp_p * w, src, dim=0, dim_size=M, reduce="sum")
+		# ev_s = scatter(pos_gate * amp_s * w, src, dim=0, dim_size=M, reduce="sum")
+		# cov = scatter(w, src, dim=0, dim_size=M, reduce="sum")
+		# hole = scatter((1.0 - amp_any) * w, src, dim=0, dim_size=M, reduce="sum")
+
+		# m_p = ev_p / cov.clamp(min=1e-5)
+		# m_s = ev_s / cov.clamp(min=1e-5)
+		# h = hole / cov.clamp(min=1e-5)
+		# log_cov = torch.log1p(cov.sum(dim=1, keepdim=True))
+		# support = torch.cat((m_p, m_s, h, log_cov), dim=-1)
+
+		# deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
+		# hard = (deg > 0).to(inpt.dtype)
+		# pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
+
+		# out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
+		# gate = self.support_gate(support)
+		# out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
+		# support = torch.cat((support, hard * gate), dim=1).detach()
+		
+		w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
+		a_p, a_s = amp[:, :1], amp[:, 1:2]		  # or mask if no amp
+		a_any = torch.maximum(a_p, a_s)
+		
+		ev_p = scatter(pos_gate * a_p * w, src, dim=0, dim_size=M, reduce="sum")
+		ev_s = scatter(pos_gate * a_s * w, src, dim=0, dim_size=M, reduce="sum")
+		
+		# quality: among mass that fired (old behavior)
+		den_p = scatter((a_p * w).clamp(min=0), src, dim=0, dim_size=M, reduce="sum")
+		den_s = scatter((a_s * w).clamp(min=0), src, dim=0, dim_size=M, reduce="sum")
+		q_p = ev_p / den_p.clamp(min=1e-5)
+		q_s = ev_s / den_s.clamp(min=1e-5)
+
+		# completeness: vs full neighborhood (new, lobe detector)
+		cov = scatter(w, src, dim=0, dim_size=M, reduce="sum")
+		c_p = scatter(a_p * w, src, dim=0, dim_size=M, reduce="sum") / cov.clamp(min=1e-5)
+		c_s = scatter(a_s * w, src, dim=0, dim_size=M, reduce="sum") / cov.clamp(min=1e-5)
+		hole = scatter((1.0 - a_any) * w, src, dim=0, dim_size=M, reduce="sum") / cov.clamp(min=1e-5)
+		
+		log_cov = torch.log1p(cov.sum(1, keepdim=True))
+		# qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim = -1)   # 2*K + 4
+		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5*K + 1
+		
+		# n_hit = scatter((a_any > 0.05).float(), src, dim=0, dim_size=M, reduce="sum")
+		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5K+2
+		# qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim=-1)  # 2K+4
+
+		deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
+		hard = (deg > 0).to(inpt.dtype)
+		pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
+
+		# gate = self.support_gate(qual)
+		# out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
+		# out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
+
+		# forward
+		qual = torch.cat((q_p, q_s), dim=-1)          # (M, 2K)
+		gate = self.support_gate(qual)
+		out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
+		out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
+		# qual = cat(q_p, q_s, c_p[:, :1], c_s[:, :1])			
+
+		# n_sta = float(mask.shape[0])  # or unique station count if you have it
+		# size_feat = torch.log1p(deg) / (np.log1p(n_sta) + 1e-3)
+		
+		export = torch.cat((
+		    q_p, q_s,                 # multi-scale quality  (2K)
+		    c_p[:, :1], c_s[:, :1],   # inner completeness only
+		    hard * gate,
+		), dim=-1).detach()
+		# dim = 2K + 3   (K=3 → 9)
+
+		# out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
+		# gate = self.support_gate(support)
+		# out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
+		# support = torch.cat((support, hard * gate), dim=1).detach()
+
+		return out, export
+
+
+
+# fc_out: optional. The MLP can learn to ignore it, and it still helps separate “one station lit up” from “a neighborhood lit up.” If small-net recall is still low after this run, drop log_cov and hole from fc_out too and set support_feat_dim = 4 * n_kernels (q_p, q_s, c_p, c_s only).
+
+
+
+# hit = (a_any > 0.05).float()
+# n_hit = scatter(hit, src, dim=0, dim_size=M, reduce="sum")   # (M, 1)
+# size_feat = torch.log1p(n_hit) / (math.log1p(n_sta) + 1e-3)
+
+
 
 use_anisotropic_spatial_aggregation = False
 if use_anisotropic_spatial_aggregation == True:
@@ -1023,7 +1272,7 @@ else:
 	
 	class SpatialAggregation(MessagePassing):
 		def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel,
-					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=17):
+					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=8): # 17
 			super(SpatialAggregation, self).__init__(aggr='mean')
 	
 			self.zero_offsets = zero_offsets
@@ -1388,7 +1637,7 @@ class SpaceTimeAttention(MessagePassing):
 	"""
 
 	def __init__(self, inpt_dim, out_channels, n_dim=4, n_latent=16, embed_dim=10,
-				 n_heads=5, support_dim=17, scale_rel=scale_rel, scale_time=scale_time):
+				 n_heads=5, support_dim=8, scale_rel=scale_rel, scale_time=scale_time):
 		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
 
 		self.n_heads = n_heads
@@ -1657,7 +1906,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		ndim_mask=1,
 		embed_dim=10,
 		n_gammas=3, # 4
-		support_dim=17,
+		support_dim=8,
 		baseline_gate=0.001, # 0.01
 	):
 		super(BipartiteGraphReadOutOperator, self).__init__()
@@ -1791,7 +2040,7 @@ class DataAggregationAssociation(nn.Module):
 	Replaces DataAggregationAssociationPhase with modular, per-layer gamma learning.
 	"""
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_latent=30, use_absolute_pos = True,
-				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 17, use_embedding = True, use_offsets = True):
+				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 8, use_embedding = True, use_offsets = True):
 		super().__init__()
 
 		# Input: Unpooled Features (s) + Encoder Latents (x_latent) + Mask + Source Mask (mask_out_1)
