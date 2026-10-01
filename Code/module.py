@@ -1185,6 +1185,8 @@ class BipartiteGraphOperator(MessagePassing):
 		return out, export
 
 
+# qual = torch.cat((q_p, q_s, c_p[:, :1], c_s[:, :1]), dim=-1)  # gate: 2K+2
+
 
 # fc_out: optional. The MLP can learn to ignore it, and it still helps separate “one station lit up” from “a neighborhood lit up.” If small-net recall is still low after this run, drop log_cov and hole from fc_out too and set support_feat_dim = 4 * n_kernels (q_p, q_s, c_p, c_s only).
 
