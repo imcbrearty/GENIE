@@ -5180,6 +5180,7 @@ class SourceStationAttention(MessagePassing):
 		real_edge = (~ifake_edge)*(inot_fake_src == 1) ## Real edges for pick queries are not fake edges of both types
 		sig_p_sq, sig_s_sq = sig_p**2, sig_s**2
 
+		
 		rel_t_p = (atime[edge_index[0][real_edge]] - (tsrc_p[sindex[real_edge], stindex[edge_index[0][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
 		rel_t_p = torch.cat((torch.exp(-1.0*torch.abs(rel_t_p)/sig_p), torch.tanh(rel_t_p / sig_p)), dim = 1) # phase[edge_index[0]]
 		rel_t_s = (atime[edge_index[0][real_edge]] - (tsrc_s[sindex[real_edge], stindex[edge_index[0][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
@@ -5222,17 +5223,26 @@ class SourceStationAttention(MessagePassing):
 		scores = (queries*contexts).sum(-1)/self.scale
 		
 		## Clip degrees
-		deg = torch.clamp(degree(edge_index[1][inot_fake_src], num_nodes = len(atime)).detach(), min = 1)
+		# deg = torch.clamp(degree(edge_index[1][inot_fake_src], num_nodes = len(atime)).detach(), min = 1)
 		# temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min = 0.25, max = 2.0))[edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
-		temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min = 0.25, max = 1.5))[edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
-		temp[deg[edge_index[1]] <= 2] = 1.0 ## Stabalize temperature for low degree cases
+		# temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min = 0.25, max = 1.5))[edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
+		# temp[deg[edge_index[1]] <= 2] = 1.0 ## Stabalize temperature for low degree cases
+		
+		deg = torch.clamp(degree(edge_index[1][inot_fake_src], num_nodes=len(atime)).detach(), min=1)
+		# Compute temperature per node first
+		node_temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min=0.25, max=1.5))
+		node_temp[deg <= 2] = 1.0  # Safe 1D boolean mask on node array
+		
+		# Map to edges
+		temp = node_temp[edge_index[1]].reshape(-1, 1)
+		
 		## Add bias terms
 		scores[self_link[:,0] == 1] = scores[self_link[:,0] == 1] + self.self_bias
 		scores[ifake_edge] = scores[ifake_edge] + self.self_dummy
 
 		scores = scores / temp.sqrt()
 
-
+		scores = scores.masked_fill(ifake_edge_src.unsqueeze(-1), -1e9)
 		alpha = softmax(scores, index) # 
 
 		if self.use_dual_attention == False:
@@ -5281,9 +5291,16 @@ class SourceStationAttention(MessagePassing):
 			scores_src[ifake_edge_src] = scores_src[ifake_edge_src] + self.self_dummy_src
 			
 			# Calculate degree per SOURCE node (how many picks are linked to this source)
+			# deg_src = torch.clamp(degree(sindex, num_nodes=len(stime)).detach(), min=1)
+			# temp_src = torch.log1p(deg_src).pow(torch.clamp(self.alpha_src, min=0.25, max=1.5))[sindex].reshape(-1, 1)
+			# temp_src[deg_src[sindex] <= 2.0] = 1.0
+
+
 			deg_src = torch.clamp(degree(sindex, num_nodes=len(stime)).detach(), min=1)
-			temp_src = torch.log1p(deg_src).pow(torch.clamp(self.alpha_src, min=0.25, max=1.5))[sindex].reshape(-1, 1)
-			temp_src[deg_src[sindex] <= 2.0] = 1.0
+			node_temp_src = torch.log1p(deg_src).pow(torch.clamp(self.alpha_src, min=0.25, max=1.5))
+			node_temp_src[deg_src <= 2.0] = 1.0
+			temp_src = node_temp_src[sindex].reshape(-1, 1)
+			
 			
 			scores_src = scores_src / temp_src.sqrt()
 			alpha_src = softmax(scores_src, sindex)  # <--- Softmax grouped by SOURCE index!
