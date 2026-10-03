@@ -1274,7 +1274,7 @@ else:
 	
 	class SpatialAggregation(MessagePassing):
 		def __init__(self, in_channels, out_channels, embed_dim=10, scale_rel=scale_rel,
-					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=8): # 17
+					 n_global=5, n_hidden=30, zero_offsets=False, support_dim=9): # 17
 			super(SpatialAggregation, self).__init__(aggr='mean')
 	
 			self.zero_offsets = zero_offsets
@@ -1639,7 +1639,7 @@ class SpaceTimeAttention(MessagePassing):
 	"""
 
 	def __init__(self, inpt_dim, out_channels, n_dim=4, n_latent=16, embed_dim=10,
-				 n_heads=5, support_dim=8, scale_rel=scale_rel, scale_time=scale_time):
+				 n_heads=5, support_dim=9, scale_rel=scale_rel, scale_time=scale_time):
 		super(SpaceTimeAttention, self).__init__(node_dim=0, aggr="add")
 
 		self.n_heads = n_heads
@@ -1908,7 +1908,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		ndim_mask=1,
 		embed_dim=10,
 		n_gammas=3, # 4
-		support_dim=8,
+		support_dim=9,
 		baseline_gate=0.001, # 0.01
 	):
 		super(BipartiteGraphReadOutOperator, self).__init__()
@@ -2042,7 +2042,7 @@ class DataAggregationAssociation(nn.Module):
 	Replaces DataAggregationAssociationPhase with modular, per-layer gamma learning.
 	"""
 	def __init__(self, in_channels, out_channels, n_hidden=30, n_dim_latent=30, use_absolute_pos = True,
-				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 8, use_embedding = True, use_offsets = True):
+				 n_dim_mask=4, embed_dim=10, n_embedding = 10, support_dim = 9, use_embedding = True, use_offsets = True):
 		super().__init__()
 
 		# Input: Unpooled Features (s) + Encoder Latents (x_latent) + Mask + Source Mask (mask_out_1)
