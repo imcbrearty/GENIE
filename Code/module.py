@@ -1331,15 +1331,47 @@ else:
 
 
 class SpaceTimeDirect(nn.Module):
-	def __init__(self, inpt_dim, out_channels):
-		super(SpaceTimeDirect, self).__init__() #  "Max" aggregation.
+    def __init__(self, inpt_dim, out_channels, embed_dim=10):
+        super(SpaceTimeDirect, self).__init__()
 
-		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
-		self.activate = nn.PReLU()
+        self.fc1 = nn.Linear(inpt_dim, inpt_dim)
+        self.act1 = nn.PReLU()
 
-	def forward(self, inpts):
+        self.film = FiLM(embed_dim, inpt_dim)
 
-		return self.activate(self.f_direct(inpts))
+        self.fc2 = nn.Linear(inpt_dim, out_channels)
+        self.act2 = nn.PReLU()
+
+    def forward(self, inpts, embed_context=None):
+        h = self.act1(self.fc1(inpts))
+
+        if embed_context is not None:
+            ctx = (
+                embed_context
+                if embed_context.dim() == 2
+                else embed_context.unsqueeze(0)
+            )
+            h = self.film(h, ctx)
+
+        out = self.act2(self.fc2(h))
+        return out
+
+
+
+
+
+
+# class SpaceTimeDirect(nn.Module):
+# 	def __init__(self, inpt_dim, out_channels):
+# 		super(SpaceTimeDirect, self).__init__() #  "Max" aggregation.
+
+# 		self.f_direct = nn.Linear(inpt_dim, out_channels) # direct read-out for context coordinates.
+# 		self.activate = nn.PReLU()
+
+# 	def forward(self, inpts):
+
+# 		return self.activate(self.f_direct(inpts))
+
 
 
 
@@ -5541,11 +5573,26 @@ class GCN_Detection_Network_extended(nn.Module):
 			self.activate = lambda x: x
 
 
-		# 1. Initialize SpaceTimeDirect
-		nn.init.kaiming_normal_(self.SpaceTimeDirect.f_direct.weight, nonlinearity='leaky_relu')
-		if self.SpaceTimeDirect.f_direct.bias is not None:
-			nn.init.zeros_(self.SpaceTimeDirect.f_direct.bias)
+		# # 1. Initialize SpaceTimeDirect
+		# nn.init.kaiming_normal_(self.SpaceTimeDirect.f_direct.weight, nonlinearity='leaky_relu')
+		# if self.SpaceTimeDirect.f_direct.bias is not None:
+		# 	nn.init.zeros_(self.SpaceTimeDirect.f_direct.bias)
+
+		# Initialize SpaceTimeDirect
+		nn.init.kaiming_normal_(
+		    self.SpaceTimeDirect.fc1.weight, nonlinearity='leaky_relu'
+		)
+		if self.SpaceTimeDirect.fc1.bias is not None:
+		    nn.init.zeros_(self.SpaceTimeDirect.fc1.bias)
 		
+		nn.init.kaiming_normal_(
+		    self.SpaceTimeDirect.fc2.weight, nonlinearity='leaky_relu'
+		)
+		if self.SpaceTimeDirect.fc2.bias is not None:
+		    nn.init.zeros_(self.SpaceTimeDirect.fc2.bias)
+					
+
+
 		# 2. Layer 1 (Hidden Projection): Kaiming Normal for PReLU
 		for proj in (self.proj_soln1, self.proj_soln2):
 			nn.init.kaiming_normal_(proj[0].weight, nonlinearity='leaky_relu')
@@ -5645,7 +5692,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		x_spatial = self.SpatialAggregation3(x, embed_context, A_src if self.use_expanded == False else A_src[0], x_temp_cuda, support = support) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
 		if self.use_direct_output == True:
-			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
+			y_latent = self.SpaceTimeDirect(x_spatial, embed_context) # contains data on spatial and temporal solution at fixed nodes
 		else:
 			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, embed_context, support) # contains data on spatial and temporal solution at fixed nodes
 
@@ -5893,7 +5940,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		x_spatial = self.SpatialAggregation3(x, self.embed_context, self.A_src, x_temp_cuda, support = support) # Last spatial step. Passed to both x_src (association readout), and x (standard readout)
 		
 		if self.use_direct_output == True:
-			y_latent = self.SpaceTimeDirect(x_spatial) # contains data on spatial and temporal solution at fixed nodes
+			y_latent = self.SpaceTimeDirect(x_spatial, self.embed_context) # contains data on spatial and temporal solution at fixed nodes
 		else:
 			y_latent = self.SpaceTimeAttention(x_spatial, x_temp_cuda_cart, x_temp_cuda_cart, x_temp_cuda_t, x_temp_cuda_t, self.embed_context, support) # contains data on spatial and temporal solution at fixed nodes
 
