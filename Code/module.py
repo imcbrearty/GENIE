@@ -5017,104 +5017,6 @@ class SourceStationAttention(MessagePassing):
 		self.activate4 = nn.PReLU()
 		# self.activate5 = nn.PReLU()
 		self.device = device
-
-
-	# def forward(self, stime, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label, sig_p = None, sig_s = None): # reference k nearest spatial points
-
-	# 	n_src, n_sta, n_arv = len(stime), trv_src.shape[1], len(tpick)
-	# 	if not self.use_phase_types:
-	# 		phase_label = phase_label * 0
-
-	# 	sig_ref = sig_s if sig_s is not None else (
-	# 		1.5 * sig_p if sig_p is not None else tpick.new_tensor(self.kernel_sig_t)
-	# 	)
-	# 	sig_win = 3.0 * sig_ref.reshape(()).to(tpick.dtype)
-
-	# 	sta = ipick.view(-1).long()
-	# 	t = tpick.view(-1)
-	# 	span = (t.max() - t.min()).clamp(min=0) + 2.0 * sig_win + 1.0
-	# 	t_pack = t + sta.to(t.dtype) * span
-
-	# 	edges = radius(
-	# 		t_pack.view(-1, 1),
-	# 		t_pack.view(-1, 1),
-	# 		r=float(sig_win),
-	# 		max_num_neighbors=13,		  # 12 + self; cap inside the window
-	# 	)
-	# 	edges = add_self_loops(remove_self_loops(edges)[0], num_nodes=n_arv)[0]
-	# 	edges = edges.flip(0).contiguous()  # keep your old orientation if message assumes it
-
-	# 	n_edge = edges.shape[1]
-	# 	off = (torch.arange(n_src, device=edges.device) * n_arv).repeat_interleave(n_edge)
-	# 	edges = (edges.repeat(1, n_src) + off).long().contiguous()
-	# 	src_index = torch.arange(n_src, device=edges.device).repeat_interleave(n_edge)
-	# 	self_link = (edges[0] == edges[1]).reshape(-1, 1)
-
-	# 	ikeep = torch.where(
-	# 		(mask_arv[src_index, torch.remainder(edges[0], n_arv).long()] > 0)
-	# 		| (edges[0] == edges[1])
-	# 	)[0]
-	# 	edges = edges[:, ikeep].contiguous()
-	# 	src_index = src_index[ikeep]
-	# 	self_link = self_link[ikeep]
-
-
-	# 	if len(src_index) == 0:
-	# 		if self.use_src_pred == True:
-	# 			return torch.zeros(n_src, n_arv, self.n_phases).to(self.device), torch.zeros(n_src, self.n_dim_out_src).to(self.device)
-	# 		else:
-	# 			return torch.zeros(n_src, n_arv, self.n_phases).to(self.device)
-
-	# 	edge_dummy = torch.cat(((n_arv*n_src)*torch.ones(1,n_arv*n_src), torch.arange(n_arv*n_src).reshape(1,-1)), dim = 0).long().to(self.device)
-
-	# 	## Create n_src dummy "arrivals" to link to each source.
-	# 	if self.use_dual_attention == True: ## Is this arrival reshape correct?
-	# 		## Should add phase embedding
-	# 		arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1 + n_src, self.ndim_arv_in, device = self.device)), dim = 0)
-	# 		phase_inpt = torch.cat((torch.tile(phase_label, (n_src, 1)), 2.0*torch.ones(1 + n_src,1).to(self.device)), dim = 0)
-	# 		src_index = torch.cat((src_index, torch.arange(n_src).repeat_interleave(n_arv, dim = 0).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
-	# 		self_link = torch.cat((self_link, torch.zeros(n_arv*n_src + n_src,1).to(device)), dim = 0).float()
-	# 		edge_dummy_src = torch.cat(( (torch.arange(n_src).reshape(1,-1) + n_src*n_arv + 1), torch.arange(n_src).reshape(1,-1) ), dim = 0).long().to(device) ## Reciever nodes can be arbitrarily listed here (the features aren't used at torch.arange(n_src).reshape(1,-1))
-	# 		edges = torch.cat((edges, edge_dummy, edge_dummy_src), dim = 1).contiguous()
-
-	# 		N = n_arv*n_src + 1 + n_src # still correct?
-	# 		M = n_arv*n_src
-
-	# 	else:
-
-	# 		arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1, self.ndim_arv_in, device = self.device)), dim = 0)
-	# 		phase_inpt = torch.cat((torch.tile(phase_label, (n_src, 1)), torch.Tensor([2.0]).reshape(1,1).to(self.device)), dim = 0)
-	# 		src_index = torch.cat((src_index, torch.arange(n_src).repeat_interleave(n_arv, dim = 0).to(device)), dim = 0).long().contiguous() ## The dummy "source index"
-	# 		self_link = torch.cat((self_link, torch.zeros(n_arv*n_src,1).to(device)), dim = 0).float()
-	# 		edges = torch.cat((edges, edge_dummy), dim = 1).contiguous()
-
-	# 		N = n_arv*n_src + 1 # still correct?
-	# 		M = n_arv*n_src
-
-		
-	# 	src_ind_repeat = torch.arange(n_src).repeat_interleave(n_arv).contiguous().long().to(self.device)
-
-	# 	if self.use_src_pred == True:
-
-	# 		out_embed = self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), sig_p = sig_p, sig_s = sig_s, size = (N, M)).view(-1, self.n_latent*self.n_heads) # M is output. Taking mean over heads
-	# 		tau_base = torch.exp(self.log_tau)
-	# 		# tau_deg = tau_base * (n_arv ** 0.5)
-
-	# 		n_active = mask_arv.reshape(n_src, n_arv).sum(1).clamp(min=1.0)  # [n_src]
-	# 		tau_deg = tau_base * n_active.sqrt().view(n_src, 1, 1)
-	# 		# alpha_score = torch.softmax(self.proj_attn(out_src) / tau_deg, dim=1)
-
-	# 		out_src = self.activate_src(self.proj_src_1(out_embed)).view(n_src, n_arv, -1)
-	# 		alpha_score = torch.softmax(self.proj_attn(out_src) / tau_deg, dim = 1)
-	# 		out_src = self.proj_src_3(self.activate_src1(self.proj_src_2((alpha_score*out_src).sum(1))))
-	# 		out = self.proj_2(self.activate4(self.proj_1(out_embed)))
-	# 		return out.view(n_src, n_arv, -1), out_src ## Make sure this is correct reshape (not transposed)
-		
-	# 	else:
-
-	# 		out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), sig_p = sig_p, sig_s = sig_s, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
-
-	# 	return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
 	
 	def forward(self, stime, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label, sig_p=None, sig_s=None):
 		device = arrival.device
@@ -5219,19 +5121,7 @@ class SourceStationAttention(MessagePassing):
 		out[src_a, pick_a] = self.proj_2(self.activate4(self.proj_1(emb)))
 	
 		if self.use_src_pred:
-			# out_src_p = self.activate_src(self.proj_src_1(emb))
-			# score = self.proj_attn(out_src_p).squeeze(-1)
-			# # softmax over active picks of each source only
-			# score = score - score.max()
-			# w = torch.zeros(n_src, n_arv, device=device)
-			# w[src_a, pick_a] = score
-			# w = w.masked_fill(mask_arv <= 0, -1e9)
-			# n_active = mask_arv.reshape(n_src, n_arv).sum(1).clamp(min=1.0)
-			# tau = torch.exp(self.log_tau) * n_active.sqrt()
-			# alpha = torch.softmax(w / tau.view(n_src, 1), dim=1)
-			# buf = arrival.new_zeros(n_src, n_arv, out_src_p.size(-1))
-			# buf[src_a, pick_a] = out_src_p
-			# out_src = self.proj_src_3(self.activate_src1(self.proj_src_2((alpha.unsqueeze(-1) * buf).sum(1))))
+			
 			
 			out_src_p = self.activate_src(self.proj_src_1(emb))
 			score = self.proj_attn(out_src_p).squeeze(-1)
@@ -5366,25 +5256,20 @@ class SourceStationAttention(MessagePassing):
 			values_src[ifake_edge_src,:,:] = self.dummy_values_src # .repeat(n_fake_src, 1, 1)
 
 
-			use_previous_dual = False
-			if use_previous_dual == True:
-				scores_src = (queries_src*contexts_src).sum(-1)/self.scale
-				deg = torch.clamp(degree(sindex, num_nodes = len(stime)).detach(), min = 1)
+			# else:
 
-				temp_src = torch.log1p(deg).pow(torch.clamp(self.alpha_src, min = 0.25, max = 2.0))[sindex].reshape(-1,1) # [edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
-				temp_src[deg[sindex] <= 2.0] = 1.0
-
-				scores_src[ifake_edge_src] = scores_src[ifake_edge_src] + self.self_dummy_src
-				scores_src = scores_src / temp_src.sqrt()
-				alpha_src = softmax(scores_src, sindex)
-
-			else:
-
-				scores_src = (queries_src * contexts_src).sum(-1) / self.scale
-				scores_src[ifake_edge_src] = scores_src[ifake_edge_src] + self.self_dummy_src
-				scores_src = scores_src / temp.sqrt()		  # first-branch temp
-				alpha_src = softmax(scores_src, index)		 # same groups as alpha
-
+			# RESTORED GLOBAL SOURCE POOLING WITH DYNAMIC DEGREES:
+			scores_src = (queries_src * contexts_src).sum(-1) / self.scale
+			scores_src[ifake_edge_src] = scores_src[ifake_edge_src] + self.self_dummy_src
+			
+			# Calculate degree per SOURCE node (how many picks are linked to this source)
+			deg_src = torch.clamp(degree(sindex, num_nodes=len(stime)).detach(), min=1)
+			temp_src = torch.log1p(deg_src).pow(torch.clamp(self.alpha_src, min=0.25, max=1.5))[sindex].reshape(-1, 1)
+			temp_src[deg_src[sindex] <= 2.0] = 1.0
+			
+			scores_src = scores_src / temp_src.sqrt()
+			alpha_src = softmax(scores_src, sindex)  # <--- Softmax grouped by SOURCE index!
+			
 
 			attn_src = alpha_src.unsqueeze(-1)*values_src
 			## Now merge with the messages of the previous attention layer and aggregate
@@ -5393,6 +5278,110 @@ class SourceStationAttention(MessagePassing):
 			return merge_attn
 			
 
+
+
+	# def forward(self, stime, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label, sig_p = None, sig_s = None): # reference k nearest spatial points
+
+	# 	n_src, n_sta, n_arv = len(stime), trv_src.shape[1], len(tpick)
+	# 	if not self.use_phase_types:
+	# 		phase_label = phase_label * 0
+
+	# 	sig_ref = sig_s if sig_s is not None else (
+	# 		1.5 * sig_p if sig_p is not None else tpick.new_tensor(self.kernel_sig_t)
+	# 	)
+	# 	sig_win = 3.0 * sig_ref.reshape(()).to(tpick.dtype)
+
+	# 	sta = ipick.view(-1).long()
+	# 	t = tpick.view(-1)
+	# 	span = (t.max() - t.min()).clamp(min=0) + 2.0 * sig_win + 1.0
+	# 	t_pack = t + sta.to(t.dtype) * span
+
+	# 	edges = radius(
+	# 		t_pack.view(-1, 1),
+	# 		t_pack.view(-1, 1),
+	# 		r=float(sig_win),
+	# 		max_num_neighbors=13,		  # 12 + self; cap inside the window
+	# 	)
+	# 	edges = add_self_loops(remove_self_loops(edges)[0], num_nodes=n_arv)[0]
+	# 	edges = edges.flip(0).contiguous()  # keep your old orientation if message assumes it
+
+	# 	n_edge = edges.shape[1]
+	# 	off = (torch.arange(n_src, device=edges.device) * n_arv).repeat_interleave(n_edge)
+	# 	edges = (edges.repeat(1, n_src) + off).long().contiguous()
+	# 	src_index = torch.arange(n_src, device=edges.device).repeat_interleave(n_edge)
+	# 	self_link = (edges[0] == edges[1]).reshape(-1, 1)
+
+	# 	ikeep = torch.where(
+	# 		(mask_arv[src_index, torch.remainder(edges[0], n_arv).long()] > 0)
+	# 		| (edges[0] == edges[1])
+	# 	)[0]
+	# 	edges = edges[:, ikeep].contiguous()
+	# 	src_index = src_index[ikeep]
+	# 	self_link = self_link[ikeep]
+
+
+	# 	if len(src_index) == 0:
+	# 		if self.use_src_pred == True:
+	# 			return torch.zeros(n_src, n_arv, self.n_phases).to(self.device), torch.zeros(n_src, self.n_dim_out_src).to(self.device)
+	# 		else:
+	# 			return torch.zeros(n_src, n_arv, self.n_phases).to(self.device)
+
+	# 	edge_dummy = torch.cat(((n_arv*n_src)*torch.ones(1,n_arv*n_src), torch.arange(n_arv*n_src).reshape(1,-1)), dim = 0).long().to(self.device)
+
+	# 	## Create n_src dummy "arrivals" to link to each source.
+	# 	if self.use_dual_attention == True: ## Is this arrival reshape correct?
+	# 		## Should add phase embedding
+	# 		arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1 + n_src, self.ndim_arv_in, device = self.device)), dim = 0)
+	# 		phase_inpt = torch.cat((torch.tile(phase_label, (n_src, 1)), 2.0*torch.ones(1 + n_src,1).to(self.device)), dim = 0)
+	# 		src_index = torch.cat((src_index, torch.arange(n_src).repeat_interleave(n_arv, dim = 0).to(device), torch.arange(n_src).to(device)), dim = 0).long().contiguous()
+	# 		self_link = torch.cat((self_link, torch.zeros(n_arv*n_src + n_src,1).to(device)), dim = 0).float()
+	# 		edge_dummy_src = torch.cat(( (torch.arange(n_src).reshape(1,-1) + n_src*n_arv + 1), torch.arange(n_src).reshape(1,-1) ), dim = 0).long().to(device) ## Reciever nodes can be arbitrarily listed here (the features aren't used at torch.arange(n_src).reshape(1,-1))
+	# 		edges = torch.cat((edges, edge_dummy, edge_dummy_src), dim = 1).contiguous()
+
+	# 		N = n_arv*n_src + 1 + n_src # still correct?
+	# 		M = n_arv*n_src
+
+	# 	else:
+
+	# 		arrival_inpt = torch.cat((arrival.reshape(n_arv*n_src,-1), torch.zeros(1, self.ndim_arv_in, device = self.device)), dim = 0)
+	# 		phase_inpt = torch.cat((torch.tile(phase_label, (n_src, 1)), torch.Tensor([2.0]).reshape(1,1).to(self.device)), dim = 0)
+	# 		src_index = torch.cat((src_index, torch.arange(n_src).repeat_interleave(n_arv, dim = 0).to(device)), dim = 0).long().contiguous() ## The dummy "source index"
+	# 		self_link = torch.cat((self_link, torch.zeros(n_arv*n_src,1).to(device)), dim = 0).float()
+	# 		edges = torch.cat((edges, edge_dummy), dim = 1).contiguous()
+
+	# 		N = n_arv*n_src + 1 # still correct?
+	# 		M = n_arv*n_src
+
+		
+	# 	src_ind_repeat = torch.arange(n_src).repeat_interleave(n_arv).contiguous().long().to(self.device)
+
+	# 	if self.use_src_pred == True:
+
+	# 		out_embed = self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), sig_p = sig_p, sig_s = sig_s, size = (N, M)).view(-1, self.n_latent*self.n_heads) # M is output. Taking mean over heads
+	# 		tau_base = torch.exp(self.log_tau)
+	# 		# tau_deg = tau_base * (n_arv ** 0.5)
+
+	# 		n_active = mask_arv.reshape(n_src, n_arv).sum(1).clamp(min=1.0)  # [n_src]
+	# 		tau_deg = tau_base * n_active.sqrt().view(n_src, 1, 1)
+	# 		# alpha_score = torch.softmax(self.proj_attn(out_src) / tau_deg, dim=1)
+
+	# 		out_src = self.activate_src(self.proj_src_1(out_embed)).view(n_src, n_arv, -1)
+	# 		alpha_score = torch.softmax(self.proj_attn(out_src) / tau_deg, dim = 1)
+	# 		out_src = self.proj_src_3(self.activate_src1(self.proj_src_2((alpha_score*out_src).sum(1))))
+	# 		out = self.proj_2(self.activate4(self.proj_1(out_embed)))
+	# 		return out.view(n_src, n_arv, -1), out_src ## Make sure this is correct reshape (not transposed)
+		
+	# 	else:
+
+	# 		out = self.proj_2(self.activate4(self.proj_1(self.propagate(edges, x = (arrival_inpt, arrival_inpt[0:(n_arv*n_src)]), stime = stime, tsrc_p = trv_src[:,:,0], tsrc_s = trv_src[:,:,1], sindex = src_index, stindex = torch.tile(ipick, (n_src,)), atime = torch.tile(tpick, (n_src,)), phase = (phase_inpt, phase_inpt[0:(n_arv*n_src)]), self_link = self_link, num_queries = torch.Tensor([n_arv*n_src]).to(self.device), sig_p = sig_p, sig_s = sig_s, size = (N, M)).view(-1, self.n_latent*self.n_heads)))) # M is output. Taking mean over heads
+
+	# 	return out.view(n_src, n_arv, -1) ## Make sure this is correct reshape (not transposed)
+
+
+
+
+
+	
 		# # src isn't used. Only trv_src is needed.
 		# n_src, n_sta, n_arv = len(stime), trv_src.shape[1], len(tpick) # + 1 ## Note: adding 1 to size of arrivals!
 		# if self.use_phase_types == False:
