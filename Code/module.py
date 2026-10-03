@@ -5175,8 +5175,10 @@ class SourceStationAttention(MessagePassing):
 		
 		deg = torch.clamp(degree(edge_index[1][inot_fake_src], num_nodes=len(atime)).detach(), min=1)
 		# Compute temperature per node first
-		node_temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min=0.25, max=1.5))
-		node_temp[deg <= 2] = 1.0  # Safe 1D boolean mask on node array
+		node_temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min=0.25, max=1.5)).clamp(min=1.5)
+		# node_temp[deg <= 2] = 1.0  # Safe 1D boolean mask on node array
+		# node_temp = torch.log1p(deg).pow(self.alpha.clamp(0.25, 1.5)).clamp(min=1.5)
+		# scores = scores / node_temp[edge_index[1]].sqrt()
 		
 		# Map to edges
 		temp = node_temp[edge_index[1]].reshape(-1, 1)
