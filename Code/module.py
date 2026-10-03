@@ -1020,17 +1020,15 @@ class BipartiteGraphOperator(MessagePassing):
 		    nn.Linear(16, 1), nn.Sigmoid(),
 		)
 		nn.init.constant_(self.support_gate[-2].bias, -0.3)
-		
-		
-		nn.init.constant_(self.support_gate[-2].bias, -0.3)
 
+		
 		self.norm = RMSNorm(ndim_in)
 		self.fc_out = nn.Linear(ndim_in + self.support_feat_dim, ndim_out)
 		self.act_out = nn.PReLU()
 	
 	def _ordered_scales(self, log_base, delta, r_min, r_max):
 		# log_base: (K,) or (1, K)
-		stretch = torch.exp(0.30 * torch.tanh(delta[:, :1]))
+		stretch = torch.exp(0.35 * torch.tanh(delta[:, :1]))
 		resid = 0.15 * torch.tanh(delta[:, 1:])
 		r = torch.exp(log_base.view(1, -1)) * stretch * torch.exp(resid)
 		gaps = F.softplus(r[:, 1:] - r[:, :-1]) + 1e-3
@@ -1047,48 +1045,25 @@ class BipartiteGraphOperator(MessagePassing):
 			M = int(A_src_in_edges.edge_index[1].max().item()) + 1 if E else 0
 
 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-
-		# delta_r = self.f_radii(ctx)
-		# radii = torch.exp(
-		# 	self.log_kernel_radii
-		# 	+ 0.35 * torch.tanh(delta_r[:, :1]) # 0.5
-		# 	+ 0.15 * torch.tanh(delta_r[:, 1:]) # 0.2
-		# ).reshape(-1).clamp(self.r_min, self.r_max)
+					
 		radii = self._ordered_scales(
 			self.log_kernel_radii, self.f_radii(ctx), self.r_min, self.r_max
 		)
 					
+		# 2. Distance radii for edge RBF features (converted to gammas)
+		r_g = self._ordered_scales(
+		    self.log_gamma_base, self.f_gamma(ctx), self.r_min, self.r_max
+		)			
+		gammas = 1.0 / r_g.pow(2)
+
 		diff_sp = A_src_in_edges.x[:, :3]
 		norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim=True)
 		unit_dir = diff_sp / norm_pos.clamp(min=1e-6)
-
-		delta = self.f_gamma(ctx)
-
-		g_scale = torch.exp(
-			self.log_gamma_base
-			+ 0.35 * torch.tanh(delta[:, :1])
-			+ 0.15 * torch.tanh(delta[:, 1:])
-		)
-		r_g = (1.0 / g_scale.clamp(min=1e-8).sqrt())		  # distance units
-		gaps = F.softplus(r_g[:, 1:] - r_g[:, :-1]) + 1e-3
-		r_g = torch.cat((r_g[:, :1], r_g[:, :1] + gaps.cumsum(1)), dim=1)
-		r_g = r_g.clamp(self.r_min, self.r_max)
-		gammas = 1.0 / r_g.pow(2)
-
-		# gammas = torch.exp(
-		# 	self.log_gamma_base
-		# 	+ 0.35 * torch.tanh(delta[:, :1])
-		# 	+ 0.15 * torch.tanh(delta[:, 1:])
-		# )
+					
 		rbf = torch.exp(-torch.sqrt(gammas * norm_pos ** 2 + 1e-5))
 		geo = self.act_edge(self.film_edge(
 			self.fc_edge(torch.cat((inpt, unit_dir, rbf), dim=-1)), ctx
 		))
-
-		# sta = A_src_in_sta[0]		  # or whichever end is the station
-		# deg_sta = scatter(torch.ones_like(pos_gate), sta, dim=0, reduce="sum")
-		# w_sta = 1.0 / deg_sta[sta].clamp(min=1.0).sqrt()	# or log1p
-		# msg = w_sta * pos_gate * route * geo
 					
 		pos_gate = 0.05 + 0.90*self.fc_pos_gate(torch.cat((inpt, mask, norm_pos), dim=-1))
 		route = self.mask_gate(mask)
@@ -1100,30 +1075,6 @@ class BipartiteGraphOperator(MessagePassing):
 		# raw unsigned Gaussians (all@P, all@S); fall back to mask if amp omitted
 		if amp is None:
 			amp = mask
-		# amp_p = amp[:, 0:1]
-		# amp_s = amp[:, 1:2]
-		# amp_any = torch.maximum(amp_p, amp_s)
-
-		# w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
-		# ev_p = scatter(pos_gate * amp_p * w, src, dim=0, dim_size=M, reduce="sum")
-		# ev_s = scatter(pos_gate * amp_s * w, src, dim=0, dim_size=M, reduce="sum")
-		# cov = scatter(w, src, dim=0, dim_size=M, reduce="sum")
-		# hole = scatter((1.0 - amp_any) * w, src, dim=0, dim_size=M, reduce="sum")
-
-		# m_p = ev_p / cov.clamp(min=1e-5)
-		# m_s = ev_s / cov.clamp(min=1e-5)
-		# h = hole / cov.clamp(min=1e-5)
-		# log_cov = torch.log1p(cov.sum(dim=1, keepdim=True))
-		# support = torch.cat((m_p, m_s, h, log_cov), dim=-1)
-
-		# deg = scatter(torch.ones_like(pos_gate), src, dim=0, dim_size=M, reduce="sum")
-		# hard = (deg > 0).to(inpt.dtype)
-		# pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
-
-		# out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
-		# gate = self.support_gate(support)
-		# out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
-		# support = torch.cat((support, hard * gate), dim=1).detach()
 		
 		w = torch.exp(-norm_pos / radii.clamp(min=1e-6))
 		a_p, a_s = amp[:, :1], amp[:, 1:2]		  # or mask if no amp
@@ -1145,10 +1096,7 @@ class BipartiteGraphOperator(MessagePassing):
 		hole = scatter((1.0 - a_any) * w, src, dim=0, dim_size=M, reduce="sum") / cov.clamp(min=1e-5)
 		
 		log_cov = torch.log1p(cov.sum(1, keepdim=True))
-		# qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim = -1)   # 2*K + 4
-		# support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5*K + 1
-		
-		# n_hit = scatter((a_any > 0.05).float(), src, dim=0, dim_size=M, reduce="sum")
+
 		support = torch.cat((q_p, q_s, c_p, c_s, hole, log_cov), dim=-1)  # 5K+2
 		# qual = torch.cat((q_p, q_s, log_cov, c_p[:, :1], c_s[:, :1], hole[:, :1]), dim=-1)  # 2K+4
 
@@ -1156,10 +1104,7 @@ class BipartiteGraphOperator(MessagePassing):
 		hard = (deg > 0).to(inpt.dtype)
 		pattern = hard * self.norm(stacked / deg.clamp(min=1.0).sqrt())
 
-		# gate = self.support_gate(qual)
-		# out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
-		# out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
-
+					
 		# forward
 		qual = torch.cat((q_p, q_s), dim=-1)          # (M, 2K)
 		gate = self.support_gate(qual)
@@ -5551,7 +5496,7 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		## Make association module layers (note, previous arrival embeddings used to be smaller)
 		self.ArrivalEmbedding = ArrivalEmbedding(30, 30, trv = trv, k_spc_edges = k_spc_edges, device = device, ftrns2 = ftrns2) ## [note: merging the embeddings for P and S into one (oveloaded) layer rather than keeping as seperate layers?]
-		self.Arrivals = SourceStationAttention(30, 30, 2, 15, n_heads = 3, use_src_pred = use_src_pred, device = device).to(device)
+		self.Arrivals = SourceStationAttention(30, 30, 2, 15, n_heads = 4, use_src_pred = use_src_pred, device = device).to(device)
 		if use_src_pred == True:
 			self.alpha = nn.Parameter(torch.tensor([0.1], device = device))
 
