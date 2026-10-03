@@ -4982,6 +4982,7 @@ class SourceStationAttention(MessagePassing):
 			self.use_src_pred = True
 			self.n_dim_out_src = n_dim_out_src
 			self.log_tau = nn.Parameter(torch.tensor([np.log(0.1)], dtype = torch.float32, device = device))
+			self.null_src_logit = nn.Parameter(torch.zeros(1))
 			
 		else:
 			self.use_src_pred = False
@@ -5218,19 +5219,43 @@ class SourceStationAttention(MessagePassing):
 		out[src_a, pick_a] = self.proj_2(self.activate4(self.proj_1(emb)))
 	
 		if self.use_src_pred:
+			# out_src_p = self.activate_src(self.proj_src_1(emb))
+			# score = self.proj_attn(out_src_p).squeeze(-1)
+			# # softmax over active picks of each source only
+			# score = score - score.max()
+			# w = torch.zeros(n_src, n_arv, device=device)
+			# w[src_a, pick_a] = score
+			# w = w.masked_fill(mask_arv <= 0, -1e9)
+			# n_active = mask_arv.reshape(n_src, n_arv).sum(1).clamp(min=1.0)
+			# tau = torch.exp(self.log_tau) * n_active.sqrt()
+			# alpha = torch.softmax(w / tau.view(n_src, 1), dim=1)
+			# buf = arrival.new_zeros(n_src, n_arv, out_src_p.size(-1))
+			# buf[src_a, pick_a] = out_src_p
+			# out_src = self.proj_src_3(self.activate_src1(self.proj_src_2((alpha.unsqueeze(-1) * buf).sum(1))))
+			
 			out_src_p = self.activate_src(self.proj_src_1(emb))
 			score = self.proj_attn(out_src_p).squeeze(-1)
-			# softmax over active picks of each source only
-			score = score - score.max()
-			w = torch.zeros(n_src, n_arv, device=device)
+			
+			w = torch.full((n_src, n_arv), -1e9, device=device)
 			w[src_a, pick_a] = score
-			w = w.masked_fill(mask_arv <= 0, -1e9)
+			
+			# Append the trainable null logit as an extra column (index n_arv):
+			null_col = self.null_src_logit.expand(n_src, 1)
+			w_aug = torch.cat([w, null_col], dim=1) # Shape: (n_src, n_arv + 1)
+			
 			n_active = mask_arv.reshape(n_src, n_arv).sum(1).clamp(min=1.0)
 			tau = torch.exp(self.log_tau) * n_active.sqrt()
-			alpha = torch.softmax(w / tau.view(n_src, 1), dim=1)
+			
+			# Softmax over (n_arv + 1)
+			alpha_aug = torch.softmax(w_aug / tau.view(n_src, 1), dim=1)
+			
+			# Slice back to (n_src, n_arv) for the weighted sum:
+			alpha = alpha_aug[:, :n_arv]
+			
 			buf = arrival.new_zeros(n_src, n_arv, out_src_p.size(-1))
 			buf[src_a, pick_a] = out_src_p
 			out_src = self.proj_src_3(self.activate_src1(self.proj_src_2((alpha.unsqueeze(-1) * buf).sum(1))))
+			
 			return out, out_src
 			
 		return out
