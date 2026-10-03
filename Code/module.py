@@ -4952,17 +4952,24 @@ class SourceStationAttention(MessagePassing):
 	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_dim_out_src = 1, n_heads = 5, n_hidden = 30, kernel_sig_t = kernel_sig_t, use_src_pred = False, use_dual_attention = True, use_phase_types = use_phase_types, device = device):
 		super(SourceStationAttention, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
-		self.f_pick_query = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-		self.f_pick_context = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-		self.f_pick_values = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-
+		self.f_pick_query = nn.Sequential(nn.Linear(ndim_arv_in, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+		self.f_pick_context = nn.Sequential(nn.Linear(ndim_arv_in, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+		self.f_pick_values = nn.Sequential(nn.Linear(ndim_arv_in, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+		self.film_query = FiLM2Layer(9, ndim_arv_in)
+		self.film_context = FiLM2Layer(9, ndim_arv_in)
+		
 		if use_dual_attention == True:
-			self.f_source_query = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.f_source_context = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.merge_attn = nn.Sequential(nn.Linear(2*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_latent))
-			self.alpha_src = nn.Parameter(torch.Tensor([0.5])) ## Initilizes as 0.5
-
+			self.f_source_query = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.f_source_context = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			# self.merge_attn = nn.Sequential(nn.Linear(2*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_latent))
+			self.film_merge = FiLM2Layer(n_heads*n_latent, n_heads*n_latent)
+			
+			# self.alpha_src = nn.Parameter(torch.Tensor([0.5])) ## Initilizes as 0.5
+			self.alpha_src = nn.Parameter(torch.tensor([0.5], dtype=torch.float32))
+			self.film_query_src = FiLM2Layer(9, ndim_arv_in + n_heads*n_latent)
+			self.film_context_src = FiLM2Layer(9, ndim_arv_in + n_heads*n_latent)
+			
 			self.self_dummy_src = nn.Parameter(torch.zeros(1, n_heads))
 			self.dummy_keys_src = nn.Parameter(torch.zeros(1, n_heads, n_latent)) # .to(device)
 			self.dummy_queries_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
@@ -5000,20 +5007,24 @@ class SourceStationAttention(MessagePassing):
 		n_dim_phase = 5
 		self.embed_phase = nn.Embedding(2 + 1, n_dim_phase)
 
-		self.alpha = nn.Parameter(torch.Tensor([0.5])) ## Initilizes as 0.5 # self.log_temp = nn.Parameter(torch.Tensor([0.5])).to(device)
-
+		self.alpha = nn.Parameter(torch.tensor([0.5], dtype = torch.float32)) ## Initilizes as 0.5 # self.log_temp = nn.Parameter(torch.Tensor([0.5])).to(device)
+		# self.alpha = torch.tensor([0.5], dtype=torch.float32)
+		
 		self.use_dual_attention = use_dual_attention
 		self.ndim_feat = ndim_arv_in + ndim_extra
 		self.use_phase_types = use_phase_types
 		self.ndim_arv_in = ndim_arv_in
 		self.n_phases = ndim_out
 
+		# self.film_space_time = FiLM2Layer
+
 		self.use_src_context = False
 		if self.use_src_context == True:
 			self.embed_src = nn.Sequential(nn.Linear(ndim_src_in, n_hidden), nn.PReLU())
 			self.gate_src = nn.Sequential(nn.Linear(ndim_src_in + n_hidden, n_hidden), nn.PReLU(), nn.Linear(n_hidden, 1))
-			self.downscale = torch.Tensor([0.1]).to(device)
-
+			# self.downscale = torch.Tensor([0.1]).to(device)
+			self.register_buffer("downscale", torch.tensor([0.1]))
+		
 		self.activate4 = nn.PReLU()
 		# self.activate5 = nn.PReLU()
 		self.device = device
@@ -5170,27 +5181,28 @@ class SourceStationAttention(MessagePassing):
 		sig_p_sq, sig_s_sq = sig_p**2, sig_s**2
 
 		rel_t_p = (atime[edge_index[0][real_edge]] - (tsrc_p[sindex[real_edge], stindex[edge_index[0][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_p = torch.cat((torch.exp(-0.5*(rel_t_p**2)/sig_p_sq), torch.tanh(rel_t_p / sig_p)), dim = 1) # phase[edge_index[0]]
+		rel_t_p = torch.cat((torch.exp(-1.0*torch.abs(rel_t_p)/sig_p), torch.tanh(rel_t_p / sig_p)), dim = 1) # phase[edge_index[0]]
 		rel_t_s = (atime[edge_index[0][real_edge]] - (tsrc_s[sindex[real_edge], stindex[edge_index[0][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_s = torch.cat((torch.exp(-0.5*(rel_t_s**2)/sig_s_sq), torch.tanh(rel_t_s / sig_s)), dim = 1) # phase[edge_index[0]]
+		rel_t_s = torch.cat((torch.exp(-1.0*torch.abs(rel_t_s)/sig_s), torch.tanh(rel_t_s / sig_s)), dim = 1) # phase[edge_index[0]]
 		rel_t = torch.cat((rel_t_p, rel_t_s, self.embed_phase(phase_j[real_edge].long().reshape(-1))), dim = 1) ## only indexed for not fake source
 
 		rel_t_p1 = (atime[edge_index[1][inot_fake_src]] - (tsrc_p[sindex[inot_fake_src], stindex[edge_index[1][inot_fake_src]]] + stime[sindex[inot_fake_src]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_p1 = torch.cat((torch.exp(-0.5*(rel_t_p1**2)/sig_p_sq), torch.tanh(rel_t_p1 / sig_p)), dim = 1) # phase[edge_index[0]]
+		rel_t_p1 = torch.cat((torch.exp(-1.0*torch.abs(rel_t_p1)/sig_p), torch.tanh(rel_t_p1 / sig_p)), dim = 1) # phase[edge_index[0]]
 		rel_t_s1 = (atime[edge_index[1][inot_fake_src]] - (tsrc_s[sindex[inot_fake_src], stindex[edge_index[1][inot_fake_src]]] + stime[sindex[inot_fake_src]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-		rel_t_s1 = torch.cat((torch.exp(-0.5*(rel_t_s1**2)/sig_s_sq), torch.tanh(rel_t_s1 / sig_s)), dim = 1) # phase[edge_index[0]]
+		rel_t_s1 = torch.cat((torch.exp(-1.0*torch.abs(rel_t_s1)/sig_s), torch.tanh(rel_t_s1 / sig_s)), dim = 1) # phase[edge_index[0]]
 		rel_t1 = torch.cat((rel_t_p1, rel_t_s1, self.embed_phase(phase_i[inot_fake_src].long().reshape(-1))), dim = 1)
 
 		## Queries using reciever nodes (i) because each reciever is trying to decide which of neighboring picks is "relevant", and it also uses source embedding because this is dependant on the source
 		## Contexts (actually keys) and values use the sender nodes as these are the ones the queries are attending over ## Note: I did used to include the source origin time..
 		# queries_real_and_null = self.f_pick_query(torch.cat((x_i[inot_fake_src], rel_t1, sembed[sindex[inot_fake_src]], self_link[inot_fake_src]), dim = 1)).view(-1, self.n_heads, self.n_latent)
+		x_mod_query = self.film_query(x_i[inot_fake_src], rel_t1)
+		x_mod_context = self.film_context(x_j[real_edge], rel_t)
+		
+		queries_real_and_null = self.f_pick_query(x_mod_query).view(-1, self.n_heads, self.n_latent)
+		contexts_real = self.f_pick_context(x_mod_context).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information		
+		values_real = self.f_pick_values(x_mod_context).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
 
-		queries_real_and_null = self.f_pick_query(torch.cat((x_i[inot_fake_src], rel_t1), dim = 1)).view(-1, self.n_heads, self.n_latent)
-
-		contexts_real = self.f_pick_context(torch.cat((x_j[real_edge], rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information		
-		values_real = self.f_pick_values(torch.cat((x_j[real_edge], rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
-
-
+		
 		queries = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
 		contexts = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
 		values = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
@@ -5201,8 +5213,11 @@ class SourceStationAttention(MessagePassing):
 
 		n_fake = int(ifake_edge.sum())
 
-		contexts[ifake_edge,:,:] = self.dummy_keys # .repeat(n_fake, 1, 1)
-		values[ifake_edge,:,:] = self.dummy_values # .repeat(n_fake, 1, 1)
+		
+		if n_fake > 0:
+		    contexts[ifake_edge, :, :] = self.dummy_keys.expand(n_fake, -1, -1)
+		    values[ifake_edge, :, :] = self.dummy_values.expand(n_fake, -1, -1)
+		
 		## Compute attention
 		scores = (queries*contexts).sum(-1)/self.scale
 		
@@ -5229,16 +5244,19 @@ class SourceStationAttention(MessagePassing):
 			attn_picks = alpha.unsqueeze(-1)*values
 
 			rel_t_p2 = (atime[edge_index[1][real_edge]] - (tsrc_p[sindex[real_edge], stindex[edge_index[1][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-			rel_t_p2 = torch.cat((torch.exp(-0.5*(rel_t_p2**2)/sig_p_sq), torch.tanh(rel_t_p2 / sig_p)), dim = 1) # phase[edge_index[0]]
+			rel_t_p2 = torch.cat((torch.exp(-1.0*torch.abs(rel_t_p2)/sig_p), torch.tanh(rel_t_p2 / sig_p)), dim = 1) # phase[edge_index[0]]
 			rel_t_s2 = (atime[edge_index[1][real_edge]] - (tsrc_s[sindex[real_edge], stindex[edge_index[1][real_edge]]] + stime[sindex[real_edge]])).reshape(-1,1) # .detach() # correct? (edges[0] point to input data, we access the augemted data time)
-			rel_t_s2 = torch.cat((torch.exp(-0.5*(rel_t_s2**2)/sig_s_sq), torch.tanh(rel_t_s2 / sig_s)), dim = 1) # phase[edge_index[0]]
+			rel_t_s2 = torch.cat((torch.exp(-1.0*torch.abs(rel_t_s2)/sig_s), torch.tanh(rel_t_s2 / sig_s)), dim = 1) # phase[edge_index[0]]
 			rel_t2 = torch.cat((rel_t_p2, rel_t_s2, self.embed_phase(phase_i[real_edge].long().reshape(-1))), dim = 1)
 
 			attn_slice = attn_picks.view(-1, self.n_heads*self.n_latent)[real_edge]
+
+			x_mod_src_query = self.film_query_src(torch.cat((x_i[real_edge], attn_slice), dim = 1), rel_t2)
+			x_mod_src_context = self.film_context_src(torch.cat((x_j[real_edge], attn_slice), dim = 1), rel_t)
 			
-			queries_src_real = self.f_source_query(torch.cat((x_i[real_edge], attn_slice, rel_t2), dim = 1)).view(-1, self.n_heads, self.n_latent)
-			contexts_src_real = self.f_source_context(torch.cat((x_j[real_edge], attn_slice, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
-			values_src_real = self.f_source_values(torch.cat((x_j[real_edge], attn_slice, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+			queries_src_real = self.f_source_query(x_mod_src_query).view(-1, self.n_heads, self.n_latent)
+			contexts_src_real = self.f_source_context(x_mod_src_context).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+			values_src_real = self.f_source_values(x_mod_src_context).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
 			# values_src = self.f_source_values(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
 
 			queries_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
@@ -5251,12 +5269,12 @@ class SourceStationAttention(MessagePassing):
 
 
 			n_fake_src = int(ifake_edge_src.sum())
-			queries_src[ifake_edge_src,:,:] = self.dummy_queries_src # .repeat(n_fake_src, 1, 1)
-			contexts_src[ifake_edge_src,:,:] = self.dummy_keys_src # .repeat(n_fake_src, 1, 1)
-			values_src[ifake_edge_src,:,:] = self.dummy_values_src # .repeat(n_fake_src, 1, 1)
 
-
-			# else:
+			# n_fake_src = int(ifake_edge_src.sum())
+			if n_fake_src > 0:
+			    queries_src[ifake_edge_src, :, :] = self.dummy_queries_src.expand(n_fake_src, -1, -1)
+			    contexts_src[ifake_edge_src, :, :] = self.dummy_keys_src.expand(n_fake_src, -1, -1)
+			    values_src[ifake_edge_src, :, :] = self.dummy_values_src.expand(n_fake_src, -1, -1)		
 
 			# RESTORED GLOBAL SOURCE POOLING WITH DYNAMIC DEGREES:
 			scores_src = (queries_src * contexts_src).sum(-1) / self.scale
@@ -5269,16 +5287,15 @@ class SourceStationAttention(MessagePassing):
 			
 			scores_src = scores_src / temp_src.sqrt()
 			alpha_src = softmax(scores_src, sindex)  # <--- Softmax grouped by SOURCE index!
-			
 
 			attn_src = alpha_src.unsqueeze(-1)*values_src
 			## Now merge with the messages of the previous attention layer and aggregate
-			merge_attn = self.merge_attn(torch.cat((attn_picks, attn_src), dim = 2))
-
+			# merge_attn = self.merge_attn(torch.cat((attn_picks, attn_src), dim = 2))
+			merge_attn = self.film_merge(attn_picks.view(-1,self.n_heads*self.n_latent), attn_src.view(-1,self.n_heads*self.n_latent)).view(-1, self.n_heads, self.n_latent)
+			
 			return merge_attn
 			
-
-
+		
 
 	# def forward(self, stime, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label, sig_p = None, sig_s = None): # reference k nearest spatial points
 
@@ -5426,6 +5443,23 @@ class FiLM(nn.Module):
 		gamma, beta = film_params.chunk(2, dim=-1)
 		return x * (1.0 + gamma) + beta
 
+class FiLM2Layer(nn.Module):
+    """2-layer FiLM generator with zero-initialized final projection."""
+    def __init__(self, embed_dim, feature_dim, hidden_dim=30):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(embed_dim, hidden_dim),
+            nn.PReLU(),
+            nn.Linear(hidden_dim, 2 * feature_dim)
+        )
+        # Zero-initialize the final output linear projection ONLY
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(self, x, embed_context):
+        gamma_beta = self.net(embed_context)
+        gamma, beta = torch.chunk(gamma_beta, 2, dim=-1)
+        return x * (1.0 + gamma) + beta
 
 class RMSNorm(nn.Module):
 	def __init__(self, dim: int, eps: float = 1e-6):
