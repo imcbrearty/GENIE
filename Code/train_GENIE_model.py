@@ -5979,7 +5979,7 @@ for batch_idx, inputs in enumerate(loader):
 			knn_picks = torch.stack(torch.where(pick_edge_mask), dim=0).long()
 			# ---------------------------------------------------------------------------
 
-			if knn_picks.shape[1] > 0:
+			if knn_picks.shape[1] > 5:
 				peak_reference_rel_p = torch.max(pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 0], pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 0])
 				peak_reference_rel_s = torch.max(pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 1], pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 1])
 				pos_allowed_p1, pos_allowed_p2 = torch.where(peak_reference_rel_p > tol_min)
