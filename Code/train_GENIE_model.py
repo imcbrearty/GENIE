@@ -3589,7 +3589,9 @@ mx_pred_1, mx_pred_2, mx_pred_3, mx_pred_4 = np.zeros(n_epochs), np.zeros(n_epoc
 mz.set_scale_coefficients(src_x_kernel*2.0, scale_time, kernel_sig_t, kernel_sig_t*3.0, src_x_kernel, src_t_kernel, time_shift_range)
 
 
-weights = torch.Tensor([0.1, 0.4, 0.25, 0.25]).to(device)
+# weights = torch.Tensor([0.1, 0.4, 0.25, 0.25]).to(device)
+weights = torch.Tensor([0.1, 0.3, 0.8, 0.8]).to(device)
+
 
 lat_range_interior = [lat_range[0], lat_range[1]]
 lon_range_interior = [lon_range[0], lon_range[1]]
@@ -4811,6 +4813,8 @@ for batch_idx, inputs in enumerate(loader):
 
 			N_sta, tol_min = len(Locs[i0]), 0.01
 			k_local_use = min(len(Locs[i0]), k_sta_edges*2 + 1)
+			N_ref_picks = loss_charbonnier_assoc.N_ref_picks
+
 			# vec_ind = np.arange(k_sta_edges*2)
 			# stride_select = np.sort(np.hstack([np.random.choice(vec_ind, size = k_sta_edges, replace = False) + j*k_sta_edges for j in range(len(Locs[i0]))]))
 			knn_sta = remove_self_loops(knn(ftrns1_diff(Locs[i0].to(device))/1000.0, ftrns1_diff(Locs[i0].to(device))/1000.0, k = k_local_use))[0] # [:,stride_select]
@@ -4860,7 +4864,7 @@ for batch_idx, inputs in enumerate(loader):
 				trgt_diff_p = pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[0][pos_allowed_p2], 0] - pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[1][pos_allowed_p2], 0]
 				pred_diff_p = out[2][mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[0][pos_allowed_p2], 0] - out[2][mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[1][pos_allowed_p2], 0]
 
-				loss_rel_assoc_P = (assoc_loss_scale / 1.0) * loss_charbonnier_assoc(
+				loss_rel_assoc_P = (assoc_loss_scale / N_ref_picks) * loss_charbonnier_assoc(
 					pred_diff_p,
 					trgt_diff_p,
 					apply_peak_weight = True,
@@ -4877,7 +4881,7 @@ for batch_idx, inputs in enumerate(loader):
 				trgt_diff_s = pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[0][pos_allowed_s2], 1] - pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[1][pos_allowed_s2], 1]
 				pred_diff_s = out[3][mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[0][pos_allowed_s2], 0] - out[3][mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[1][pos_allowed_s2], 0]
 
-				loss_rel_assoc_S = (assoc_loss_scale / 1.0) * loss_charbonnier_assoc(
+				loss_rel_assoc_S = (assoc_loss_scale / N_ref_picks) * loss_charbonnier_assoc(
 					pred_diff_s,
 					trgt_diff_s,
 					apply_peak_weight = True,
