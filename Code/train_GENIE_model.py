@@ -4535,8 +4535,8 @@ for batch_idx, inputs in enumerate(loader):
 
 			# Inlined 4D spacetime distance check to keep code compact
 			if len(sources_np) > 0 and len(queries_np) > 0:
-				ecef_q = lla2ecef_diff(queries_np[:, 0:3])/1000.0
-				ecef_s = lla2ecef_diff(sources_np[:, 0:3])/1000.0
+				ecef_q = ftrns1_diff(queries_np[:, 0:3])/1000.0
+				ecef_s = ftrns1_diff(sources_np[:, 0:3])/1000.0
 				# dist_3d = np.linalg.norm(ecef_q[:, None, :] - ecef_s[None, :, :], axis=-1)
 				dist_3d = torch.cdist(ecef_q, ecef_s) # , axis=-1)
 				# dist_t = np.abs(queries_np[:, 3:4] - sources_np[:, 3:4].T)
@@ -4620,8 +4620,8 @@ for batch_idx, inputs in enumerate(loader):
 		
 
 			# 1. Expand pool size to capture a wider spatial-temporal range
-			k_nearest_pool = 120
-			stride_step = 3  # Takes every 3rd neighbor up to k_pool (~40 neighbors max)
+			k_nearest_pool = 100
+			stride_step = 2  # Takes every 3rd neighbor up to k_pool (~40 neighbors max)
 
 			ifind_positive = torch.where(
 				Lbls_query[i0].squeeze() > 0.01
@@ -4643,7 +4643,7 @@ for batch_idx, inputs in enumerate(loader):
 				edge_index_full = knn(
 					proj_coords,
 					proj_coords,
-					k=k + 1,
+					k=k,
 				)
 
 				src, dst = edge_index_full
