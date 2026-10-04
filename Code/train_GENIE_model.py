@@ -4630,7 +4630,7 @@ for batch_idx, inputs in enumerate(loader):
 
 			# Include both true ground-truth targets AND predicted false positives
 			ifind_positive = torch.where(
-				(Lbls_query[i0].squeeze() > 0.01) | (out[1][:, 0].detach() > 0.025)
+				(Lbls_query[i0].squeeze().to(device) > 0.01) | (out[1][:, 0].detach() > 0.025)
 			)[0].to(device)
 
 			scale_rel_tol = 2.5 * (src_x_kernel * 2.0) / 1000.0
@@ -4870,8 +4870,8 @@ for batch_idx, inputs in enumerate(loader):
 				)
 
 				# 2. Extract predicted peak reference (.detach() prevents backprop into mask selection)
-				pred_lbls_p = out[2][:, 0].detach()  # P-channel predictions
-				pred_lbls_s = out[3][:, 0].detach()  # S-channel predictions
+				pred_lbls_p = out[2][:, :, 0].detach()  # P-channel predictions
+				pred_lbls_s = out[3][:, :, 0].detach()  # S-channel predictions
 
 				pred_reference_rel_p = torch.max(
 					pred_lbls_p[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1)], 
