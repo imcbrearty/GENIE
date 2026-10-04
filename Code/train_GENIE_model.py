@@ -4313,6 +4313,7 @@ for batch_idx, inputs in enumerate(loader):
 	loss_negative_val = 0.0
 	loss_relative_val = 0.0
 	loss_saddle_val = 0.0
+	loss_rel_sta_val = 0.0
 
 	n_batch_valid = sum([len(lp_times[i0]) > 0 for i0 in range(n_batch)])
 	
@@ -4486,9 +4487,9 @@ for batch_idx, inputs in enumerate(loader):
 
 			# 2. Smooth density scale using estimated min_sta_ref
 			raw_scale = 1.0 + 0.5 * torch.log(
-			    torch.tensor(max(1.0, N_stations_sample / min_sta_ref), device=device)
+				torch.tensor(max(1.0, N_stations_sample / min_sta_ref), device=device)
 			)
-			assoc_loss_scale = torch.clamp(raw_scale, min=1.0, max=3.0)
+			assoc_loss_scale = torch.clamp(raw_scale, min=1.0, max=2.0)
 
 			# Uncapped baselines
 			loss_reg_query = weights[1] * loss_charbonnier_source(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], update_ema = True)
@@ -4621,10 +4622,15 @@ for batch_idx, inputs in enumerate(loader):
 
 			# 1. Expand pool size to capture a wider spatial-temporal range
 			k_nearest_pool = 100
-			stride_step = 2  # Takes every 3rd neighbor up to k_pool (~40 neighbors max)
+			stride_step = 3  # Takes every 3rd neighbor up to k_pool (~40 neighbors max)
 
+			# ifind_positive = torch.where(
+			# 	Lbls_query[i0].squeeze() > 0.01
+			# )[0].to(device)
+
+			# Include both true ground-truth targets AND predicted false positives
 			ifind_positive = torch.where(
-				Lbls_query[i0].squeeze() > 0.01
+				(Lbls_query[i0].squeeze() > 0.01) | (out[1][:, 0].detach() > 0.01)
 			)[0].to(device)
 
 			scale_rel_tol = 2.5 * (src_x_kernel * 2.0) / 1000.0
@@ -4811,7 +4817,7 @@ for batch_idx, inputs in enumerate(loader):
 		computed_rel_station_loss = False	
 		if use_rel_station_loss == True and ramp_aux > 0.0:
 
-			N_sta, tol_min = len(Locs[i0]), 0.01
+			N_sta, tol_min = len(Locs[i0]), 0.025
 			k_local_use = min(len(Locs[i0]), k_sta_edges*2 + 1)
 			N_ref_picks = loss_charbonnier_assoc.N_ref_picks
 
@@ -4848,10 +4854,42 @@ for batch_idx, inputs in enumerate(loader):
 			# ---------------------------------------------------------------------------
 
 			if knn_picks.shape[1] > 0:
-				peak_reference_rel_p = torch.max(pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 0], pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 0])
-				peak_reference_rel_s = torch.max(pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 1], pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 1])
-				pos_allowed_p1, pos_allowed_p2 = torch.where(peak_reference_rel_p > tol_min)
-				pos_allowed_s1, pos_allowed_s2 = torch.where(peak_reference_rel_s > tol_min)
+				# peak_reference_rel_p = torch.max(pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 0], pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 0])
+				# peak_reference_rel_s = torch.max(pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 1], pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 1])
+				# pos_allowed_p1, pos_allowed_p2 = torch.where(peak_reference_rel_p > tol_min)
+				# pos_allowed_s1, pos_allowed_s2 = torch.where(peak_reference_rel_s > tol_min)
+
+				# 1. Extract ground truth peak reference
+				peak_reference_rel_p = torch.max(
+					pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 0], 
+					pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 0]
+				)
+				peak_reference_rel_s = torch.max(
+					pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 1], 
+					pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 1]
+				)
+
+				# 2. Extract predicted peak reference (.detach() prevents backprop into mask selection)
+				pred_lbls_p = out[2][:, 0].detach()  # P-channel predictions
+				pred_lbls_s = out[3][:, 0].detach()  # S-channel predictions
+
+				pred_reference_rel_p = torch.max(
+					pred_lbls_p[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1)], 
+					pred_lbls_p[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1)]
+				)
+				pred_reference_rel_s = torch.max(
+					pred_lbls_s[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1)], 
+					pred_lbls_s[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1)]
+				)
+
+				# 3. Union condition: Ground truth OR model prediction above threshold
+				pos_allowed_p1, pos_allowed_p2 = torch.where(
+					(peak_reference_rel_p > tol_min) | (pred_reference_rel_p > tol_min)
+				)
+				pos_allowed_s1, pos_allowed_s2 = torch.where(
+					(peak_reference_rel_s > tol_min) | (pred_reference_rel_s > tol_min)
+				)
+
 
 			else:
 				pos_allowed_p1 = np.zeros(0).astype('int')
@@ -4892,6 +4930,8 @@ for batch_idx, inputs in enumerate(loader):
 				)
 				loss_relative_station += 0.5*weights[3]*weight_assoc_v[inc]*loss_rel_assoc_S
 				computed_rel_station_loss = True
+
+				loss_rel_sta_val += loss_relative_station.item() / n_batch_valid
 
 
 			# loss_reg_assoc_P = (assoc_loss_scale / 1.0) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
@@ -5068,6 +5108,7 @@ for batch_idx, inputs in enumerate(loader):
 		mz.BipartiteGraphReadOutOperator.r_max.fill_(float(spatial_quantiles[2] * 4.0))
 
 		loss_charbonnier_assoc.N_ref_picks.fill_(float(max(np.mean(avg_picks), 3.0)))
+		# loss_charbonnier_assoc.min_sta_ref.fill_(float(max(np.mean(avg_stations), 3.0)))
 		loss_charbonnier_assoc.min_sta_ref.fill_(float(max(np.quantile(avg_stations, 0.1), 3.0)))
 
 		init_spatial_norms, write_dist_scales = False, True
@@ -5105,7 +5146,7 @@ for batch_idx, inputs in enumerate(loader):
 	mx_pred_4[i] = mx_pred_val_4/n_batch_valid
 	# loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
-	print('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_dice_src_val, loss_dice_asc_val, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val))
+	print('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val, loss_rel_sta_val))
 
 
 	if use_model_ema:
@@ -5118,7 +5159,7 @@ for batch_idx, inputs in enumerate(loader):
 	# if use_wandb_logging == True:
 	# 	wandb.log({"loss": loss_val})
 
-	log_buffer.append('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_dice_src_val, loss_dice_asc_val, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val))
+	log_buffer.append('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val, loss_rel_sta_val))
 
 	if np.mod(i, 10) == 0:
 		with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
