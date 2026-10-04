@@ -5749,7 +5749,7 @@ for batch_idx, inputs in enumerate(loader):
 		
 		computed_relative_loss = False
 		computed_saddle_loss = False
-		moi
+		# moi
 		if use_relative_loss and ramp_aux > 0.0:
 		
 
@@ -5943,7 +5943,7 @@ for batch_idx, inputs in enumerate(loader):
 		# ==================== 5. Relative Association Loss =================
 		loss_relative_station = torch.tensor(0.0, device=device)	
 		computed_rel_station_loss = False	
-		if use_rel_station_loss == True: #  and ramp_aux > 0.0:
+		if use_rel_station_loss == True and ramp_aux > 0.0:
 
 			N_sta, tol_min = len(Locs[i0]), 0.01
 			k_local_use = min(len(Locs[i0]), k_sta_edges*2 + 1)
@@ -5988,6 +5988,8 @@ for batch_idx, inputs in enumerate(loader):
 			else:
 				pos_allowed_p1 = np.zeros(0).astype('int')
 				pos_allowed_p2 = np.zeros(0).astype('int')
+				pos_allowed_s1 = np.zeros(0).astype('int')
+				pos_allowed_s2 = np.zeros(0).astype('int')
 
 
 			if len(pos_allowed_p1) > 0:
