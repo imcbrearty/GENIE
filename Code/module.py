@@ -5277,7 +5277,7 @@ class SourceStationAttention(MessagePassing):
 
 			deg_src = torch.clamp(degree(sindex, num_nodes=len(stime)).detach(), min=1)
 			node_temp_src = torch.log1p(deg_src).pow(torch.clamp(self.alpha_src, min=0.25, max=1.5))
-			node_temp_src[deg_src <= 2.0] = 1.0
+			# node_temp_src[deg_src <= 2.0] = 1.0
 			temp_src = node_temp_src[sindex].reshape(-1, 1)
 			
 			
