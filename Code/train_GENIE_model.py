@@ -48,13 +48,6 @@ from utils import *
 from module import *
 from process_utils import *
 
-use_wandb_logging = False
-if use_wandb_logging == True:
-
-	import wandb
-	# Initialize wandb run 
-	wandb.init(project="GENIE")
-
 
 # Load configuration from YAML
 with open('config.yaml', 'r') as file:
@@ -454,7 +447,7 @@ use_preferential_sampling = train_config['use_preferential_sampling']
 use_shallow_sources = train_config['use_shallow_sources']
 use_extra_nearby_moveouts = train_config['use_extra_nearby_moveouts']
 training_params_3 = [n_batch, dist_range, max_rate_events, max_miss_events, max_false_events, miss_pick_fraction, T, dt, tscale, n_sta_range, use_sources, use_full_network, fixed_subnetworks, use_preferential_sampling, use_shallow_sources, use_extra_nearby_moveouts]
-min_sta_ref = int(n_sta_range[0]*len(locs))
+min_sta_ref = max(5, min(30, np.mean(n_sta_range)*len(locs))) # int(n_sta_range[0]*len(locs))
 
 
 def WGS84_radii_of_curvature(lat_rad, a=6378137.0, f=1.0 / 298.257223563):
@@ -807,6 +800,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		src_t_arv_kernel = zfile['association_label_width_t']
 		# kernel_sig_t = z['association_label_width_t']
 		locs = zfile['locs_use']
+		locs_cart = ftrns1(locs)
 		stas = zfile['stas_use']
 		scale_time = zfile['scale_time']/1000.0
 		time_shift_range = zfile['time_shift_range']
@@ -1046,7 +1040,9 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		src_positions = np.random.rand(n_src, 3)*scale_x + offset_x
 		src_magnitude = np.random.rand(n_src)*7.0 - 1.0 # magnitudes, between -1.0 and 7 (uniformly)
 
-	sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
+	# sr_distances = pd(ftrns1(src_positions[:,0:3]), ftrns1(locs))
+	_, sr_distances = pairwise_geodesic_distance_3d(src_positions, locs)
+
 
 	use_uniform_distance_threshold = False
 	## This previously sampled a uniform distribution by default, now it samples a skewed
@@ -1054,7 +1050,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 
 	if use_variable_domain == True:
-		fixed_dist_range = [0.05, 0.5]
+		fixed_dist_range = [0.05, 0.65]
 		# min_dist_thresh = 15e3
 		# max_dist_thresh =
 		dist_range = pd(ftrns1(x_grid[:,0:3]), ftrns1(x_grid[:,0:3])) # [x, x1] ## Set dist_range proportional to domain
@@ -1551,12 +1547,14 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	arrivals_select = arrivals[lp_concat]
 	phase_observed_select = phase_observed[lp_concat]
 
+	# pdb.set_trace()
+
 
 	Trv_subset_p = []
 	Trv_subset_s = []
 	Station_indices = []
 	Grid_indices = []
-	Batch_indices = []
+	# Batch_indices = []
 	Sample_indices = []
 	A_src_src_l = []
 	Ac_src_src_l = []
@@ -1708,8 +1706,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 		# if use_time_shift == False:
 
-		Trv_subset_p.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
-		Trv_subset_s.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
+		# Trv_subset_p.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,0].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
+		# Trv_subset_s.append(np.concatenate((x_grids_trv[i0][:,ind_sta_select,1].reshape(-1,1), np.tile(ind_sta_select, n_spc).reshape(-1,1), np.repeat(np.arange(n_spc).reshape(-1,1), len(ind_sta_select), axis = 1).reshape(-1,1), i*np.ones((n_spc*len(ind_sta_select),1))), axis = 1)) # not duplication
 
 		# else:
 
@@ -1720,115 +1718,201 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 
 		Station_indices.append(ind_sta_select) # record subsets used
-		Batch_indices.append(i*np.ones(len(ind_sta_select)*n_spc))
+		# Batch_indices.append(i*np.ones(len(ind_sta_select)*n_spc))
 		Grid_indices.append(i0)
 		Sample_indices.append(np.arange(len(ind_sta_select)*n_spc) + sc)
 		sc += len(Sample_indices[-1])
 
-		tree_subset = cKDTree(ind_sta_select.reshape(-1,1))
-		active_sources_per_slice = np.where(np.array([len( np.array(list(set(ind_sta_select).intersection(np.unique(arrivals[lp_backup[j],1])))) ) >= min_sta_arrival for j in lp_src_times_all[i]]))[0]
-		cnt_per_slice_p = np.array([len(np.where((arrivals[lp_backup[j],4] == 0)*(tree_subset.query(arrivals[lp_backup[j],1].reshape(-1,1))[0] == 0))[0]) for j in lp_src_times_all[i]])
-		cnt_per_slice_s = np.array([len(np.where((arrivals[lp_backup[j],4] == 1)*(tree_subset.query(arrivals[lp_backup[j],1].reshape(-1,1))[0] == 0))[0]) for j in lp_src_times_all[i]])
-		active_sources_per_slice = np.array(list(set(active_sources_per_slice).intersection(np.where((cnt_per_slice_p + cnt_per_slice_s) >= min_pick_arrival)[0]))).astype('int')
+		# tree_subset = cKDTree(ind_sta_select.reshape(-1,1))
+		# active_sources_per_slice = np.where(np.array([len( np.array(list(set(ind_sta_select).intersection(np.unique(arrivals[lp_backup[j],1])))) ) >= min_sta_arrival for j in lp_src_times_all[i]]))[0]
+		# cnt_per_slice_p = np.array([len(np.where((arrivals[lp_backup[j],4] == 0)*(tree_subset.query(arrivals[lp_backup[j],1].reshape(-1,1))[0] == 0))[0]) for j in lp_src_times_all[i]])
+		# cnt_per_slice_s = np.array([len(np.where((arrivals[lp_backup[j],4] == 1)*(tree_subset.query(arrivals[lp_backup[j],1].reshape(-1,1))[0] == 0))[0]) for j in lp_src_times_all[i]])
+		# active_sources_per_slice = np.array(list(set(active_sources_per_slice).intersection(np.where((cnt_per_slice_p + cnt_per_slice_s) >= min_pick_arrival)[0]))).astype('int')
 		
+		# active_sources_per_slice_l.append(active_sources_per_slice)
+
+
+		use_soft_counts = True
+		count_kernel = 1000.0
+
+		# --- Per-Sample Soft Station Mass Calculation ---
+		if (use_soft_counts == True) and np.isfinite(count_kernel) and (count_kernel > 0):
+			# Subset location coordinates to selected stations
+			locs_select = locs_cart[ind_sta_select]
+
+			# Query spatial graph only among selected stations
+			tree_stas_sub = cKDTree(locs_select)
+			lp_radius_sub = tree_stas_sub.query_ball_point(locs_select, r=3.0 * count_kernel)
+
+			edge_sta = torch.Tensor(
+			np.hstack([
+			np.concatenate((np.array(lp_radius_sub[j]).reshape(1, -1), j * np.ones((1, len(lp_radius_sub[j])))), axis=0)
+			for j in range(len(locs_select))
+			])
+			).long()
+
+			dist_sta = torch.norm(
+			torch.Tensor(locs_select)[edge_sta[0]] - torch.Tensor(locs_select)[edge_sta[1]],
+			dim=1,
+			keepdim=True
+			)
+
+			# Per-sample station mass mapped to local indices 0..len(ind_sta_select)-1
+			sta_mass_sample = (
+			1.0 / scatter(
+			torch.exp(-0.5 * (dist_sta**2) / (count_kernel**2)),
+			edge_sta[1],
+			dim=0,
+			dim_size=len(locs_select),
+			reduce='sum'
+			).cpu().detach().numpy().reshape(-1)
+			)
+
+			# Map local sample mass back to global station IDs
+			sta_mass_dict = dict(zip(ind_sta_select, sta_mass_sample))
+
+		else:
+			sta_mass_dict = {s: 1.0 for s in ind_sta_select}
+
+		# --- Soft-Weighted Active Source Subset Selection ---
+		cnt_per_slice_sta_w = []
+		cnt_per_slice_pick_w = []
+
+		for j in lp_src_times_all[i]:
+			
+			arr_j = arrivals[lp_backup[j]]
+			if len(arr_j) == 0:
+				cnt_per_slice_sta_w.append(0.0)
+				cnt_per_slice_pick_w.append(0.0)
+				continue
+
+			# Station IDs for arrivals corresponding to source j
+			arr_stas = arr_j[:, 1].astype('int')
+
+			# Filter to arrivals landing on selected stations
+			valid_mask = np.isin(arr_stas, ind_sta_select)
+			valid_stas = arr_stas[valid_mask]
+
+			if len(valid_stas) == 0:
+				cnt_per_slice_sta_w.append(0.0)
+				cnt_per_slice_pick_w.append(0.0)
+			else:
+				# Look up soft weights for the valid stations in this sample
+				unique_stas = np.unique(valid_stas)
+
+				cnt_per_slice_sta_w.append(sum([sta_mass_dict[s] for s in unique_stas]))
+				cnt_per_slice_pick_w.append(sum([sta_mass_dict[s] for s in valid_stas]))
+
+		cnt_per_slice_sta_w = np.array(cnt_per_slice_sta_w)
+		cnt_per_slice_pick_w = np.array(cnt_per_slice_pick_w)
+
+		# Filter sources satisfying soft minimums
+		active_sources_per_slice = np.where(
+		(cnt_per_slice_sta_w >= min_sta_arrival) &
+		(cnt_per_slice_pick_w >= min_pick_arrival)
+		)[0].astype('int')
+
+		# pdb.set_trace()
 		active_sources_per_slice_l.append(active_sources_per_slice)
+
+
 
 
 	if use_variable_domain == True:
 		zfile.close()
 
 
-	Trv_subset_p = np.vstack(Trv_subset_p)
-	Trv_subset_s = np.vstack(Trv_subset_s)
-	Batch_indices = np.hstack(Batch_indices)
+	# Trv_subset_p = np.vstack(Trv_subset_p)
+	# Trv_subset_s = np.vstack(Trv_subset_s)
+	# Batch_indices = np.hstack(Batch_indices)
 
 
 	offset_per_batch = 1.5*(np.abs(max_t - min_t))
 	offset_per_station = 1.5*n_batch*offset_per_batch
 
 
-	arrivals_offset = np.hstack([-time_samples[i] + i*offset_per_batch + offset_per_station*arrivals[lp[i],1] for i in range(n_batch)]) ## Actually, make disjoint, both in station axis, and in batch number.
-	one_vec = np.concatenate((np.ones(1), np.zeros(4)), axis = 0).reshape(1,-1)
-	arrivals_select = np.vstack([arrivals[lp[i]] for i in range(n_batch)]) + arrivals_offset.reshape(-1,1)*one_vec ## Does this ever fail? E.g., when there's a missing station's
-	n_arvs = arrivals_select.shape[0]
+	# arrivals_offset = np.hstack([-time_samples[i] + i*offset_per_batch + offset_per_station*arrivals[lp[i],1] for i in range(n_batch)]) ## Actually, make disjoint, both in station axis, and in batch number.
+	# one_vec = np.concatenate((np.ones(1), np.zeros(4)), axis = 0).reshape(1,-1)
+	# arrivals_select = np.vstack([arrivals[lp[i]] for i in range(n_batch)]) + arrivals_offset.reshape(-1,1)*one_vec ## Does this ever fail? E.g., when there's a missing station's
+	# n_arvs = arrivals_select.shape[0]
 
-	# Rather slow!
-	iargsort = np.argsort(arrivals_select[:,0])
-	arrivals_select = arrivals_select[iargsort]
-	phase_observed_select = phase_observed_select[iargsort]
+	# # Rather slow!
+	# iargsort = np.argsort(arrivals_select[:,0])
+	# arrivals_select = arrivals_select[iargsort]
+	# phase_observed_select = phase_observed_select[iargsort]
 
-	iwhere_p = np.where(phase_observed_select == 0)[0]
-	iwhere_s = np.where(phase_observed_select == 1)[0]
-	n_arvs_p = len(iwhere_p)
-	n_arvs_s = len(iwhere_s)
+	# iwhere_p = np.where(phase_observed_select == 0)[0]
+	# iwhere_s = np.where(phase_observed_select == 1)[0]
+	# n_arvs_p = len(iwhere_p)
+	# n_arvs_s = len(iwhere_s)
 
-	query_time_p = Trv_subset_p[:,0] + Batch_indices*offset_per_batch + Trv_subset_p[:,1]*offset_per_station
-	query_time_s = Trv_subset_s[:,0] + Batch_indices*offset_per_batch + Trv_subset_s[:,1]*offset_per_station
+	# query_time_p = Trv_subset_p[:,0] + Batch_indices*offset_per_batch + Trv_subset_p[:,1]*offset_per_station
+	# query_time_s = Trv_subset_s[:,0] + Batch_indices*offset_per_batch + Trv_subset_s[:,1]*offset_per_station
 
-	## No phase type information
-	ip_p = np.searchsorted(arrivals_select[:,0], query_time_p)
-	ip_s = np.searchsorted(arrivals_select[:,0], query_time_s)
+	# ## No phase type information
+	# ip_p = np.searchsorted(arrivals_select[:,0], query_time_p)
+	# ip_s = np.searchsorted(arrivals_select[:,0], query_time_s)
 
-	ip_p_pad = ip_p.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
-	ip_s_pad = ip_s.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
-	ip_p_pad = np.minimum(np.maximum(ip_p_pad, 0), n_arvs - 1) 
-	ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
+	# ip_p_pad = ip_p.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
+	# ip_s_pad = ip_s.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
+	# ip_p_pad = np.minimum(np.maximum(ip_p_pad, 0), n_arvs - 1) 
+	# ip_s_pad = np.minimum(np.maximum(ip_s_pad, 0), n_arvs - 1)
 
-	if use_sign_input == False:
-		rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-		rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
-	else:
-		rel_t_p = query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-		rel_t_s = query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]
-		rel_t_p_ind = np.argmin(np.abs(rel_t_p), axis = 1)
-		rel_t_s_ind = np.argmin(np.abs(rel_t_s), axis = 1)
-		rel_t_p_slice = rel_t_p[np.arange(len(rel_t_p)),rel_t_p_ind]
-		rel_t_s_slice = rel_t_s[np.arange(len(rel_t_s)),rel_t_s_ind]
-		rel_t_p = np.sign(rel_t_p_slice)*np.abs(rel_t_p_slice) ## Preserve sign information
-		rel_t_s = np.sign(rel_t_s_slice)*np.abs(rel_t_s_slice)
+	# if use_sign_input == False:
+	# 	rel_t_p = abs(query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+	# 	rel_t_s = abs(query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]).min(1)
+	# else:
+	# 	rel_t_p = query_time_p[:, np.newaxis] - arrivals_select[ip_p_pad, 0] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+	# 	rel_t_s = query_time_s[:, np.newaxis] - arrivals_select[ip_s_pad, 0]
+	# 	rel_t_p_ind = np.argmin(np.abs(rel_t_p), axis = 1)
+	# 	rel_t_s_ind = np.argmin(np.abs(rel_t_s), axis = 1)
+	# 	rel_t_p_slice = rel_t_p[np.arange(len(rel_t_p)),rel_t_p_ind]
+	# 	rel_t_s_slice = rel_t_s[np.arange(len(rel_t_s)),rel_t_s_ind]
+	# 	rel_t_p = np.sign(rel_t_p_slice)*np.abs(rel_t_p_slice) ## Preserve sign information
+	# 	rel_t_s = np.sign(rel_t_s_slice)*np.abs(rel_t_s_slice)
 
-	## With phase type information
-	ip_p1 = np.searchsorted(arrivals_select[iwhere_p,0], query_time_p)
-	ip_s1 = np.searchsorted(arrivals_select[iwhere_s,0], query_time_s)
+	# ## With phase type information
+	# ip_p1 = np.searchsorted(arrivals_select[iwhere_p,0], query_time_p)
+	# ip_s1 = np.searchsorted(arrivals_select[iwhere_s,0], query_time_s)
 
-	ip_p1_pad = ip_p1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
-	ip_s1_pad = ip_s1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
-	ip_p1_pad = np.minimum(np.maximum(ip_p1_pad, 0), n_arvs_p - 1) 
-	ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
+	# ip_p1_pad = ip_p1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) # np.array([-1,0,1]).reshape(1,-1), third digit, unnecessary.
+	# ip_s1_pad = ip_s1.reshape(-1,1) + np.array([-1,0]).reshape(1,-1) 
+	# ip_p1_pad = np.minimum(np.maximum(ip_p1_pad, 0), n_arvs_p - 1) 
+	# ip_s1_pad = np.minimum(np.maximum(ip_s1_pad, 0), n_arvs_s - 1)
 
-	if use_sign_input == False:
+	# if use_sign_input == False:
 	
-		if len(iwhere_p) > 0:
-			rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-		else:
-			# rel_t_p1 = np.zeros(rel_t_p.shape)
-			rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+	# 	if len(iwhere_p) > 0:
+	# 		rel_t_p1 = abs(query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0]).min(1) ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+	# 	else:
+	# 		# rel_t_p1 = np.zeros(rel_t_p.shape)
+	# 		rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
 	
-		if len(iwhere_s) > 0:
-			rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
-		else:
-			# rel_t_s1 = np.zeros(rel_t_s.shape)
-			rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+	# 	if len(iwhere_s) > 0:
+	# 		rel_t_s1 = abs(query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0]).min(1)
+	# 	else:
+	# 		# rel_t_s1 = np.zeros(rel_t_s.shape)
+	# 		rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
 
-	else:
+	# else:
 
-		if len(iwhere_p) > 0:
-			rel_t_p1 = query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-			rel_t_p1_ind = np.argmin(np.abs(rel_t_p1), axis = 1)
-			rel_t_p1_slice = rel_t_p1[np.arange(len(rel_t_p1)),rel_t_p1_ind]
-			rel_t_p1 = np.sign(rel_t_p1_slice)*np.abs(rel_t_p1_slice) ## Preserve sign information
-		else:
-			# rel_t_p1 = np.zeros(rel_t_p.shape)
-			rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+	# 	if len(iwhere_p) > 0:
+	# 		rel_t_p1 = query_time_p[:, np.newaxis] - arrivals_select[iwhere_p[ip_p1_pad], 0] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+	# 		rel_t_p1_ind = np.argmin(np.abs(rel_t_p1), axis = 1)
+	# 		rel_t_p1_slice = rel_t_p1[np.arange(len(rel_t_p1)),rel_t_p1_ind]
+	# 		rel_t_p1 = np.sign(rel_t_p1_slice)*np.abs(rel_t_p1_slice) ## Preserve sign information
+	# 	else:
+	# 		# rel_t_p1 = np.zeros(rel_t_p.shape)
+	# 		rel_t_p1 = np.random.choice([-1.0, 1.0], size = rel_t_p.shape)*np.ones(rel_t_p.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
 	
-		if len(iwhere_s) > 0:
-			rel_t_s1 = query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
-			rel_t_s1_ind = np.argmin(np.abs(rel_t_s1), axis = 1)
-			rel_t_s1_slice = rel_t_s1[np.arange(len(rel_t_s1)),rel_t_s1_ind]
-			rel_t_s1 = np.sign(rel_t_s1_slice)*np.abs(rel_t_s1_slice) ## Preserve sign information
-		else:
-			# rel_t_s1 = np.zeros(rel_t_s.shape)
-			rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
+	# 	if len(iwhere_s) > 0:
+	# 		rel_t_s1 = query_time_s[:, np.newaxis] - arrivals_select[iwhere_s[ip_s1_pad], 0] ## To do neighborhood version, can extend this to collect neighborhoods of points linked.
+	# 		rel_t_s1_ind = np.argmin(np.abs(rel_t_s1), axis = 1)
+	# 		rel_t_s1_slice = rel_t_s1[np.arange(len(rel_t_s1)),rel_t_s1_ind]
+	# 		rel_t_s1 = np.sign(rel_t_s1_slice)*np.abs(rel_t_s1_slice) ## Preserve sign information
+	# 	else:
+	# 		# rel_t_s1 = np.zeros(rel_t_s.shape)
+	# 		rel_t_s1 = np.random.choice([-1.0, 1.0], size = rel_t_s.shape)*np.ones(rel_t_s.shape)*kernel_sig_t*10.0 ## Need to place null values as large offset, so they map to zero
 			
 
 	Inpts = []
@@ -1861,6 +1945,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if skip_graphs == False:
 		Ac_src_src_l = []
 
+
+	arrivals_select_copy = np.copy(arrivals_select)
+	arrivals_select_copy[:,4] = phase_observed_select
+
+
 	thresh_mask = 0.01
 	for i in range(n_batch):
 		# Create inputs and mask
@@ -1870,21 +1959,40 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		n_spc = x_grids[grid_select].shape[0]
 		n_sta_slice = len(sta_select)
 
-		inpt = np.zeros((x_grids[Grid_indices[i]].shape[0], n_sta, 4)) # Could make this smaller (on the subset of stations), to begin with.
-		if use_sign_input == False:
-			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
-			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
-			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
-			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
-		else:
-			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.sign(rel_t_p[ind_select])*np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
-			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.sign(rel_t_s[ind_select])*np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
-			inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.sign(rel_t_p1[ind_select])*np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
-			inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.sign(rel_t_s1[ind_select])*np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
+		# pdb.set_trace()
+
+		engine = TopKEmbeddingEngine1(
+			arrivals_select_copy,
+			locs[sta_select],
+			sta_select,
+			A_src_in_sta_l[i],
+			x_grids_trv[grid_select],
+			kernel_sig_t=kernel_sig_t,
+			dt=kernel_sig_t / 15.0,
+			t_pad=3.0 * kernel_sig_t,
+			k_top=2,
+			device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
+			store_on_cpu = True
+		)
+
+		[inpts, masks], _ = engine.extract_inputs(t0 = np.array([time_samples[i]]), min_t = min_t, max_t = max_t, t_win = 2.0*kernel_sig_t, out_device = torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+
+
+		# inpt = np.zeros((x_grids[Grid_indices[i]].shape[0], n_sta, 4)) # Could make this smaller (on the subset of stations), to begin with.
+		# if use_sign_input == False:
+		# 	inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
+		# 	inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
+		# 	inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
+		# 	inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
+		# else:
+		# 	inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 0] = np.sign(rel_t_p[ind_select])*np.exp(-0.5*(rel_t_p[ind_select]**2)/(kernel_sig_t**2))
+		# 	inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 1] = np.sign(rel_t_s[ind_select])*np.exp(-0.5*(rel_t_s[ind_select]**2)/(kernel_sig_t**2))
+		# 	inpt[Trv_subset_p[ind_select,2].astype('int'), Trv_subset_p[ind_select,1].astype('int'), 2] = np.sign(rel_t_p1[ind_select])*np.exp(-0.5*(rel_t_p1[ind_select]**2)/(kernel_sig_t**2))
+		# 	inpt[Trv_subset_s[ind_select,2].astype('int'), Trv_subset_s[ind_select,1].astype('int'), 3] = np.sign(rel_t_s1[ind_select])*np.exp(-0.5*(rel_t_s1[ind_select]**2)/(kernel_sig_t**2))
 		
 		trv_out = x_grids_trv[grid_select][:,sta_select,:] ## Subsetting, into sliced indices.
-		Inpts.append(inpt[:,sta_select,:]) # sub-select, subset of stations.
-		Masks.append(1.0*(np.abs(inpt[:,sta_select,:]) > thresh_mask))
+		Inpts.append(inpts[0].cpu().detach().numpy()) # sub-select, subset of stations.
+		Masks.append(masks[0].cpu().detach().numpy())
 		Trv_out.append(trv_out)
 		Locs.append(locs[sta_select])
 		X_fixed.append(x_grids[grid_select])
@@ -2398,28 +2506,16 @@ def compute_source_labels(x_query, x_query_t, src_x, src_t, src_spatial_kernel, 
 
 
 class LossLogger:
-	"""
-	Lightweight, decoupled loss tracking utility.
-	Tracks raw microbatch losses, computes step averages, and maintains smooth EMAs.
-	Safe for conditional/sparse losses.
-	"""
 	def __init__(self, alpha=0.95):
 		self.alpha = alpha
-		
-		# Accumulation state (resets every gradient step)
 		self._accum_sums = defaultdict(float)
 		self._accum_counts = defaultdict(int)
-		
-		# Smooth persistent state across training steps
 		self.ema_dict = {}
 
 	def update(self, losses_dict: dict):
-		"""Accumulate loss values for a single microbatch / sub-step."""
 		for name, loss in losses_dict.items():
 			if loss is None:
 				continue
-			
-			# Extract float safely (handles 0D tensors, scalars, or 1D single-element tensors)
 			if isinstance(loss, torch.Tensor):
 				val = loss.detach().mean().item()
 			else:
@@ -2429,32 +2525,41 @@ class LossLogger:
 			self._accum_counts[name] += 1
 
 	def step(self) -> dict:
-		"""
-		Call at the end of a gradient accumulation step (or end of batch).
-		Computes step means, updates global EMAs, and returns current step metrics.
-		"""
 		step_means = {}
-		
 		for name, total_sum in self._accum_sums.items():
 			count = self._accum_counts[name]
 			mean_val = total_sum / max(1, count)
 			step_means[name] = mean_val
 			
-			# Update EMA (smooth long-term tracking)
 			if name not in self.ema_dict:
 				self.ema_dict[name] = mean_val
 			else:
 				self.ema_dict[name] = self.alpha * self.ema_dict[name] + (1.0 - self.alpha) * mean_val
 		
-		# Clear step buffers
 		self._accum_sums.clear()
 		self._accum_counts.clear()
-		
 		return step_means
 
 	def get_ema(self) -> dict:
-		"""Returns current smoothed EMAs for logging."""
 		return dict(self.ema_dict)
+
+	# --- ADD THESE TWO METHODS FOR SAVING / LOADING ---
+	def state_dict(self) -> dict:
+		"""Returns internal EMA state and accumulation state for checkpointing."""
+		return {
+			'alpha': self.alpha,
+			'ema_dict': self.ema_dict,
+			'accum_sums': dict(self._accum_sums),
+			'accum_counts': dict(self._accum_counts),
+		}
+
+	def load_state_dict(self, state_dict: dict):
+		"""Restores state from a saved checkpoint."""
+		self.alpha = state_dict.get('alpha', self.alpha)
+		self.ema_dict = state_dict.get('ema_dict', {})
+		
+		self._accum_sums = defaultdict(float, state_dict.get('accum_sums', {}))
+		self._accum_counts = defaultdict(int, state_dict.get('accum_counts', {}))
 
 
 
@@ -2574,7 +2679,7 @@ def create_training_inputs(trv, Inpts, Masks, Locs, X_fixed, A_src_in_sta_l, A_s
 
 
 	if use_phase_types == False:
-		Inpts[:,2::] = 0.0 ## Phase type informed features zeroed out
+		Inpts[:,12::] = 0.0 ## Phase type informed features zeroed out
 		Masks[:,2::] = 0.0
 
 
@@ -4046,38 +4151,38 @@ class EMAMassCharbonnierLoss(nn.Module):
 	# 		)
 
 	def _ema_update(self, buffer, value):
-	    """
-	    Update EMA buffers safely using copy_().
-	    Only warmup/buffer initialization applies to running_target_mass.
-	    """
-	    with torch.no_grad():
-	        val = value.detach()
+		"""
+		Update EMA buffers safely using copy_().
+		Only warmup/buffer initialization applies to running_target_mass.
+		"""
+		with torch.no_grad():
+			val = value.detach()
 
-	        # 1. Warmup logic ONLY applies to running_target_mass
-	        if buffer is self.running_target_mass and self.initialize_mass:
-	            self.mass_buffer.append(val)
+			# 1. Warmup logic ONLY applies to running_target_mass
+			if buffer is self.running_target_mass and self.initialize_mass:
+				self.mass_buffer.append(val)
 
-	            if len(self.mass_buffer) == 1:
-	                buffer.copy_(val)
-	                return
-	            elif len(self.mass_buffer) >= self.initialize_mass_buffer:
-	                # Set initial mass to the average of the first N non-empty micro-batches
-	                stacked_mass = torch.stack(self.mass_buffer)
-	                buffer.copy_(stacked_mass.mean())
-	                self.initialize_mass = False
-	                self.mass_buffer.clear() # Clear list to free GPU/host memory
-	                print(f"Finished initializing target mass: {buffer.item():.5f} ({self.loss_name}) \n")
-	                return
-	            else:
-	                # Use a faster learning rate during initial warmup
-	                scale_momentum = 5.0
-	        else:
-	            scale_momentum = 1.0
+				if len(self.mass_buffer) == 1:
+					buffer.copy_(val)
+					return
+				elif len(self.mass_buffer) >= self.initialize_mass_buffer:
+					# Set initial mass to the average of the first N non-empty micro-batches
+					stacked_mass = torch.stack(self.mass_buffer)
+					buffer.copy_(stacked_mass.mean())
+					self.initialize_mass = False
+					self.mass_buffer.clear() # Clear list to free GPU/host memory
+					print(f"Finished initializing target mass: {buffer.item():.5f} ({self.loss_name}) \n")
+					return
+				else:
+					# Use a faster learning rate during initial warmup
+					scale_momentum = 5.0
+			else:
+				scale_momentum = 1.0
 
-	        # 2. Compute out-of-place and copy into buffer
-	        m = scale_momentum * self.momentum
-	        updated_val = (1.0 - m) * buffer + m * val
-	        buffer.copy_(updated_val)
+			# 2. Compute out-of-place and copy into buffer
+			m = scale_momentum * self.momentum
+			updated_val = (1.0 - m) * buffer + m * val
+			buffer.copy_(updated_val)
 
 	def forward(
 		self,
@@ -4610,7 +4715,7 @@ else:
 
 mz = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv = trv, device = device).to(device)
 optimizer = optim.Adam(mz.parameters(), lr = 0.001)
-logger = LossLogger()
+logger = LossLogger(alpha=0.95)
 
 ## Initialize model ema
 use_model_ema = True
@@ -4737,6 +4842,10 @@ if build_training_data == True:
 					A_src_src, Ac_src_src = A_src_src
 					A_prod_src_src, Ac_prod_src_src = A_prod_src_src
 
+				if use_phase_types == False:
+					Inpts[i][:,12::] = 0.0 ## Phase type informed features zeroed out
+					Masks[i][:,2::] = 0.0
+
 				A_sta_sta_l[i] = A_sta_sta ## These should be equal
 				A_src_src_l[i] = A_src_src ## These should be equal
 				A_prod_sta_sta_l[i] = A_prod_sta_sta
@@ -4746,8 +4855,11 @@ if build_training_data == True:
 				A_edges_time_s_l[i] = A_edges_time_s
 				A_edges_ref_l[i] = dt_partition
 				A_src_in_sta_l[i] = A_src_in_sta
-				Inpts[i] = np.copy(np.ascontiguousarray(Inpts[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
-				Masks[i] = np.copy(np.ascontiguousarray(Masks[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))			
+				assert(len(Inpts[i]) == A_src_in_sta.shape[1])
+				assert(len(Masks[i]) == A_src_in_sta.shape[1])
+
+				# Inpts[i] = np.copy(np.ascontiguousarray(Inpts[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))
+				# Masks[i] = np.copy(np.ascontiguousarray(Masks[i][A_src_in_sta[1].cpu().detach().numpy(), A_src_in_sta[0].cpu().detach().numpy()]))			
 				if use_expanded == True:
 					Ac_src_src_l[i] = Ac_src_src
 					Ac_prod_src_src_l[i] = Ac_prod_src_src
@@ -4758,15 +4870,15 @@ if build_training_data == True:
 
 			## Call extra inputs
 			# print('Note set t_win in input')
-			x_src_query, tq_sample, x_src_query_cart, trv_out, trv_out_src, spatial_vals, tq, input_tensor_1, input_tensor_2, A_prod_sta_tensor, A_prod_src_tensor, data_1, data_2, lp_times_slice, lp_stations_slice, lp_phases_slice, lp_meta_slice = create_training_inputs(trv, Inpts[i], Masks[i], Locs[i], X_fixed[i], A_src_in_sta_l[i], A_src_in_prod_l[i], A_prod_sta_sta_l[i], A_prod_src_src_l[i], lp_srcs[i], lp_times[i], lp_stations[i], lp_phases[i], lp_meta[i], params_extra = params_extra, device = device)
+			x_src_query, tq_sample, x_src_query_cart, trv_out, trv_out_src, spatial_vals, tq, _, _, A_prod_sta_tensor, A_prod_src_tensor, data_1, data_2, lp_times_slice, lp_stations_slice, lp_phases_slice, lp_meta_slice = create_training_inputs(trv, Inpts[i], Masks[i], Locs[i], X_fixed[i], A_src_in_sta_l[i], A_src_in_prod_l[i], A_prod_sta_sta_l[i], A_prod_src_src_l[i], lp_srcs[i], lp_times[i], lp_stations[i], lp_phases[i], lp_meta[i], params_extra = params_extra, device = device)
 
 			# pdb.set_trace()
 
 			pick_lbls = pick_labels_extract_interior_region_flattened(x_src_query_cart, tq_sample.cpu().detach().numpy(), lp_meta_slice[:,-2::], lp_srcs[i], lat_range_interior, lon_range_interior, ftrns1, sig_t = src_t_arv_kernel, sig_x = src_x_arv_kernel)
 
 
-			h['Inpts_%d'%i] = Inpts[i] # Inpts[i]
-			h['Masks_%d'%i] = Masks[i] # Masks[i]
+			# h['Inpts_%d'%i] = Inpts[i] # Inpts[i]
+			# h['Masks_%d'%i] = Masks[i] # Masks[i]
 			h['X_fixed_%d'%i] = X_fixed[i]
 			h['X_fixed_cart_%d'%i] = ftrns1(X_fixed[i])
 			h['X_query_%d'%i] = X_query[i]
@@ -4822,8 +4934,11 @@ if build_training_data == True:
 			h['trv_out_src_%d'%i] = trv_out_src.cpu().detach().numpy()
 			h['spatial_vals_%d'%i] = spatial_vals.cpu().detach().numpy()
 			h['tq_%d'%i] = tq.cpu().detach().numpy()
-			h['input_tensor_1_%d'%i] = input_tensor_1.cpu().detach().numpy()
-			h['input_tensor_2_%d'%i] = input_tensor_2.cpu().detach().numpy()
+			# h['input_tensor_1_%d'%i] = input_tensor_1.cpu().detach().numpy()
+			# h['input_tensor_2_%d'%i] = input_tensor_2.cpu().detach().numpy()
+			h['input_tensor_1_%d'%i] = Inpts[i] # input_tensor_1.cpu().detach().numpy()
+			h['input_tensor_2_%d'%i] = Masks[i] # input_tensor_2.cpu().detach().numpy()
+			
 			h['A_prod_sta_tensor_%d'%i] = A_prod_sta_tensor.cpu().detach().numpy()
 			h['A_prod_src_tensor_%d'%i] = A_prod_src_tensor.cpu().detach().numpy()
 			h['data_1_edges_%d'%i] = data_1.edge_index.cpu().detach().numpy()
@@ -4899,6 +5014,7 @@ use_regression_loss = True
 use_consistency_loss = False
 use_negative_loss = True
 use_relative_loss = True
+use_rel_station_loss = True
 use_cap_loss = False
 
 
@@ -4930,6 +5046,47 @@ DiceLoss = GaussianDiceLoss() ## Can change the bg_weight
 # )
 
 
+# loss_charbonnier_base = EMAMassCharbonnierLoss(
+# 	peak_boost=3.0,
+# 	momentum=0.001,
+# 	foreground_weight=1.0,
+# 	background_weight=1.0,
+# 	foreground_threshold=0.01,
+# 	empty_batch_weight=0.25,
+# 	normalize_by_ema=True,
+# 	ema_include_empty=False, # True
+# 	loss_name = 'base'
+# )
+
+
+# loss_charbonnier_source = EMAMassCharbonnierLoss(
+# 	peak_boost=10.0,
+# 	momentum=0.001,
+# 	foreground_weight=1.0,
+# 	background_weight=5.0,
+# 	foreground_threshold=0.01,
+# 	empty_batch_weight=1.0,
+# 	normalize_by_ema=True,
+# 	ema_include_empty=False,
+# 	loss_name = 'source'
+# )
+
+
+# loss_charbonnier_assoc = EMAMassCharbonnierLoss(
+# 	peak_boost=10.0,
+# 	momentum=0.001,
+# 	foreground_weight=1.0,
+# 	background_weight=5.0,
+# 	foreground_threshold=0.01,
+# 	empty_batch_weight=1.0,
+# 	normalize_by_ema=True,
+# 	ema_include_empty=False,
+# 	loss_name = 'assoc'
+# )
+
+
+
+
 loss_charbonnier_base = EMAMassCharbonnierLoss(
 	peak_boost=3.0,
 	momentum=0.001,
@@ -4947,7 +5104,7 @@ loss_charbonnier_source = EMAMassCharbonnierLoss(
 	peak_boost=10.0,
 	momentum=0.001,
 	foreground_weight=1.0,
-	background_weight=5.0,
+	background_weight=2.0, # 5.0
 	foreground_threshold=0.01,
 	empty_batch_weight=1.0,
 	normalize_by_ema=True,
@@ -4960,13 +5117,14 @@ loss_charbonnier_assoc = EMAMassCharbonnierLoss(
 	peak_boost=10.0,
 	momentum=0.001,
 	foreground_weight=1.0,
-	background_weight=5.0,
+	background_weight=2.0, # 5.0
 	foreground_threshold=0.01,
 	empty_batch_weight=1.0,
 	normalize_by_ema=True,
 	ema_include_empty=False,
 	loss_name = 'assoc'
 )
+
 
 
 
@@ -5010,9 +5168,25 @@ if torch.cuda.is_available():
 	VerificationSuite.test_run("cuda"); print('\n')
 
 VerificationSuite1.test_run("cpu"); print('\n')
-    if torch.cuda.is_available():
-        VerificationSuite1.test_run("cuda"); print('\n')
+if torch.cuda.is_available():
+	VerificationSuite1.test_run("cuda"); print('\n')
 
+## Initialize logger
+use_wandb_logging = False  # Set to True when ready
+if use_wandb_logging:
+	import wandb
+	wandb.init(
+		project="GENIE",
+		name=f"run_ver_{n_ver}_step_{n_restart_step if n_restart else 0}",
+		config={
+			"version": n_ver,
+			"save_interval": save_interval,
+			"learning_rate": optimizer.param_groups[0]['lr'],
+			"training_params": training_params,
+			"graph_params": graph_params,
+		},
+		resume="allow" if n_restart else None,
+	)
 
 # for i in range(n_restart_step, n_epochs):
 for batch_idx, inputs in enumerate(loader):
@@ -5021,6 +5195,10 @@ for batch_idx, inputs in enumerate(loader):
 	i = n_restart_step + batch_idx
 	if i > n_epochs:
 		print('Finished training')
+		
+		if use_wandb_logging:
+			wandb.finish()
+
 		sys.exit()
 
 
@@ -5028,45 +5206,154 @@ for batch_idx, inputs in enumerate(loader):
 	ramp_main = get_step_ramp(i, start_step = 0, ramp_steps = int(n_epochs/10))
 
 
-	if (i == n_restart_step)*(n_restart == True):
-		## Load model and optimizer.
-		mz.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
-		if use_model_ema:
-			mz_ema.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_ema_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
+	# if (i == n_restart_step)*(n_restart == True):
+	# 	## Load model and optimizer.
+	# 	mz.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
+	# 	if use_model_ema:
+	# 		mz_ema.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_ema_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
 
-		optimizer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(n_restart_step, n_ver), map_location = device))
-		checkpoint = torch.load(write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver), map_location = device)
-		loss_charbonnier_base.load_state_dict(checkpoint["loss_base_state_dict"])	
-		loss_charbonnier_source.load_state_dict(checkpoint["loss_source_state_dict"])	
-		loss_charbonnier_assoc.load_state_dict(checkpoint["loss_assoc_state_dict"])
-		zlosses = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_restart_step, n_ver))
-		losses[0:n_restart_step] = zlosses['losses'][0:n_restart_step]
-		mx_trgt_1[0:n_restart_step] = zlosses['mx_trgt_1'][0:n_restart_step]; mx_trgt_2[0:n_restart_step] = zlosses['mx_trgt_2'][0:n_restart_step]
-		mx_trgt_3[0:n_restart_step] = zlosses['mx_trgt_3'][0:n_restart_step]; mx_trgt_4[0:n_restart_step] = zlosses['mx_trgt_4'][0:n_restart_step]
-		mx_pred_1[0:n_restart_step] = zlosses['mx_pred_1'][0:n_restart_step]; mx_pred_2[0:n_restart_step] = zlosses['mx_pred_2'][0:n_restart_step]
-		mx_pred_3[0:n_restart_step] = zlosses['mx_pred_3'][0:n_restart_step]; mx_pred_4[0:n_restart_step] = zlosses['mx_pred_4'][0:n_restart_step]
-		loss_charbonnier_base.initialize_mass, loss_charbonnier_source.initialize_mass, loss_charbonnier_assoc.initialize_mass = False, False, False
-		print('loaded model for restart on step %d ver %d \n'%(n_restart_step, n_ver))
-		zlosses.close()
+	# 	optimizer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(n_restart_step, n_ver), map_location = device))
+	# 	checkpoint = torch.load(write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver), map_location = device)
+	# 	loss_charbonnier_base.load_state_dict(checkpoint["loss_base_state_dict"])	
+	# 	loss_charbonnier_source.load_state_dict(checkpoint["loss_source_state_dict"])	
+	# 	loss_charbonnier_assoc.load_state_dict(checkpoint["loss_assoc_state_dict"])
+	# 	checkpoint = torch.load(resuming_checkpoint_path)
 	
+	#	 # Restore loss logger EMA history
+	#	 if 'logger_state_dict' in checkpoint:
+	#		 logger.load_state_dict(checkpoint['logger_state_dict'])
+
+	# 	zlosses = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_restart_step, n_ver))
+	# 	losses[0:n_restart_step] = zlosses['losses'][0:n_restart_step]
+	# 	mx_trgt_1[0:n_restart_step] = zlosses['mx_trgt_1'][0:n_restart_step]; mx_trgt_2[0:n_restart_step] = zlosses['mx_trgt_2'][0:n_restart_step]
+	# 	mx_trgt_3[0:n_restart_step] = zlosses['mx_trgt_3'][0:n_restart_step]; mx_trgt_4[0:n_restart_step] = zlosses['mx_trgt_4'][0:n_restart_step]
+	# 	mx_pred_1[0:n_restart_step] = zlosses['mx_pred_1'][0:n_restart_step]; mx_pred_2[0:n_restart_step] = zlosses['mx_pred_2'][0:n_restart_step]
+	# 	mx_pred_3[0:n_restart_step] = zlosses['mx_pred_3'][0:n_restart_step]; mx_pred_4[0:n_restart_step] = zlosses['mx_pred_4'][0:n_restart_step]
+	# 	loss_charbonnier_base.initialize_mass, loss_charbonnier_source.initialize_mass, loss_charbonnier_assoc.initialize_mass = False, False, False
+	# 	print('loaded model for restart on step %d ver %d \n'%(n_restart_step, n_ver))
+	# 	zlosses.close()
+	
+	if n_restart and (i == n_restart_step):
+		ckpt_path = write_training_file + f'trained_gnn_model_step_{n_restart_step}_ver_{n_ver}.pt'
+		npz_path = write_training_file + f'trained_gnn_model_step_{n_restart_step}_ver_{n_ver}_losses.npz'
+
+		# --- A. Load PyTorch Checkpoint ---
+		checkpoint = torch.load(ckpt_path, map_location=device)
+
+		mz.load_state_dict(checkpoint['model_state_dict'])
+		if use_model_ema and ('model_ema_state_dict' in checkpoint):
+			mz_ema.load_state_dict(checkpoint['model_ema_state_dict'])
+
+		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+		# Load Loss Functions
+		loss_charbonnier_base.load_state_dict(checkpoint['loss_base_state_dict'])
+		loss_charbonnier_source.load_state_dict(checkpoint['loss_source_state_dict'])
+		loss_charbonnier_assoc.load_state_dict(checkpoint['loss_assoc_state_dict'])
+
+		# Disable mass re-initialization on resume
+		loss_charbonnier_base.initialize_mass = False
+		loss_charbonnier_source.initialize_mass = False
+		loss_charbonnier_assoc.initialize_mass = False
+
+		# Restore LossLogger State
+		if 'logger_state_dict' in checkpoint:
+			logger.load_state_dict(checkpoint['logger_state_dict'])
+
+		# --- B. Load .npz History ---
+		with np.load(npz_path) as zlosses:
+			losses[:n_restart_step] = zlosses['losses'][:n_restart_step]
+			mx_trgt_1[:n_restart_step] = zlosses['mx_trgt_1'][:n_restart_step]
+			mx_trgt_2[:n_restart_step] = zlosses['mx_trgt_2'][:n_restart_step]
+			mx_trgt_3[:n_restart_step] = zlosses['mx_trgt_3'][:n_restart_step]
+			mx_trgt_4[:n_restart_step] = zlosses['mx_trgt_4'][:n_restart_step]
+			
+			mx_pred_1[:n_restart_step] = zlosses['mx_pred_1'][:n_restart_step]
+			mx_pred_2[:n_restart_step] = zlosses['mx_pred_2'][:n_restart_step]
+			mx_pred_3[:n_restart_step] = zlosses['mx_pred_3'][:n_restart_step]
+			mx_pred_4[:n_restart_step] = zlosses['mx_pred_4'][:n_restart_step]
+
+		print(f"Successfully loaded model for restart on step {n_restart_step} (ver {n_ver})\n")
+
 	if use_variable_domain == False:
 		mz.set_scale_coefficients(src_x_kernel*2.0, scale_time, kernel_sig_t, kernel_sig_t*3.0, src_x_kernel, src_t_kernel, time_shift_range)
 		
 	
-	if (((np.mod(i, 1000) == 0) or (i == (n_epochs - 1)))*(i != n_restart_step)) or (batch_idx == (len_loader - 1)):
+	# if (((np.mod(i, 1000) == 0) or (i == (n_epochs - 1)))*(i != n_restart_step)) or (batch_idx == (len_loader - 1)):
 
-		## Add save state of loss balancer so can re load
-		torch.save(mz.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(i, n_ver))
+	# 	## Add save state of loss balancer so can re load
+	# 	torch.save(mz.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(i, n_ver))
+	# 	if use_model_ema:
+	# 		torch.save(mz_ema.state_dict(), write_training_file + 'trained_gnn_model_step_ema_%d_ver_%d.h5'%(i, n_ver))
+	# 	torch.save(optimizer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(i, n_ver))
+	# 	np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
+	# 	checkpoint = {"loss_source_state_dict": loss_charbonnier_source.state_dict(), "loss_assoc_state_dict": loss_charbonnier_assoc.state_dict(), 'loss_base_state_dict': loss_charbonnier_base.state_dict()}
+	# 	# "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "epoch": epoch, "global_step": global_step,
+	# 	torch.save(checkpoint, write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver))
+	# 	checkpoint_logger = {
+	# 		'logger_state_dict': logger.state_dict(),  # <--- Save logger state here
+	# 	}
+	# 	torch.save(checkpoint_logger, write_training_file + 'trained_gnn_model_logger_step_%d.pt'%i)
+
+	# 	print('saved model %s %d'%(n_ver, i))
+	# 	print('saved model at step %d'%i)
+
+	save_interval = 1000
+	if ((i % save_interval == 0) or (i == n_epochs - 1)) and (i != n_restart_step):
+		# --- A. Save Model, Optimizer, Loss Functions, and LossLogger ---
+		ckpt_path = write_training_file + f'trained_gnn_model_step_{i}_ver_{n_ver}.pt'
+		
+		ckpt_payload = {
+			'step': i,
+			'version': n_ver,
+			'model_state_dict': mz.state_dict(),
+			'optimizer_state_dict': optimizer.state_dict(),
+			'logger_state_dict': logger.state_dict(),
+			'loss_base_state_dict': loss_charbonnier_base.state_dict(),
+			'loss_source_state_dict': loss_charbonnier_source.state_dict(),
+			'loss_assoc_state_dict': loss_charbonnier_assoc.state_dict(),
+		}
+		
 		if use_model_ema:
-			torch.save(mz_ema.state_dict(), write_training_file + 'trained_gnn_model_step_ema_%d_ver_%d.h5'%(i, n_ver))
-		torch.save(optimizer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(i, n_ver))
-		np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
-		checkpoint = {"loss_source_state_dict": loss_charbonnier_source.state_dict(), "loss_assoc_state_dict": loss_charbonnier_assoc.state_dict(), 'loss_base_state_dict': loss_charbonnier_base.state_dict()}
-		# "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "epoch": epoch, "global_step": global_step,
-		torch.save(checkpoint, write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver))
-		print('saved model %s %d'%(n_ver, i))
-		print('saved model at step %d'%i)
+			ckpt_payload['model_ema_state_dict'] = mz_ema.state_dict()
+			
+		torch.save(ckpt_payload, ckpt_path)
 
+		# --- B. Save Metrics Array (.npz) ---
+		npz_path = write_training_file + f'trained_gnn_model_step_{i}_ver_{n_ver}_losses.npz'
+		# np.savez_compressed(
+		#	 npz_path,
+		#	 losses=losses[:i+1],
+		#	 mx_trgt_1=mx_trgt_1[:i+1],
+		#	 mx_trgt_2=mx_trgt_2[:i+1],
+		#	 mx_trgt_3=mx_trgt_3[:i+1],
+		#	 mx_trgt_4=mx_trgt_4[:i+1],
+		#	 mx_pred_1=mx_pred_1[:i+1],
+		#	 mx_pred_2=mx_pred_2[:i+1],
+		#	 mx_pred_3=mx_pred_3[:i+1],
+		#	 mx_pred_4=mx_pred_4[:i+1],
+		# )
+		np.savez_compressed(
+			npz_path,
+			losses=losses[:i+1],
+			mx_trgt_1=mx_trgt_1[:i+1],
+			mx_trgt_2=mx_trgt_2[:i+1],
+			mx_trgt_3=mx_trgt_3[:i+1],
+			mx_trgt_4=mx_trgt_4[:i+1],
+			mx_pred_1=mx_pred_1[:i+1],
+			mx_pred_2=mx_pred_2[:i+1],
+			mx_pred_3=mx_pred_3[:i+1],
+			mx_pred_4=mx_pred_4[:i+1],
+			# Include spatial metadata and config dicts:
+			scale_x=scale_x,
+			offset_x=offset_x,
+			scale_x_extend=scale_x_extend,
+			offset_x_extend=offset_x_extend,
+			training_params=training_params,
+			graph_params=graph_params,
+			pred_params=pred_params,
+		)
+		print(f"Checkpoint saved at step {i} (ver {n_ver})")
 
 	optimizer.zero_grad()
 
@@ -5105,6 +5392,7 @@ for batch_idx, inputs in enumerate(loader):
 	mask_lbls_query_l = [[] for j in range(n_batch)]
 	mask_lbls_assoc_query_l = [[] for j in range(n_batch)]
 
+	# moi
 
 	weight_assoc_v = []
 	for j in range(n_batch):
@@ -5332,19 +5620,26 @@ for batch_idx, inputs in enumerate(loader):
 		# ==================== 1. REGRESSION / AMPLITUDE LOSSES ====================
 		if use_regression_loss:
 
-			## Normalize association loss by reference station count
-			N_stations_sample = pick_lbls.shape[1]
-			assoc_loss_scale = 1.0 + torch.log(torch.tensor(max(1.0, N_stations_sample / min_sta_ref), device = device))
+			N_stations_sample = max(3, len(np.unique(lp_stations[i0])))
+
+			# 2. Compute gentle logarithmic density scale based on TRUE station count
+			raw_scale = 1.0 + 0.5 * torch.log(torch.tensor(max(1.0, N_stations_sample / min_sta_ref), device=device))
+
+			# 3. Clamp/Cap the scale factor (e.g. max 2.0x boost)
+			assoc_loss_scale = torch.clamp(raw_scale, min=1.0, max=2.0)
 
 			# Uncapped baselines
 			loss_reg_query = weights[1] * loss_charbonnier_source(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], update_ema = True)
 			loss_reg_base = weights[0] * loss_charbonnier_base(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]], update_ema = True)
-			loss_reg_assoc_P = (assoc_loss_scale / N_stations_sample) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
-			loss_reg_assoc_S = (assoc_loss_scale / N_stations_sample) * weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
+			loss_reg_assoc_P = (assoc_loss_scale / 1.0) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
+			loss_reg_assoc_S = (assoc_loss_scale / 1.0) * weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
+			# loss_reg_assoc_P = (assoc_loss_scale / N_stations_sample) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
+			# loss_reg_assoc_S = (assoc_loss_scale / N_stations_sample) * weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
 			# loss_reg_assoc_P *= assoc_loss_scale
 
 			loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch_valid
 			loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch_valid
+
 
 
 		# ==================== 1. DICE / LOCALIZATION LOSSES ====================
@@ -5366,22 +5661,26 @@ for batch_idx, inputs in enumerate(loader):
 		if use_negative_loss and (ramp_aux > 0.0) and rand_use_negative:
 
 			min_up_sample = 0.05 # 0.1
-			min_safe_dist_m = 2.5 * src_x_kernel # 3.0
+			min_safe_dist_km = 2.5 * src_x_kernel / 1000.0 # 3.0
 			min_safe_t_s = 2.5 * src_t_kernel # 3.0
 
-			queries_np = X_query[i0].cpu().detach().numpy() # [N, 4]
-			sources_np = lp_srcs[i0].cpu().detach().numpy() # [M, 4]
+			queries_np = X_query[i0].to(device) # .cpu().detach().numpy() # [N, 4]
+			sources_np = lp_srcs[i0].to(device) # .cpu().detach().numpy() # [M, 4]
 
 			# Inlined 4D spacetime distance check to keep code compact
 			if len(sources_np) > 0 and len(queries_np) > 0:
-				ecef_q = lla2ecef(queries_np[:, 0:3])
-				ecef_s = lla2ecef(sources_np[:, 0:3])
-				dist_3d = np.linalg.norm(ecef_q[:, None, :] - ecef_s[None, :, :], axis=-1)
-				dist_t = np.abs(queries_np[:, 3:4] - sources_np[:, 3:4].T)
-				
+				ecef_q = lla2ecef_diff(queries_np[:, 0:3])/1000.0
+				ecef_s = lla2ecef_diff(sources_np[:, 0:3])/1000.0
+				# dist_3d = np.linalg.norm(ecef_q[:, None, :] - ecef_s[None, :, :], axis=-1)
+				dist_3d = torch.cdist(ecef_q, ecef_s) # , axis=-1)
+				# dist_t = np.abs(queries_np[:, 3:4] - sources_np[:, 3:4].T)
+				dist_t = torch.abs(queries_np[:, 3:4] - sources_np[:, 3:4].T)
+
 				# Point is unsafe ONLY if it is close in space AND time simultaneously
-				is_close = (dist_3d < min_safe_dist_m) & (dist_t < min_safe_t_s)
-				is_far_enough = ~np.any(is_close, axis=1)
+				is_close = (dist_3d < min_safe_dist_km) & (dist_t < min_safe_t_s)
+				# is_far_enough = ~np.any(is_close, axis=1)
+				is_far_enough = ~is_close.any(dim=1).cpu().numpy()
+
 			else:
 				is_far_enough = np.ones(len(queries_np), dtype=bool)
 
@@ -5400,6 +5699,9 @@ for batch_idx, inputs in enumerate(loader):
 
 			prob_up_sample = prob_up_sample / prob_up_sample.sum()
 			is_global_lon = (lon_range_extend[1] - lon_range_extend[0]) >= 359.0
+
+			queries_np = queries_np.cpu().numpy()
+			sources_np = sources_np.cpu().numpy()
 
 			# Resample queries around identified hard negatives
 			x_query_sample, x_query_sample_t = sample_dense_queries(
@@ -5423,7 +5725,7 @@ for batch_idx, inputs in enumerate(loader):
 			lbls_query = compute_source_labels(x_query_sample, x_query_sample_t, sources_np[:, 0:3], sources_np[:, 3], src_spatial_kernel, src_t_kernel, ftrns1)
 
 			# Final Safety Gate: Strip any perturbed point that bounced back onto a non-zero label
-			lbls_query_tensor = torch.Tensor(lbls_query).to(device)
+			lbls_query_tensor = torch.tensor(lbls_query, dtype = torch.float32, device = device) # ).to(device)
 			neg_mask_final = (lbls_query_tensor[:, 0] < 0.01)
 
 			if neg_mask_final.any():
@@ -5440,25 +5742,6 @@ for batch_idx, inputs in enumerate(loader):
 				# apply_normalize=False,
 				# update_ema=False,
 		
-
-		# # ==================== 4. RELATIVE LOSS ===================== #
-		# loss_rel = torch.Tensor([0.0]).to(device)
-		# computed_relative_loss = False
-		# if (use_relative_loss == True)*(ramp_aux > 0):
-		# 	k_nearest_query = 30
-		# 	ifind_positive = torch.where(Lbls_query[i0].squeeze() > 0.1)[0].to(device)
-		# 	if len(ifind_positive) > int(k_nearest_query/10):
-		# 		proj_coords = torch.cat((ftrns1_diff(X_query[i0].to(device))/1000.0, scale_time*X_query[i0][:,3:4].to(device)), dim = 1)[ifind_positive]
-		# 		edges_query = ifind_positive[remove_self_loops(knn(proj_coords, proj_coords, k = min(k_nearest_query, len(ifind_positive) - 1)))[0]] # .flip(0).contiguous()
-		# 		trgt_rel = Lbls_query[i0].to(device)[edges_query[0]] - Lbls_query[i0].to(device)[edges_query[1]]
-		# 		pred_rel = out[1][edges_query[0]] - out[1][edges_query[1]]
-		# 		weight_rel = 0.25 + 0.75*torch.exp(-torch.abs(trgt_rel)/0.35)
-		# 		# loss_rel = weights[1] * charbonnier_loss(pred_rel, trgt_rel, weight = weight_rel)
-		# 		loss_rel = loss_charbonnier_source(pred_rel, trgt_rel, sample_weight = weight_rel, 
-		# 			apply_peak_weight = False, apply_fg_bg_balance=False, apply_normalize = False, update_ema = False)
-		# 		loss_relative_val += loss_rel.item() / n_batch_valid
-		# 		computed_relative_loss = True
-
 		
 		# ==================== 4. RELATIVE + SADDLE LOSS ==================== #
 		loss_rel = torch.tensor(0.0, device=device)
@@ -5466,169 +5749,283 @@ for batch_idx, inputs in enumerate(loader):
 		
 		computed_relative_loss = False
 		computed_saddle_loss = False
-		
+		moi
 		if use_relative_loss and ramp_aux > 0.0:
 		
-		    k_nearest_query = 50
-		
-		    ifind_positive = torch.where(
-		        Lbls_query[i0].squeeze() > 0.01
-		    )[0].to(device)
-		
-		    # All KNN, relative, and saddle computations MUST live inside this check
-		    if len(ifind_positive) > 2:
-		
-		        proj_coords = torch.cat((
-		            ftrns1_diff(X_query[i0].to(device)) / 1000.0,
-		            scale_time * X_query[i0][:, 3:4].to(device)
-		        ), dim=1)[ifind_positive]
-		
-		        n_center = len(ifind_positive)
-		        k = min(k_nearest_query, n_center - 1)
-		
-		        edge_index_full = knn(
-		            proj_coords,
-		            proj_coords,
-		            k=k + 1,
-		        )
-		
-		        src, dst = edge_index_full
-		
-		        # Make neighbor rows explicitly grouped by center
-		        order = torch.argsort(src)
-		        src = src[order]
-		        dst = dst[order]
-		
-		        # Remove self edges explicitly
-		        non_self = src != dst
-		        src = src[non_self]
-		        dst = dst[non_self]
-		
-		        # After removing self, each center should have k neighbors
-		        k_actual = dst.shape[0] // n_center
-		
-		        neighbors_local = dst.view(n_center, k_actual)
-		
-		        src_local = torch.arange(
-		            n_center, device=device
-		        ).repeat_interleave(k_actual)
-		
-		        dst_local = neighbors_local.reshape(-1)
-		
-		        src_idx = ifind_positive[src_local]
-		        dst_idx = ifind_positive[dst_local]
-		
-		        y = Lbls_query[i0].to(device)[:, 0]
-		        p = out[1][:, 0]
-		
-		        # ============================================================
-		        # Pairwise relative loss
-		        # ============================================================
-		        y0, y1 = y[src_idx], y[dst_idx]
-		        p0, p1 = p[src_idx], p[dst_idx]
-		
-		        target_rel = y0 - y1
-		        pred_rel = p0 - p1
-		
-		        weight_rel = (
-		            0.5
-		            + 0.5 * torch.minimum(y0.abs(), y1.abs())
-		            + 0.5 * target_rel.abs()
-		        )
-		        weight_rel = weight_rel / weight_rel.mean().clamp_min(1e-6)
-		
-		        peak_reference_rel = 0.5 * (y0.abs() + y1.abs())
-		
-		        loss_rel = loss_charbonnier_source(
-		            pred_rel,
-		            target_rel,
-		            sample_weight=weight_rel,
-		            apply_peak_weight=True,
-		            peak_reference=peak_reference_rel,
-		            apply_fg_bg_balance=False,
-		            apply_normalize=True,
-		            update_ema=False,
-		        )
-		
-		        loss_relative_val += loss_rel.item() / n_batch_valid
-		        computed_relative_loss = True
-		
-		        # ============================================================
-		        # Saddle / trough loss
-		        # ============================================================
-		        perm = torch.argsort(
-		            torch.rand_like(neighbors_local.float()), dim=1
-		        )
-		        neighbors_shuffled = neighbors_local.gather(1, perm)
-		
-		        n_pair = k_actual // 2
-		
-		        if n_pair > 0:
-		            a_local = neighbors_shuffled[:, 0:2*n_pair:2].reshape(-1)
-		            b_local = neighbors_shuffled[:, 1:2*n_pair:2].reshape(-1)
-		            c_local = torch.arange(
-		                n_center, device=device
-		            ).repeat_interleave(n_pair)
-		
-		            a_idx = ifind_positive[a_local]
-		            b_idx = ifind_positive[b_local]
-		            c_idx = ifind_positive[c_local]
-		
-		            yc, ya, yb = y[c_idx], y[a_idx], y[b_idx]
-		            pc, pa, pb = p[c_idx], p[a_idx], p[b_idx]
-		
-		            dir_a = proj_coords[a_local] - proj_coords[c_local]
-		            dir_b = proj_coords[b_local] - proj_coords[c_local]
-		
-		            cos_sim = (
-		                torch.sum(dir_a * dir_b, dim=1)
-		                / (
-		                    torch.norm(dir_a, dim=1)
-		                    * torch.norm(dir_b, dim=1)
-		                    + 1e-6
-		                )
-		            )
-		
-		            valley = (
-		                (yc > 0.01) &
-		                (ya > 0.1) &
-		                (yb > 0.1) &
-		                (yc < ya) &
-		                (yc < yb) &
-		                (cos_sim < 0.0)
-		            )
-		
-		            # Require at least 4 valid saddle points to avoid high-variance gradient updates
-		            if valley.sum() >= 4:
-		
-		                target_drop = torch.cat((
-		                    ya[valley] - yc[valley],
-		                    yb[valley] - yc[valley],
-		                ))
-		
-		                pred_drop = torch.cat((
-		                    pa[valley] - pc[valley],
-		                    pb[valley] - pc[valley],
-		                ))
-		
-		                peak_reference_saddle = torch.cat((
-		                    ya[valley].abs(),
-		                    yb[valley].abs(),
-		                ))
-		
-		                loss_saddle = loss_charbonnier_source(
-		                    pred_drop,
-		                    target_drop,
-		                    apply_peak_weight=True,
-		                    peak_reference=peak_reference_saddle,
-		                    apply_fg_bg_balance=False,
-		                    apply_normalize=True,
-		                    update_ema=False,
-		                )
-		
-		                loss_saddle_val += loss_saddle.item() / n_batch_valid
-		                computed_saddle_loss = True
 
+			# 1. Expand pool size to capture a wider spatial-temporal range
+			k_nearest_pool = 120
+			stride_step = 3  # Takes every 3rd neighbor up to k_pool (~40 neighbors max)
+
+			ifind_positive = torch.where(
+				Lbls_query[i0].squeeze() > 0.01
+			)[0].to(device)
+
+			scale_rel_tol = 2.5 * (src_x_kernel * 2.0) / 1000.0
+
+			# All KNN, relative, and saddle computations MUST live inside this check
+			if len(ifind_positive) > 2:
+
+				proj_coords = torch.cat((
+					ftrns1_diff(X_query[i0].to(device)) / 1000.0,
+					scale_time * X_query[i0][:, 3:4].to(device)
+				), dim=1)[ifind_positive]
+
+				n_center = len(ifind_positive)
+				k = min(k_nearest_pool, n_center - 1)
+
+				edge_index_full = knn(
+					proj_coords,
+					proj_coords,
+					k=k + 1,
+				)
+
+				src, dst = edge_index_full
+
+				# Make neighbor rows explicitly grouped by center
+				order = torch.argsort(src)
+				src = src[order]
+				dst = dst[order]
+
+				# Remove self edges explicitly
+				non_self = src != dst
+				src = src[non_self]
+				dst = dst[non_self]
+
+
+				# Reshape into local neighborhood matrix
+				k_actual_pool = dst.shape[0] // n_center
+				neighbors_local = dst.view(n_center, k_actual_pool)
+
+				# ============================================================
+				# STRIDED DIFFUSE NEIGHBOR SAMPLING
+				# ============================================================
+				current_stride = stride_step if k_actual_pool >= 30 else 1
+				strided_indices = torch.arange(0, k_actual_pool, step=current_stride, device=device)
+
+				neighbors_diffuse = neighbors_local[:, strided_indices]
+				k_actual = neighbors_diffuse.shape[1]
+
+				# Flatten strided neighbor matrix
+				src_local = torch.arange(n_center, device=device).repeat_interleave(k_actual)
+				dst_local = neighbors_diffuse.reshape(-1)
+
+				# 4D distance check directly on local coordinates
+				dist_rel = torch.norm(proj_coords[src_local] - proj_coords[dst_local], dim=1)
+				valid_dist = dist_rel <= scale_rel_tol
+
+				# Map directly to global query indices with distance filter applied in one go
+				src_idx = ifind_positive[src_local[valid_dist]]
+				dst_idx = ifind_positive[dst_local[valid_dist]]
+
+
+				y = Lbls_query[i0].to(device)[:, 0]
+				p = out[1][:, 0]
+		
+				# ============================================================
+				# Pairwise relative loss
+				# ============================================================
+				if len(src_idx) > 0:
+
+					y0, y1 = y[src_idx], y[dst_idx]
+					p0, p1 = p[src_idx], p[dst_idx]
+			
+					target_rel = y0 - y1
+					pred_rel = p0 - p1
+			
+					weight_rel = (
+						0.5
+						+ 0.5 * torch.minimum(y0.abs(), y1.abs())
+						+ 0.5 * target_rel.abs()
+					)
+					weight_rel = weight_rel / weight_rel.mean().clamp_min(1e-6)
+			
+					peak_reference_rel = 0.5 * (y0.abs() + y1.abs())
+			
+					loss_rel = loss_charbonnier_source(
+						pred_rel,
+						target_rel,
+						sample_weight=weight_rel,
+						apply_peak_weight=True,
+						peak_reference=peak_reference_rel,
+						apply_fg_bg_balance=False,
+						apply_normalize=True,
+						update_ema=False,
+					)
+			
+					loss_relative_val += loss_rel.item() / n_batch_valid
+					computed_relative_loss = True
+		
+				# ============================================================
+				# Saddle / trough loss
+				# ============================================================
+				perm = torch.argsort(
+					torch.rand_like(neighbors_local.float()), dim=1
+				)
+				neighbors_shuffled = neighbors_local.gather(1, perm)
+		
+				n_pair = k_actual // 2
+		
+				if n_pair > 0:
+					a_local = neighbors_shuffled[:, 0:2*n_pair:2].reshape(-1)
+					b_local = neighbors_shuffled[:, 1:2*n_pair:2].reshape(-1)
+					c_local = torch.arange(
+						n_center, device=device
+					).repeat_interleave(n_pair)
+		
+					a_idx = ifind_positive[a_local]
+					b_idx = ifind_positive[b_local]
+					c_idx = ifind_positive[c_local]
+		
+					yc, ya, yb = y[c_idx], y[a_idx], y[b_idx]
+					pc, pa, pb = p[c_idx], p[a_idx], p[b_idx]
+		
+					dir_a = proj_coords[a_local] - proj_coords[c_local]
+					dir_b = proj_coords[b_local] - proj_coords[c_local]
+		
+					dist_ca = torch.norm(dir_a, dim=1)
+					dist_cb = torch.norm(dir_b, dim=1)
+
+					cos_sim = (
+						torch.sum(dir_a * dir_b, dim=1)
+						/ (
+							dist_ca
+							* dist_cb
+							+ 1e-6
+						)
+					)
+
+					# 2. Saddle Point Condition (cos_sim < 0.3)
+					# cos_sim < 0.3 ensures angle between CA and CB is > 72.5 degrees
+					valley = (
+						(yc > 0.01) & 
+						(ya > 0.1) & 
+						(yb > 0.1) & 
+						(yc < 0.85 * ya) &  # Deep enough drop relative to A
+						(yc < 0.85 * yb) &  # Deep enough drop relative to B
+						(cos_sim < 0.3)	& # Captures non-linear valley geometries
+						(dist_ca <= scale_rel_tol) &
+						(dist_cb <= scale_rel_tol)
+					)
+		
+					# Require at least 4 valid saddle points to avoid high-variance gradient updates
+					if valley.sum() >= 4:
+		
+						target_drop = torch.cat((
+							ya[valley] - yc[valley],
+							yb[valley] - yc[valley],
+						))
+		
+						pred_drop = torch.cat((
+							pa[valley] - pc[valley],
+							pb[valley] - pc[valley],
+						))
+		
+						peak_reference_saddle = torch.cat((
+							ya[valley].abs(),
+							yb[valley].abs(),
+						))
+		
+						loss_saddle = loss_charbonnier_source(
+							pred_drop,
+							target_drop,
+							apply_peak_weight=True,
+							peak_reference=peak_reference_saddle,
+							apply_fg_bg_balance=False,
+							apply_normalize=True,
+							update_ema=False,
+						)
+		
+						loss_saddle_val += loss_saddle.item() / n_batch_valid
+						computed_saddle_loss = True
+
+
+		# ==================== 5. Relative Association Loss =================
+		loss_relative_station = torch.tensor(0.0, device=device)	
+		computed_rel_station_loss = False	
+		if use_rel_station_loss == True: #  and ramp_aux > 0.0:
+
+			N_sta, tol_min = len(Locs[i0]), 0.01
+			k_local_use = min(len(Locs[i0]), k_sta_edges*2 + 1)
+			# vec_ind = np.arange(k_sta_edges*2)
+			# stride_select = np.sort(np.hstack([np.random.choice(vec_ind, size = k_sta_edges, replace = False) + j*k_sta_edges for j in range(len(Locs[i0]))]))
+			knn_sta = remove_self_loops(knn(ftrns1_diff(Locs[i0].to(device))/1000.0, ftrns1_diff(Locs[i0].to(device))/1000.0, k = k_local_use))[0] # [:,stride_select]
+
+			# Reshape edges per source station to pick k_sta_edges per station
+			# edge_index is ordered by src station in PyTorch Geometric's knn implementation
+			num_edges_per_sta = k_local_use - 1
+			edge_src = knn_sta[0].view(N_sta, num_edges_per_sta)
+			edge_dst = knn_sta[1].view(N_sta, num_edges_per_sta)
+
+			# Permute and take first k_sta_edges per station
+			rand_perm = torch.argsort(torch.rand(N_sta, num_edges_per_sta, device=device), dim=1)[:, :k_sta_edges]
+			sampled_src = torch.gather(edge_src, 1, rand_perm).reshape(-1)
+			sampled_dst = torch.gather(edge_dst, 1, rand_perm).reshape(-1)
+
+			# ------------------ Broadcast Station Edges to Pick Edges ------------------
+			sta_of_pick = lp_stations[i0].to(device).long()  # Shape: (N_picks,)
+			
+			# Build adjacency matrix for sampled station graph
+			sta_adj = torch.zeros((N_sta, N_sta), dtype=torch.bool, device=device)
+			sta_adj[sampled_src, sampled_dst] = True
+
+			# Broadcast pick station assignments across pairs (N_picks, N_picks)
+			# Find pick pairs (p1, p2) whose underlying stations are connected in the station graph
+			p1_sta = sta_of_pick.view(-1, 1)
+			p2_sta = sta_of_pick.view(1, -1)
+			pick_edge_mask = sta_adj[p1_sta, p2_sta] & (p1_sta != p2_sta)
+
+			# knn_picks is shape (2, N_pick_edges) — replacing knn_sta!
+			knn_picks = torch.stack(torch.where(pick_edge_mask), dim=0).long()
+			# ---------------------------------------------------------------------------
+
+			if knn_picks.shape[1] > 0:
+				peak_reference_rel_p = torch.max(pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 0], pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 0])
+				peak_reference_rel_s = torch.max(pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 1], pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 1])
+				pos_allowed_p1, pos_allowed_p2 = torch.where(peak_reference_rel_p > tol_min)
+				pos_allowed_s1, pos_allowed_s2 = torch.where(peak_reference_rel_s > tol_min)
+
+			else:
+				pos_allowed_p1 = np.zeros(0).astype('int')
+				pos_allowed_p2 = np.zeros(0).astype('int')
+
+
+			if len(pos_allowed_p1) > 0:
+				trgt_diff_p = pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[0][pos_allowed_p2], 0] - pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[1][pos_allowed_p2], 0]
+				pred_diff_p = out[2][mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[0][pos_allowed_p2], 0] - out[2][mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[1][pos_allowed_p2], 0]
+
+				loss_rel_assoc_P = (assoc_loss_scale / 1.0) * loss_charbonnier_assoc(
+					pred_diff_p,
+					trgt_diff_p,
+					apply_peak_weight = True,
+					peak_reference = peak_reference_rel_p[pos_allowed_p1, pos_allowed_p2],
+					apply_fg_bg_balance = False,
+					apply_normalize = True,
+					update_ema = False,
+				)
+				loss_relative_station += 0.5*weights[2]*weight_assoc_v[inc]*loss_rel_assoc_P
+				computed_rel_station_loss = True
+
+
+			if len(pos_allowed_s1) > 0:
+				trgt_diff_s = pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[0][pos_allowed_s2], 1] - pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[1][pos_allowed_s2], 1]
+				pred_diff_s = out[3][mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[0][pos_allowed_s2], 0] - out[3][mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[1][pos_allowed_s2], 0]
+
+				loss_rel_assoc_S = (assoc_loss_scale / 1.0) * loss_charbonnier_assoc(
+					pred_diff_s,
+					trgt_diff_s,
+					apply_peak_weight = True,
+					peak_reference = peak_reference_rel_s[pos_allowed_s1, pos_allowed_s2],
+					apply_fg_bg_balance = False,
+					apply_normalize = True,
+					update_ema = False,
+				)
+				loss_relative_station += 0.5*weights[3]*weight_assoc_v[inc]*loss_rel_assoc_S
+				computed_rel_station_loss = True
+
+
+			# loss_reg_assoc_P = (assoc_loss_scale / 1.0) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
+			# loss_reg_assoc_S = (assoc_loss_scale / 1.0) * weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
 
 
 		# ==================== 5. CONSISTENCY LOSS ====================
@@ -5680,6 +6077,16 @@ for batch_idx, inputs in enumerate(loader):
 		if computed_relative_loss:
 			loss_dict['aux_relative'] = loss_rel
 
+		if computed_saddle_loss:
+			loss_dict['aux_saddle'] = loss_saddle
+
+		if computed_rel_station_loss:
+			loss_dict['aux_rel_station'] = loss_relative_station
+
+		if use_dice_loss:
+			loss_dict['loss_dice3'] = loss_dice3
+			loss_dict['loss_dice4'] = loss_dice4
+
 
 		# if computed_negative_loss:
 		# 	loss_dict['aux_negative'] = ramp_aux * raw_loss_negative
@@ -5692,28 +6099,28 @@ for batch_idx, inputs in enumerate(loader):
 		# loss += 0.1*(loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
 
 		if computed_negative_loss == True:
-			loss += 0.3 * ramp_aux * weights[1] * loss_negative
+			# loss += 0.3 * ramp_aux * weights[1] * loss_negative
+			loss += 0.25 * ramp_aux * weights[1] * loss_negative
 
 		if computed_relative_loss == True:
 			loss += 0.08 * ramp_aux * weights[1] * loss_rel
 
 		if computed_saddle_loss == True:
-			loss += 0.02 * ramp_aux * weights[1] * loss_saddle
+			# loss += 0.02 * ramp_aux * weights[1] * loss_saddle
+			loss += 0.075 * ramp_aux * weights[1] * loss_saddle
+
+		if computed_rel_station_loss == True:
+			loss += 0.08 * ramp_aux * loss_relative_station
 
 		if use_dice_loss == True:
-			# loss += 0.05 * (loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
 			loss += 0.02 * (loss_dice3 + loss_dice4)
-			# loss_dict['loss_base1'] = loss_base1
-			# loss_dict['loss_dice2'] = loss_dice2
-			loss_dict['loss_dice3'] = loss_dice3
-			loss_dict['loss_dice4'] = loss_dice4
+
 		
 		# print(f"Query: {loss_reg_query.item():.4f} | Neg: {loss_negative.item():.4f} | Rel: {loss_rel.item():.4f}")
 
 		# loss = LossBalancer(loss_dict, accum_steps = n_batch, is_last_accum_step = (inc == (n_batch - 1))) # losses_dict: dict, accum_steps: int = None, is_last_accum_step: bool = False
 		loss = loss/n_batch_valid
 		loss.backward(retain_graph = False)
-
 
 		n_visualize_step = 1000
 		n_visualize_fraction = 0.2
@@ -5726,7 +6133,7 @@ for batch_idx, inputs in enumerate(loader):
 		## Estimate scales
 		if init_spatial_norms == True:
 			diff_sp = input_tensors_l[i0][4].x[:, :3]
-	        norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim = False)
+			norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim = False)
 			dist_norms.append(norm_pos.cpu().detach().numpy())
 		
 		# if inc != (n_batch - 1):
@@ -5743,6 +6150,10 @@ for batch_idx, inputs in enumerate(loader):
 		mx_pred_val_2 += out[1].max().item()
 		mx_pred_val_3 += out[2].max().item()
 		mx_pred_val_4 += out[3].max().item()
+
+
+		loss_dict['total_loss'] = loss
+		logger.update(loss_dict)
 
 
 		# # 1. Zero gradients, compute primary loss backward
@@ -5792,9 +6203,28 @@ for batch_idx, inputs in enumerate(loader):
 	
 	if (loss_charbonnier_source.initialize_mass == False) and (loss_charbonnier_assoc.initialize_mass == False) and (write_dist_scales == False): ## Skip update on first write of spatial scales
 		optimizer.step()
-		
+		logger.step()
 
-	
+		# if use_wandb_logging:
+		# 	step_metrics = logger.step()
+		# 	log_data = {f"train/{k}": v for k, v in step_metrics.items()}
+		# 	log_data.update({f"ema/{k}": v for k, v in logger.get_ema().items()})
+		# 	wandb.log(log_data, step=global_step)
+
+		# Inside your training loop at step i:
+		step_metrics = logger.step()
+		ema_metrics = logger.get_ema()
+		if use_wandb_logging:
+			log_payload = {}
+			for name, val in step_metrics.items():
+				log_payload[f"train/{name}"] = val	
+
+			for name, val in ema_metrics.items():
+				log_payload[f"ema/{name}"] = val
+			wandb.log(log_payload, step=i)
+			# 3. Optional: track learning rate
+			# log_payload["lr"] = optimizer.param_groups[0]['lr']
+
 	losses[i] = loss_val
 	mx_trgt_1[i] = mx_trgt_val_1/n_batch_valid
 	mx_trgt_2[i] = mx_trgt_val_2/n_batch_valid
@@ -5816,9 +6246,9 @@ for batch_idx, inputs in enumerate(loader):
 				p_ema.mul_(model_ema).add_(p, alpha=1.0 - model_ema)
 
 
-	# Log losses
-	if use_wandb_logging == True:
-		wandb.log({"loss": loss_val})
+	# # Log losses
+	# if use_wandb_logging == True:
+	# 	wandb.log({"loss": loss_val})
 
 	log_buffer.append('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_dice_src_val, loss_dice_asc_val, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val))
 
@@ -6028,3 +6458,4 @@ def compute_loss(x, n_repeat = 10, return_metrics = False):
 	else:
 
 		return f1, prec, rec, Srcs, Srcs_trgt, Matches, Ind, Ind1 ## Can include detected events
+
