@@ -525,6 +525,20 @@ for i in range(len(x_grids)):
 	mz_slice.eval()
 	mz_list.append(mz_slice)
 
+
+# model_path = MODELS_DIR / f"{name_of_project}_trained_gnn_model_step_{n_step_load}_ver_{n_ver_load}.pt"
+# checkpoint = torch.load(model_path, map_location=device)
+# state_dict = checkpoint['model_state_dict']
+
+# mz_list = []
+# for i in range(len(x_grids)):
+#     mz_slice = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv=trv, device=device).to(device)
+#     mz_slice.load_state_dict(state_dict)
+#     mz_slice.eval()
+    
+#     mz_list.append(mz_slice)
+
+
 n_batch = 1 ## Process one time step at a time (fixed)
 day_len = 86400
 assert(n_batch == 1)
