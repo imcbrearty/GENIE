@@ -4489,7 +4489,7 @@ for batch_idx, inputs in enumerate(loader):
 			raw_scale = 1.0 + 0.5 * torch.log(
 				torch.tensor(max(1.0, N_stations_sample / min_sta_ref), device=device)
 			)
-			assoc_loss_scale = torch.clamp(raw_scale, min=1.0, max=2.0)
+			assoc_loss_scale = torch.clamp(raw_scale, min=1.0, max=3.0)
 
 			# Uncapped baselines
 			loss_reg_query = weights[1] * loss_charbonnier_source(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], update_ema = True)
@@ -4622,7 +4622,7 @@ for batch_idx, inputs in enumerate(loader):
 
 			# 1. Expand pool size to capture a wider spatial-temporal range
 			k_nearest_pool = 100
-			stride_step = 3  # Takes every 3rd neighbor up to k_pool (~40 neighbors max)
+			stride_step = 2  # Takes every 3rd neighbor up to k_pool (~40 neighbors max)
 
 			# ifind_positive = torch.where(
 			# 	Lbls_query[i0].squeeze() > 0.01
@@ -4630,7 +4630,7 @@ for batch_idx, inputs in enumerate(loader):
 
 			# Include both true ground-truth targets AND predicted false positives
 			ifind_positive = torch.where(
-				(Lbls_query[i0].squeeze() > 0.01) | (out[1][:, 0].detach() > 0.01)
+				(Lbls_query[i0].squeeze() > 0.01) | (out[1][:, 0].detach() > 0.025)
 			)[0].to(device)
 
 			scale_rel_tol = 2.5 * (src_x_kernel * 2.0) / 1000.0
