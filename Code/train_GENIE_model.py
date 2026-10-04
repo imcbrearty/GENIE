@@ -5068,7 +5068,7 @@ for batch_idx, inputs in enumerate(loader):
 		mz.BipartiteGraphReadOutOperator.r_max.fill_(float(spatial_quantiles[2] * 4.0))
 
 		loss_charbonnier_assoc.N_ref_picks.fill_(float(max(np.mean(avg_picks), 3.0)))
-		loss_charbonnier_assoc.min_sta_ref.fill_(float(max(np.mean(avg_stations), 3.0)))
+		loss_charbonnier_assoc.min_sta_ref.fill_(float(max(np.quantile(avg_stations, 0.1), 3.0)))
 
 		init_spatial_norms, write_dist_scales = False, True
 		print("Bipartite radii scales q15/40/85", spatial_quantiles.tolist(), "clamp", mz.Bipartite_ReadIn.r_min, mz.Bipartite_ReadIn.r_max, "\n")
