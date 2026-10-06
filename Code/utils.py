@@ -581,6 +581,88 @@ def softplus_threshold_degrees(mags, d_min=1.8, d_cap=180.0, m0=3.2, k=1.0):
     d_max = d_min + (d_cap - d_min) * (softplus / softplus_max)
     return np.minimum(d_max, d_cap)
 
+
+
+
+def estimate_max_observation_distance(
+    mags, 
+    a=0.55, 
+    b=1.2, 
+    d_min_km=5.0, 
+    d_max_km=20015.0, 
+    return_degrees=False,
+    latitude=None
+):
+    """
+    Estimates a realistic upper bound for maximum observation distance
+    given seismic magnitudes using a power-law scaling relation.
+    
+    Converts distance using the WGS 84 ellipsoid specification.
+    
+    Parameters:
+    -----------
+    mags : float or array-like
+        Seismic magnitude(s).
+    a, b : float
+        Scaling parameters for log10(D_km) = a * M + b.
+        Default (a=0.55, b=1.2) provides a broad, tolerant upper bound.
+    d_min_km : float
+        Minimum distance threshold in km (default 1.0 km).
+    d_max_km : float
+        Maximum distance cap in km (default antipodal distance ~20,015 km).
+    return_degrees : bool
+        If True, returns arc distance in degrees.
+        If False, returns ground distance in meters.
+    latitude : float or array-like, optional
+        Geodetic latitude in degrees (-90 to 90) for local WGS 84 radius calculation.
+        If None, uses the global authalic mean Earth radius (WGS 84).
+        
+    Returns:
+    --------
+    np.ndarray or float
+        Maximum observation distance in degrees or meters.
+    """
+    # WGS 84 Constants
+    WGS84_A = 6378137.0           # Semi-major axis (meters)
+    WGS84_B = 6356752.314245179   # Semi-minor axis (meters)
+    WGS84_R_MEAN = 6371008.7714   # Mean authalic radius (meters)
+
+    # Input sanitization
+    is_scalar = np.isscalar(mags)
+    mags_arr = np.asarray(mags, dtype=np.float64)
+    
+    # Calculate ground distance in kilometers and meters
+    d_km = 10.0 ** (a * mags_arr + b)
+    d_km = np.clip(d_km, d_min_km, d_max_km)
+    d_meters = d_km * 1000.0
+
+    if not return_degrees:
+        return float(d_meters) if is_scalar else d_meters
+
+    # Calculate WGS 84 Earth radius
+    if latitude is None:
+        radius_m = WGS84_R_MEAN
+    else:
+        lat_rad = np.radians(np.asarray(latitude, dtype=np.float64))
+        cos_lat = np.cos(lat_rad)
+        sin_lat = np.sin(lat_rad)
+        
+        # Local Gaussian radius of curvature R(lat) = (a^2 * b) / (a^2 * cos^2(lat) + b^2 * sin^2(lat))
+        num = (WGS84_A ** 2) * WGS84_B
+        den = (WGS84_A * cos_lat) ** 2 + (WGS84_B * sin_lat) ** 2
+        radius_m = num / den
+
+    # Arc angle in degrees: theta = (d / R) * (180 / pi)
+    arc_degrees = np.degrees(d_meters / radius_m)
+    
+    # Cap at antipodal max degree (180 deg)
+    arc_degrees = np.minimum(arc_degrees, 180.0)
+
+    return float(arc_degrees) if is_scalar else arc_degrees
+
+
+
+
 ### K-means scripts
 
 def kmeans_packing(scale_x, offset_x, ndim, n_clusters, ftrns1, n_batch = 3000, n_steps = 5000, n_sim = 1, lr = 0.01):
