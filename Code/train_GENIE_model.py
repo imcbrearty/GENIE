@@ -1196,8 +1196,12 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		use_magnitude_threshold = True
 		if (use_magnitude_threshold == True) and np.isfinite(src_magnitude).all() and (src_magnitude.max() > 0):
 			delta_3d_deg, surface_m = pairwise_geodesic_distance_3d(src_positions, locs)
-			max_deg_threshold = softplus_threshold_degrees(src_magnitude)[:, np.newaxis]
-			allowed_distance_mask = (delta_3d_deg <= max_deg_threshold).reshape(-1)
+			# max_deg_threshold = softplus_threshold_degrees(src_magnitude)[:, np.newaxis]
+			max_obs_distance = estimate_max_observation_distance(src_magnitude, return_degrees = False)[:, np.newaxis]
+			# allowed_distance_mask = (delta_3d_deg <= max_deg_threshold).reshape(-1)
+			
+			allowed_distance_mask = (surface_m <= max_obs_distance).reshape(-1)
+			
 			ifind1 = np.where((ip_query1[0] < min_sigma_multiple*sigma_p.reshape(-1))*(allowed_distance_mask == 1))[0]
 			ifind2 = np.where((ip_query2[0] < min_sigma_multiple*sigma_s.reshape(-1))*(allowed_distance_mask == 1))[0]
 		
@@ -1449,7 +1453,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	## Check which sources are active
 	source_tree_indices = cKDTree(arrivals[:,2].reshape(-1,1))
 	lp = source_tree_indices.query_ball_point(np.arange(n_events).reshape(-1,1), r = 0)
-	lp_backup = [lp[j] for j in range(len(lp))]
+	lp_backup = [np.copy(lp[j]) for j in range(len(lp))]
 	n_unique_station_counts = np.array([len(np.unique(arrivals[lp[j],1])) for j in range(n_events)])
 	cnt_p_srcs = np.array([len(np.where(arrivals[lp[j],4] == 0)[0]) for j in range(n_events)])
 	cnt_s_srcs = np.array([len(np.where(arrivals[lp[j],4] == 1)[0]) for j in range(n_events)])
@@ -1845,9 +1849,19 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		n_sta_slice = len(sta_select)
 
 		# pdb.set_trace()
+	
+		# lp_concat = np.hstack([np.array(list(lp[j])) for j in range(n_batch)]).astype('int')
+		# if len(lp_concat) == 0:
+		# 	lp_concat = np.array([0]) # So it doesnt fail?
+		# arrivals_select = arrivals[lp_concat]
+		# phase_observed_select = phase_observed[lp_concat]
 
+		arrivals_select_slice = arrivals[np.array(list(lp[i])]
+		phase_observed_slice = phase_observed[np.array(list(lp[i])]
+		arrivals_select_slice[:,4] = phase_observed_slice
+		
 		engine = TopKEmbeddingEngine1(
-			arrivals_select_copy,
+			arrivals_select_slice,
 			locs[sta_select],
 			sta_select,
 			A_src_in_sta_l[i],
