@@ -1856,8 +1856,8 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		# arrivals_select = arrivals[lp_concat]
 		# phase_observed_select = phase_observed[lp_concat]
 
-		arrivals_select_slice = arrivals[np.array(list(lp[i])]
-		phase_observed_slice = phase_observed[np.array(list(lp[i])]
+		arrivals_select_slice = arrivals[np.array(list(lp[i]))]
+		phase_observed_slice = phase_observed[np.array(list(lp[i]))]
 		arrivals_select_slice[:,4] = phase_observed_slice
 		
 		engine = TopKEmbeddingEngine1(
