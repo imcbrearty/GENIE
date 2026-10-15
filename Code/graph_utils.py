@@ -5817,7 +5817,7 @@ def build_graphs_domain(m_domain, locs_use, stas_use, scale_domain, deg_padding,
 		association_label_width = domain_params['association_label_width']
 		association_label_width_t = domain_params['association_label_width_t']
 		sigma_input = domain_params['sigma_input']
-		if initialize is not None: z.close()
+		# if initialize is not None: z.close()
 
 
 	num_grids = 1 if initialize is None else initialize[2]
