@@ -45,7 +45,7 @@ import h5py
 
 
 from utils import *
-from module import *
+from module2 import *
 from process_utils import *
 
 
@@ -110,7 +110,7 @@ n_frac_reference_catalog = train_config['n_frac_reference_catalog'] # 0.8 ## The
 n_batches_per_job = train_config['n_batches_per_job']
 
 use_real_data = train_config.get('use_real_data', True)
-n_real_fraction = train_config.get('n_real_fraction', 0.3)
+n_real_fraction = train_config.get('n_real_fraction', 0.35)
 
 use_fixed_graphs = train_config.get('use_fixed_graphs', True) # True # True
 use_variable_domain = train_config.get('use_variable_domain', True) # True
@@ -979,7 +979,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 	if (use_aftershocks == True)*(len(src_positions) > 1):
 			n_iterations = 1
 			for i in range(n_iterations):
-				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.1, float(src_x_kernel/0.35), float(src_t_kernel/0.35)
+				aftershock_rate, aftershock_scale_x, aftershock_scale_t = 0.15, float(src_x_kernel/0.35), float(src_t_kernel/0.35)
 				if (int(np.ceil(aftershock_rate*len(src_positions))) > 0):
 					ichoose = np.random.choice(np.arange(1, len(src_positions)), size = int(np.ceil(aftershock_rate*len(src_positions))), replace = False)
 					rand_vec = np.random.randn(len(ichoose),3)
@@ -1050,7 +1050,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 
 	if use_variable_domain == True:
-		fixed_dist_range = [0.05, 0.65]
+		fixed_dist_range = [0.1, 0.65]
 		# min_dist_thresh = 15e3
 		# max_dist_thresh =
 		dist_range = pd(ftrns1(x_grid[:,0:3]), ftrns1(x_grid[:,0:3])) # [x, x1] ## Set dist_range proportional to domain
@@ -1318,11 +1318,11 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 		use_clean_data_interval = True
 		if use_clean_data_interval == True:
 			## Remove a section of false picks completely, so very clean events are also shown in training (to stabalize the single input pick per station per phase type case with the attention mechanism)
-			frac_interval = [0.1, 0.3] ## Between 0.1 and 0.3 of the full time window
+			frac_interval = [0.05, 0.1] ## Between 0.1 and 0.3 of the full time window
 			frac_length_sample = np.random.rand()*(frac_interval[1] - frac_interval[0]) + frac_interval[0]
 			interval_length = int(np.floor(station_false_rate_eval.shape[1]*frac_length_sample))
 			ichoose_start = np.random.choice(station_false_rate_eval.shape[1] - interval_length)
-			station_false_rate_eval[:,ichoose_start:(ichoose_start + interval_length)] = 0.0 ## Set false pick rate to zero during this interval, for all stations
+			station_false_rate_eval[:,ichoose_start:(ichoose_start + interval_length)] = 0.2*station_false_rate_eval[:,ichoose_start:(ichoose_start + interval_length)] ## Set false pick rate to zero during this interval, for all stations
 		
 		
 		vals = np.random.poisson(dt*station_false_rate_eval/T) # This scaling, assigns to each bin the number of events to achieve correct, on averge, average
@@ -1490,7 +1490,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 	perturb_phases = True # For true picks, randomly flip a fraction of phases
 	if (len(phase_observed) > 0)*(perturb_phases == True)*(use_real_data_sample == False):
-		frac_perturb_interval = [0.1, 0.3]
+		frac_perturb_interval = [0.05, 0.2]
 		frac_perturb_sample = np.random.rand()*(frac_perturb_interval[1] - frac_perturb_interval[0]) + frac_perturb_interval[0]
 		if len(iexcess_noise) > 0:
 			iwhere_real = np.sort(np.array(list(set(iwhere_real).union(iz[iexcess_noise])))).astype('int')
@@ -3881,14 +3881,15 @@ if load_training_data == True:
 	dataset = TrainingDataset(np.random.permutation(files_load), n_batch, n_epochs, use_gradient_loss = use_gradient_loss, use_expanded = use_expanded)
 
 
-use_dice_loss = False
+use_dice_loss = True
 use_regression_loss = True
 use_consistency_loss = False
 use_negative_loss = True
 use_relative_loss = True
 use_rel_station_loss = True
 use_cap_loss = False
-
+use_null_loss = True
+use_isolated_loss = True
 
 # DiceLoss = GaussianDiceLossL1() ## Can change the bg_weight
 # gaussian_heatmap_loss = split_charbonnier_loss
@@ -3986,10 +3987,10 @@ loss_charbonnier_source = EMAMassCharbonnierLoss(
 
 
 loss_charbonnier_assoc = EMAMassCharbonnierLoss(
-	peak_boost=10.0,
+	peak_boost=5.0,
 	momentum=0.001,
 	foreground_weight=1.0,
-	background_weight=2.0, # 5.0
+	background_weight=5.0, # 5.0
 	foreground_threshold=0.01,
 	empty_batch_weight=1.0,
 	normalize_by_ema=True,
@@ -4078,32 +4079,6 @@ for batch_idx, inputs in enumerate(loader):
 	ramp_main = get_step_ramp(i, start_step = 0, ramp_steps = int(n_epochs/10))
 
 
-	# if (i == n_restart_step)*(n_restart == True):
-	# 	## Load model and optimizer.
-	# 	mz.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
-	# 	if use_model_ema:
-	# 		mz_ema.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_ema_%d_ver_%d.h5'%(n_restart_step, n_ver), map_location = device))
-
-	# 	optimizer.load_state_dict(torch.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(n_restart_step, n_ver), map_location = device))
-	# 	checkpoint = torch.load(write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver), map_location = device)
-	# 	loss_charbonnier_base.load_state_dict(checkpoint["loss_base_state_dict"])	
-	# 	loss_charbonnier_source.load_state_dict(checkpoint["loss_source_state_dict"])	
-	# 	loss_charbonnier_assoc.load_state_dict(checkpoint["loss_assoc_state_dict"])
-	# 	checkpoint = torch.load(resuming_checkpoint_path)
-	
-	#	 # Restore loss logger EMA history
-	#	 if 'logger_state_dict' in checkpoint:
-	#		 logger.load_state_dict(checkpoint['logger_state_dict'])
-
-	# 	zlosses = np.load(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(n_restart_step, n_ver))
-	# 	losses[0:n_restart_step] = zlosses['losses'][0:n_restart_step]
-	# 	mx_trgt_1[0:n_restart_step] = zlosses['mx_trgt_1'][0:n_restart_step]; mx_trgt_2[0:n_restart_step] = zlosses['mx_trgt_2'][0:n_restart_step]
-	# 	mx_trgt_3[0:n_restart_step] = zlosses['mx_trgt_3'][0:n_restart_step]; mx_trgt_4[0:n_restart_step] = zlosses['mx_trgt_4'][0:n_restart_step]
-	# 	mx_pred_1[0:n_restart_step] = zlosses['mx_pred_1'][0:n_restart_step]; mx_pred_2[0:n_restart_step] = zlosses['mx_pred_2'][0:n_restart_step]
-	# 	mx_pred_3[0:n_restart_step] = zlosses['mx_pred_3'][0:n_restart_step]; mx_pred_4[0:n_restart_step] = zlosses['mx_pred_4'][0:n_restart_step]
-	# 	loss_charbonnier_base.initialize_mass, loss_charbonnier_source.initialize_mass, loss_charbonnier_assoc.initialize_mass = False, False, False
-	# 	print('loaded model for restart on step %d ver %d \n'%(n_restart_step, n_ver))
-	# 	zlosses.close()
 	
 	if n_restart and (i == n_restart_step):
 		ckpt_path = write_training_file + f'trained_gnn_model_step_{n_restart_step}_ver_{n_ver}.pt'
@@ -4151,24 +4126,6 @@ for batch_idx, inputs in enumerate(loader):
 		mz.set_scale_coefficients(src_x_kernel*2.0, scale_time, kernel_sig_t, kernel_sig_t*3.0, src_x_kernel, src_t_kernel, time_shift_range)
 		
 	
-	# if (((np.mod(i, 1000) == 0) or (i == (n_epochs - 1)))*(i != n_restart_step)) or (batch_idx == (len_loader - 1)):
-
-	# 	## Add save state of loss balancer so can re load
-	# 	torch.save(mz.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d.h5'%(i, n_ver))
-	# 	if use_model_ema:
-	# 		torch.save(mz_ema.state_dict(), write_training_file + 'trained_gnn_model_step_ema_%d_ver_%d.h5'%(i, n_ver))
-	# 	torch.save(optimizer.state_dict(), write_training_file + 'trained_gnn_model_step_%d_ver_%d_optimizer.h5'%(i, n_ver))
-	# 	np.savez_compressed(write_training_file + 'trained_gnn_model_step_%d_ver_%d_losses.npz'%(i, n_ver), losses = losses, mx_trgt_1 = mx_trgt_1, mx_trgt_2 = mx_trgt_2, mx_trgt_3 = mx_trgt_3, mx_trgt_4 = mx_trgt_4, mx_pred_1 = mx_pred_1, mx_pred_2 = mx_pred_2, mx_pred_3 = mx_pred_3, mx_pred_4 = mx_pred_4, scale_x = scale_x, offset_x = offset_x, scale_x_extend = scale_x_extend, offset_x_extend = offset_x_extend, training_params = training_params, graph_params = graph_params, pred_params = pred_params)
-	# 	checkpoint = {"loss_source_state_dict": loss_charbonnier_source.state_dict(), "loss_assoc_state_dict": loss_charbonnier_assoc.state_dict(), 'loss_base_state_dict': loss_charbonnier_base.state_dict()}
-	# 	# "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "epoch": epoch, "global_step": global_step,
-	# 	torch.save(checkpoint, write_training_file + 'trained_gnn_model_checkpoint_step_%d_ver_%d.h5'%(i, n_ver))
-	# 	checkpoint_logger = {
-	# 		'logger_state_dict': logger.state_dict(),  # <--- Save logger state here
-	# 	}
-	# 	torch.save(checkpoint_logger, write_training_file + 'trained_gnn_model_logger_step_%d.pt'%i)
-
-	# 	print('saved model %s %d'%(n_ver, i))
-	# 	print('saved model at step %d'%i)
 
 	save_interval = 1000
 	if ((i % save_interval == 0) or (i == n_epochs - 1)) and (i != n_restart_step):
@@ -4193,18 +4150,7 @@ for batch_idx, inputs in enumerate(loader):
 
 		# --- B. Save Metrics Array (.npz) ---
 		npz_path = write_training_file + f'trained_gnn_model_step_{i}_ver_{n_ver}_losses.npz'
-		# np.savez_compressed(
-		#	 npz_path,
-		#	 losses=losses[:i+1],
-		#	 mx_trgt_1=mx_trgt_1[:i+1],
-		#	 mx_trgt_2=mx_trgt_2[:i+1],
-		#	 mx_trgt_3=mx_trgt_3[:i+1],
-		#	 mx_trgt_4=mx_trgt_4[:i+1],
-		#	 mx_pred_1=mx_pred_1[:i+1],
-		#	 mx_pred_2=mx_pred_2[:i+1],
-		#	 mx_pred_3=mx_pred_3[:i+1],
-		#	 mx_pred_4=mx_pred_4[:i+1],
-		# )
+
 		np.savez_compressed(
 			npz_path,
 			losses=losses[:i+1],
@@ -4264,7 +4210,7 @@ for batch_idx, inputs in enumerate(loader):
 	mask_lbls_query_l = [[] for j in range(n_batch)]
 	mask_lbls_assoc_query_l = [[] for j in range(n_batch)]
 
-	# moi
+
 
 	weight_assoc_v = []
 	for j in range(n_batch):
@@ -4328,6 +4274,8 @@ for batch_idx, inputs in enumerate(loader):
 	loss_relative_val = 0.0
 	loss_saddle_val = 0.0
 	loss_rel_sta_val = 0.0
+	loss_null_asc_val = 0.0
+	loss_isolated_val = 0.0
 
 	n_batch_valid = sum([len(lp_times[i0]) > 0 for i0 in range(n_batch)])
 	
@@ -4490,6 +4438,8 @@ for batch_idx, inputs in enumerate(loader):
 			plt.close('all')
 
 
+
+
 		# ==================== 1. REGRESSION / AMPLITUDE LOSSES ====================
 		if use_regression_loss:
 
@@ -4501,21 +4451,70 @@ for batch_idx, inputs in enumerate(loader):
 
 			# 2. Smooth density scale using estimated min_sta_ref
 			raw_scale = 1.0 + 0.5 * torch.log(
-				torch.tensor(max(1.0, N_stations_sample / min_sta_ref), device=device)
+							torch.tensor(max(1.0, N_stations_sample / min_sta_ref), device=device)
 			)
 			assoc_loss_scale = torch.clamp(raw_scale, min=1.0, max=3.0)
+
+
+			# 1. Pairwise 3D source-receiver distances in km
+			dist_qs = torch.norm(
+							x_src_query_cart_l[i0].to(device)[mask_lbls_assoc_query_l[i0]].unsqueeze(1) - ftrns1_diff(Locs[i0][:, :3][lp_stations[i0]].to(device)).unsqueeze(0), dim=-1
+			) / 1000.0  # shape: (N_query, N_stations)
+
+			# 2. Extract true association mask across P and S channels
+			true_assoc_mask = (
+							(pick_lbls[mask_lbls_assoc_query_l[i0], :, 0] > 0.01) |
+							(pick_lbls[mask_lbls_assoc_query_l[i0], :, 1] > 0.01)
+			)
+
+			# 3. Fully Vectorized R80 per query
+			dist_masked = torch.where(true_assoc_mask, dist_qs, torch.tensor(float('inf'), device=device))
+			sorted_dists, _ = torch.sort(dist_masked, dim=1)
+			n_active = true_assoc_mask.sum(dim=1)
+			k_80_idx = torch.clamp((0.80 * (n_active.float() - 1)).long(), min=0)
+			r80_raw = sorted_dists.gather(1, k_80_idx.unsqueeze(1)).squeeze(1)
+
+			valid_queries = (n_active >= 3)
+			r80_per_query = torch.where(valid_queries, r80_raw, torch.tensor(40.0, device=device))
+			r80_per_query = torch.clamp(r80_per_query, min=20.0).unsqueeze(1) # shape: (N_query, 1)
+
+			# 4. Compute normalized distance ratio r and log penalty scale
+			r_ratio = torch.clamp(dist_qs / r80_per_query, min=1.0)
+			alpha_log = 0.75
+			# log_dist_scale = 1.0 + alpha_log * torch.log(r_ratio)
+			log_dist_scale = (1.0 + 1.5 * torch.log(r_ratio)).clamp(max=5.0)
+
+
+			target_neg_p = (pick_lbls[mask_lbls_assoc_query_l[i0], :, 0] <= 0.01)
+			target_neg_s = (pick_lbls[mask_lbls_assoc_query_l[i0], :, 1] <= 0.01)
+
+			# 5. Apply penalty ONLY to target negatives (y_true <= 0.01)
+			weight_dist_p = torch.where(target_neg_p, log_dist_scale, torch.ones_like(log_dist_scale))
+			weight_dist_s = torch.where(target_neg_s, log_dist_scale, torch.ones_like(log_dist_scale))
+
+			# 2. Smooth density scale using estimated min_sta_ref
+			# raw_scale = 1.0 + 0.5 * torch.log(
+			#	   torch.tensor(max(1.0, N_stations_sample / min_sta_ref), device=device)
+			# )
 
 			# Uncapped baselines
 			loss_reg_query = weights[1] * loss_charbonnier_source(out[1][mask_lbls_query_l[i0]], torch.Tensor(Lbls_query[i0]).to(device)[mask_lbls_query_l[i0]], update_ema = True)
 			loss_reg_base = weights[0] * loss_charbonnier_base(out[0][mask_lbls_l[i0]], torch.Tensor(Lbls[i0]).to(device)[mask_lbls_l[i0]], update_ema = True)
-			loss_reg_assoc_P = (assoc_loss_scale / N_ref_picks) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
-			loss_reg_assoc_S = (assoc_loss_scale / N_ref_picks) * weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
-			# loss_reg_assoc_P = (assoc_loss_scale / N_stations_sample) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
-			# loss_reg_assoc_S = (assoc_loss_scale / N_stations_sample) * weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
-			# loss_reg_assoc_P *= assoc_loss_scale
+			loss_reg_assoc_P = (assoc_loss_scale / N_ref_picks) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, sample_weight = weight_dist_p, ema_group = 'P')
+			loss_reg_assoc_S = (assoc_loss_scale / N_ref_picks) * weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, sample_weight = weight_dist_s, ema_group = 'S')
+
+
+			null_weight = 0.5
+			pick_labels_null_p = 1.0 - pick_lbls[mask_lbls_assoc_query_l[i0], :, 0]
+			pick_labels_null_s = 1.0 - pick_lbls[mask_lbls_assoc_query_l[i0], :, 1]
+			loss_null_assoc_P = null_weight * (assoc_loss_scale / N_ref_picks) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[4][mask_lbls_assoc_query_l[i0], :, 0], pick_labels_null_p, update_ema = False, apply_peak_weight = False, sample_weight = weight_dist_p, ema_group = 'P')
+			loss_null_assoc_S = null_weight * (assoc_loss_scale / N_ref_picks) * weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[5][mask_lbls_assoc_query_l[i0], :, 0], pick_labels_null_s, update_ema = False, apply_peak_weight = False, sample_weight = weight_dist_s, ema_group = 'S')
+
 
 			loss_reg_src_val += (loss_reg_base.item() + loss_reg_query.item()) / n_batch_valid
 			loss_reg_asc_val += (loss_reg_assoc_P.item() + loss_reg_assoc_S.item()) / n_batch_valid
+			loss_null_asc_val += (loss_null_assoc_P.item() + loss_null_assoc_S.item()) / n_batch_valid
+
 
 
 		if loss_charbonnier_assoc.initialize_mass or loss_charbonnier_source.initialize_mass:
@@ -4618,10 +4617,6 @@ for batch_idx, inputs in enumerate(loader):
 				loss_negative_val += loss_negative.item() / n_batch_valid
 				computed_negative_loss = True
 
-				# apply_peak_weight=False,
-				# apply_fg_bg_balance=False,
-				# apply_normalize=False,
-				# update_ema=False,
 		
 		
 		# ==================== 4. RELATIVE + SADDLE LOSS ==================== #
@@ -4827,129 +4822,145 @@ for batch_idx, inputs in enumerate(loader):
 
 
 		# ==================== 5. Relative Association Loss =================
-		loss_relative_station = torch.tensor(0.0, device=device)	
-		computed_rel_station_loss = False	
+		loss_relative_station = torch.tensor(0.0, device=device)
+		loss_isolated_station = torch.tensor(0.0, device=device)
+		computed_rel_station_loss = False
+
 		if use_rel_station_loss == True and ramp_aux > 0.0:
+		    N_sta, tol_min = len(Locs[i0]), 0.025
+		    k_local_use = min(len(Locs[i0]), k_sta_edges*2 + 1)
+		    N_ref_picks = loss_charbonnier_assoc.N_ref_picks
 
-			N_sta, tol_min = len(Locs[i0]), 0.025
-			k_local_use = min(len(Locs[i0]), k_sta_edges*2 + 1)
-			N_ref_picks = loss_charbonnier_assoc.N_ref_picks
+		    knn_sta = remove_self_loops(knn(
+		        ftrns1_diff(Locs[i0].to(device))/1000.0,
+		        ftrns1_diff(Locs[i0].to(device))/1000.0,
+		        k=k_local_use
+		    ))[0]
 
-			# vec_ind = np.arange(k_sta_edges*2)
-			# stride_select = np.sort(np.hstack([np.random.choice(vec_ind, size = k_sta_edges, replace = False) + j*k_sta_edges for j in range(len(Locs[i0]))]))
-			knn_sta = remove_self_loops(knn(ftrns1_diff(Locs[i0].to(device))/1000.0, ftrns1_diff(Locs[i0].to(device))/1000.0, k = k_local_use))[0] # [:,stride_select]
+		    num_edges_per_sta = k_local_use - 1
+		    edge_src = knn_sta[0].view(N_sta, num_edges_per_sta)
+		    edge_dst = knn_sta[1].view(N_sta, num_edges_per_sta)
 
-			# Reshape edges per source station to pick k_sta_edges per station
-			# edge_index is ordered by src station in PyTorch Geometric's knn implementation
-			num_edges_per_sta = k_local_use - 1
-			edge_src = knn_sta[0].view(N_sta, num_edges_per_sta)
-			edge_dst = knn_sta[1].view(N_sta, num_edges_per_sta)
+		    rand_perm = torch.argsort(torch.rand(N_sta, num_edges_per_sta, device=device), dim=1)[:, :k_sta_edges]
+		    sampled_src = torch.gather(edge_src, 1, rand_perm).reshape(-1)
+		    sampled_dst = torch.gather(edge_dst, 1, rand_perm).reshape(-1)
 
-			# Permute and take first k_sta_edges per station
-			rand_perm = torch.argsort(torch.rand(N_sta, num_edges_per_sta, device=device), dim=1)[:, :k_sta_edges]
-			sampled_src = torch.gather(edge_src, 1, rand_perm).reshape(-1)
-			sampled_dst = torch.gather(edge_dst, 1, rand_perm).reshape(-1)
+		    sta_of_pick = lp_stations[i0].to(device).long()
+		    sta_adj = torch.zeros((N_sta, N_sta), dtype=torch.bool, device=device)
+		    sta_adj[sampled_src, sampled_dst] = True
 
-			# ------------------ Broadcast Station Edges to Pick Edges ------------------
-			sta_of_pick = lp_stations[i0].to(device).long()  # Shape: (N_picks,)
-			
-			# Build adjacency matrix for sampled station graph
-			sta_adj = torch.zeros((N_sta, N_sta), dtype=torch.bool, device=device)
-			sta_adj[sampled_src, sampled_dst] = True
+		    p1_sta = sta_of_pick.view(-1, 1)
+		    p2_sta = sta_of_pick.view(1, -1)
+		    pick_edge_mask = sta_adj[p1_sta, p2_sta] & (p1_sta != p2_sta)
+		    knn_picks = torch.stack(torch.where(pick_edge_mask), dim=0).long()
 
-			# Broadcast pick station assignments across pairs (N_picks, N_picks)
-			# Find pick pairs (p1, p2) whose underlying stations are connected in the station graph
-			p1_sta = sta_of_pick.view(-1, 1)
-			p2_sta = sta_of_pick.view(1, -1)
-			pick_edge_mask = sta_adj[p1_sta, p2_sta] & (p1_sta != p2_sta)
+		    if knn_picks.shape[1] > 0:
+		        # ----- Relative station loss (your original code) -----
+		        peak_reference_rel_p = torch.max(
+		            pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 0],
+		            pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 0]
+		        )
+		        peak_reference_rel_s = torch.max(
+		            pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 1],
+		            pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 1]
+		        )
 
-			# knn_picks is shape (2, N_pick_edges) — replacing knn_sta!
-			knn_picks = torch.stack(torch.where(pick_edge_mask), dim=0).long()
-			# ---------------------------------------------------------------------------
+		        pred_lbls_p = out[2][:, :, 0].detach()
+		        pred_lbls_s = out[3][:, :, 0].detach()
 
-			if knn_picks.shape[1] > 0:
-				# peak_reference_rel_p = torch.max(pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 0], pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 0])
-				# peak_reference_rel_s = torch.max(pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 1], pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 1])
-				# pos_allowed_p1, pos_allowed_p2 = torch.where(peak_reference_rel_p > tol_min)
-				# pos_allowed_s1, pos_allowed_s2 = torch.where(peak_reference_rel_s > tol_min)
+		        pred_reference_rel_p = torch.max(
+		            pred_lbls_p[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1)],
+		            pred_lbls_p[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1)]
+		        )
+		        pred_reference_rel_s = torch.max(
+		            pred_lbls_s[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1)],
+		            pred_lbls_s[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1)]
+		        )
 
-				# 1. Extract ground truth peak reference
-				peak_reference_rel_p = torch.max(
-					pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 0], 
-					pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 0]
-				)
-				peak_reference_rel_s = torch.max(
-					pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1), 1], 
-					pick_lbls[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1), 1]
-				)
+		        pos_allowed_p1, pos_allowed_p2 = torch.where(
+		            (peak_reference_rel_p > tol_min) | (pred_reference_rel_p > tol_min)
+		        )
+		        pos_allowed_s1, pos_allowed_s2 = torch.where(
+		            (peak_reference_rel_s > tol_min) | (pred_reference_rel_s > tol_min)
+		        )
 
-				# 2. Extract predicted peak reference (.detach() prevents backprop into mask selection)
-				pred_lbls_p = out[2][:, :, 0].detach()  # P-channel predictions
-				pred_lbls_s = out[3][:, :, 0].detach()  # S-channel predictions
+		        if len(pos_allowed_p1) > 0:
+		            trgt_diff_p = (
+		                pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[0][pos_allowed_p2], 0]
+		                - pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[1][pos_allowed_p2], 0]
+		            )
+		            pred_diff_p = (
+		                out[2][mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[0][pos_allowed_p2], 0]
+		                - out[2][mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[1][pos_allowed_p2], 0]
+		            )
+		            loss_rel_assoc_P = (assoc_loss_scale / N_ref_picks) * loss_charbonnier_assoc(
+		                pred_diff_p, trgt_diff_p,
+		                apply_peak_weight=True,
+		                peak_reference=peak_reference_rel_p[pos_allowed_p1, pos_allowed_p2],
+		                apply_fg_bg_balance=False,
+		                apply_normalize=True,
+		                update_ema=False,
+		            )
+		            loss_relative_station += 0.5 * weights[2] * weight_assoc_v[inc] * loss_rel_assoc_P
+		            computed_rel_station_loss = True
 
-				pred_reference_rel_p = torch.max(
-					pred_lbls_p[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1)], 
-					pred_lbls_p[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1)]
-				)
-				pred_reference_rel_s = torch.max(
-					pred_lbls_s[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[0].reshape(1,-1)], 
-					pred_lbls_s[mask_lbls_assoc_query_l[i0].reshape(-1,1), knn_picks[1].reshape(1,-1)]
-				)
+		        if len(pos_allowed_s1) > 0:
+		            trgt_diff_s = (
+		                pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[0][pos_allowed_s2], 1]
+		                - pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[1][pos_allowed_s2], 1]
+		            )
+		            pred_diff_s = (
+		                out[3][mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[0][pos_allowed_s2], 0]
+		                - out[3][mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[1][pos_allowed_s2], 0]
+		            )
+		            loss_rel_assoc_S = (assoc_loss_scale / N_ref_picks) * loss_charbonnier_assoc(
+		                pred_diff_s, trgt_diff_s,
+		                apply_peak_weight=True,
+		                peak_reference=peak_reference_rel_s[pos_allowed_s1, pos_allowed_s2],
+		                apply_fg_bg_balance=False,
+		                apply_normalize=True,
+		                update_ema=False,
+		            )
+		            loss_relative_station += 0.5 * weights[3] * weight_assoc_v[inc] * loss_rel_assoc_S
+		            computed_rel_station_loss = True
+		            
 
-				# 3. Union condition: Ground truth OR model prediction above threshold
-				pos_allowed_p1, pos_allowed_p2 = torch.where(
-					(peak_reference_rel_p > tol_min) | (pred_reference_rel_p > tol_min)
-				)
-				pos_allowed_s1, pos_allowed_s2 = torch.where(
-					(peak_reference_rel_s > tol_min) | (pred_reference_rel_s > tol_min)
-				)
+		        # ----- Isolated False-Positive Loss (label-aware) -----
+		        if use_isolated_loss:
+		            gt_p = pick_lbls[mask_lbls_assoc_query_l[i0], :, 0]
+		            gt_s = pick_lbls[mask_lbls_assoc_query_l[i0], :, 1]
+		            pred_p = out[2][mask_lbls_assoc_query_l[i0], :, 0]
+		            pred_s = out[3][mask_lbls_assoc_query_l[i0], :, 0]
 
+		            diff_p = pred_p[:, knn_picks[0]] - pred_p[:, knn_picks[1]]
+		            diff_s = pred_s[:, knn_picks[0]] - pred_s[:, knn_picks[1]]
 
-			else:
-				pos_allowed_p1 = np.zeros(0).astype('int')
-				pos_allowed_p2 = np.zeros(0).astype('int')
-				pos_allowed_s1 = np.zeros(0).astype('int')
-				pos_allowed_s2 = np.zeros(0).astype('int')
+		            iso_p = (
+		                torch.relu(diff_p)
+		                * (pred_p[:, knn_picks[0]] > 0.15).float()
+		                * (gt_p[:, knn_picks[0]] < 0.05).float()
+		            )
+		            iso_s = (
+		                torch.relu(diff_s)
+		                * (pred_s[:, knn_picks[0]] > 0.15).float()
+		                * (gt_s[:, knn_picks[0]] < 0.05).float()
+		            )
 
+		            if iso_p.numel() > 0:
+		                loss_isolated_station = loss_isolated_station + 0.5 * weights[2] * weight_assoc_v[inc] * iso_p.mean()
+		            if iso_s.numel() > 0:
+		                loss_isolated_station = loss_isolated_station + 0.5 * weights[3] * weight_assoc_v[inc] * iso_s.mean()
 
-			if len(pos_allowed_p1) > 0:
-				trgt_diff_p = pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[0][pos_allowed_p2], 0] - pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[1][pos_allowed_p2], 0]
-				pred_diff_p = out[2][mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[0][pos_allowed_p2], 0] - out[2][mask_lbls_assoc_query_l[i0][pos_allowed_p1], knn_picks[1][pos_allowed_p2], 0]
-
-				loss_rel_assoc_P = (assoc_loss_scale / N_ref_picks) * loss_charbonnier_assoc(
-					pred_diff_p,
-					trgt_diff_p,
-					apply_peak_weight = True,
-					peak_reference = peak_reference_rel_p[pos_allowed_p1, pos_allowed_p2],
-					apply_fg_bg_balance = False,
-					apply_normalize = True,
-					update_ema = False,
-				)
-				loss_relative_station += 0.5*weights[2]*weight_assoc_v[inc]*loss_rel_assoc_P
-				computed_rel_station_loss = True
-
-
-			if len(pos_allowed_s1) > 0:
-				trgt_diff_s = pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[0][pos_allowed_s2], 1] - pick_lbls[mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[1][pos_allowed_s2], 1]
-				pred_diff_s = out[3][mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[0][pos_allowed_s2], 0] - out[3][mask_lbls_assoc_query_l[i0][pos_allowed_s1], knn_picks[1][pos_allowed_s2], 0]
-
-				loss_rel_assoc_S = (assoc_loss_scale / N_ref_picks) * loss_charbonnier_assoc(
-					pred_diff_s,
-					trgt_diff_s,
-					apply_peak_weight = True,
-					peak_reference = peak_reference_rel_s[pos_allowed_s1, pos_allowed_s2],
-					apply_fg_bg_balance = False,
-					apply_normalize = True,
-					update_ema = False,
-				)
-				loss_relative_station += 0.5*weights[3]*weight_assoc_v[inc]*loss_rel_assoc_S
-				computed_rel_station_loss = True
-
-				loss_rel_sta_val += loss_relative_station.item() / n_batch_valid
+		            loss_isolated_val += loss_isolated_station.item() / n_batch_valid
 
 
-			# loss_reg_assoc_P = (assoc_loss_scale / 1.0) * weight_assoc_v[inc] * weights[2] * loss_charbonnier_assoc(out[2][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 0], update_ema = True, ema_group = 'P')
-			# loss_reg_assoc_S = (assoc_loss_scale / 1.0) * weight_assoc_v[inc] * weights[3] * loss_charbonnier_assoc(out[3][mask_lbls_assoc_query_l[i0], :, 0], pick_lbls[mask_lbls_assoc_query_l[i0], :, 1], update_ema = True, ema_group = 'S')
+		    if computed_rel_station_loss:
+		        loss_rel_sta_val += loss_relative_station.item() / n_batch_valid
+
+		# (optional) log the isolated loss
+		# loss_iso_val += loss_isolated_station.item() / n_batch_valid
+
+
 
 
 		# ==================== 5. CONSISTENCY LOSS ====================
@@ -5011,6 +5022,13 @@ for batch_idx, inputs in enumerate(loader):
 			loss_dict['loss_dice3'] = loss_dice3
 			loss_dict['loss_dice4'] = loss_dice4
 
+		if use_null_loss:
+			loss_dict['loss_null_assoc_P'] = loss_null_assoc_P
+			loss_dict['loss_null_assoc_S'] = loss_null_assoc_S
+
+		if use_isolated_loss:
+			loss_dict['loss_isolated_station'] = loss_isolated_station
+
 
 		# if computed_negative_loss:
 		# 	loss_dict['aux_negative'] = ramp_aux * raw_loss_negative
@@ -5022,22 +5040,29 @@ for batch_idx, inputs in enumerate(loader):
 		loss = 1.0*(loss_reg_base + ramp_main*loss_reg_query + ramp_main*loss_reg_assoc_P + ramp_main*loss_reg_assoc_S)
 		# loss += 0.1*(loss_base1 + loss_dice2 + loss_dice3 + loss_dice4)
 
+		if use_null_loss:
+			loss += 1.0*(ramp_main*loss_null_assoc_P + ramp_main*loss_null_assoc_S)
+
 		if computed_negative_loss == True:
 			# loss += 0.3 * ramp_aux * weights[1] * loss_negative
 			loss += 0.25 * ramp_aux * weights[1] * loss_negative
 
 		if computed_relative_loss == True:
-			loss += 0.08 * ramp_aux * weights[1] * loss_rel
+			loss += 0.065 * ramp_aux * weights[1] * loss_rel
 
 		if computed_saddle_loss == True:
 			# loss += 0.02 * ramp_aux * weights[1] * loss_saddle
-			loss += 0.075 * ramp_aux * weights[1] * loss_saddle
+			loss += 0.05 * ramp_aux * weights[1] * loss_saddle
 
 		if computed_rel_station_loss == True:
-			loss += 0.08 * ramp_aux * loss_relative_station
+			loss += 0.15 * ramp_aux * loss_relative_station
 
 		if use_dice_loss == True:
-			loss += 0.02 * (loss_dice3 + loss_dice4)
+			loss += 0.05 * (loss_dice3 + loss_dice4)
+
+		if use_isolated_loss == True:
+			loss += 0.15 * ramp_aux * loss_isolated_station
+
 
 		
 		# print(f"Query: {loss_reg_query.item():.4f} | Neg: {loss_negative.item():.4f} | Rel: {loss_rel.item():.4f}")
@@ -5116,10 +5141,21 @@ for batch_idx, inputs in enumerate(loader):
 			mz.Bipartite_ReadIn.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
 			mz.BipartiteGraphReadOutOperator.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
 
+			# product-graph gammas (also under no_grad)
+			product_gammas = 1.0 / spatial_quantiles.clamp(min=1e-3)
+			mz.log_gamma_base.copy_(product_gammas.log().view(1, -1))
+
 		mz.Bipartite_ReadIn.r_min.fill_(float(spatial_quantiles[0] * 0.5))
 		mz.Bipartite_ReadIn.r_max.fill_(float(spatial_quantiles[2] * 4.0))
 		mz.BipartiteGraphReadOutOperator.r_min.fill_(float(spatial_quantiles[0] * 0.5))
 		mz.BipartiteGraphReadOutOperator.r_max.fill_(float(spatial_quantiles[2] * 4.0))
+
+		# product_gammas = 1.0 / spatial_quantiles.clamp(min=1e-3)
+    	# mz.log_gamma_base.copy_(product_gammas.log().view(1, -1))   # or mz.module.log_gamma_base if nested
+
+		# product_gammas = 1.0 / spatial_quantiles.clamp(min=1e-3)
+		# mz.log_gamma_base.copy_(product_gammas.log().view(1, -1))
+
 
 		loss_charbonnier_assoc.N_ref_picks.fill_(float(max(np.mean(avg_picks), 3.0)))
 		# loss_charbonnier_assoc.min_sta_ref.fill_(float(max(np.mean(avg_stations), 3.0)))
@@ -5160,7 +5196,7 @@ for batch_idx, inputs in enumerate(loader):
 	mx_pred_4[i] = mx_pred_val_4/n_batch_valid
 	# loss_regularize_val = loss_regularize_val/np.maximum(1.0, loss_regularize_cnt)
 
-	print('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val, loss_rel_sta_val))
+	print('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val, loss_rel_sta_val, loss_null_asc_val, loss_isolated_val))
 
 
 	if use_model_ema:
@@ -5173,7 +5209,7 @@ for batch_idx, inputs in enumerate(loader):
 	# if use_wandb_logging == True:
 	# 	wandb.log({"loss": loss_val})
 
-	log_buffer.append('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val, loss_rel_sta_val))
+	log_buffer.append('%d loss %0.5f, trgts: %0.4f, %0.4f, %0.4f, %0.4f, preds: %0.4f, %0.4f, %0.4f, %0.4f [%0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f, %0.4f] \n'%(i, loss_val, mx_trgt_val_1, mx_trgt_val_2, mx_trgt_val_3, mx_trgt_val_4, mx_pred_val_1, mx_pred_val_2, mx_pred_val_3, mx_pred_val_4, loss_reg_src_val, loss_reg_asc_val, loss_negative_val, loss_relative_val, loss_rel_sta_val, loss_null_asc_val, loss_isolated_val))
 
 	if np.mod(i, 10) == 0:
 		with open(write_training_file + 'output_%d.txt'%n_ver, 'a') as text_file:
