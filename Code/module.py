@@ -1016,8 +1016,8 @@ class BipartiteGraphOperator(MessagePassing):
 		# )
 		
 		self.support_gate = nn.Sequential(
-		    nn.Linear(2 * n_kernels, 16), nn.PReLU(),
-		    nn.Linear(16, 1), nn.Sigmoid(),
+			nn.Linear(2 * n_kernels, 16), nn.PReLU(),
+			nn.Linear(16, 1), nn.Sigmoid(),
 		)
 		nn.init.constant_(self.support_gate[-2].bias, -0.3)
 
@@ -1052,7 +1052,7 @@ class BipartiteGraphOperator(MessagePassing):
 					
 		# 2. Distance radii for edge RBF features (converted to gammas)
 		r_g = self._ordered_scales(
-		    self.log_gamma_base, self.f_gamma(ctx), self.r_min, self.r_max
+			self.log_gamma_base, self.f_gamma(ctx), self.r_min, self.r_max
 		)			
 		gammas = 1.0 / r_g.pow(2)
 
@@ -1106,7 +1106,7 @@ class BipartiteGraphOperator(MessagePassing):
 
 					
 		# forward
-		qual = torch.cat((q_p, q_s), dim=-1)          # (M, 2K)
+		qual = torch.cat((q_p, q_s), dim=-1)		  # (M, 2K)
 		gate = self.support_gate(qual)
 		out = self.act_out(self.fc_out(torch.cat((pattern, support), dim=-1)))
 		out = out * (self.gate_floor + (1.0 - self.gate_floor) * gate)
@@ -1116,9 +1116,9 @@ class BipartiteGraphOperator(MessagePassing):
 		# size_feat = torch.log1p(deg) / (np.log1p(n_sta) + 1e-3)
 		
 		export = torch.cat((
-		    q_p, q_s,                 # multi-scale quality  (2K)
-		    c_p[:, :1], c_s[:, :1],   # inner completeness only
-		    hard * gate,
+			q_p, q_s,				 # multi-scale quality  (2K)
+			c_p[:, :1], c_s[:, :1],   # inner completeness only
+			hard * gate,
 		), dim=-1).detach()
 		# dim = 2K + 3   (K=3 → 9)
 
@@ -1331,30 +1331,30 @@ else:
 
 
 class SpaceTimeDirect(nn.Module):
-    def __init__(self, inpt_dim, out_channels, embed_dim=10):
-        super(SpaceTimeDirect, self).__init__()
+	def __init__(self, inpt_dim, out_channels, embed_dim=10):
+		super(SpaceTimeDirect, self).__init__()
 
-        self.fc1 = nn.Linear(inpt_dim, inpt_dim)
-        self.act1 = nn.PReLU()
+		self.fc1 = nn.Linear(inpt_dim, inpt_dim)
+		self.act1 = nn.PReLU()
 
-        self.film = FiLM(embed_dim, inpt_dim)
+		self.film = FiLM(embed_dim, inpt_dim)
 
-        self.fc2 = nn.Linear(inpt_dim, out_channels)
-        self.act2 = nn.PReLU()
+		self.fc2 = nn.Linear(inpt_dim, out_channels)
+		self.act2 = nn.PReLU()
 
-    def forward(self, inpts, embed_context=None):
-        h = self.act1(self.fc1(inpts))
+	def forward(self, inpts, embed_context=None):
+		h = self.act1(self.fc1(inpts))
 
-        if embed_context is not None:
-            ctx = (
-                embed_context
-                if embed_context.dim() == 2
-                else embed_context.unsqueeze(0)
-            )
-            h = self.film(h, ctx)
+		if embed_context is not None:
+			ctx = (
+				embed_context
+				if embed_context.dim() == 2
+				else embed_context.unsqueeze(0)
+			)
+			h = self.film(h, ctx)
 
-        out = self.act2(self.fc2(h))
-        return out
+		out = self.act2(self.fc2(h))
+		return out
 
 
 
@@ -1886,7 +1886,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		embed_dim=10,
 		n_gammas=3, # 4
 		support_dim=9,
-		baseline_gate=0.001, # 0.01
+		baseline_gate=0.0, # 0.01
 	):
 		super(BipartiteGraphReadOutOperator, self).__init__()
 
@@ -1992,6 +1992,7 @@ class BipartiteGraphReadOutOperator(nn.Module):
 		support_proj = self.f_support(support)
 		edge_inpt = torch.cat((inpt[source_idx], rel_pos, support_proj), dim=-1)
 		geo_features = self.act_edge(self.film_edge(self.fc_edge(edge_inpt), ctx))
+		# support_proj = self.f_support(support) * rbf_decay[:, :1]
 
 		# Step 6: Phase routing
 		phase_routing = self.mask_gate(edge_mask)
@@ -2105,7 +2106,7 @@ class DataAggregationAssociation(nn.Module):
 # 		kernel_sig_t=kernel_sig_t,
 # 		use_phase_types=use_phase_types,
 # 		scale_time=scale_time,
-# 		min_thresh=0.01,
+# 		min_thresh=0.02,
 # 		trv=None,
 # 		ftrns2=None,
 # 		debug_asserts=True,
@@ -2120,9 +2121,7 @@ class DataAggregationAssociation(nn.Module):
 # 		self.min_thresh = min_thresh
 # 		self.scale_time = scale_time
 # 		self.scale_rel = scale_rel
-# 		self.k_spc_edges = k_spc_edges
-# 		self.dilate_scale = 4.0
-# 		self.scale_misfit = 3.0
+# 		self.k_spc_edges = max(int((2 * k_spc_edges) // 3), 5) # k_spc_edges
 # 		self.scale_s_window = 1.5
 
 # 		self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
@@ -2130,29 +2129,52 @@ class DataAggregationAssociation(nn.Module):
 # 		self.log_sig_t_scale = nn.Parameter(torch.zeros(2))
 # 		self.null_out = nn.Parameter(torch.randn(ndim_out))
 
-# 		self.fc1 = nn.Sequential(
-# 			nn.Linear(ndim_arv_in + 25 + n_phase_embed, 2 * n_hidden),
-# 			nn.PReLU(),
-# 			nn.Linear(2 * n_hidden, n_hidden),
-# 		)
+# 		# self.fc1 = nn.Sequential(
+# 		# 	nn.Linear(ndim_arv_in + 25 + n_phase_embed, 2 * n_hidden),
+# 		# 	nn.PReLU(),
+# 		# 	nn.Linear(2 * n_hidden, n_hidden),
+# 		# )
 # 		self.fc2 = nn.Sequential(
-# 			nn.Linear(ndim_arv_in + 8 + n_phase_embed, 2 * n_hidden),
+# 			nn.Linear(ndim_arv_in + 5 + n_phase_embed, 2 * n_hidden),
 # 			nn.PReLU(),
 # 			nn.Linear(2 * n_hidden, n_hidden),
 # 		)
 # 		self.fc3 = nn.Sequential(
-# 			nn.Linear(ndim_arv_in + 8 + n_phase_embed, 2 * n_hidden),
+# 			nn.Linear(ndim_arv_in + 5 + n_phase_embed, 2 * n_hidden),
 # 			nn.PReLU(),
 # 			nn.Linear(2 * n_hidden, n_hidden),
 # 		)
 
-# 		self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
-# 		self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
-# 		self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
-# 		self.f_gamma_t2, self.log_gamma_base_t2 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
-# 		self.f_gamma_t3, self.log_gamma_base_t3 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
+# 		# self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
+# 		# self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
+# 		# self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
+# 		# self.f_gamma_t2, self.log_gamma_base_t2 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
+# 		# self.f_gamma_t3, self.log_gamma_base_t3 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
 
-# 		self.film1 = FiLM(embed_vector_dim, n_hidden)
+
+# 		self.fc_x = nn.Sequential(
+# 			nn.Linear(ndim_arv_in, 2 * n_hidden),
+# 			nn.PReLU(),
+# 			nn.Linear(2 * n_hidden, n_hidden),
+# 		)
+# 		self.fc_r = nn.Sequential(
+# 			nn.Linear(2 + n_phase_embed, n_hidden),
+# 			nn.PReLU(),
+# 			nn.Linear(n_hidden, n_hidden),
+# 		)
+# 		self.film_x = ScaleFiLM(embed_vector_dim, n_hidden)
+
+
+# 		self.f_sig_t = nn.Sequential(
+# 			nn.Linear(embed_vector_dim, 16),
+# 			nn.PReLU(),
+# 			nn.Linear(16, 2)		  # two outputs: P and S
+# 		)
+# 		nn.init.zeros_(self.f_sig_t[-1].weight)
+# 		nn.init.zeros_(self.f_sig_t[-1].bias)
+
+
+# 		# self.film1 = FiLM(embed_vector_dim, n_hidden)
 # 		self.film2 = FiLM(embed_vector_dim, n_hidden)
 # 		self.film3 = FiLM(embed_vector_dim, n_hidden)
 
@@ -2160,615 +2182,72 @@ class DataAggregationAssociation(nn.Module):
 # 		self.norm2 = RMSNorm(n_hidden)
 # 		self.norm3 = RMSNorm(n_hidden)
 
-# 		self.gate = nn.Sequential(nn.Linear(3 * n_hidden, 3 * n_hidden), nn.Sigmoid())
+# 		# self.gate = nn.Sequential(nn.Linear(3 * n_hidden, 3 * n_hidden), nn.Sigmoid())
 # 		self.fc_merge = nn.Sequential(
 # 			nn.Linear(3 * n_hidden, 2 * n_hidden),
 # 			nn.PReLU(),
 # 			nn.Linear(2 * n_hidden, ndim_out),
 # 		)
 
-# 	def _init_gamma_bank(self, embed_dim, init_gammas):
-# 		f_g = nn.Linear(embed_dim, 2 * len(init_gammas))
-# 		nn.init.normal_(f_g.weight, std=0.01)
-# 		nn.init.zeros_(f_g.bias)
-# 		log_base = nn.Parameter(
-# 			torch.log(torch.tensor(init_gammas, dtype=torch.float32).reshape(1, -1))
-# 		)
-# 		return f_g, log_base
-
-# 	def _get_gammas(self, f_g, log_base, ctx):
-# 		n_g = log_base.shape[1]
-# 		delta = f_g(ctx.reshape(-1, ctx.shape[-1]))
-# 		alpha = 1.1 * torch.tanh(delta[..., :n_g])
-# 		res = 0.2 * torch.tanh(delta[..., n_g:])
-# 		# return torch.exp(log_base.to(ctx.device) + alpha + res).mean(dim=0, keepdim=True)
-# 		return torch.exp(log_base + alpha + res).mean(dim=0, keepdim=True)
-
-# 	def _process_phase_branch(
-# 		self,
-# 		tpick,
-# 		tlatent,			 # [N_prod, 2] -> columns 0: P, 1: S
-# 		ipick,
-# 		A_src_in_sta,
-# 		x_context_cart,
-# 		x_context_t,
-# 		locs_use_cart,
-# 		x,				   # [N_prod, D_x]
-# 		phase_label,
-# 		ctx,
-# 		deg_srcs,
-# 		cum_deg_srcs,
-# 	):
-# 		device = x.device
-# 		N_picks = len(tpick)
-# 		N_prod = A_src_in_sta.size(1)
-
-# 		if N_picks == 0 or N_prod == 0:
-# 			out_dim = self.fc2[-1].out_features
-# 			return (
-# 				torch.zeros((N_picks, out_dim), device=device),
-# 				torch.zeros((N_picks, out_dim), device=device),
-# 			)
-
-# 		# sig_scale = torch.exp(self.log_sig_t_scale)
-# 		# sig_p = (self.scale_misfit * self.kernel_sig_t * sig_scale[0]) ** 2
-# 		# sig_s = (self.scale_misfit * self.kernel_sig_t * sig_scale[1]) ** 2
-
-# 		# 1. Fully Canonical Station Matching (Shared across both P and S)
-# 		prod_sta = A_src_in_sta[0]
-# 		prod_ctx = A_src_in_sta[1]
-
-# 		prod_key = prod_sta.to(torch.int64) * (len(x_context_cart) + 1) + prod_ctx.to(torch.int64)
-# 		sta_order = torch.argsort(prod_key, stable=True)
-# 		sorted_sta = prod_sta[sta_order]
-
-# 		p_left = torch.searchsorted(sorted_sta, ipick, side="left")
-# 		p_right = torch.searchsorted(sorted_sta, ipick, side="right")
-
-# 		has_match = p_right > p_left
-# 		if not has_match.any():
-# 			out_dim = self.fc2[-1].out_features
-# 			return (
-# 				torch.zeros((N_picks, out_dim), device=device),
-# 				torch.zeros((N_picks, out_dim), device=device),
-# 			)
-
-# 		valid_picks = torch.where(has_match)[0]
-# 		counts = p_right[valid_picks] - p_left[valid_picks]
-# 		starts = p_left[valid_picks]
-
-# 		offsets = torch.arange(counts.sum(), device=device) - torch.repeat_interleave(
-# 			torch.cumsum(counts, 0) - counts, counts
-# 		)
-# 		matched_prod_indices = sta_order[starts.repeat_interleave(counts) + offsets]
-# 		matched_pick_indices = valid_picks.repeat_interleave(counts)
-
-# 		# 2. Canonical Multi-Key Tie Breaking (Run per phase_idx in parallel [2, N_matched])
-# 		# Compute dt for both P (idx 0) and S (idx 1) simultaneously -> Shape: [2, N_matched]
-# 		dt_both = torch.abs(
-# 			tpick[matched_pick_indices].unsqueeze(0) - tlatent[matched_prod_indices, :2].T
-# 		)
-
-# 		# We do top-match selection per phase
-# 		ind_grab_sorted_list = []
-# 		uniq_picks_sorted_list = []
-
-# 		for phase_idx in range(2):
-# 			dt = dt_both[phase_idx]
-# 			dt_order = torch.argsort(dt, stable=True)
-# 			dt_rank = torch.zeros_like(dt_order)
-# 			dt_rank[dt_order] = torch.arange(len(dt), device=device)
-
-# 			key = (
-# 				matched_pick_indices.to(torch.int64) * (len(dt) * N_prod)
-# 				+ dt_rank.to(torch.int64) * N_prod
-# 				+ matched_prod_indices.to(torch.int64)
-# 			)
-# 			order = torch.argsort(key, stable=True)
-# 			m_pick = matched_pick_indices[order]
-# 			m_prod = matched_prod_indices[order]
-
-# 			mask_first = torch.cat([
-# 				torch.tensor([True], device=device),
-# 				m_pick[1:] != m_pick[:-1],
-# 			])
-# 			ind_grab = m_prod[mask_first]
-# 			uniq_picks = m_pick[mask_first]
-
-# 			uniq_picks_sorted, sort_order = torch.sort(uniq_picks, stable=True)
-# 			ind_grab_sorted = ind_grab[sort_order]
-
-# 			ind_grab_sorted_list.append(ind_grab_sorted)
-# 			uniq_picks_sorted_list.append(uniq_picks_sorted)
-
-# 		# 3. KNN Expansion over context source per pick
-# 		x_ctx_combined = torch.cat(
-# 			(x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1
-# 		)
-
-# 		# Stack both P and S context nearest neighbors -> Shape [2 * N_uniq]
-# 		ctx_nn_p = A_src_in_sta[1, ind_grab_sorted_list[0]]
-# 		ctx_nn_s = A_src_in_sta[1, ind_grab_sorted_list[1]]
-# 		ctx_nn_both = torch.cat([ctx_nn_p, ctx_nn_s], dim=0)
-
-# 		edge_idx = knn(
-# 			x_ctx_combined,
-# 			x_ctx_combined[ctx_nn_both],
-# 			k=self.k_spc_edges,
-# 		)
-
-# 		nbr_sources = edge_idx[1]
-		
-# 		# Map edge sources back to P or S pick index
-# 		uniq_picks_both = torch.cat([uniq_picks_sorted_list[0], uniq_picks_sorted_list[1]], dim=0)
-# 		phase_owner_both = torch.cat([
-# 			torch.zeros(len(uniq_picks_sorted_list[0]), dtype=torch.long, device=device),
-# 			torch.ones(len(uniq_picks_sorted_list[1]), dtype=torch.long, device=device),
-# 		], dim=0)
-
-# 		pick_of_nbr = uniq_picks_both[edge_idx[0]]
-# 		phase_of_nbr = phase_owner_both[edge_idx[0]]
-
-# 		deg_nbr = deg_srcs[nbr_sources]
-# 		start = cum_deg_srcs[nbr_sources]
-
-# 		inc_inds = torch.arange(deg_nbr.sum(), device=device) - torch.repeat_interleave(
-# 			torch.cumsum(deg_nbr, 0) - deg_nbr, deg_nbr
-# 		)
-# 		nodes_all = start.repeat_interleave(deg_nbr) + inc_inds
-# 		pick_all = pick_of_nbr.repeat_interleave(deg_nbr)
-# 		phase_all = phase_of_nbr.repeat_interleave(deg_nbr)
-
-# 		station_ok = A_src_in_sta[0, nodes_all] == ipick[pick_all]
-# 		if not station_ok.any():
-# 			out_dim = self.fc2[-1].out_features
-# 			return (
-# 				torch.zeros((N_picks, out_dim), device=device),
-# 				torch.zeros((N_picks, out_dim), device=device),
-# 			)
-
-# 		nodes = nodes_all[station_ok]
-# 		inds = pick_all[station_ok]
-# 		phases = phase_all[station_ok]
-
-# 		# 4. Process P (phase=0) and S (phase=1) Edges
-# 		results = []
-# 		fc_layers = [self.fc2, self.fc3]
-# 		film_layers = [self.film2, self.film3]
-# 		f_gammas = [self.f_gamma_t2, self.f_gamma_t3]
-# 		log_bases = [self.log_gamma_base_t2, self.log_gamma_base_t3]
-
-# 		sig_scale = torch.exp(self.log_sig_t_scale)
-# 		sig_p = (self.scale_misfit * self.kernel_sig_t * sig_scale[0]).clamp(min = 1e-3) # ) ** 2
-# 		sig_s = (self.scale_misfit * self.kernel_sig_t * sig_scale[1] * self.scale_s_window).clamp(min = 1e-3) # ) ** 2
-# 		sig_phases = [sig_p, sig_s]
-# 		# sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1).clamp(min = 1e-3)
-
-# 		for p_idx in range(2):
-# 			p_mask = phases == p_idx
-# 			if not p_mask.any():
-# 				out_dim = fc_layers[p_idx][-1].out_features
-# 				results.append(torch.zeros((N_picks, out_dim), device=device))
-# 				continue
-
-# 			p_nodes = nodes[p_mask]
-# 			p_inds = inds[p_mask]
-
-# 			# Canonical Sort per phase branch
-# 			canon_order = torch.argsort(
-# 				ipick[p_inds].to(torch.int64) * (N_picks * N_prod)
-# 				+ p_inds.to(torch.int64) * N_prod
-# 				+ p_nodes.to(torch.int64),
-# 				stable=True,
-# 			)
-# 			p_nodes = p_nodes[canon_order]
-# 			p_inds = p_inds[canon_order]
-
-# 			# Feature Assembly
-# 			diff_t = tpick[p_inds].reshape(-1, 1) - tlatent[p_nodes, p_idx].reshape(-1, 1)
-# 			misfit_rel = torch.cat(
-# 				[
-# 					torch.exp(-1.0 * torch.abs(diff_t) / sig_phases[p_idx]),
-# 					torch.tanh(diff_t / sig_phases[p_idx])
-# 				],
-# 				dim=1,
-# 			)
-
-# 			# torch.exp(-1.0 * torch.abs(diff_t) / (self.scale_misfit * self.kernel_sig_t)),
-
-# 			off_sta = (locs_use_cart[ipick[p_inds]] - x_context_cart[A_src_in_sta[1, p_nodes]]) / (10.0 * self.scale_rel)
-# 			norm_s = torch.linalg.vector_norm(off_sta, dim=1, keepdim=True).clamp(min=1e-6)
-# 			gammas = self._get_gammas(f_gammas[p_idx], log_bases[p_idx], ctx)
-# 			feat = torch.cat((off_sta / norm_s, torch.exp(-1.0 * norm_s * gammas[:, :3])), dim=1)
-
-# 			inpt = torch.cat(
-# 				(
-# 					x[p_nodes],
-# 					misfit_rel,
-# 					feat,
-# 					self.phase_embed(phase_label[p_inds].long()),
-# 				),
-# 				dim=1,
-# 			)
-
-# 			agg = scatter(
-# 				film_layers[p_idx](fc_layers[p_idx](inpt), ctx.expand(len(inpt), -1)),
-# 				p_inds,
-# 				dim=0,
-# 				dim_size=N_picks,
-# 				reduce="mean",
-# 			)
-# 			results.append(agg)
-
-# 		return self.norm2(results[0]), self.norm3(results[1])
-
-
-# 	def forward(
-# 		self,
-# 		x,
-# 		x_context_cart,
-# 		x_context_t,
-# 		x_query_cart,
-# 		x_query_t,
-# 		A_src_in_sta,
-# 		tpick,
-# 		ipick,
-# 		phase_label,
-# 		locs_use_cart,
-# 		tlatent,
-# 		embed_context,
-# 		trv_out=None,
-# 	):
-# 		# start_time = time.time()
-# 		device = x.device
-# 		tpick = torch.as_tensor(tpick, device=device)
-
-# 		tpick = tpick.view(-1)
-# 		ipick = ipick.view(-1)
-# 		phase_label = phase_label.view(-1)
-		
-# 		N_q = len(x_query_cart)
-# 		N_p = len(tpick)
-# 		N_prod = A_src_in_sta.size(1)
-
-# 		if trv_out is None:
-# 			trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart))
-# 		trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
-
-# 		if not self.use_phase_types:
-# 			phase_label = torch.zeros_like(phase_label)
-
-# 		# 1. Misfit Filtering (Filter active pairs FIRST)
-# 		# sig_scale = torch.exp(self.log_sig_t_scale)
-# 		# sig_p = self.dilate_scale * self.kernel_sig_t # * sig_scale[0] # ) ** 2
-# 		# sig_s = self.dilate_scale * self.kernel_sig_t # * sig_scale[1] # ) ** 2
-
-# 		var_p = max(self.dilate_scale * self.kernel_sig_t, 1e-3)**2
-# 		var_s = max(self.dilate_scale * self.kernel_sig_t * self.scale_s_window, 1e-3)**2
-
-# 		trv_p = trv_out[:, ipick, 0]
-# 		trv_s = trv_out[:, ipick, 1]
-
-# 		misfit_p = torch.exp(-0.5 * (trv_p - tpick.reshape(1,-1)) ** 2 / var_p )
-# 		misfit_s = torch.exp(-0.5 * (trv_s - tpick.reshape(1,-1)) ** 2 / var_s )
-# 		# misfit_p_ = torch.exp(-0.5 * (trv_p - tpick) ** 2 / sig_p)
-# 		# misfit_s_ = torch.exp(-0.5 * (trv_s - tpick) ** 2 / sig_s)		
-
-# 		phase_is_p = (phase_label == 0).unsqueeze(0)
-# 		phase_misfit = torch.where(phase_is_p, misfit_p, misfit_s)
-# 		max_misfit = torch.maximum(phase_misfit, torch.maximum(misfit_p, misfit_s))
-# 		mask_misfit_time = max_misfit > self.min_thresh
-# 		isrc, iarv = torch.where(mask_misfit_time)
-
-# 		# Pre-compute graph degrees
-# 		deg_srcs = scatter(
-# 			torch.ones(A_src_in_sta.size(1), device=device, dtype=torch.long),
-# 			A_src_in_sta[1],
-# 			dim=0,
-# 			dim_size=len(x_context_cart),
-# 			reduce="sum",
-# 		)
-# 		cum_deg_srcs = torch.cat(
-# 			(torch.zeros(1, device=device, dtype=torch.long), torch.cumsum(deg_srcs, dim=0)[:-1]), dim=0
-# 		)
-
-# 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-# 		D_h = self.fc1[-1].out_features
-
-# 		# Direct sparse initialization without full grid expansion
-# 		# Flatten self.null_embed to [D_h] or [1, D_h] before expanding
-# 		arv_flat = self.null_embed.view(-1, D_h).expand(N_q * N_p, D_h).clone()
-
-# 		if len(iarv) > 0:
-# 			# 2. KNN only over active queries
-
-# 			## Old sort
-# 			# active_q_unique, active_q_inv = torch.unique(isrc, return_inverse=True)
-			
-# 			# Fast unique for sorted 1D tensors on GPU
-# 			# mask_unique = torch.cat([torch.tensor([True], device=device), isrc[1:] != isrc[:-1]])
-# 			first_elem = torch.ones(1, dtype=torch.bool, device=isrc.device)
-# 			mask_unique = torch.cat([first_elem, isrc[1:] != isrc[:-1]])
-# 			active_q_unique = isrc[mask_unique]
-# 			# torch.unique_consecutive(isrc)
-
-
-# 			edge_idx = knn(
-# 				torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
-# 				torch.cat((x_query_cart[active_q_unique] / 1000.0, self.scale_time * x_query_t[active_q_unique].reshape(-1, 1)), dim=1),
-# 				k=self.k_spc_edges,
-# 			)
-			
-# 			# Remap edge_idx[0] back to full N_q query indices
-# 			q_knn_indices = active_q_unique[edge_idx[0]]
-# 			ref_context_nodes = edge_idx[1]
-			
-# 			# Map query KNN neighbors directly to pair active set
-# 			deg_sl = deg_srcs[ref_context_nodes]
-# 			inc_inds = (
-# 				torch.arange(deg_sl.sum(), device=device, dtype=torch.long)
-# 				- torch.repeat_interleave(torch.cumsum(deg_sl, dim=0) - deg_sl, deg_sl)
-# 			)
-# 			nodes_prod = cum_deg_srcs[ref_context_nodes].repeat_interleave(deg_sl) + inc_inds
-# 			ind_query = q_knn_indices.repeat_interleave(deg_sl)
-
-# 			# Match active pairs (isrc, iarv) against expanded product nodes
-# 			sta_src_pairs = A_src_in_sta[:, nodes_prod]
-
-
-# 			# Composite key: (Query ID * N_stations) + Station ID
-# 			key_prod = ind_query.to(torch.int64) * len(locs_use_cart) + sta_src_pairs[0].to(torch.int64)
-# 			order_kp = torch.argsort(key_prod, stable=True)
-# 			key_prod_sorted = key_prod[order_kp]
-
-# 			# Query-Pick target composite key
-# 			key_active = isrc.to(torch.int64) * len(locs_use_cart) + ipick[iarv].to(torch.int64)
-
-# 			p_left = torch.searchsorted(key_prod_sorted, key_active, side="left")
-# 			p_right = torch.searchsorted(key_prod_sorted, key_active, side="right")
-
-# 			has_match = p_right > p_left
-# 			if has_match.any():
-# 				valid_indices = torch.where(has_match)[0]
-# 				counts = p_right[valid_indices] - p_left[valid_indices]
-# 				starts = p_left[valid_indices]
-
-# 				offsets = torch.arange(counts.sum(), device=device) - torch.repeat_interleave(
-# 					torch.cumsum(counts, 0) - counts, counts
-# 				)
-# 				matched_prod_indices = order_kp[starts.repeat_interleave(counts) + offsets]
-# 				i_pick_match = valid_indices.repeat_interleave(counts)
-
-# 				match_mask = ind_query[matched_prod_indices] == isrc[i_pick_match]
-# 				matched_prod_indices = matched_prod_indices[match_mask]
-# 				i_pick_match = i_pick_match[match_mask]
-
-# 				q_idx = isrc[i_pick_match]
-# 				p_arr_idx = iarv[i_pick_match]
-# 				node_idx = nodes_prod[matched_prod_indices]
-# 				p_idx = phase_label[p_arr_idx].long()
-
-# 				# Canonical ordering independent of input pick perm
-# 				canon_order = torch.argsort(
-# 					q_idx.to(torch.int64) * (N_p * N_prod)
-# 					+ p_arr_idx.to(torch.int64) * N_prod
-# 					+ node_idx.to(torch.int64),
-# 					stable=True,
-# 				)
-
-# 				q_idx = q_idx[canon_order]
-# 				p_arr_idx = p_arr_idx[canon_order]
-# 				node_idx = node_idx[canon_order]
-# 				p_idx = p_idx[canon_order]
-
-# 				tlat = tlatent[node_idx, p_idx].reshape(-1, 1)
-# 				m_rel = tpick[p_arr_idx].reshape(-1, 1) - tlat
-# 				trv_ph = trv_out[q_idx, ipick[p_arr_idx], p_idx].reshape(-1, 1)
-# 				m_query = tpick[p_arr_idx].reshape(-1, 1) - trv_ph
-
-# 				sig_scale = torch.exp(self.log_sig_t_scale)
-# 				sig_p = self.scale_misfit * self.kernel_sig_t * sig_scale[0] # ) ** 2
-# 				sig_s = self.scale_misfit * self.kernel_sig_t * sig_scale[1] * self.scale_s_window # ) ** 2
-# 				sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1).clamp(min = 1e-3)
-
-# 				m_rel_feat = torch.cat(
-# 					[torch.exp(-1.0 * torch.abs(m_rel) / sig_phase),
-# 					 torch.tanh(m_rel / sig_phase)], dim = 1 #  # torch.sign(m_rel)), dim=1
-# 				)
-# 				m_query_feat = torch.cat(
-# 					[torch.exp(-1.0 * torch.abs(m_query) / sig_phase),
-# 					 torch.tanh(m_query / sig_phase)], dim = 1 # # torch.sign(m_query)), dim=1
-# 				)
-
-# 				# (torch.exp(-1.0 * torch.abs(m_rel) / (self.scale_misfit * self.kernel_sig_t)),
-# 				# (torch.exp(-1.0 * torch.abs(m_rel) / (self.scale_misfit * self.kernel_sig_t)),
-
-# 				off_src_sta = (locs_use_cart[ipick[p_arr_idx]] - x_query_cart[q_idx]) / (10.0 * self.scale_rel)
-# 				off_ref_sta = (locs_use_cart[ipick[p_arr_idx]] - x_context_cart[A_src_in_sta[1, node_idx]]) / (10.0 * self.scale_rel)
-# 				off_ref_src = (x_query_cart[q_idx] - x_context_cart[A_src_in_sta[1, node_idx]]) / (1.0 * self.scale_rel)
-# 				off_ref_src_t = (
-# 					1000.0 * self.scale_time
-# 					* (x_query_t[q_idx].reshape(-1, 1) - x_context_t[A_src_in_sta[1, node_idx]].reshape(-1, 1))
-# 					/ (3.0 * self.scale_rel)
-# 				)
-
-# 				n_src_sta = torch.linalg.vector_norm(off_src_sta, dim=1, keepdim=True).clamp(min=1e-6)
-# 				n_ref_sta = torch.linalg.vector_norm(off_ref_sta, dim=1, keepdim=True).clamp(min=1e-6)
-# 				n_ref_src = torch.linalg.vector_norm(off_ref_src, dim=1, keepdim=True).clamp(min=1e-6)
-
-# 				g1 = self._get_gammas(self.f_gamma1, self.log_gamma_base1, ctx)
-# 				g2 = self._get_gammas(self.f_gamma2, self.log_gamma_base2, ctx)
-# 				g3 = self._get_gammas(self.f_gamma3, self.log_gamma_base3, ctx)
-
-# 				feat_src_sta = torch.cat((off_src_sta / n_src_sta, torch.exp(-1.0 * n_src_sta * g1[:, :3])), dim=-1)
-# 				feat_ref_sta = torch.cat((off_ref_sta / n_ref_sta, torch.exp(-1.0 * n_ref_sta * g2[:, :3])), dim=-1)
-# 				feat_ref_src = torch.cat((off_ref_src / n_ref_src, torch.exp(-1.0 * n_ref_src * g3[:, :3])), dim=-1)
-# 				feat_time = torch.cat((off_ref_src_t, torch.exp(-1.0 * torch.abs(off_ref_src_t) * g3[:, 3:5])), dim=-1)
-
-# 				inpt = torch.cat(
-# 					(
-# 						x[node_idx],
-# 						m_rel_feat,
-# 						m_query_feat,
-# 						feat_src_sta,
-# 						feat_ref_sta,
-# 						feat_ref_src,
-# 						feat_time,
-# 						self.phase_embed(p_idx),
-# 					),
-# 					dim=1,
-# 				)
-# 				emb = self.film1(self.fc1(inpt), ctx.expand(len(inpt), -1))
-# 				flat_target = q_idx * N_p + p_arr_idx
-
-# 				# FIXED
-# 				counts = scatter(torch.ones(len(flat_target), 1, device=device), flat_target, dim=0, dim_size=N_q * N_p, reduce="sum")
-# 				mask_active_scat = (counts > 0).squeeze(-1)
-
-# 				raw_scatter = scatter(emb, flat_target, dim=0, dim_size=N_q * N_p, reduce="mean")
-# 				if mask_active_scat.any():
-# 					arv_flat[mask_active_scat] = self.norm1(raw_scatter[mask_active_scat])
-
-
-# 		arv_embed = arv_flat.view(N_q, N_p, D_h)
-
-# 		# print('Time [1] : %0.4f'%(time.time() - start_time))
-# 		# start_time = time.time()
-
-# 		agg_p, agg_s = self._process_phase_branch(
-# 			tpick, tlatent, ipick, A_src_in_sta,
-# 			x_context_cart, x_context_t, locs_use_cart, x, phase_label, ctx,
-# 			deg_srcs, cum_deg_srcs,
-# 		)
-
-
-# 		# 1. Active pair index calculation (isrc, iarv derived from mask_misfit_time earlier)
-# 		flat_active = isrc * N_p + iarv
-
-# 		# 2. Extract features only for active pairs
-# 		arv_active = arv_flat[flat_active]   # [N_active, D_h]
-# 		exp_p_active = agg_p[iarv]		   # [N_active, D_h] (Direct 1D index, skips N_q expansion)
-# 		exp_s_active = agg_s[iarv]		   # [N_active, D_h] (Direct 1D index, skips N_q expansion)
-
-# 		concat_active = torch.cat((arv_active, exp_p_active, exp_s_active), dim=-1) # [N_active, 3 * D_h]
-
-# 		# 3. Evaluate FC networks ONLY on active pairs (~30% of total workload)
-# 		gated_active = concat_active * self.gate(concat_active)
-# 		out_active = self.fc_merge(gated_active)
-
-# 		# 2. Scatter results into prefilled buffer initialized with trainable null_out
-# 		out_flat = self.null_out.expand(N_q * N_p, -1).clone()
-# 		out_flat[flat_active] = out_active
-# 		out = out_flat.view(N_q, N_p, -1)
-
-# 		# print('Time [3] : %0.4f' % (time.time() - start_time))
-
-# 		return out, mask_misfit_time
-
-
-
-# class ArrivalEmbedding(nn.Module):
-# 	def __init__(
-# 		self,
-# 		ndim_arv_in,
-# 		ndim_out,
-# 		n_hidden=20,
-# 		n_dim_embed=30,
-# 		n_phase_embed=5,
-# 		embed_vector_dim=10,
-# 		scale_rel=scale_rel,
-# 		k_spc_edges=k_spc_edges,
-# 		kernel_sig_t=kernel_sig_t,
-# 		use_phase_types=use_phase_types,
-# 		scale_time=scale_time,
-# 		min_thresh=0.01,
-# 		trv=None,
-# 		ftrns2=None,
-# 		debug_asserts=True,
-# 		device = device
-# 	):
-# 		super().__init__()
-# 		self.ftrns2 = ftrns2
-# 		self.trv = trv
-# 		self.debug_asserts = debug_asserts
-# 		self.use_phase_types = use_phase_types
-# 		self.kernel_sig_t = kernel_sig_t
-# 		self.min_thresh = min_thresh
-# 		self.scale_time = scale_time
-# 		self.scale_rel = scale_rel
-# 		self.k_spc_edges = k_spc_edges
-# 		# self.dilate_scale = 4.0
-# 		# self.scale_misfit = 3.0
-# 		self.scale_s_window = 1.5
-
-# 		self.null_embed = nn.Parameter(torch.zeros(1, 1, n_hidden))
-# 		self.phase_embed = nn.Embedding(2, n_phase_embed)
-# 		self.log_sig_t_scale = nn.Parameter(torch.zeros(2))
-# 		self.null_out = nn.Parameter(torch.randn(ndim_out))
-
-# 		self.fc1 = nn.Sequential(
-# 			nn.Linear(ndim_arv_in + 25 + n_phase_embed, 2 * n_hidden),
-# 			nn.PReLU(),
-# 			nn.Linear(2 * n_hidden, n_hidden),
-# 		)
-# 		self.fc2 = nn.Sequential(
-# 			nn.Linear(ndim_arv_in + 8 + n_phase_embed, 2 * n_hidden),
-# 			nn.PReLU(),
-# 			nn.Linear(2 * n_hidden, n_hidden),
-# 		)
-# 		self.fc3 = nn.Sequential(
-# 			nn.Linear(ndim_arv_in + 8 + n_phase_embed, 2 * n_hidden),
-# 			nn.PReLU(),
-# 			nn.Linear(2 * n_hidden, n_hidden),
-# 		)
-
-# 		self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
-# 		self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
-# 		self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
-# 		self.f_gamma_t2, self.log_gamma_base_t2 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
-# 		self.f_gamma_t3, self.log_gamma_base_t3 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
-
-# 		self.film1 = FiLM(embed_vector_dim, n_hidden)
-# 		self.film2 = FiLM(embed_vector_dim, n_hidden)
-# 		self.film3 = FiLM(embed_vector_dim, n_hidden)
-
-# 		self.norm1 = RMSNorm(n_hidden)
-# 		self.norm2 = RMSNorm(n_hidden)
-# 		self.norm3 = RMSNorm(n_hidden)
-
-# 		self.gate = nn.Sequential(nn.Linear(3 * n_hidden, 3 * n_hidden), nn.Sigmoid())
-# 		self.fc_merge = nn.Sequential(
-# 			nn.Linear(3 * n_hidden, 2 * n_hidden),
-# 			nn.PReLU(),
-# 			nn.Linear(2 * n_hidden, ndim_out),
-# 		)
-
-# 	def _init_gamma_bank(self, embed_dim, init_gammas):
-# 		f_g = nn.Linear(embed_dim, 2 * len(init_gammas))
-# 		nn.init.normal_(f_g.weight, std=0.01)
-# 		nn.init.zeros_(f_g.bias)
-# 		log_base = nn.Parameter(
-# 			torch.log(torch.tensor(init_gammas, dtype=torch.float32).reshape(1, -1))
-# 		)
-# 		return f_g, log_base
-
-# 	def _get_gammas(self, f_g, log_base, ctx):
-# 		n_g = log_base.shape[1]
-# 		delta = f_g(ctx.reshape(-1, ctx.shape[-1]))
-# 		alpha = 1.1 * torch.tanh(delta[..., :n_g])
-# 		res = 0.2 * torch.tanh(delta[..., n_g:])
-# 		# return torch.exp(log_base.to(ctx.device) + alpha + res).mean(dim=0, keepdim=True)
-# 		return torch.exp(log_base + alpha + res).mean(dim=0, keepdim=True)
-
-# 	def _sig_t(self):
-# 		# clamped learned tweak: ~0.83–1.2 × σ_t
-# 		# adj = 1.2 ** torch.tanh(self.log_sig_t_scale)
-# 		adj = 1.0 + 0.2 * torch.tanh(self.log_sig_t_scale)
-
-# 		sig_p = self.kernel_sig_t * adj[0]
-# 		sig_s = self.kernel_sig_t * self.scale_s_window * adj[1]
+# 	# def _init_gamma_bank(self, embed_dim, init_gammas):
+# 	# 	f_g = nn.Linear(embed_dim, 2 * len(init_gammas))
+# 	# 	nn.init.normal_(f_g.weight, std=0.01)
+# 	# 	nn.init.zeros_(f_g.bias)
+# 	# 	log_base = nn.Parameter(
+# 	# 		torch.log(torch.tensor(init_gammas, dtype=torch.float32).reshape(1, -1))
+# 	# 	)
+# 	# 	return f_g, log_base
+
+# 	# def _get_gammas(self, f_g, log_base, ctx):
+# 	# 	n_g = log_base.shape[1]
+# 	# 	delta = f_g(ctx.reshape(-1, ctx.shape[-1]))
+# 	# 	alpha = 1.1 * torch.tanh(delta[..., :n_g])
+# 	# 	res = 0.2 * torch.tanh(delta[..., n_g:])
+# 	# 	# return torch.exp(log_base.to(ctx.device) + alpha + res).mean(dim=0, keepdim=True)
+# 	# 	return torch.exp(log_base + alpha + res).mean(dim=0, keepdim=True)
+
+# 	# def _sig_t(self):
+# 	# 	# clamped learned tweak: ~0.83–1.2 × σ_t
+# 	# 	# adj = 1.2 ** torch.tanh(self.log_sig_t_scale)
+# 	# 	adj = 1.0 + 0.2 * torch.tanh(self.log_sig_t_scale)
+
+# 	# 	sig_p = self.kernel_sig_t * adj[0]
+# 	# 	sig_s = self.kernel_sig_t * self.scale_s_window * adj[1]
+# 	# 	return sig_p.clamp(min=1e-3), sig_s.clamp(min=1e-3)
+
+# 	# def _sig_t(self, ctx=None):
+# 	#	 if ctx is None:
+# 	#		 # fallback for any call sites that don’t pass context
+# 	#		 adj = torch.exp(0.4 * torch.tanh(self.log_sig_t_scale))  # keep old param as backup if you want
+# 	#	 else:
+# 	#		 # ctx shape: [1, embed_dim] or [B, embed_dim]
+# 	#		 delta = self.f_sig_t(ctx)
+# 	#		 # bound the adjustment so it doesn’t explode
+# 	#		 adj = torch.exp(0.5 * torch.tanh(delta))		  # ≈ [0.61, 1.65]
+# 	#		 # or a bit more conservative:
+# 	#		 # adj = torch.exp(0.4 * torch.tanh(delta))
+
+# 	#	 sig_p = self.kernel_sig_t * adj[..., 0]
+# 	#	 sig_s = self.kernel_sig_t * self.scale_s_window * adj[..., 1]
+# 	#	 return sig_p.clamp(min=1e-3), sig_s.clamp(min=1e-3)
+
+
+# 	def _sig_t(self, ctx=None):
+# 		# Global residual (starts at 1.0)
+# 		global_adj = torch.exp(0.3 * torch.tanh(self.log_sig_t_scale))
+
+# 		if ctx is not None:
+# 			delta = self.f_sig_t(ctx)
+# 			ctx_adj = torch.exp(0.4 * torch.tanh(delta))
+# 			adj = global_adj * ctx_adj		  # residual combination
+# 		else:
+# 			adj = global_adj
+
+# 		sig_p = self.kernel_sig_t * adj[..., 0]
+# 		sig_s = self.kernel_sig_t * self.scale_s_window * adj[..., 1]
 # 		return sig_p.clamp(min=1e-3), sig_s.clamp(min=1e-3)
 
+
 # 	def _process_phase_branch(
 # 		self,
 # 		tpick,
@@ -2795,10 +2274,6 @@ class DataAggregationAssociation(nn.Module):
 # 				torch.zeros((N_picks, out_dim), device=device),
 # 			)
 
-# 		# sig_scale = torch.exp(self.log_sig_t_scale)
-# 		# sig_p = (self.scale_misfit * self.kernel_sig_t * sig_scale[0]) ** 2
-# 		# sig_s = (self.scale_misfit * self.kernel_sig_t * sig_scale[1]) ** 2
-
 # 		# 1. Fully Canonical Station Matching (Shared across both P and S)
 # 		prod_sta = A_src_in_sta[0]
 # 		prod_ctx = A_src_in_sta[1]
@@ -2817,22 +2292,50 @@ class DataAggregationAssociation(nn.Module):
 # 				torch.zeros((N_picks, out_dim), device=device),
 # 				torch.zeros((N_picks, out_dim), device=device),
 # 			)
-
+		
+# 		MAX_ROWS = 2_000_000
 # 		valid_picks = torch.where(has_match)[0]
 # 		counts = p_right[valid_picks] - p_left[valid_picks]
 # 		starts = p_left[valid_picks]
 
-# 		# MAX_MATCH = 2_000_000
-# 		# if int(counts.sum()) > MAX_MATCH:
-# 		# 	raise RuntimeError(f"ArrivalEmbedding match explosion: {int(counts.sum())}")
-# 		# 	# or chunk valid_indices
+# 		n_prod = A_src_in_sta.size(1)
+# 		if counts.numel() and int(counts.max()) > n_prod + 2:
+# 			raise RuntimeError(
+# 				f"phase match explode max={int(counts.max())} n_prod={n_prod}"
+# 			)
+		
+# 		sig_p, sig_s = self._sig_t(ctx)
 
-# 		offsets = torch.arange(counts.sum(), device=device) - torch.repeat_interleave(
-# 			torch.cumsum(counts, 0) - counts, counts
-# 		)
-# 		matched_prod_indices = sta_order[starts.repeat_interleave(counts) + offsets]
-# 		matched_pick_indices = valid_picks.repeat_interleave(counts)
+# 		kept_prod, kept_pick = [], []
+# 		if counts.numel() > 0:
+# 			cs = counts.cumsum(0)
+# 			i, n = 0, counts.numel()
+# 			while i < n:
+# 				base = cs[i] - counts[i]
+# 				# j = int(torch.searchsorted(cs, base + MAX_ROWS, right=True).item())
+# 				j = int(torch.searchsorted(cs, base + MAX_ROWS, side="right").item())
+# 				j = min(max(j, i + 1), n)
+# 				sl = slice(i, j)
+# 				c, s0, vp = counts[sl], starts[sl], valid_picks[sl]
+# 				off = torch.arange(int(c.sum().item()), device=device) - torch.repeat_interleave(
+# 					c.cumsum(0) - c, c
+# 				)
+# 				mprod = sta_order[s0.repeat_interleave(c) + off]
+# 				mpick = vp.repeat_interleave(c)
+# 				dt = (tpick[mpick].unsqueeze(1) - tlatent[mprod, :2]).abs().min(1).values
+# 				keep = dt < (3.0 * sig_s)
+# 				kept_prod.append(mprod[keep])
+# 				kept_pick.append(mpick[keep])
+# 				i = j
 
+# 		matched_prod_indices = torch.cat(kept_prod) if kept_prod else sta_order.new_empty(0)
+# 		matched_pick_indices = torch.cat(kept_pick) if kept_pick else valid_picks.new_empty(0)
+
+# 		if matched_pick_indices.numel() == 0:
+# 			out_dim = self.fc2[-1].out_features
+# 			z = torch.zeros((N_picks, out_dim), device=device)
+# 			return z, z
+		
 # 		# 2. Canonical Multi-Key Tie Breaking (Run per phase_idx in parallel [2, N_matched])
 # 		# Compute dt for both P (idx 0) and S (idx 1) simultaneously -> Shape: [2, N_matched]
 # 		dt_both = torch.abs(
@@ -2881,6 +2384,11 @@ class DataAggregationAssociation(nn.Module):
 # 		ctx_nn_s = A_src_in_sta[1, ind_grab_sorted_list[1]]
 # 		ctx_nn_both = torch.cat([ctx_nn_p, ctx_nn_s], dim=0)
 
+# 		if ctx_nn_both.numel() == 0:
+# 			out_dim = self.fc2[-1].out_features
+# 			z = torch.zeros((N_picks, out_dim), device=device)
+# 			return z, z
+		
 # 		edge_idx = knn(
 # 			x_ctx_combined,
 # 			x_ctx_combined[ctx_nn_both],
@@ -2921,20 +2429,24 @@ class DataAggregationAssociation(nn.Module):
 # 		inds = pick_all[station_ok]
 # 		phases = phase_all[station_ok]
 
+# 		sig_p, sig_s = self._sig_t(ctx)
+# 		dt_n = (tpick[inds] - tlatent[nodes, phases]).abs()
+# 		keep_n = dt_n < (3.0 * sig_s)
+# 		nodes, inds, phases = nodes[keep_n], inds[keep_n], phases[keep_n]
+# 		if nodes.numel() == 0:
+# 			out_dim = self.fc2[-1].out_features
+# 			z = torch.zeros((N_picks, out_dim), device=device)
+# 			return z, z
+		
 # 		# 4. Process P (phase=0) and S (phase=1) Edges
 # 		results = []
 # 		fc_layers = [self.fc2, self.fc3]
 # 		film_layers = [self.film2, self.film3]
-# 		f_gammas = [self.f_gamma_t2, self.f_gamma_t3]
-# 		log_bases = [self.log_gamma_base_t2, self.log_gamma_base_t3]
+# 		# f_gammas = [self.f_gamma_t2, self.f_gamma_t3]
+# 		# log_bases = [self.log_gamma_base_t2, self.log_gamma_base_t3]
 
-# 		# sig_scale = torch.exp(self.log_sig_t_scale)
-# 		# sig_p = (self.scale_misfit * self.kernel_sig_t * sig_scale[0]).clamp(min = 1e-3) # ) ** 2
-# 		# sig_s = (self.scale_misfit * self.kernel_sig_t * sig_scale[1] * self.scale_s_window).clamp(min = 1e-3) # ) ** 2
-# 		# sig_phases = [sig_p, sig_s]
-# 		# sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1).clamp(min = 1e-3)
 
-# 		sig_p, sig_s = self._sig_t()
+# 		# sig_p, sig_s = self._sig_t()
 # 		sig_phases = [sig_p, sig_s]
 
 # 		for p_idx in range(2):
@@ -2967,30 +2479,21 @@ class DataAggregationAssociation(nn.Module):
 # 				dim=1,
 # 			)
 
-# 			# torch.exp(-1.0 * torch.abs(diff_t) / (self.scale_misfit * self.kernel_sig_t)),
 
 # 			off_sta = (locs_use_cart[ipick[p_inds]] - x_context_cart[A_src_in_sta[1, p_nodes]]) / (10.0 * self.scale_rel)
 # 			norm_s = torch.linalg.vector_norm(off_sta, dim=1, keepdim=True).clamp(min=1e-6)
-# 			gammas = self._get_gammas(f_gammas[p_idx], log_bases[p_idx], ctx)
-# 			feat = torch.cat((off_sta / norm_s, torch.exp(-1.0 * norm_s * gammas[:, :3])), dim=1)
-
-# 			inpt = torch.cat(
-# 				(
-# 					x[p_nodes],
-# 					misfit_rel,
-# 					feat,
-# 					self.phase_embed(phase_label[p_inds].long()),
-# 				),
-# 				dim=1,
-# 			)
-
+# 			inpt = torch.cat((
+# 				x[p_nodes],
+# 				misfit_rel,
+# 				off_sta / norm_s,
+# 				self.phase_embed(phase_label[p_inds].long()),
+# 			), dim=1)
 # 			agg = scatter(
 # 				film_layers[p_idx](fc_layers[p_idx](inpt), ctx.expand(len(inpt), -1)),
-# 				p_inds,
-# 				dim=0,
-# 				dim_size=N_picks,
-# 				reduce="mean",
+# 				p_inds, dim=0, dim_size=N_picks, reduce="mean",
 # 			)
+
+
 # 			results.append(agg)
 
 # 		return self.norm2(results[0]), self.norm3(results[1])
@@ -3024,6 +2527,12 @@ class DataAggregationAssociation(nn.Module):
 # 		N_p = len(tpick)
 # 		N_prod = A_src_in_sta.size(1)
 
+# 		if N_p == 0:
+# 			return (
+# 				x.new_zeros(N_q, 0, self.null_out.size(-1)),
+# 				tpick.new_zeros(N_q, 0),
+# 			)
+		
 # 		if trv_out is None:
 # 			trv_out = self.trv(self.ftrns2(locs_use_cart), self.ftrns2(x_query_cart))
 # 		trv_out = trv_out + x_query_t.reshape(-1, 1, 1)
@@ -3031,22 +2540,13 @@ class DataAggregationAssociation(nn.Module):
 # 		if not self.use_phase_types:
 # 			phase_label = torch.zeros_like(phase_label)
 
-# 		# 1. Misfit Filtering (Filter active pairs FIRST)
-# 		# sig_scale = torch.exp(self.log_sig_t_scale)
-# 		# sig_p = self.dilate_scale * self.kernel_sig_t # * sig_scale[0] # ) ** 2
-# 		# sig_s = self.dilate_scale * self.kernel_sig_t # * sig_scale[1] # ) ** 2
 
-# 		sig_p, sig_s = self._sig_t()
+# 		sig_p, sig_s = self._sig_t(embed_context)
 # 		sig_f_p = 1.25 * sig_p		  # slight inflation vs feature
 # 		sig_f_s = 1.25 * sig_s
 # 		var_p = sig_f_p.pow(2)
 # 		var_s = sig_f_s.pow(2)
 
-# 		# misfit_p / misfit_s / mask unchanged
-
-# 		# var_p = max(self.dilate_scale * self.kernel_sig_t, 1e-3)**2
-# 		# var_s = max(self.dilate_scale * self.kernel_sig_t * self.scale_s_window, 1e-3)**2
-
 # 		trv_p = trv_out[:, ipick, 0]
 # 		trv_s = trv_out[:, ipick, 1]
 
@@ -3074,7 +2574,7 @@ class DataAggregationAssociation(nn.Module):
 # 		)
 
 # 		ctx = embed_context if embed_context.dim() == 2 else embed_context.unsqueeze(0)
-# 		D_h = self.fc1[-1].out_features
+# 		D_h = self.fc_x[-1].out_features
 
 # 		# Direct sparse initialization without full grid expansion
 # 		# Flatten self.null_embed to [D_h] or [1, D_h] before expanding
@@ -3083,16 +2583,9 @@ class DataAggregationAssociation(nn.Module):
 # 		if len(iarv) > 0:
 # 			# 2. KNN only over active queries
 
-# 			## Old sort
-# 			# active_q_unique, active_q_inv = torch.unique(isrc, return_inverse=True)
-			
-# 			# Fast unique for sorted 1D tensors on GPU
-# 			# mask_unique = torch.cat([torch.tensor([True], device=device), isrc[1:] != isrc[:-1]])
 # 			first_elem = torch.ones(1, dtype=torch.bool, device=isrc.device)
 # 			mask_unique = torch.cat([first_elem, isrc[1:] != isrc[:-1]])
 # 			active_q_unique = isrc[mask_unique]
-# 			# torch.unique_consecutive(isrc)
-
 
 # 			edge_idx = knn(
 # 				torch.cat((x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1),
@@ -3103,15 +2596,9 @@ class DataAggregationAssociation(nn.Module):
 # 			# Remap edge_idx[0] back to full N_q query indices
 # 			q_knn_indices = active_q_unique[edge_idx[0]]
 # 			ref_context_nodes = edge_idx[1]
-			
 
 # 			# Map query KNN neighbors directly to pair active set
 # 			deg_sl = deg_srcs[ref_context_nodes]
-
-# 			MAX_MATCH = 2_000_000
-# 			if int(deg_sl.sum()) > MAX_MATCH:
-# 				raise RuntimeError(f"ArrivalEmbedding deg_l explosion: {int(deg_sl.sum())}")
-# 				# or chunk valid_indices
 
 # 			inc_inds = (
 # 				torch.arange(deg_sl.sum(), device=device, dtype=torch.long)
@@ -3122,7 +2609,6 @@ class DataAggregationAssociation(nn.Module):
 
 # 			# Match active pairs (isrc, iarv) against expanded product nodes
 # 			sta_src_pairs = A_src_in_sta[:, nodes_prod]
-
 
 # 			# Composite key: (Query ID * N_stations) + Station ID
 # 			key_prod = ind_query.to(torch.int64) * len(locs_use_cart) + sta_src_pairs[0].to(torch.int64)
@@ -3141,13 +2627,16 @@ class DataAggregationAssociation(nn.Module):
 # 				counts = p_right[valid_indices] - p_left[valid_indices]
 # 				starts = p_left[valid_indices]
 
-
-# 				MAX_MATCH = 2_000_000
-# 				if int(counts.sum()) > MAX_MATCH:
-# 					raise RuntimeError(f"ArrivalEmbedding match explosion: {int(counts.sum())}")
-# 					# or chunk valid_indices
-
-
+# 				# if counts.numel() and int(counts.max()) > max(64, int(deg_srcs.max()) * self.k_spc_edges):
+# 				# 				raise RuntimeError(f"fwd match explode max={int(counts.max())} deg={int(deg_srcs.max())}")
+			
+# 				n_prod = A_src_in_sta.size(1)
+# 				if counts.numel() and int(counts.max()) > N_prod + 2:
+# 					raise RuntimeError(
+# 						f"phase match explode max={int(counts.max())} n_prod={N_prod}"
+# 					)
+					
+				
 # 				offsets = torch.arange(counts.sum(), device=device) - torch.repeat_interleave(
 # 					torch.cumsum(counts, 0) - counts, counts
 # 				)
@@ -3157,108 +2646,74 @@ class DataAggregationAssociation(nn.Module):
 # 				match_mask = ind_query[matched_prod_indices] == isrc[i_pick_match]
 # 				matched_prod_indices = matched_prod_indices[match_mask]
 # 				i_pick_match = i_pick_match[match_mask]
+			
+# 				# sig_p, sig_s = self._sig_t(embed_context)
 
-# 				q_idx = isrc[i_pick_match]
-# 				p_arr_idx = iarv[i_pick_match]
-# 				node_idx = nodes_prod[matched_prod_indices]
-# 				p_idx = phase_label[p_arr_idx].long()
+# 				dt_q = (
+# 					tpick[iarv[i_pick_match]].unsqueeze(1)
+# 					- tlatent[nodes_prod[matched_prod_indices], :2]
+# 				).abs().min(dim=1).values
+				
+# 				keep = dt_q < (3.0 * sig_s)
+# 				matched_prod_indices = matched_prod_indices[keep]
+# 				i_pick_match = i_pick_match[keep]
+# 				if i_pick_match.numel() == 0:
+# 					pass  # leave arv_flat as null
+# 				else:
+				
+# 					q_idx = isrc[i_pick_match]
+# 					p_arr_idx = iarv[i_pick_match]
+# 					node_idx = nodes_prod[matched_prod_indices]
+# 					p_idx = phase_label[p_arr_idx].long()
+	
+# 					# Canonical ordering independent of input pick perm
+# 					canon_order = torch.argsort(
+# 						q_idx.to(torch.int64) * (N_p * N_prod)
+# 						+ p_arr_idx.to(torch.int64) * N_prod
+# 						+ node_idx.to(torch.int64),
+# 						stable=True,
+# 					)
+	
+# 					q_idx = q_idx[canon_order]
+# 					p_arr_idx = p_arr_idx[canon_order]
+# 					node_idx = node_idx[canon_order]
+# 					p_idx = p_idx[canon_order]
+	
+# 					# tlat = tlatent[node_idx, p_idx].reshape(-1, 1)
+# 					# m_rel = tpick[p_arr_idx].reshape(-1, 1) - tlat
+# 					trv_ph = trv_out[q_idx, ipick[p_arr_idx], p_idx].reshape(-1, 1)
+# 					m_query = tpick[p_arr_idx].reshape(-1, 1) - trv_ph
+					
+	
+# 					# sig_p, sig_s = self._sig_t()
+# 					sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1)
+	
+# 					m_query_feat = torch.cat((
+# 						torch.exp(-m_query.abs() / sig_phase),
+# 						torch.tanh(m_query / sig_phase),
+# 					), dim=1)
+# 					h_x = self.film_x(self.fc_x(x[node_idx]), ctx.expand(len(node_idx), -1))
+# 					h_r = self.fc_r(torch.cat((m_query_feat, self.phase_embed(p_idx)), dim=-1))
+# 					emb = h_x + 0.25 * h_r
 
-# 				# Canonical ordering independent of input pick perm
-# 				canon_order = torch.argsort(
-# 					q_idx.to(torch.int64) * (N_p * N_prod)
-# 					+ p_arr_idx.to(torch.int64) * N_prod
-# 					+ node_idx.to(torch.int64),
-# 					stable=True,
-# 				)
-
-# 				q_idx = q_idx[canon_order]
-# 				p_arr_idx = p_arr_idx[canon_order]
-# 				node_idx = node_idx[canon_order]
-# 				p_idx = p_idx[canon_order]
-
-# 				tlat = tlatent[node_idx, p_idx].reshape(-1, 1)
-# 				m_rel = tpick[p_arr_idx].reshape(-1, 1) - tlat
-# 				trv_ph = trv_out[q_idx, ipick[p_arr_idx], p_idx].reshape(-1, 1)
-# 				m_query = tpick[p_arr_idx].reshape(-1, 1) - trv_ph
-
-# 				# sig_scale = torch.exp(self.log_sig_t_scale)
-# 				# sig_p = self.scale_misfit * self.kernel_sig_t * sig_scale[0] # ) ** 2
-# 				# sig_s = self.scale_misfit * self.kernel_sig_t * sig_scale[1] * self.scale_s_window # ) ** 2
-# 				# sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1).clamp(min = 1e-3)
-
-# 				sig_p, sig_s = self._sig_t()
-# 				sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1)
-
-# 				m_rel_feat = torch.cat(
-# 					[torch.exp(-1.0 * torch.abs(m_rel) / sig_phase),
-# 					 torch.tanh(m_rel / sig_phase)], dim = 1 #  # torch.sign(m_rel)), dim=1
-# 				)
-# 				m_query_feat = torch.cat(
-# 					[torch.exp(-1.0 * torch.abs(m_query) / sig_phase),
-# 					 torch.tanh(m_query / sig_phase)], dim = 1 # # torch.sign(m_query)), dim=1
-# 				)
-
-# 				# (torch.exp(-1.0 * torch.abs(m_rel) / (self.scale_misfit * self.kernel_sig_t)),
-# 				# (torch.exp(-1.0 * torch.abs(m_rel) / (self.scale_misfit * self.kernel_sig_t)),
-
-# 				off_src_sta = (locs_use_cart[ipick[p_arr_idx]] - x_query_cart[q_idx]) / (10.0 * self.scale_rel)
-# 				off_ref_sta = (locs_use_cart[ipick[p_arr_idx]] - x_context_cart[A_src_in_sta[1, node_idx]]) / (10.0 * self.scale_rel)
-# 				off_ref_src = (x_query_cart[q_idx] - x_context_cart[A_src_in_sta[1, node_idx]]) / (1.0 * self.scale_rel)
-# 				off_ref_src_t = (
-# 					1000.0 * self.scale_time
-# 					* (x_query_t[q_idx].reshape(-1, 1) - x_context_t[A_src_in_sta[1, node_idx]].reshape(-1, 1))
-# 					/ (3.0 * self.scale_rel)
-# 				)
-
-# 				n_src_sta = torch.linalg.vector_norm(off_src_sta, dim=1, keepdim=True).clamp(min=1e-6)
-# 				n_ref_sta = torch.linalg.vector_norm(off_ref_sta, dim=1, keepdim=True).clamp(min=1e-6)
-# 				n_ref_src = torch.linalg.vector_norm(off_ref_src, dim=1, keepdim=True).clamp(min=1e-6)
-
-# 				g1 = self._get_gammas(self.f_gamma1, self.log_gamma_base1, ctx)
-# 				g2 = self._get_gammas(self.f_gamma2, self.log_gamma_base2, ctx)
-# 				g3 = self._get_gammas(self.f_gamma3, self.log_gamma_base3, ctx)
-
-# 				feat_src_sta = torch.cat((off_src_sta / n_src_sta, torch.exp(-1.0 * n_src_sta * g1[:, :3])), dim=-1)
-# 				feat_ref_sta = torch.cat((off_ref_sta / n_ref_sta, torch.exp(-1.0 * n_ref_sta * g2[:, :3])), dim=-1)
-# 				feat_ref_src = torch.cat((off_ref_src / n_ref_src, torch.exp(-1.0 * n_ref_src * g3[:, :3])), dim=-1)
-# 				feat_time = torch.cat((off_ref_src_t, torch.exp(-1.0 * torch.abs(off_ref_src_t) * g3[:, 3:5])), dim=-1)
-
-# 				inpt = torch.cat(
-# 					(
-# 						x[node_idx],
-# 						m_rel_feat,
-# 						m_query_feat,
-# 						feat_src_sta,
-# 						feat_ref_sta,
-# 						feat_ref_src,
-# 						feat_time,
-# 						self.phase_embed(p_idx),
-# 					),
-# 					dim=1,
-# 				)
-# 				emb = self.film1(self.fc1(inpt), ctx.expand(len(inpt), -1))
-# 				flat_target = q_idx * N_p + p_arr_idx
-
-# 				# FIXED
-# 				counts = scatter(torch.ones(len(flat_target), 1, device=device), flat_target, dim=0, dim_size=N_q * N_p, reduce="sum")
-# 				mask_active_scat = (counts > 0).squeeze(-1)
-
-# 				raw_scatter = scatter(emb, flat_target, dim=0, dim_size=N_q * N_p, reduce="mean")
-# 				if mask_active_scat.any():
-# 					arv_flat[mask_active_scat] = self.norm1(raw_scatter[mask_active_scat])
+# 					flat_target = q_idx * N_p + p_arr_idx
+	
+# 					# FIXED
+# 					counts = scatter(torch.ones(len(flat_target), 1, device=device), flat_target, dim=0, dim_size=N_q * N_p, reduce="sum")
+# 					mask_active_scat = (counts > 0).squeeze(-1)
+	
+# 					raw_scatter = scatter(emb, flat_target, dim=0, dim_size=N_q * N_p, reduce="mean")
+# 					if mask_active_scat.any():
+# 						arv_flat[mask_active_scat] = self.norm1(raw_scatter[mask_active_scat])
 
 
 # 		arv_embed = arv_flat.view(N_q, N_p, D_h)
-
-# 		# print('Time [1] : %0.4f'%(time.time() - start_time))
-# 		# start_time = time.time()
 
 # 		agg_p, agg_s = self._process_phase_branch(
 # 			tpick, tlatent, ipick, A_src_in_sta,
 # 			x_context_cart, x_context_t, locs_use_cart, x, phase_label, ctx,
 # 			deg_srcs, cum_deg_srcs,
 # 		)
-
 
 # 		# 1. Active pair index calculation (isrc, iarv derived from mask_misfit_time earlier)
 # 		flat_active = isrc * N_p + iarv
@@ -3268,20 +2723,19 @@ class DataAggregationAssociation(nn.Module):
 # 		exp_p_active = agg_p[iarv]		   # [N_active, D_h] (Direct 1D index, skips N_q expansion)
 # 		exp_s_active = agg_s[iarv]		   # [N_active, D_h] (Direct 1D index, skips N_q expansion)
 
-# 		concat_active = torch.cat((arv_active, exp_p_active, exp_s_active), dim=-1) # [N_active, 3 * D_h]
-
-# 		# 3. Evaluate FC networks ONLY on active pairs (~30% of total workload)
-# 		gated_active = concat_active * self.gate(concat_active)
-# 		out_active = self.fc_merge(gated_active)
+# 		side = torch.cat((0.25 * exp_p_active, 0.25 * exp_s_active), dim=-1)
+# 		out_active = self.fc_merge(torch.cat((arv_active, side), dim=-1))
 
 # 		# 2. Scatter results into prefilled buffer initialized with trainable null_out
 # 		out_flat = self.null_out.expand(N_q * N_p, -1).clone()
 # 		out_flat[flat_active] = out_active
-# 		out = out_flat.view(N_q, N_p, -1)
-
+# 		# out = out_flat.view(N_q, N_p, -1)
+# 		out = out_flat.view(N_q, N_p, self.null_out.size(-1))  # not -1
+		
 # 		# print('Time [3] : %0.4f' % (time.time() - start_time))
 
 # 		return out, mask_misfit_time
+
 
 
 
@@ -3338,6 +2792,14 @@ class ArrivalEmbedding(nn.Module):
 			nn.Linear(2 * n_hidden, n_hidden),
 		)
 
+		self.f_sig_t = nn.Sequential(
+			nn.Linear(embed_vector_dim, 16),
+			nn.PReLU(),
+			nn.Linear(16, 2)
+		)
+		nn.init.zeros_(self.f_sig_t[-1].weight)
+		nn.init.zeros_(self.f_sig_t[-1].bias)
+
 		self.f_gamma1, self.log_gamma_base1 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
 		self.f_gamma2, self.log_gamma_base2 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0])
 		self.f_gamma3, self.log_gamma_base3 = self._init_gamma_bank(embed_vector_dim, [0.1, 1.0, 5.0, 0.5, 10.0])
@@ -3376,13 +2838,28 @@ class ArrivalEmbedding(nn.Module):
 		# return torch.exp(log_base.to(ctx.device) + alpha + res).mean(dim=0, keepdim=True)
 		return torch.exp(log_base + alpha + res).mean(dim=0, keepdim=True)
 
-	def _sig_t(self):
-		# clamped learned tweak: ~0.83–1.2 × σ_t
-		# adj = 1.2 ** torch.tanh(self.log_sig_t_scale)
-		adj = 1.0 + 0.2 * torch.tanh(self.log_sig_t_scale)
+	# def _sig_t(self):
+	# 	# clamped learned tweak: ~0.83–1.2 × σ_t
+	# 	# adj = 1.2 ** torch.tanh(self.log_sig_t_scale)
+	# 	adj = 1.0 + 0.2 * torch.tanh(self.log_sig_t_scale)
 
-		sig_p = self.kernel_sig_t * adj[0]
-		sig_s = self.kernel_sig_t * self.scale_s_window * adj[1]
+	# 	sig_p = self.kernel_sig_t * adj[0]
+	# 	sig_s = self.kernel_sig_t * self.scale_s_window * adj[1]
+	# 	return sig_p.clamp(min=1e-3), sig_s.clamp(min=1e-3)
+
+	def _sig_t(self, ctx=None):
+		# Global residual (starts at 1.0)
+		global_adj = torch.exp(0.3 * torch.tanh(self.log_sig_t_scale))
+
+		if ctx is not None:
+			delta = self.f_sig_t(ctx)
+			ctx_adj = torch.exp(0.4 * torch.tanh(delta))
+			adj = global_adj * ctx_adj		  # residual combination
+		else:
+			adj = global_adj
+
+		sig_p = self.kernel_sig_t * adj[..., 0]
+		sig_s = self.kernel_sig_t * self.scale_s_window * adj[..., 1]
 		return sig_p.clamp(min=1e-3), sig_s.clamp(min=1e-3)
 
 
@@ -3442,7 +2919,7 @@ class ArrivalEmbedding(nn.Module):
 
 		# n_ctx = len(x_context_cart)
 		# if counts.numel() and int(counts.max()) > n_ctx + 2:
-  #   		raise RuntimeError(f"phase match explode max={int(counts.max())} n_ctx={n_ctx}")
+		#   		raise RuntimeError(f"phase match explode max={int(counts.max())} n_ctx={n_ctx}")
 		
 		n_prod = A_src_in_sta.size(1)
 		if counts.numel() and int(counts.max()) > n_prod + 2:
@@ -3450,7 +2927,7 @@ class ArrivalEmbedding(nn.Module):
 				f"phase match explode max={int(counts.max())} n_prod={n_prod}"
 			)
 		
-		sig_p, sig_s = self._sig_t()
+		sig_p, sig_s = self._sig_t(ctx)
 
 		kept_prod, kept_pick = [], []
 		if counts.numel() > 0:
@@ -3575,7 +3052,7 @@ class ArrivalEmbedding(nn.Module):
 		inds = pick_all[station_ok]
 		phases = phase_all[station_ok]
 
-		sig_p, sig_s = self._sig_t()
+		# sig_p, sig_s = self._sig_t()
 		dt_n = (tpick[inds] - tlatent[nodes, phases]).abs()
 		keep_n = dt_n < (3.0 * sig_s)
 		nodes, inds, phases = nodes[keep_n], inds[keep_n], phases[keep_n]
@@ -3592,7 +3069,7 @@ class ArrivalEmbedding(nn.Module):
 		log_bases = [self.log_gamma_base_t2, self.log_gamma_base_t3]
 
 
-		sig_p, sig_s = self._sig_t()
+		# sig_p, sig_s = self._sig_t()
 		sig_phases = [sig_p, sig_s]
 
 		for p_idx in range(2):
@@ -3696,7 +3173,7 @@ class ArrivalEmbedding(nn.Module):
 			phase_label = torch.zeros_like(phase_label)
 
 
-		sig_p, sig_s = self._sig_t()
+		sig_p, sig_s = self._sig_t(embed_context)
 		sig_f_p = 1.25 * sig_p		  # slight inflation vs feature
 		sig_f_s = 1.25 * sig_s
 		var_p = sig_f_p.pow(2)
@@ -3802,7 +3279,7 @@ class ArrivalEmbedding(nn.Module):
 				matched_prod_indices = matched_prod_indices[match_mask]
 				i_pick_match = i_pick_match[match_mask]
 			
-				sig_p, sig_s = self._sig_t()
+				# sig_p, sig_s = self._sig_t()
 
 				dt_q = (
 					tpick[iarv[i_pick_match]].unsqueeze(1)
@@ -3840,7 +3317,7 @@ class ArrivalEmbedding(nn.Module):
 					m_query = tpick[p_arr_idx].reshape(-1, 1) - trv_ph
 					
 	
-					sig_p, sig_s = self._sig_t()
+					# sig_p, sig_s = self._sig_t()
 					sig_phase = torch.where(p_idx == 0, sig_p, sig_s).unsqueeze(1)
 	
 					m_rel_feat = torch.cat(
@@ -3936,258 +3413,9 @@ class ArrivalEmbedding(nn.Module):
 
 
 
-	# def _process_phase_branch(
-	# 	self,
-	# 	tpick,
-	# 	tlatent,			 # [N_prod, 2] -> columns 0: P, 1: S
-	# 	ipick,
-	# 	A_src_in_sta,
-	# 	x_context_cart,
-	# 	x_context_t,
-	# 	locs_use_cart,
-	# 	x,				   # [N_prod, D_x]
-	# 	phase_label,
-	# 	ctx,
-	# 	deg_srcs,
-	# 	cum_deg_srcs,
-	# ):
-	# 	device = x.device
-	# 	N_picks = len(tpick)
-	# 	N_prod = A_src_in_sta.size(1)
-
-	# 	if N_picks == 0 or N_prod == 0:
-	# 		out_dim = self.fc2[-1].out_features
-	# 		return (
-	# 			torch.zeros((N_picks, out_dim), device=device),
-	# 			torch.zeros((N_picks, out_dim), device=device),
-	# 		)
-
-	# 	# 1. Fully Canonical Station Matching (Shared across both P and S)
-	# 	prod_sta = A_src_in_sta[0]
-	# 	prod_ctx = A_src_in_sta[1]
-
-	# 	prod_key = prod_sta.to(torch.int64) * (len(x_context_cart) + 1) + prod_ctx.to(torch.int64)
-	# 	sta_order = torch.argsort(prod_key, stable=True)
-	# 	sorted_sta = prod_sta[sta_order]
-
-	# 	p_left = torch.searchsorted(sorted_sta, ipick, side="left")
-	# 	p_right = torch.searchsorted(sorted_sta, ipick, side="right")
-
-	# 	has_match = p_right > p_left
-	# 	if not has_match.any():
-	# 		out_dim = self.fc2[-1].out_features
-	# 		return (
-	# 			torch.zeros((N_picks, out_dim), device=device),
-	# 			torch.zeros((N_picks, out_dim), device=device),
-	# 		)
-
-	# 	valid_picks = torch.where(has_match)[0]
-	# 	counts = p_right[valid_picks] - p_left[valid_picks]
-	# 	starts = p_left[valid_picks]
-
-	# 	offsets = torch.arange(counts.sum(), device=device) - torch.repeat_interleave(
-	# 		torch.cumsum(counts, 0) - counts, counts
-	# 	)
-	# 	matched_prod_indices = sta_order[starts.repeat_interleave(counts) + offsets]
-	# 	matched_pick_indices = valid_picks.repeat_interleave(counts)
-		
-	# 	sig_p, sig_s = self._sig_t()
-	# 	dt_min = (
-	# 		tpick[matched_pick_indices].unsqueeze(1)
-	# 		- tlatent[matched_prod_indices, :2]
-	# 	).abs().min(dim=1).values
-	# 	keep = dt_min < (3.0 * sig_s)
-	# 	matched_prod_indices = matched_prod_indices[keep]
-	# 	matched_pick_indices = matched_pick_indices[keep]
-	# 	if matched_pick_indices.numel() == 0:
-	# 		out_dim = self.fc2[-1].out_features
-	# 		z = torch.zeros((N_picks, out_dim), device=device)
-	# 		return z, z
-		
-	# 	# 2. Canonical Multi-Key Tie Breaking (Run per phase_idx in parallel [2, N_matched])
-	# 	# Compute dt for both P (idx 0) and S (idx 1) simultaneously -> Shape: [2, N_matched]
-	# 	dt_both = torch.abs(
-	# 		tpick[matched_pick_indices].unsqueeze(0) - tlatent[matched_prod_indices, :2].T
-	# 	)
-
-	# 	# We do top-match selection per phase
-	# 	ind_grab_sorted_list = []
-	# 	uniq_picks_sorted_list = []
-
-	# 	for phase_idx in range(2):
-	# 		dt = dt_both[phase_idx]
-	# 		dt_order = torch.argsort(dt, stable=True)
-	# 		dt_rank = torch.zeros_like(dt_order)
-	# 		dt_rank[dt_order] = torch.arange(len(dt), device=device)
-
-	# 		key = (
-	# 			matched_pick_indices.to(torch.int64) * (len(dt) * N_prod)
-	# 			+ dt_rank.to(torch.int64) * N_prod
-	# 			+ matched_prod_indices.to(torch.int64)
-	# 		)
-	# 		order = torch.argsort(key, stable=True)
-	# 		m_pick = matched_pick_indices[order]
-	# 		m_prod = matched_prod_indices[order]
-
-	# 		mask_first = torch.cat([
-	# 			torch.tensor([True], device=device),
-	# 			m_pick[1:] != m_pick[:-1],
-	# 		])
-	# 		ind_grab = m_prod[mask_first]
-	# 		uniq_picks = m_pick[mask_first]
-
-	# 		uniq_picks_sorted, sort_order = torch.sort(uniq_picks, stable=True)
-	# 		ind_grab_sorted = ind_grab[sort_order]
-
-	# 		ind_grab_sorted_list.append(ind_grab_sorted)
-	# 		uniq_picks_sorted_list.append(uniq_picks_sorted)
-
-	# 	# 3. KNN Expansion over context source per pick
-	# 	x_ctx_combined = torch.cat(
-	# 		(x_context_cart / 1000.0, self.scale_time * x_context_t.reshape(-1, 1)), dim=1
-	# 	)
-
-	# 	# Stack both P and S context nearest neighbors -> Shape [2 * N_uniq]
-	# 	ctx_nn_p = A_src_in_sta[1, ind_grab_sorted_list[0]]
-	# 	ctx_nn_s = A_src_in_sta[1, ind_grab_sorted_list[1]]
-	# 	ctx_nn_both = torch.cat([ctx_nn_p, ctx_nn_s], dim=0)
-
-	# 	if ctx_nn_both.numel() == 0:
-	# 		out_dim = self.fc2[-1].out_features
-	# 		z = torch.zeros((N_picks, out_dim), device=device)
-	# 		return z, z
-		
-	# 	edge_idx = knn(
-	# 		x_ctx_combined,
-	# 		x_ctx_combined[ctx_nn_both],
-	# 		k=self.k_spc_edges,
-	# 	)
-
-	# 	nbr_sources = edge_idx[1]
-		
-	# 	# Map edge sources back to P or S pick index
-	# 	uniq_picks_both = torch.cat([uniq_picks_sorted_list[0], uniq_picks_sorted_list[1]], dim=0)
-	# 	phase_owner_both = torch.cat([
-	# 		torch.zeros(len(uniq_picks_sorted_list[0]), dtype=torch.long, device=device),
-	# 		torch.ones(len(uniq_picks_sorted_list[1]), dtype=torch.long, device=device),
-	# 	], dim=0)
-
-	# 	pick_of_nbr = uniq_picks_both[edge_idx[0]]
-	# 	phase_of_nbr = phase_owner_both[edge_idx[0]]
-
-	# 	deg_nbr = deg_srcs[nbr_sources]
-	# 	start = cum_deg_srcs[nbr_sources]
-
-	# 	inc_inds = torch.arange(deg_nbr.sum(), device=device) - torch.repeat_interleave(
-	# 		torch.cumsum(deg_nbr, 0) - deg_nbr, deg_nbr
-	# 	)
-	# 	nodes_all = start.repeat_interleave(deg_nbr) + inc_inds
-	# 	pick_all = pick_of_nbr.repeat_interleave(deg_nbr)
-	# 	phase_all = phase_of_nbr.repeat_interleave(deg_nbr)
-
-	# 	station_ok = A_src_in_sta[0, nodes_all] == ipick[pick_all]
-	# 	if not station_ok.any():
-	# 		out_dim = self.fc2[-1].out_features
-	# 		return (
-	# 			torch.zeros((N_picks, out_dim), device=device),
-	# 			torch.zeros((N_picks, out_dim), device=device),
-	# 		)
-
-	# 	nodes = nodes_all[station_ok]
-	# 	inds = pick_all[station_ok]
-	# 	phases = phase_all[station_ok]
-
-	# 	sig_p, sig_s = self._sig_t()
-	# 	dt_n = (tpick[inds] - tlatent[nodes, phases]).abs()
-	# 	keep_n = dt_n < (3.0 * sig_s)
-	# 	nodes, inds, phases = nodes[keep_n], inds[keep_n], phases[keep_n]
-	# 	if nodes.numel() == 0:
-	# 		out_dim = self.fc2[-1].out_features
-	# 		z = torch.zeros((N_picks, out_dim), device=device)
-	# 		return z, z
-		
-	# 	# 4. Process P (phase=0) and S (phase=1) Edges
-	# 	results = []
-	# 	fc_layers = [self.fc2, self.fc3]
-	# 	film_layers = [self.film2, self.film3]
-	# 	f_gammas = [self.f_gamma_t2, self.f_gamma_t3]
-	# 	log_bases = [self.log_gamma_base_t2, self.log_gamma_base_t3]
-
-	# 	sig_p, sig_s = self._sig_t()
-	# 	sig_phases = [sig_p, sig_s]
-
-	# 	for p_idx in range(2):
-	# 		p_mask = phases == p_idx
-	# 		if not p_mask.any():
-	# 			out_dim = fc_layers[p_idx][-1].out_features
-	# 			results.append(torch.zeros((N_picks, out_dim), device=device))
-	# 			continue
-
-	# 		p_nodes = nodes[p_mask]
-	# 		p_inds = inds[p_mask]
-
-	# 		# Canonical Sort per phase branch
-	# 		canon_order = torch.argsort(
-	# 			ipick[p_inds].to(torch.int64) * (N_picks * N_prod)
-	# 			+ p_inds.to(torch.int64) * N_prod
-	# 			+ p_nodes.to(torch.int64),
-	# 			stable=True,
-	# 		)
-	# 		p_nodes = p_nodes[canon_order]
-	# 		p_inds = p_inds[canon_order]
-
-	# 		# Feature Assembly
-	# 		diff_t = tpick[p_inds].reshape(-1, 1) - tlatent[p_nodes, p_idx].reshape(-1, 1)
-	# 		misfit_rel = torch.cat(
-	# 			[
-	# 				torch.exp(-1.0 * torch.abs(diff_t) / sig_phases[p_idx]),
-	# 				torch.tanh(diff_t / sig_phases[p_idx])
-	# 			],
-	# 			dim=1,
-	# 		)
-
-	# 		# torch.exp(-1.0 * torch.abs(diff_t) / (self.scale_misfit * self.kernel_sig_t)),
-
-	# 		off_sta = (locs_use_cart[ipick[p_inds]] - x_context_cart[A_src_in_sta[1, p_nodes]]) / (10.0 * self.scale_rel)
-	# 		norm_s = torch.linalg.vector_norm(off_sta, dim=1, keepdim=True).clamp(min=1e-6)
-	# 		gammas = self._get_gammas(f_gammas[p_idx], log_bases[p_idx], ctx)
-	# 		feat = torch.cat((off_sta / norm_s, torch.exp(-1.0 * norm_s * gammas[:, :3])), dim=1)
-
-	# 		inpt = torch.cat(
-	# 			(
-	# 				x[p_nodes],
-	# 				misfit_rel,
-	# 				feat,
-	# 				self.phase_embed(phase_label[p_inds].long()),
-	# 			),
-	# 			dim=1,
-	# 		)
-
-	# 		agg = scatter(
-	# 			film_layers[p_idx](fc_layers[p_idx](inpt), ctx.expand(len(inpt), -1)),
-	# 			p_inds,
-	# 			dim=0,
-	# 			dim_size=N_picks,
-	# 			reduce="mean",
-	# 		)
-	# 		results.append(agg)
-
-	# 	return self.norm2(results[0]), self.norm3(results[1])
 
 
 
-
-
-# A small inner loop in forward, only around the expand → match → fc1 block. Not a loop over the whole model.
-# ref_context_nodes is a 1-D list of KNN sources. Split it so each slice has deg_srcs[slice].sum() ≤ MAX (e.g. 5e5). For each slice:
-
-# repeat_interleave that slice only
-# key match + 3σ
-# fc1 / film1
-# scatter add into the same arv_flat (or accumulate emb and flat_target, scatter once at the end)
-
-# _process_phase_branch stays as-is. Outer training loop unchanged.
-# You only add this if that repeat_interleave actually OOMs. Until then, no loop.
 
 
 
@@ -4922,35 +4150,38 @@ class VerificationSuite1(ArrivalEmbedding):
 
 # 			return merge_attn
 
+		
 
 
 class SourceStationAttention(MessagePassing):
 
-	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_dim_out_src = 1, n_heads = 5, n_hidden = 30, kernel_sig_t = kernel_sig_t, use_src_pred = False, use_dual_attention = True, use_phase_types = use_phase_types, device = device):
+	def __init__(self, ndim_src_in, ndim_arv_in, ndim_out, n_latent, ndim_extra = 1, n_dim_out_src = 1, n_heads = 5, n_hidden = 30, kernel_sig_t = kernel_sig_t, use_src_pred = False, use_dual_attention = False, use_phase_types = use_phase_types, device = device):
 		super(SourceStationAttention, self).__init__(node_dim = 0, aggr = 'add') # check node dim.
 
-		self.f_pick_query = nn.Sequential(nn.Linear(ndim_arv_in, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-		self.f_pick_context = nn.Sequential(nn.Linear(ndim_arv_in, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-		self.f_pick_values = nn.Sequential(nn.Linear(ndim_arv_in, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-		self.film_query = FiLM2Layer(9, ndim_arv_in)
-		self.film_context = FiLM2Layer(9, ndim_arv_in)
+		self.f_pick_query = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+		self.f_pick_context = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+		self.f_pick_values = nn.Sequential(nn.Linear(ndim_arv_in + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+		# self.film_query = FiLM2Layer(9, ndim_arv_in)
+		# self.film_context = FiLM2Layer(9, ndim_arv_in)
 		
 		if use_dual_attention == True:
-			self.f_source_query = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.f_source_context = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
-			# self.merge_attn = nn.Sequential(nn.Linear(2*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_latent))
-			self.film_merge = FiLM2Layer(n_heads*n_latent, n_heads*n_latent)
-			
+			self.f_source_query = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.f_source_context = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.f_source_values = nn.Sequential(nn.Linear(ndim_arv_in + n_heads*n_latent + 9, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_heads*n_latent))
+			self.merge_attn = nn.Sequential(nn.Linear(2*n_latent, n_hidden), nn.PReLU(), nn.Linear(n_hidden, n_latent))
+			# self.film_merge = FiLM2Layer(n_heads*n_latent, n_heads*n_latent)
+			nn.init.zeros_(self.merge_attn[-1].weight)
+			nn.init.zeros_(self.merge_attn[-1].bias)
+
 			# self.alpha_src = nn.Parameter(torch.Tensor([0.5])) ## Initilizes as 0.5
 			self.alpha_src = nn.Parameter(torch.tensor([0.5], dtype=torch.float32))
-			self.film_query_src = FiLM2Layer(9, ndim_arv_in + n_heads*n_latent)
-			self.film_context_src = FiLM2Layer(9, ndim_arv_in + n_heads*n_latent)
+			# self.film_query_src = FiLM2Layer(9, ndim_arv_in + n_heads*n_latent)
+			# self.film_context_src = FiLM2Layer(9, ndim_arv_in + n_heads*n_latent)
 			
 			self.self_dummy_src = nn.Parameter(torch.zeros(1, n_heads))
-			self.dummy_keys_src = nn.Parameter(torch.zeros(1, n_heads, n_latent)) # .to(device)
-			self.dummy_queries_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
-			self.dummy_values_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+			# self.dummy_keys_src = nn.Parameter(torch.zeros(1, n_heads, n_latent)) # .to(device)
+			# self.dummy_queries_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+			# self.dummy_values_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
 
 
 		# self.proj_1 = nn.Linear(n_latent, n_hidden) # can remove this layer possibly.
@@ -4965,7 +4196,7 @@ class SourceStationAttention(MessagePassing):
 			self.activate_src1 = nn.PReLU()			
 			self.use_src_pred = True
 			self.n_dim_out_src = n_dim_out_src
-			self.log_tau = nn.Parameter(torch.tensor([np.log(0.1)], dtype = torch.float32, device = device))
+			self.log_tau = nn.Parameter(torch.tensor([np.log(0.1)], dtype = torch.float32))
 			self.null_src_logit = nn.Parameter(torch.zeros(1))
 			
 		else:
@@ -4978,8 +4209,11 @@ class SourceStationAttention(MessagePassing):
 
 		self.self_bias = nn.Parameter(torch.zeros(1, n_heads)) # .to(device) # zeros
 		self.self_dummy = nn.Parameter(torch.zeros(1, n_heads)) # .to(device) # zeros
-		self.dummy_keys = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
-		self.dummy_values = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+		# self.dummy_keys = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+		# self.dummy_values = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.01) # .to(device)
+		self.null_embed = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.02)  # shared null key/value
+		self.null_embed_src = nn.Parameter(torch.randn(1, n_heads, n_latent) * 0.02)  # shared null key/value
+
 
 		n_dim_phase = 5
 		self.embed_phase = nn.Embedding(2 + 1, n_dim_phase)
@@ -4992,6 +4226,33 @@ class SourceStationAttention(MessagePassing):
 		self.use_phase_types = use_phase_types
 		self.ndim_arv_in = ndim_arv_in
 		self.n_phases = ndim_out
+
+		self.null_proj = nn.Sequential(
+			nn.Linear(n_latent, n_latent),
+			nn.PReLU(),
+			nn.Linear(n_latent, n_latent)
+		)
+		nn.init.zeros_(self.null_proj[-1].weight)
+		nn.init.zeros_(self.null_proj[-1].bias)
+
+		self.null_proj_src = nn.Sequential(
+			nn.Linear(n_latent, n_latent),
+			nn.PReLU(),
+			nn.Linear(n_latent, n_latent)
+		)
+		nn.init.zeros_(self.null_proj_src[-1].weight)
+		nn.init.zeros_(self.null_proj_src[-1].bias)
+
+
+		# After self.proj_2
+		self.proj_null = nn.Sequential(
+			nn.Linear(n_latent * n_heads, n_hidden),
+			nn.PReLU(),
+			nn.Linear(n_hidden, self.n_phases)   # one null logit per phase
+		)
+		# Optional: zero-init the last layer so it starts neutral
+		nn.init.zeros_(self.proj_null[-1].weight)
+		nn.init.zeros_(self.proj_null[-1].bias)
 
 		# self.film_space_time = FiLM2Layer
 
@@ -5006,7 +4267,7 @@ class SourceStationAttention(MessagePassing):
 		# self.activate5 = nn.PReLU()
 		self.device = device
 	
-	def forward(self, stime, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label, sig_p=None, sig_s=None):
+	def forward(self, stime, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label, sig_p=None, sig_s=None, return_null = False):
 		device = arrival.device
 		n_src, n_arv = len(stime), len(tpick)
 		if not self.use_phase_types:
@@ -5032,8 +4293,8 @@ class SourceStationAttention(MessagePassing):
 		if n_act == 0:
 			z = arrival.new_zeros(n_src, n_arv, self.n_phases)
 			if self.use_src_pred:
-				return z, arrival.new_zeros(n_src, self.n_dim_out_src)
-			return z
+				return z, 1.0 - z, arrival.new_zeros(n_src, self.n_dim_out_src)
+			return z, 1.0 - z
 	
 		slot = torch.full((n_src, n_arv), -1, device=device, dtype=torch.long)
 		slot[src_a, pick_a] = torch.arange(n_act, device=device)
@@ -5108,35 +4369,43 @@ class SourceStationAttention(MessagePassing):
 		out = arrival.new_zeros(n_src, n_arv, self.n_phases)
 		out[src_a, pick_a] = self.proj_2(self.activate4(self.proj_1(emb)))
 	
+
+		null_out = None
+		if return_null:
+			null_out = arrival.new_zeros(n_src, n_arv, self.n_phases)
+			null_out[src_a, pick_a] = self.proj_null(emb)
+
 		if self.use_src_pred:
-			
-			
 			out_src_p = self.activate_src(self.proj_src_1(emb))
 			score = self.proj_attn(out_src_p).squeeze(-1)
-			
+
 			w = torch.full((n_src, n_arv), -1e9, device=device)
 			w[src_a, pick_a] = score
-			
-			# Append the trainable null logit as an extra column (index n_arv):
+
 			null_col = self.null_src_logit.expand(n_src, 1)
-			w_aug = torch.cat([w, null_col], dim=1) # Shape: (n_src, n_arv + 1)
-			
+			w_aug = torch.cat([w, null_col], dim=1)
+
 			n_active = mask_arv.reshape(n_src, n_arv).sum(1).clamp(min=1.0)
 			tau = torch.exp(self.log_tau) * n_active.sqrt()
-			
-			# Softmax over (n_arv + 1)
+
 			alpha_aug = torch.softmax(w_aug / tau.view(n_src, 1), dim=1)
-			
-			# Slice back to (n_src, n_arv) for the weighted sum:
 			alpha = alpha_aug[:, :n_arv]
-			
+
 			buf = arrival.new_zeros(n_src, n_arv, out_src_p.size(-1))
 			buf[src_a, pick_a] = out_src_p
 			out_src = self.proj_src_3(self.activate_src1(self.proj_src_2((alpha.unsqueeze(-1) * buf).sum(1))))
-			
+
+			if return_null:
+				return out, null_out, out_src
+
 			return out, out_src
-			
+
+		if return_null:
+
+			return out, null_out
+
 		return out
+
 	
 	def message(self, x_j, x_i, edge_index, index, tsrc_p, tsrc_s, sindex, stindex, stime, atime, self_link, num_queries, sig_p, sig_s, phase_j, phase_i): # Can use phase_j, or directly call edge_index, like done for atime, stindex, etc.
 
@@ -5170,20 +4439,28 @@ class SourceStationAttention(MessagePassing):
 		rel_t_s1 = torch.cat((torch.exp(-1.0*torch.abs(rel_t_s1)/sig_s), torch.tanh(rel_t_s1 / sig_s)), dim = 1) # phase[edge_index[0]]
 		rel_t1 = torch.cat((rel_t_p1, rel_t_s1, self.embed_phase(phase_i[inot_fake_src].long().reshape(-1))), dim = 1)
 
-		## Queries using reciever nodes (i) because each reciever is trying to decide which of neighboring picks is "relevant", and it also uses source embedding because this is dependant on the source
-		## Contexts (actually keys) and values use the sender nodes as these are the ones the queries are attending over ## Note: I did used to include the source origin time..
+		# # Queries using reciever nodes (i) because each reciever is trying to decide which of neighboring picks is "relevant", and it also uses source embedding because this is dependant on the source
+		# # Contexts (actually keys) and values use the sender nodes as these are the ones the queries are attending over ## Note: I did used to include the source origin time..
 		# queries_real_and_null = self.f_pick_query(torch.cat((x_i[inot_fake_src], rel_t1, sembed[sindex[inot_fake_src]], self_link[inot_fake_src]), dim = 1)).view(-1, self.n_heads, self.n_latent)
-		x_mod_query = self.film_query(x_i[inot_fake_src], rel_t1)
-		x_mod_context = self.film_context(x_j[real_edge], rel_t)
+		# x_mod_query = self.film_query(x_i[inot_fake_src], rel_t1)
+		# x_mod_context = self.film_context(x_j[real_edge], rel_t)
 		
-		queries_real_and_null = self.f_pick_query(x_mod_query).view(-1, self.n_heads, self.n_latent)
-		contexts_real = self.f_pick_context(x_mod_context).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information		
-		values_real = self.f_pick_values(x_mod_context).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+		# queries_real_and_null = self.f_pick_query(x_mod_query).view(-1, self.n_heads, self.n_latent)
+		# contexts_real = self.f_pick_context(x_mod_context).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information		
+		# values_real = self.f_pick_values(x_mod_context).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
 
+		# x_mod_query = self.film_query(x_i[inot_fake_src], rel_t1)
+		# x_mod_context = self.film_context(x_j[real_edge], rel_t)
+
+		x_mod = torch.cat((x_j[real_edge], rel_t), dim = 1)
+		queries_real_and_null = self.f_pick_query(torch.cat((x_i[inot_fake_src], rel_t1), dim = 1)).view(-1, self.n_heads, self.n_latent)
+		contexts_real = self.f_pick_context(x_mod).view(-1, self.n_heads, self.n_latent)
+		values_real = self.f_pick_values(x_mod).view(-1, self.n_heads, self.n_latent)
 		
-		queries = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
-		contexts = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
-		values = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+		device = x_j.device
+		queries = torch.zeros(len(index), self.n_heads, self.n_latent, device = device)
+		contexts = torch.zeros(len(index), self.n_heads, self.n_latent, device = device)
+		values = torch.zeros(len(index), self.n_heads, self.n_latent, device = device)
 
 		queries[inot_fake_src,:,:] = queries_real_and_null
 		contexts[real_edge,:,:] = contexts_real
@@ -5191,38 +4468,32 @@ class SourceStationAttention(MessagePassing):
 
 		n_fake = int(ifake_edge.sum())
 
+		# if n_fake > 0:
+		#	 contexts[ifake_edge, :, :] = self.dummy_keys.expand(n_fake, -1, -1)
+		#	 values[ifake_edge, :, :] = self.dummy_values.expand(n_fake, -1, -1)
 		
 		if n_fake > 0:
-		    contexts[ifake_edge, :, :] = self.dummy_keys.expand(n_fake, -1, -1)
-		    values[ifake_edge, :, :] = self.dummy_values.expand(n_fake, -1, -1)
-		
+			null_kv = self.null_embed.expand(n_fake, -1, -1)
+			null_kv = self.null_proj(null_kv) # .view(n_fake, self.n_heads, self.n_latent)
+			contexts[ifake_edge, :, :] = null_kv
+			values[ifake_edge, :, :]   = null_kv
+
 		## Compute attention
-		scores = (queries*contexts).sum(-1)/self.scale
 		
-		## Clip degrees
-		# deg = torch.clamp(degree(edge_index[1][inot_fake_src], num_nodes = len(atime)).detach(), min = 1)
-		# temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min = 0.25, max = 2.0))[edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
-		# temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min = 0.25, max = 1.5))[edge_index[1]].reshape(-1,1) # [edge_index[1]].reshape(-1,1)
-		# temp[deg[edge_index[1]] <= 2] = 1.0 ## Stabalize temperature for low degree cases
-		
-		deg = torch.clamp(degree(edge_index[1][inot_fake_src], num_nodes=len(atime)).detach(), min=1)
+		deg = degree(edge_index[1][inot_fake_src], num_nodes=len(atime)).clamp(min = 1).detach()
 		# Compute temperature per node first
-		node_temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min=0.25, max=1.5)).clamp(min=1.5)
-		# node_temp[deg <= 2] = 1.0  # Safe 1D boolean mask on node array
-		# node_temp = torch.log1p(deg).pow(self.alpha.clamp(0.25, 1.5)).clamp(min=1.5)
-		# scores = scores / node_temp[edge_index[1]].sqrt()
-		
-		# Map to edges
-		temp = node_temp[edge_index[1]].reshape(-1, 1)
-		
-		## Add bias terms
-		scores[self_link[:,0] == 1] = scores[self_link[:,0] == 1] + self.self_bias
-		scores[ifake_edge] = scores[ifake_edge] + self.self_dummy
+		# node_temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min=0.25, max=1.5)).clamp(min=1.5)
+		node_temp = torch.log1p(deg).pow(torch.clamp(self.alpha, min=0.2, max=1.2)).clamp(min=2.5)
 
+		temp = node_temp[edge_index[1]].unsqueeze(-1)
+
+		scores = (queries*contexts).sum(-1)/self.scale
 		scores = scores / temp.sqrt()
-
+		scores[self_link[:, 0] == 1] += self.self_bias
+		scores[ifake_edge] += self.self_dummy
 		scores = scores.masked_fill(ifake_edge_src.unsqueeze(-1), -1e9)
-		alpha = softmax(scores, index) # 
+		alpha = softmax(scores, index)
+
 
 		if self.use_dual_attention == False:
 
@@ -5240,17 +4511,21 @@ class SourceStationAttention(MessagePassing):
 
 			attn_slice = attn_picks.view(-1, self.n_heads*self.n_latent)[real_edge]
 
-			x_mod_src_query = self.film_query_src(torch.cat((x_i[real_edge], attn_slice), dim = 1), rel_t2)
-			x_mod_src_context = self.film_context_src(torch.cat((x_j[real_edge], attn_slice), dim = 1), rel_t)
+			# x_q = torch.cat((x_i[real_edge], attn_slice), dim = 1)
+			# x_k = torch.cat((x_j[real_edge], attn_slice), dim = 1)
+
+			# x_mod_src_query = self.film_query_src(torch.cat((x_i[real_edge], attn_slice), dim = 1), rel_t2)
+			# x_mod_src_context = self.film_context_src(torch.cat((x_j[real_edge], attn_slice), dim = 1), rel_t)
 			
-			queries_src_real = self.f_source_query(x_mod_src_query).view(-1, self.n_heads, self.n_latent)
-			contexts_src_real = self.f_source_context(x_mod_src_context).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
-			values_src_real = self.f_source_values(x_mod_src_context).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
+			x_mod = torch.cat((x_j[real_edge], attn_slice, rel_t), dim = 1)
+			queries_src_real = self.f_source_query(torch.cat((x_i[real_edge], attn_slice, rel_t2), dim = 1)).view(-1, self.n_heads, self.n_latent)
+			contexts_src_real = self.f_source_context(x_mod).view(-1, self.n_heads, self.n_latent) ## Do not include self link in context to avoid short cut of information
+			values_src_real = self.f_source_values(x_mod).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
 			# values_src = self.f_source_values(torch.cat((x_j, attn_picks, rel_t), dim = 1)).view(-1, self.n_heads, self.n_latent) ## Note self_link optional here
 
-			queries_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
-			contexts_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
-			values_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = self.device)
+			queries_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = device)
+			contexts_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = device)
+			values_src = torch.zeros(len(index), self.n_heads, self.n_latent, device = device)
 
 			queries_src[real_edge,:,:] = queries_src_real
 			contexts_src[real_edge,:,:] = contexts_src_real
@@ -5259,39 +4534,47 @@ class SourceStationAttention(MessagePassing):
 
 			n_fake_src = int(ifake_edge_src.sum())
 
-			# n_fake_src = int(ifake_edge_src.sum())
+			# # n_fake_src = int(ifake_edge_src.sum())
+			# if n_fake_src > 0:
+			#	 queries_src[ifake_edge_src, :, :] = self.dummy_queries_src.expand(n_fake_src, -1, -1)
+			#	 contexts_src[ifake_edge_src, :, :] = self.dummy_keys_src.expand(n_fake_src, -1, -1)
+			#	 values_src[ifake_edge_src, :, :] = self.dummy_values_src.expand(n_fake_src, -1, -1)		
+
+
 			if n_fake_src > 0:
-			    queries_src[ifake_edge_src, :, :] = self.dummy_queries_src.expand(n_fake_src, -1, -1)
-			    contexts_src[ifake_edge_src, :, :] = self.dummy_keys_src.expand(n_fake_src, -1, -1)
-			    values_src[ifake_edge_src, :, :] = self.dummy_values_src.expand(n_fake_src, -1, -1)		
+				null_kv = self.null_embed_src.expand(n_fake_src, -1, -1)
+				null_kv = self.null_proj_src(null_kv) # .view(n_fake_src, self.n_heads, self.n_latent)
+				queries_src[ifake_edge_src, :, :]  = null_kv
+				contexts_src[ifake_edge_src, :, :] = null_kv
+				values_src[ifake_edge_src, :, :]   = null_kv
+
 
 			# RESTORED GLOBAL SOURCE POOLING WITH DYNAMIC DEGREES:
 			scores_src = (queries_src * contexts_src).sum(-1) / self.scale
-			scores_src[ifake_edge_src] = scores_src[ifake_edge_src] + self.self_dummy_src
+			# scores_src[ifake_edge_src] = scores_src[ifake_edge_src] + self.self_dummy_src
 			
-			# Calculate degree per SOURCE node (how many picks are linked to this source)
-			# deg_src = torch.clamp(degree(sindex, num_nodes=len(stime)).detach(), min=1)
-			# temp_src = torch.log1p(deg_src).pow(torch.clamp(self.alpha_src, min=0.25, max=1.5))[sindex].reshape(-1, 1)
-			# temp_src[deg_src[sindex] <= 2.0] = 1.0
-
-
 			deg_src = torch.clamp(degree(sindex, num_nodes=len(stime)).detach(), min=1)
-			node_temp_src = torch.log1p(deg_src).pow(torch.clamp(self.alpha_src, min=0.25, max=1.5))
+			# node_temp_src = torch.log1p(deg_src).pow(torch.clamp(self.alpha_src, min=0.25, max=1.5))
+			node_temp_src = torch.log1p(deg_src).pow(torch.clamp(self.alpha_src, min=0.2, max=1.2)).clamp(min=2.5)
+
 			# node_temp_src[deg_src <= 2.0] = 1.0
 			temp_src = node_temp_src[sindex].reshape(-1, 1)
 			
-			
 			scores_src = scores_src / temp_src.sqrt()
+			scores_src[ifake_edge_src] += self.self_dummy_src
 			alpha_src = softmax(scores_src, sindex)  # <--- Softmax grouped by SOURCE index!
 
 			attn_src = alpha_src.unsqueeze(-1)*values_src
 			## Now merge with the messages of the previous attention layer and aggregate
 			# merge_attn = self.merge_attn(torch.cat((attn_picks, attn_src), dim = 2))
-			merge_attn = self.film_merge(attn_picks.view(-1,self.n_heads*self.n_latent), attn_src.view(-1,self.n_heads*self.n_latent)).view(-1, self.n_heads, self.n_latent)
+			merge_attn = attn_picks + self.merge_attn(torch.cat((attn_picks, attn_src), dim = 2)) # .view(-1, self.n_heads, self.n_latent)
 			
 			return merge_attn
-			
-		
+
+
+
+
+
 
 	# def forward(self, stime, trv_src, locs_cart, arrival, mask_arv, tpick, ipick, phase_label, sig_p = None, sig_s = None): # reference k nearest spatial points
 
@@ -5440,22 +4723,32 @@ class FiLM(nn.Module):
 		return x * (1.0 + gamma) + beta
 
 class FiLM2Layer(nn.Module):
-    """2-layer FiLM generator with zero-initialized final projection."""
-    def __init__(self, embed_dim, feature_dim, hidden_dim=30):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(embed_dim, hidden_dim),
-            nn.PReLU(),
-            nn.Linear(hidden_dim, 2 * feature_dim)
-        )
-        # Zero-initialize the final output linear projection ONLY
-        nn.init.zeros_(self.net[-1].weight)
-        nn.init.zeros_(self.net[-1].bias)
+	"""2-layer FiLM generator with zero-initialized final projection."""
+	def __init__(self, embed_dim, feature_dim, hidden_dim=30):
+		super().__init__()
+		self.net = nn.Sequential(
+			nn.Linear(embed_dim, hidden_dim),
+			nn.PReLU(),
+			nn.Linear(hidden_dim, feature_dim)
+		)
+		# Zero-initialize the final output linear projection ONLY
+		nn.init.zeros_(self.net[-1].weight)
+		nn.init.zeros_(self.net[-1].bias)
 
-    def forward(self, x, embed_context):
-        gamma_beta = self.net(embed_context)
-        gamma, beta = torch.chunk(gamma_beta, 2, dim=-1)
-        return x * (1.0 + gamma) + beta
+	def forward(self, x, embed_context):
+		gamma = self.net(embed_context) # .chunk(gamma_beta, 2, dim=-1)
+		gamma = 0.5 * torch.tanh(gamma)
+		return x * (1.0 + gamma) # + beta
+
+class ScaleFiLM(nn.Module):
+	def __init__(self, embed_dim, features):
+		super().__init__()
+		self.net = nn.Linear(embed_dim, features)
+		nn.init.zeros_(self.net.weight)
+		nn.init.zeros_(self.net.bias)
+	def forward(self, x, embed_context):
+		gamma = 0.5 * torch.tanh(self.net(embed_context))
+		return x * (1.0 + gamma)
 
 class RMSNorm(nn.Module):
 	def __init__(self, dim: int, eps: float = 1e-6):
@@ -5530,7 +4823,7 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		## Make association module layers (note, previous arrival embeddings used to be smaller)
 		self.ArrivalEmbedding = ArrivalEmbedding(30, 30, trv = trv, k_spc_edges = k_spc_edges, device = device, ftrns2 = ftrns2) ## [note: merging the embeddings for P and S into one (oveloaded) layer rather than keeping as seperate layers?]
-		self.Arrivals = SourceStationAttention(30, 30, 2, 15, n_heads = 4, use_src_pred = use_src_pred, device = device).to(device)
+		self.Arrivals = SourceStationAttention(30, 30, 2, 15, n_heads = 3, use_src_pred = use_src_pred, device = device).to(device)
 		if use_src_pred == True:
 			self.alpha = nn.Parameter(torch.tensor([0.1], device = device))
 
@@ -5580,16 +4873,16 @@ class GCN_Detection_Network_extended(nn.Module):
 
 		# Initialize SpaceTimeDirect
 		nn.init.kaiming_normal_(
-		    self.SpaceTimeDirect.fc1.weight, nonlinearity='leaky_relu'
+			self.SpaceTimeDirect.fc1.weight, nonlinearity='leaky_relu'
 		)
 		if self.SpaceTimeDirect.fc1.bias is not None:
-		    nn.init.zeros_(self.SpaceTimeDirect.fc1.bias)
+			nn.init.zeros_(self.SpaceTimeDirect.fc1.bias)
 		
 		nn.init.kaiming_normal_(
-		    self.SpaceTimeDirect.fc2.weight, nonlinearity='leaky_relu'
+			self.SpaceTimeDirect.fc2.weight, nonlinearity='leaky_relu'
 		)
 		if self.SpaceTimeDirect.fc2.bias is not None:
-		    nn.init.zeros_(self.SpaceTimeDirect.fc2.bias)
+			nn.init.zeros_(self.SpaceTimeDirect.fc2.bias)
 					
 
 
@@ -5606,7 +4899,7 @@ class GCN_Detection_Network_extended(nn.Module):
 				nn.init.zeros_(proj[2].bias)
 
 
-	def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q, save_state = False):
+	def forward(self, Slice, Mask, A_in_sta, A_in_src, A_src_in_edges, A_Lg_in_src, A_src_in_sta, A_src, A_edges_p, A_edges_s, dt_partition, tlatent, tpick, ipick, phase_label, locs_use_cart, x_temp_cuda_cart, x_temp_cuda_t, x_query_cart, x_query_src_cart, t_query, tq_sample, trv_out_q, return_null = True, save_state = False):
 
 		# start_time = time.time()
 
@@ -5728,6 +5021,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		
 
 		latent_ref = x_latent if self.use_src_pred else x_latent.detach()
+		# latent_ref = x_latent # if self.use_src_pred else x_latent.detach()
 
 		# Run standardized association phase
 		s = self.DataAggregationAssociation(
@@ -5748,18 +5042,22 @@ class GCN_Detection_Network_extended(nn.Module):
 		)
 
 		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, tlatent, embed_context, trv_out = trv_out_q)
-		sig_p, sig_s = self.ArrivalEmbedding._sig_t()
+		sig_p, sig_s = self.ArrivalEmbedding._sig_t(embed_context)
 		
 		if self.use_src_pred == True:
-			arv, src = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label, sig_p = sig_p, sig_s = sig_s) # trv_out_q[:,ipick,0].view(-1)
+			arv, null, src = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label, sig_p = sig_p, sig_s = sig_s, return_null = return_null) # trv_out_q[:,ipick,0].view(-1)
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)
-			return self.activate(y), self.activate(x), self.activate(arv_p), self.activate(arv_s), self.activate(src)
+			null_p, null_p = null[:,:,0].unsqueeze(-1), null[:,:,1].unsqueeze(-1)
+
+			return self.activate(y), self.activate(x), self.activate(arv_p), self.activate(arv_s), self.activate(null_p), self.activate(null_s), self.activate(src)
 
 		else:
 			
-			arv = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label, sig_p = sig_p, sig_s = sig_s) # trv_out_q[:,ipick,0].view(-1)
+			arv, null = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label, sig_p = sig_p, sig_s = sig_s, return_null = return_null) # trv_out_q[:,ipick,0].view(-1)
 			arv_p, arv_s = arv[:,:,0].unsqueeze(-1), arv[:,:,1].unsqueeze(-1)			
-			return self.activate(y), self.activate(x), self.activate(arv_p), self.activate(arv_s)
+			null_p, null_s = null[:,:,0].unsqueeze(-1), null[:,:,1].unsqueeze(-1)			
+
+			return self.activate(y), self.activate(x), self.activate(arv_p), self.activate(arv_s), self.activate(null_p), self.activate(null_s)
 
 	def set_scale_coefficients(self, scale_rel, scale_time, kernel_sig_t, eps, src_x_kernel, src_t_kernel, time_shift_range):
 
@@ -5850,7 +5148,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		embed_context = self.embed_vector(self.embedding_vector) # .expand(Slice.shape[0], -1) # .expand(Slice.shape[0], dim = 0)
 
 		arv_embed, mask_arv = self.ArrivalEmbedding(self.s, self.x_temp_cuda_cart, self.x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, self.locs_use_cart, self.tlatent, embed_context, trv_out = trv_out_q)
-		sig_p, sig_s = self.ArrivalEmbedding._sig_t()
+		sig_p, sig_s = self.ArrivalEmbedding._sig_t(embed_context)
 		
 		if self.use_src_pred == True:
 			arv, src = self.Arrivals(tq_sample, trv_out_q, self.locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label, sig_p = sig_p, sig_s = sig_s) # trv_out_q[:,ipick,0].view(-1)
@@ -5987,7 +5285,7 @@ class GCN_Detection_Network_extended(nn.Module):
 		)
 
 		arv_embed, mask_arv = self.ArrivalEmbedding(s, x_temp_cuda_cart, x_temp_cuda_t, x_query_src_cart, tq_sample, self.A_src_in_sta, tpick, ipick, phase_label, locs_use_cart, self.tlatent, self.embed_context, trv_out = trv_out_q)
-		sig_p, sig_s = self.ArrivalEmbedding._sig_t()
+		sig_p, sig_s = self.ArrivalEmbedding._sig_t(self.embed_context)
 		
 		if self.use_src_pred == True:
 			arv, src = self.Arrivals(tq_sample, trv_out_q, locs_use_cart, arv_embed, mask_arv, tpick, ipick, phase_label, sig_p = sig_p, sig_s = sig_s) # trv_out_q[:,ipick,0].view(-1)
@@ -6543,4 +5841,5 @@ class Magnitude(nn.Module):
 		mag = (log_amp + self.activate(self.epicenter_spatial_coef[phase])*pw_log_dist_zero - self.depth_spatial_coef[phase]*pw_log_dist_depths - bias)/torch.maximum(self.activate(self.mag_coef[phase]), torch.Tensor([1e-12]).to(self.device))
 
 		return mag
+
 
