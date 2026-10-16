@@ -1763,7 +1763,7 @@ def generate_synthetic_data(trv, locs, x_grids, x_grids_trv, x_grids_trv_refs, x
 
 		for j in lp_src_times_all[i]:
 			
-			arr_j = arrivals[lp_backup[j]]
+			arr_j = arrivals[lp_backup[j].astype('int')]
 			if len(arr_j) == 0:
 				cnt_per_slice_sta_w.append(0.0)
 				cnt_per_slice_pick_w.append(0.0)
