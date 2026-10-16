@@ -6476,6 +6476,13 @@ def fit_spatial_domain(locs_use, stas_use, scale_domain, deg_padding, number_of_
 		final_W_phys = mean_nearest_neighbor
 		final_W_t = mean_nearest_neighbor_t
 
+
+		use_min_kernels = True
+		if use_min_kernels == True:
+			final_W_phys = max(final_W_phys, 7500.0)
+			final_W_t = max(final_W_t, 0.75)
+	
+		
 		# The 4D Geometric Slack
 		dt_geometric = np.sqrt((final_W_t/2)**2 + (final_W_phys/(2*Vc))**2)
 		sigma_input = 1.0 * dt_geometric
@@ -9558,6 +9565,12 @@ def estimate_kernel_widths(domain, station_locs, z_range=(-40000, 2000), vel_pha
 		wavelength_m = vel_phase / dominant_freq_hz
 		w_phys = float(0.5 * np.sqrt(wavelength_m * aperture_m))
 		w_t = float(0.5 / dominant_freq_hz)
+
+	use_min_kernels = True
+	if use_min_kernels == True:
+		w_phys = max(w_phys, 7500.0)
+		w_t = max(w_t, 0.65)
+		
 
 	rel_scale = w_phys / aperture_m
 
