@@ -15,7 +15,7 @@ import pathlib
 from torch.autograd import Variable
 from sklearn.metrics import r2_score
 from utils import *
-from module import VModel, TravelTimesPN
+from module import VModel, TravelTimesPN, TravelTimesPN_Regional
 from torch.autograd import Variable
 from torch_geometric.utils import get_laplacian
 from process_utils import * # differential_evolution_location
@@ -291,8 +291,8 @@ if train_travel_time_neural_network == True:
 	    norm_vel=norm_vel,
 	    conversion_factor=conversion_factor,
 	    norm_lla=norm_lla,
-	    corrs=corrs,
-	    locs_corr=locs_corr,
+	    corrs=None,
+	    locs_corr=None,
 	    device=device
 	).to(device)
 
@@ -336,7 +336,10 @@ if train_travel_time_neural_network == True:
 	        travel_times_s = Ts_samples[isample]
 
 	    pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method='direct', train=True)
-	    vel_pred = m.vmodel(src_pos_cart, src_embed)
+	    # vel_pred = m.vmodel(src_pos_cart, src_embed)
+
+		src_lla_norm = m.norm_lla(src_pos)
+		vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
 
 	    pred_total_p = pred_base[:, [0]] + pred_perturb[:, [0]]
 	    pred_total_s = pred_base[:, [1]] + pred_perturb[:, [1]]
@@ -473,7 +476,10 @@ if train_travel_time_neural_network == True:
 	            travel_times_s = Ts_samples_vald[isample]
 
 	        pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method='direct', train=True)
-	        vel_pred = m.vmodel(src_pos_cart, src_embed)
+	        # vel_pred = m.vmodel(src_pos_cart, src_embed)
+
+			src_lla_norm = m.norm_lla(src_pos)
+			vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
 
 	        pred_total_p = pred_base[:, [0]] + pred_perturb[:, [0]]
 	        pred_total_s = pred_base[:, [1]] + pred_perturb[:, [1]]
@@ -643,7 +649,10 @@ if train_travel_time_neural_network == True:
 			trgt_data = torch.Tensor(np.concatenate((travel_times_p.reshape(-1,1), travel_times_s.reshape(-1,1)), axis = 1)).to(device)
 
 		pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method = 'direct', train = True)
-		vel_pred = m.vmodel(src_pos_cart, src_embed)
+		# vel_pred = m.vmodel(src_pos_cart, src_embed)
+
+		src_lla_norm = m.norm_lla(src_pos)
+		vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
 
 		scale_loss = 1.0
 		trgt = norm_vel(torch.Tensor(np.concatenate((Vp_samples[isample].reshape(-1,1), Vs_samples[isample].reshape(-1,1)), axis = 1))).to(device)
@@ -677,7 +686,10 @@ if train_travel_time_neural_network == True:
 			trgt_data = torch.Tensor(np.concatenate((travel_times_p.reshape(-1,1), travel_times_s.reshape(-1,1)), axis = 1)).to(device)
 
 		pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method = 'direct', train = True)
-		vel_pred = m.vmodel(src_pos_cart, src_embed)
+		# vel_pred = m.vmodel(src_pos_cart, src_embed)
+
+		src_lla_norm = m.norm_lla(src_pos)
+		vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
 
 		scale_loss = 1.0
 		trgt = norm_vel(torch.Tensor(np.concatenate((Vp_samples_vald[isample].reshape(-1,1), Vs_samples_vald[isample].reshape(-1,1)), axis = 1))).to(device)
@@ -725,8 +737,10 @@ if train_travel_time_neural_network == True:
 
 		pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method = 'direct', train = True)
 		# pred_perturb = pred_perturb1 + pred_perturb2
+		# vel_pred = m.vmodel(src_pos_cart, src_embed)
 
-		vel_pred = m.vmodel(src_pos_cart, src_embed)
+		src_lla_norm = m.norm_lla(src_pos)
+		vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
 
 		scale_loss = 1.0
 		trgt = vel_pred # norm_vel(torch.Tensor(np.concatenate((Vp_samples[isample].reshape(-1,1), Vs_samples[isample].reshape(-1,1)), axis = 1))).to(device)
@@ -760,7 +774,10 @@ if train_travel_time_neural_network == True:
 			trgt_data = torch.Tensor(np.concatenate((travel_times_p.reshape(-1,1), travel_times_s.reshape(-1,1)), axis = 1)).to(device)
 
 		pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method = 'direct', train = True)
-		vel_pred = m.vmodel(src_pos_cart, src_embed)
+		# vel_pred = m.vmodel(src_pos_cart, src_embed)
+
+		src_lla_norm = m.norm_lla(src_pos)
+		vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
 
 		scale_loss = 1.0
 		trgt = vel_pred # norm_vel(torch.Tensor(np.concatenate((Vp_samples_vald[isample].reshape(-1,1), Vs_samples_vald[isample].reshape(-1,1)), axis = 1))).to(device)
