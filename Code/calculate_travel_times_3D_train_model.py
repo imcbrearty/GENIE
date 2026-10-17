@@ -196,6 +196,12 @@ if train_travel_time_neural_network == True:
 	x_pos = np.concatenate((x_pos, np.concatenate((x_pos[:,0:2], depth_range[1]*np.ones((len(x_pos),1))), axis = 1)), axis = 0)
 	max_dist = np.linalg.norm(np.expand_dims(ftrns1(x_pos), axis = 0) - np.expand_dims(ftrns1(x_pos), axis = 1), axis = 2).max()
 	max_time = max_dist/vs_min
+	lat_mean, lat_norm = np.mean(lat_range_extend), np.diff(lat_range_extend)[0]/2.0
+	lon_mean, lon_norm = np.mean(lon_range_extend), np.diff(lon_range_extend)[0]/2.0
+	depth_norm = np.diff(depth_range)[0]
+	mean_lla = torch.tensor(np.array([lat_mean, lon_mean, 0.0]).reshape(1,-1), dtype = torch.float32, device = device)
+	scale_lla = torch.tensor(np.array([lat_norm, lon_norm, depth_norm]).reshape(1,-1), dtype = torch.float32, device = device)
+	norm_lla = lambda x: (x - mean_lla)/scale_lla
 
 	scale_norm_factor = (max_time*vp_max/max_dist)
 
@@ -214,8 +220,26 @@ if train_travel_time_neural_network == True:
 	conversion_factor = (base_val_1/base_val_2).mean()
 	conversion_factor = conversion_factor/max_time
 
-	scale_params = [max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor]
-	m = TravelTimesPN(ftrns1_diff, ftrns2_diff, n_phases = 2, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
+
+	scale_params = [max_dist, max_time, vp_max, vs_min, scale_norm_factor, conversion_factor, lat_mean, lon_mean, lat_norm, lon_norm, depth_norm]
+	# m = TravelTimesPN(ftrns1_diff, ftrns2_diff, n_phases = 2, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, device = device).to(device)
+
+	# Instantiate regional network
+	m = TravelTimesPN_Regional(
+	    ftrns1 = ftrns1_diff,
+	    ftrns2 = ftrns2_diff,
+	    n_phases = 2,
+	    v_mean = v_mean,
+	    norm_pos = norm_pos,
+	    inorm_pos = inorm_pos,
+	    inorm_time = inorm_time,
+	    norm_vel = norm_vel,
+	    conversion_factor = conversion_factor,
+	    norm_lla = norm_lla,
+	    corrs = corrs,
+	    locs_corr = locs_corr,
+	    device = device
+	).to(device)
 
 
 	optimizer = optim.Adam(m.parameters(), lr = 0.001)
