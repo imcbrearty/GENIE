@@ -178,7 +178,7 @@ def sample_stratified_queries_for_station(
 	n_candidates_factor=4,
 	# optional near densification as fraction of domain width (None = off)
 	near_frac=0.15,
-	n_near_boost=5_000,		  # e.g. 20_000 extra candidates in near ball; 0 = pure domain
+	n_near_boost=10_000,		  # e.g. 20_000 extra candidates in near ball; 0 = pure domain
 	_sobol_box=None,
 	xx_min=None,
 	xx_max=None,
