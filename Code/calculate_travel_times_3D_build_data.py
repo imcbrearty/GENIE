@@ -11,223 +11,324 @@ from scipy.interpolate import RegularGridInterpolator
 from numpy import interp
 import shutil
 import pathlib
-# from module import TravelTimes
-from torch.autograd import Variable
-from sklearn.metrics import r2_score
 from utils import *
-from module import TravelTimesPN
-from torch.autograd import Variable
-from torch_geometric.utils import get_laplacian
-from process_utils import * # differential_evolution_location
+from graph_utils import *
 import glob
 import sys
 import os
 
-def lla2ecef_diff(p, a = torch.Tensor([6378137.0]), e = torch.Tensor([8.18191908426215e-2]), device = 'cpu'):
-	# x = x.astype('float')
-	# https://www.mathworks.com/matlabcentral/fileexchange/7941-convert-cartesian-ecef-coordinates-to-lat-lon-alt
-	a = a.to(device)
-	e = e.to(device)
-	# p = p.detach().clone().float().to(device) # why include detach here?
-	pi = torch.Tensor([np.pi]).to(device)
-	# p[:,0:2] = p[:,0:2]*torch.Tensor([pi/180.0, pi/180.0]).view(1,-1).to(device)
-	N = a/torch.sqrt(1 - (e**2)*torch.sin(p[:,0]*pi/180.0)**2)
-	# results:
-	x = (N + p[:,2])*torch.cos(p[:,0]*pi/180.0)*torch.cos(p[:,1]*pi/180.0)
-	y = (N + p[:,2])*torch.cos(p[:,0]*pi/180.0)*torch.sin(p[:,1]*pi/180.0)
-	z = ((1-e**2)*N + p[:,2])*torch.sin(p[:,0]*pi/180.0)
 
-	return torch.cat((x.view(-1,1), y.view(-1,1), z.view(-1,1)), dim = 1)
 
-def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores = 10):
+def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores=10):
+	"""
+	Computes 3D P and S travel time fields in parallel using Fast Marching (scikit-fmm).
+	Includes sub-grid source placement, zero-contour guards, and HPC job-array logging.
+	"""
+	# -------------------------------------------------------------------------
+	# 0. Initial Validation & Grid Boundary Check
+	# -------------------------------------------------------------------------
+	n_sources = xx_r.shape[0]
+	grid_shape = x11.shape
+
+	print(f"[INFO] Initializing compute_travel_times_parallel", flush=True)
+	print(f"[INFO] Grid Shape: {grid_shape} | Total Nodes: {h.shape[0]:,}", flush=True)
+	print(f"[INFO] Total Sources to Process: {n_sources} across {num_cores} cores", flush=True)
+	print(f"[INFO] Grid Extents X: [{x11.min():.2f}, {x11.max():.2f}] | Y: [{x12.min():.2f}, {x12.max():.2f}] | Z: [{x13.min():.2f}, {x13.max():.2f}]", flush=True)
+
+	# Check for non-physical/corrupted velocities prior to job dispatch
+	v_min, v1_min = np.nanmin(h), np.nanmin(h1)
+	if v_min <= 0 or v1_min <= 0:
+		print(f"[WARNING] Velocity fields contain non-positive values (Vp_min={v_min:.1f}, Vs_min={v1_min:.1f})!", flush=True)
+		print(f"[WARNING] Negative/zero velocities will cause Fast Marching crashes. Ensure arrays are clipped prior to passing.", flush=True)
+
+	# -------------------------------------------------------------------------
+	# 1. Parallel Worker Routine
+	# -------------------------------------------------------------------------
 
 	def step_test(args):
-
 		yval, dx_v, h, h1, x11, x12, x13, ind = args
-		print(yval.shape); print(x11.shape); print(x12.shape); print(x13.shape)
+		source_coords = yval.ravel()
 
-		phi_xy = (x11 - yval[0,0])**2 + (x12 - yval[0,1])**2
-		phi_v = (x13 - yval[0,2])**2
+		if np.isnan(source_coords).any() or np.isinf(source_coords).any():
+			print(f"[ERROR][Task {ind}] Invalid source coordinates (NaN/Inf): {source_coords}. Returning NaNs.", flush=True)
+			empty = np.full(grid_shape, np.nan)
+			return empty, empty, ind
 
-		phi = np.sqrt(phi_xy + phi_v)
-		phi = phi - phi.min() - np.mean(dx_v)/5.0 ## Why include np.mean(dx_v)?
+		phi = np.sqrt(
+			(x11 - source_coords[0])**2
+			+ (x12 - source_coords[1])**2
+			+ (x13 - source_coords[2])**2
+		)
 
-		v = np.copy(h).reshape(x11.shape) # correct?
-		v1 = np.copy(h1).reshape(x11.shape) # correct?
+		r0 = 0.5 * np.min(dx_v)
+		phi = phi - r0
 
-		t = skfmm.travel_time(phi, v, dx = [dx_v[0], dx_v[1], dx_v[2]])
-		t1 = skfmm.travel_time(phi, v1, dx = [dx_v[0], dx_v[1], dx_v[2]])
+		# Default: interior / normal nucleation — correct by sphere radius r0
+		t0_radius = r0
 
-		return t, t1, phi, ind
+		if not (phi < 0).any():
+			min_idx = np.unravel_index(np.argmin(phi), grid_shape)
+			min_dist = float(phi[min_idx] + r0)  # Euclidean dist source → nearest node
+			phi[min_idx] = -r0
+			t0_radius = min_dist  # exterior (or failed level set): pay full distance
+			print(
+				f"[WARN][Task {ind}] Source at ({source_coords[0]:.2f}, {source_coords[1]:.2f}, {source_coords[2]:.2f}) "
+				f"has NO negative level set (Nearest node dist: {min_dist:.2f}). "
+				f"Forcing closest node negative; t0 uses min_dist.",
+				flush=True,
+			)
 
-	tp_times, ts_times = np.nan*np.zeros((h.shape[0], xx_r.shape[0])), np.nan*np.zeros((h.shape[0], xx_r.shape[0]))
+		v_grid = h.reshape(grid_shape)
+		v1_grid = h1.reshape(grid_shape)
+		dx = [dx_v[0], dx_v[1], dx_v[2]]
 
-	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [xx_r[i,:][None,:], dx_v, h, h1, x11, x12, x13, i] ) for i in range(xx_r.shape[0]))
+		try:
+			t = skfmm.travel_time(phi, v_grid, dx=dx)
+			t1 = skfmm.travel_time(phi, v1_grid, dx=dx)
+		except Exception as e:
+			print(f"[FATAL][Task {ind}] skfmm failed at source {source_coords}: {str(e)}", flush=True)
+			empty = np.full(grid_shape, np.nan)
+			return empty, empty, ind
 
-	for i in range(xx_r.shape[0]):
+		source_idx = np.unravel_index(np.argmin(phi), grid_shape)
+		t = t + (t0_radius / v_grid[source_idx])
+		t1 = t1 + (t0_radius / v1_grid[source_idx])
 
-		## Make sure to write results to correct station, based on ind
-		tp_times[:,results[i][-1]] = results[i][0].reshape(-1)
-		ts_times[:,results[i][-1]] = results[i][1].reshape(-1)
+		if ind % 50 == 0 or ind == n_sources - 1:
+			print(f"[PROGRESS] Completed source index {ind}/{n_sources} at coords {source_coords.round(1)}", flush=True)
 
+		return t, t1, ind
+
+	# -------------------------------------------------------------------------
+	# 2. Execution & Data Assembly
+	# -------------------------------------------------------------------------
+	tp_times = np.full((h.shape[0], n_sources), np.nan, dtype=np.float32)
+	ts_times = np.full((h.shape[0], n_sources), np.nan, dtype=np.float32)
+
+	# Run Parallel execution
+	print(f"[INFO] Dispatching Parallel jobs...", flush=True)
+	results = Parallel(n_jobs=num_cores)(
+		delayed(step_test)([xx_r[i, :][None, :], dx_v, h, h1, x11, x12, x13, i])
+		for i in range(n_sources)
+	)
+
+	# Reassemble results deterministically based on station index
+	print(f"[INFO] Assembling travel time matrices...", flush=True)
+	for res in results:
+		t_p, t_s, station_ind = res[0], res[1], res[2]
+		tp_times[:, station_ind] = t_p.reshape(-1)
+		ts_times[:, station_ind] = t_s.reshape(-1)
+
+	print(f"[SUCCESS] Travel time calculations finished successfully.", flush=True)
 	return tp_times, ts_times
 
 
-def compute_travel_times_parallel1(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_cores=10):
-    """
-    Computes 3D P and S travel time fields in parallel using Fast Marching (scikit-fmm).
-    Includes sub-grid source placement, zero-contour guards, and HPC job-array logging.
-    """
-    # -------------------------------------------------------------------------
-    # 0. Initial Validation & Grid Boundary Check
-    # -------------------------------------------------------------------------
-    n_sources = xx_r.shape[0]
-    grid_shape = x11.shape
+def make_merged_travel_time_interp(mp_coarse, mp_local, sta_xyz, half_xy, half_z, blend_width=None):
+	sta_xyz = np.asarray(sta_xyz, float).reshape(3)
+	if blend_width is None:
+		blend_width = 0.1 * float(half_xy)
+	blend_width = max(float(blend_width), 1.0)
 
-    print(f"[INFO] Initializing compute_travel_times_parallel", flush=True)
-    print(f"[INFO] Grid Shape: {grid_shape} | Total Nodes: {h.shape[0]:,}", flush=True)
-    print(f"[INFO] Total Sources to Process: {n_sources} across {num_cores} cores", flush=True)
-    print(f"[INFO] Grid Extents X: [{x11.min():.2f}, {x11.max():.2f}] | Y: [{x12.min():.2f}, {x12.max():.2f}] | Z: [{x13.min():.2f}, {x13.max():.2f}]", flush=True)
-
-    # Check for non-physical/corrupted velocities prior to job dispatch
-    v_min, v1_min = np.nanmin(h), np.nanmin(h1)
-    if v_min <= 0 or v1_min <= 0:
-        print(f"[WARNING] Velocity fields contain non-positive values (Vp_min={v_min:.1f}, Vs_min={v1_min:.1f})!", flush=True)
-        print(f"[WARNING] Negative/zero velocities will cause Fast Marching crashes. Ensure arrays are clipped prior to passing.", flush=True)
-
-    # -------------------------------------------------------------------------
-    # 1. Parallel Worker Routine
-    # -------------------------------------------------------------------------
-    def step_test(args):
-        yval, dx_v, h, h1, x11, x12, x13, ind = args
-
-        # Flush standard output immediately to prevent job-array log buffering
-        source_coords = yval.ravel()
-
-        # A. Check for NaN/Inf in source coordinates
-        if np.isnan(source_coords).any() or np.isinf(source_coords).any():
-            print(f"[ERROR][Task {ind}] Invalid source coordinates (NaN/Inf): {source_coords}. Returning NaNs.", flush=True)
-            empty = np.full(grid_shape, np.nan)
-            return empty, empty, ind
-
-        # B. Compute exact continuous Euclidean distance from off-grid source
-        phi = np.sqrt((x11 - source_coords[0])**2 +
-                      (x12 - source_coords[1])**2 +
-                      (x13 - source_coords[2])**2)
-
-        # C. Sub-grid 0-level set sphere (R0 = 0.5 * min cell width)
-        r0 = 0.5 * np.min(dx_v)
-        phi = phi - r0
-
-        # D. Zero Contour Safety Guard
-        # If source lies outside grid boundaries or floating point underflow occurs,
-        # force the single closest grid node to be negative (-r0) to ensure a valid 0-contour.
-        if not (phi < 0).any():
-            min_idx = np.unravel_index(np.argmin(phi), grid_shape)
-            min_dist = phi[min_idx] + r0
-            print(f"[WARN][Task {ind}] Source at ({source_coords[0]:.2f}, {source_coords[1]:.2f}, {source_coords[2]:.2f}) "
-                  f"has NO negative level set (Nearest node dist: {min_dist:.2f}). Forcing closest node negative.", flush=True)
-            phi[min_idx] = -r0
-
-        # E. Reshape velocity grids (using memory views, avoiding np.copy)
-        v_grid = h.reshape(grid_shape)
-        v1_grid = h1.reshape(grid_shape)
-
-        dx = [dx_v[0], dx_v[1], dx_v[2]]
-
-        # F. Compute Fast Marching travel times
-        try:
-            t = skfmm.travel_time(phi, v_grid, dx=dx)
-            t1 = skfmm.travel_time(phi, v1_grid, dx=dx)
-        except Exception as e:
-            print(f"[FATAL][Task {ind}] skfmm failed at source {source_coords}: {str(e)}", flush=True)
-            empty = np.full(grid_shape, np.nan)
-            return empty, empty, ind
-
-        # G. Local analytical source-time correction (t0 = R0 / v_source)
-        source_idx = np.unravel_index(np.argmin(phi), grid_shape)
-        t = t + (r0 / v_grid[source_idx])
-        t1 = t1 + (r0 / v1_grid[source_idx])
-
-        # Logging periodic progress markers (e.g., every 50th item)
-        if ind % 50 == 0 or ind == n_sources - 1:
-            print(f"[PROGRESS] Completed source index {ind}/{n_sources} at coords {source_coords.round(1)}", flush=True)
-
-        return t, t1, ind
-
-    # -------------------------------------------------------------------------
-    # 2. Execution & Data Assembly
-    # -------------------------------------------------------------------------
-    tp_times = np.full((h.shape[0], n_sources), np.nan, dtype=np.float32)
-    ts_times = np.full((h.shape[0], n_sources), np.nan, dtype=np.float32)
-
-    # Run Parallel execution
-    print(f"[INFO] Dispatching Parallel jobs...", flush=True)
-    results = Parallel(n_jobs=num_cores)(
-        delayed(step_test)([xx_r[i, :][None, :], dx_v, h, h1, x11, x12, x13, i])
-        for i in range(n_sources)
-    )
-
-    # Reassemble results deterministically based on station index
-    print(f"[INFO] Assembling travel time matrices...", flush=True)
-    for res in results:
-        t_p, t_s, station_ind = res[0], res[1], res[2]
-        tp_times[:, station_ind] = t_p.reshape(-1)
-        ts_times[:, station_ind] = t_s.reshape(-1)
-
-    print(f"[SUCCESS] Travel time calculations finished successfully.", flush=True)
-    return tp_times, ts_times
+	def interp(pts_cart):
+		pts_cart = np.asarray(pts_cart, float).reshape(-1, 3)
+		# normalized box distance (0 at station, 1 on faces)
+		q = np.maximum.reduce([
+			np.abs(pts_cart[:, 0] - sta_xyz[0]) / half_xy,
+			np.abs(pts_cart[:, 1] - sta_xyz[1]) / half_xy,
+			np.abs(pts_cart[:, 2] - sta_xyz[2]) / half_z,
+		])
+		t_c = np.asarray(mp_coarse(pts_cart)).ravel()
+		use_loc = q <= 1.0
+		t = t_c.copy()
+		if np.any(use_loc):
+			t_l = np.asarray(mp_local(pts_cart[use_loc])).ravel()
+			# blend in outer 10% of the box
+			w = np.clip((q[use_loc] - (1.0 - blend_width / max(half_xy, 1.0))) /
+						(blend_width / max(half_xy, 1.0) + 1e-12), 0.0, 1.0)
+			bad = ~np.isfinite(t_l)
+			t_l = np.where(bad, t_c[use_loc], t_l)
+			w = np.where(bad, 1.0, w)
+			t[use_loc] = (1.0 - w) * t_l + w * t_c[use_loc]
+		return t
+	return interp
 
 
+def sample_stratified_queries_for_station(
+	sta_lla,
+	lat_range,
+	lon_range,
+	depth_range,
+	ftrns1,
+	ftrns2,
+	tp_interp=None,
+	ts_interp=None,
+	vp_interp=None,
+	vs_interp=None,
+	n_very_near=40_000,
+	n_near=50_000,
+	n_far=40_000,
+	n_uniform=40_000,
+	n_boundary=10_000,
+	n_vald=10_000,
+	n_candidates_factor=4,
+	# optional near densification as fraction of domain width (None = off)
+	near_frac=0.15,
+	n_near_boost=5_000,		  # e.g. 20_000 extra candidates in near ball; 0 = pure domain
+	_sobol_box=None,
+	xx_min=None,
+	xx_max=None,
+	seed=0,
+):
+	"""
+	Continuous stratified queries for one station (save & train as-is).
+	Mirrors old lattice weights: 1/t^2, 1/t, 1/(tmax-t), uniform, + station boundary.
+	"""
+	sta_lla = np.asarray(sta_lla, dtype=float).reshape(3)
+	low_lla = np.array([lat_range[0], lon_range[0], depth_range[0]], float)
+	high_lla = np.array([lat_range[1], lon_range[1], depth_range[1]], float)
+	sta_xyz = ftrns1(sta_lla.reshape(1, 3))[0]
 
-def compute_interpolation_parallel(x1, x2, x3, Tp, Ts, X, ftrns1, num_cores = 10):
+	def clip_lla(X):
+		X = np.asarray(X, dtype=float).reshape(-1, 3)
+		return np.minimum(np.maximum(X, low_lla), high_lla)
 
-	def step_test(args):
+	def clip_xyz_to_fmm(pts_xyz, margin=0.0):
+		pts_xyz = np.asarray(pts_xyz, dtype=float).reshape(-1, 3)
+		if xx_min is None or xx_max is None:
+			return pts_xyz
+		return np.minimum(np.maximum(pts_xyz, xx_min + margin), xx_max - margin)
 
-		x1, x2, x3, tp, ts, X, ftrns1, ind = args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]
+	def domain_candidates(n):
+		n = int(max(n, 1))
+		return clip_lla(np.asarray(_sobol_box(n)))
 
-		mp = RegularGridInterpolator((x1, x2, x3), tp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-		ms = RegularGridInterpolator((x1, x2, x3), ts.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-		tp_val = mp(ftrns1(X))
-		ts_val = ms(ftrns1(X))
+	def near_boost_candidates(n, frac):
+		"""Optional: extra continuous points near station (domain-relative radius)."""
+		if n <= 0 or frac is None or frac <= 0:
+			return np.zeros((0, 3))
+		if xx_min is not None and xx_max is not None:
+			L = float(np.minimum(xx_max[0] - xx_min[0], xx_max[1] - xx_min[1]))
+		else:
+			# fallback: rough scale from LLA corners
+			c = ftrns1(np.array([
+				[low_lla[0], low_lla[1], sta_lla[2]],
+				[high_lla[0], high_lla[1], sta_lla[2]],
+			]))
+			L = float(np.linalg.norm(c[1] - c[0]))
+		radius_m = frac * L
+		need = int(n * 2)
+		rng_i = np.random.default_rng(seed + 7)
+		pts = sta_xyz + rng_i.uniform(-radius_m, radius_m, size=(need, 3))
+		pts = pts[np.linalg.norm(pts - sta_xyz, axis=1) <= radius_m]
+		if len(pts) < n:
+			extra = sta_xyz + rng_i.normal(scale=radius_m / 2.5, size=(n, 3))
+			pts = np.vstack([pts, extra]) if len(pts) else extra
+		pts = clip_xyz_to_fmm(pts)
+		return clip_lla(ftrns2(pts[:n]))
 
-		print('Finished interpolation %d'%ind)
-		
-		return tp_val, ts_val, ind
+	def weighted_pick(pts_lla, tp, n, mode, rng, exclude=None):
+		n = int(n)
+		if n <= 0 or len(pts_lla) == 0:
+			return np.zeros((0, 3)), np.zeros(0)
+		tp = np.maximum(np.asarray(tp).ravel(), 0.1)
+		m = np.ones(len(tp), dtype=bool)
+		if exclude is not None and len(exclude):
+			m[np.asarray(exclude, dtype=int)] = False
+		pts_lla, tp = pts_lla[m], tp[m]
+		if len(tp) == 0:
+			return np.zeros((0, 3)), np.zeros(0)
+		n = min(n, len(tp))
+		if mode == "inv_t":
+			w = 1.0 / tp
+		elif mode == "inv_t2":
+			w = 1.0 / tp**2
+		elif mode == "far":
+			w = 1.0 / np.maximum(tp.max() - tp, 0.1)
+		else:
+			w = np.ones_like(tp)
+		w = w / w.sum()
+		idx = rng.choice(len(tp), size=n, replace=False, p=w)
+		return pts_lla[idx], tp[idx]
 
-	n_grid = X.shape[0]
-	n_sta = Tp.shape[1]
-	Tp_interp = np.zeros((n_grid, n_sta))
-	Ts_interp = np.zeros((n_grid, n_sta))
-	assert(Tp_interp.shape[1] == Ts_interp.shape[1])
+	def eval_tp(pts_lla):
+		return np.asarray(tp_interp(ftrns1(pts_lla))).ravel()
 
-	results = Parallel(n_jobs = num_cores)(delayed(step_test)( [x1, x2, x3, Tp[:,i], Ts[:,i], X, lambda x: ftrns1(x), i] ) for i in range(n_sta))
+	rng = np.random.default_rng(seed)
 
-	for i in range(n_sta):
+	# --- one large domain pool (like old X), optional near boost mixed in ---
+	n_pool = int(n_candidates_factor * (
+		n_very_near + n_near + n_far + n_uniform
+	))
+	cand = domain_candidates(n_pool)
+	if n_near_boost > 0:
+		cand = np.vstack([cand, near_boost_candidates(n_near_boost, near_frac)])
+		cand = clip_lla(cand)
 
-		## Make sure to write results to correct station, based on ind
-		Tp_interp[:,results[i][2]] = results[i][0].reshape(-1)
-		Ts_interp[:,results[i][2]] = results[i][1].reshape(-1)
+	tp = eval_tp(cand)
 
-	return Tp_interp, Ts_interp
+	# sequential without-replacement strata on the same pool
+	used = []
+	def take(n, mode):
+		nonlocal used
+		# map exclude through current mask is awkward; rebuild pool each time
+		# simpler: pick from full cand but zero weight on already chosen via mask
+		mask = np.ones(len(cand), dtype=bool)
+		if used:
+			mask[np.unique(used)] = False
+		pts_m, tp_m = cand[mask], tp[mask]
+		if len(pts_m) == 0:
+			return np.zeros((0, 3))
+		n = min(int(n), len(pts_m))
+		if mode == "inv_t":
+			w = 1.0 / np.maximum(tp_m, 0.1)
+		elif mode == "inv_t2":
+			w = 1.0 / np.maximum(tp_m, 0.1)**2
+		elif mode == "far":
+			w = 1.0 / np.maximum(tp_m.max() - tp_m, 0.1)
+		else:
+			w = np.ones(len(tp_m))
+		w = w / w.sum()
+		idx_m = rng.choice(len(pts_m), size=n, replace=False, p=w)
+		# record global indices
+		global_idx = np.flatnonzero(mask)[idx_m]
+		used.extend(global_idx.tolist())
+		return pts_m[idx_m]
 
-class Laplacian(MessagePassing):
+	X_vn = take(n_very_near, "inv_t2")
+	X_ne = take(n_near, "inv_t")
+	X_fa = take(n_far, "far")
+	X_un = take(n_uniform, "uniform")
+	X_bd = np.repeat(sta_lla.reshape(1, 3), int(n_boundary), axis=0)
 
-	def __init__(self, lap, lap_w):
-		super(Laplacian, self).__init__('sum', node_dim = 0) # consider mean
-		self.lap = lap # edges
-		self.lap_w = lap_w.reshape(-1,1) # edge weights
+	X_train = clip_lla(np.vstack([X_vn, X_ne, X_fa, X_un, X_bd]))
+	if n_boundary > 0:
+		X_train[-n_boundary:] = sta_lla.reshape(1, 3)
 
-	def forward(self, x):
+	cand_v = domain_candidates(int(n_candidates_factor * n_vald))
+	X_vald, _ = weighted_pick(
+		cand_v, eval_tp(cand_v), n_vald, "uniform",
+		np.random.default_rng(seed + 99),
+	)
+	X_vald = clip_lla(X_vald)
 
-		## Assumes x is a square matrix
-		## (what about batch?, e.g. multiple stations)
+	def eval_all(pts):
+		xyz = ftrns1(pts)
+		out = {"X": pts, "Tp": np.asarray(tp_interp(xyz)).ravel()}
+		if ts_interp is not None:
+			out["Ts"] = np.asarray(ts_interp(xyz)).ravel()
+		if vp_interp is not None:
+			out["Vp"] = np.asarray(vp_interp(xyz)).ravel()
+		if vs_interp is not None:
+			out["Vs"] = np.asarray(vs_interp(xyz)).ravel()
+		return out
 
-		return self.propagate(self.lap, x = x, edge_attr = self.lap_w)
-
-	def message(self, x_j, edge_attr):
-
-		return edge_attr*x_j
+	train = eval_all(X_train)
+	vald = eval_all(X_vald)
+	if n_boundary > 0:
+		train["Tp"][-n_boundary:] = 0.0
+		if "Ts" in train:
+			train["Ts"][-n_boundary:] = 0.0
+	return train, vald
 
 
 # Load configuration from YAML
@@ -237,113 +338,148 @@ name_of_project = config['name_of_project']
 num_cores = config['num_cores']
 
 dx = config['dx']
-d_deg = config.get('d_deg', dx/1e5) ## Roughly convert meters to degrees
 dx_depth = config.get('dx_depth', dx)
-# d_deg = config['d_deg']
-# dx_depth = config['dx_depth']
-# depth_steps = config['depth_steps']
+# d_deg = config.get('d_deg', dx/1e5) ## Roughly convert meters to degrees
 
 ## Load travel time neural network settings
 save_dense_travel_time_data = config['save_dense_travel_time_data']
 train_travel_time_neural_network = config['train_travel_time_neural_network']
-use_relative_1d_profile = config['use_relative_1d_profile']
-# using_3D = config['using_3D']
-# using_1D = config['using_1D']
 
-if use_relative_1d_profile == True:
-	print('Overwritting num cores, because using relative 1d profile option')
-	num_cores = 1
 
-# depth_steps = np.arange(depth_steps['min_elevation'], depth_steps['max_elevation'] + depth_steps['elevation_step'], depth_steps['elevation_step']) # Elevation steps to compute travel times from 
-## (These are reference points for stations; can be a regular grid, and each station looks up the
-## travel times with respect to these values. It is discretized (nearest-neighber) rather than continous.
+# use_relative_1d_profile = config['use_relative_1d_profile']
+# if use_relative_1d_profile == True:
+# 	print('Overwritting num cores, because using relative 1d profile option')
+# 	num_cores = 1
 
 ## Load travel times (train regression model, elsewhere, or, load and "initilize" 1D interpolator method)
 path_to_file = str(pathlib.Path().absolute())
 seperator =  '\\' if '\\' in path_to_file else '/'
 path_to_file += seperator
+num_cores = 1
+
 
 # template_ver = 1
 vel_model_ver = config['vel_model_ver']
 vel_model_type = config['vel_model_type']
 use_topography = config['use_topography']
-## Load Files
+
 
 # Load region
 z = np.load(path_to_file + '%s_region.npz'%name_of_project)
 lat_range, lon_range, depth_range, deg_pad = z['lat_range'], z['lon_range'], z['depth_range'], z['deg_pad']
 z.close()
 
-# Load templates
-# z = np.load(path_to_file + 'Grids/%s_seismic_network_templates_ver_%d.npz'%(name_of_project, template_ver))
-# x_grids = z['x_grids']
-# z.close()
 
 # Load stations
 z = np.load(path_to_file + '%s_stations.npz'%name_of_project)
 locs, stas, mn, rbest = z['locs'], z['stas'], z['mn'], z['rbest']
 z.close()
 
+
 lat_range_extend = [lat_range[0] - deg_pad, lat_range[1] + deg_pad]
 lon_range_extend = [lon_range[0] - deg_pad, lon_range[1] + deg_pad]
+
 
 ## Overwrite range based on station locations and buffer
 d_pad = deg_pad # 0.15
 lat_range_extend = [np.minimum(lat_range_extend[0], locs[:,0].min() - d_pad), np.maximum(lat_range_extend[1], locs[:,0].max() + d_pad)]
 lon_range_extend = [np.minimum(lon_range_extend[0], locs[:,1].min() - d_pad), np.maximum(lon_range_extend[1], locs[:,1].max() + d_pad)]
 
+
 scale_x = np.array([lat_range[1] - lat_range[0], lon_range[1] - lon_range[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 offset_x = np.array([lat_range[0], lon_range[0], depth_range[0]]).reshape(1,-1)
 scale_x_extend = np.array([lat_range_extend[1] - lat_range_extend[0], lon_range_extend[1] - lon_range_extend[0], depth_range[1] - depth_range[0]]).reshape(1,-1)
 offset_x_extend = np.array([lat_range_extend[0], lon_range_extend[0], depth_range[0]]).reshape(1,-1)
+depth_grid = np.arange(depth_range[0], depth_range[1] + dx_depth, dx_depth)
+
 
 ftrns1 = lambda x: (rbest @ (lla2ecef(x) - mn).T).T # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
 ftrns2 = lambda x: ecef2lla((rbest.T @ x.T).T + mn)  # invert ftrns1
 
-lat_grid = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg, d_deg)
-lon_grid = np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg, d_deg)
-depth_grid = np.arange(depth_range[0], depth_range[1] + dx_depth, dx_depth)
 
-x11, x12, x13 = np.meshgrid(lat_grid, lon_grid, depth_grid)
-X = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-query_proj = ftrns1(X)
+## Using 3D domain, so must use actual station coordinates
+locs_ref = np.copy(locs)
+reciever_proj = ftrns1(locs_ref) # for all elevs.
 
 
-## Check number of workers available. Note: should apply parallel threads for running over stations.
+## Per job slice of stations
+argvs = sys.argv
+if len(argvs) == 1:
+	argvs.append(0)
+
+n_jobs = config['n_jobs']
+n_batch = int(np.ceil(len(locs)/n_jobs))
+ind_use = [np.arange(n_batch) + n_batch*i for i in range(n_jobs)]
+if n_jobs > 1:
+	ind_use[-1] = np.arange(ind_use[-2][-1] + 1, len(locs))
+ind_use = ind_use[int(argvs[1])]
+
+
 print('\n Total possible threads %d'%multiprocessing.cpu_count())
 print(f'Actually using {num_cores} cores')
 
-## Boundary of domain, in Cartesian coordinates
-elev = locs[:,2].max() + 1000.0
-z1 = np.array([lat_range_extend[0], lon_range_extend[0], elev])[None,:]
-z2 = np.array([lat_range_extend[0], lon_range_extend[1], elev])[None,:]
-z3 = np.array([lat_range_extend[1], lon_range_extend[1], elev])[None,:]
-z4 = np.array([lat_range_extend[1], lon_range_extend[0], elev])[None,:]
-z = np.concatenate((z1, z2, z3, z4), axis = 0)
-zz = ftrns1(z)
 
-ip = np.where((query_proj[:,0] >= zz[:,0].min())*(query_proj[:,0] <= zz[:,0].max())*(query_proj[:,1] >= zz[:,1].min())*(query_proj[:,1] <= zz[:,1].max()))[0]
-ys = query_proj[ip,:] # not actually used for anything (non-trivial.)
+spanned_domain, domain_pad_cnt = False, 0
+while (spanned_domain == False) and (domain_pad_cnt < 20):
 
-## If the queries are out of bounts when calling 
-x1 = np.arange(ys[:,0].min() - 20*dx, ys[:,0].max() + 20*dx, dx)
-x2 = np.arange(ys[:,1].min() - 20*dx, ys[:,1].max() + 20*dx, dx)
-x3 = np.arange(ys[:,2].min() - 4*dx, ys[:,2].max() + 4*dx, dx)
-x11, x12, x13 = np.meshgrid(x1, x2, x3)
-xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
-dx_v = np.array([np.diff(x1)[0], np.diff(x2)[0], np.diff(x3)[0]])
+	# LLA domain used for queries / stations (already extended)
+	lat0, lat1 = lat_range_extend
+	lon0, lon1 = lon_range_extend
+	dep0, dep1 = depth_range[0], depth_range[1]
 
-Xmin = xx.min(0)
-Dx = [np.diff(x1[0:2]),np.diff(x2[0:2]),np.diff(x3[0:2])]
-Mn = np.array([len(x3), len(x1)*len(x3), 1]) ## Is this off by one index? E.g., np.where(np.diff(xx[:,0]) != 0)[0] isn't exactly len(x3)
+	# Sample boundary of the LLA box (corners + edge mids + a few edge samples)
+	def lla_box_boundary(n_edge=5):
 
-## Note: if going to loop over stations, and only compute
-## travel times to a certain distance, then can clip
-## spatial domain travel times are computed for during the
-## building travel time step for each station
+		lats = np.linspace(lat0, lat1, n_edge)
+		lons = np.linspace(lon0, lon1, n_edge)
+		deps = np.linspace(dep0, dep1, max(3, n_edge // 2))
 
-## Load velocity model
-# load_model_type = 1
+        x11, x12, x13 = np.meshgrid(lats, lons, deps)
+        pts = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)   
+
+		return np.unique(np.asarray(pts, float), axis=0)
+
+	bnd_lla = lla_box_boundary(11)
+	bnd_xyz = ftrns1(bnd_lla)
+
+	margin_xy = (5.0 + domain_pad_cnt) * dx   # physical margin (m); scale-free if dx is your resolution unit
+	margin_z  =  (1.0 + domain_pad_cnt * (1/5) ) * dx
+
+	x1 = np.arange(bnd_xyz[:, 0].min() - margin_xy, bnd_xyz[:, 0].max() + margin_xy + dx, dx)
+	x2 = np.arange(bnd_xyz[:, 1].min() - margin_xy, bnd_xyz[:, 1].max() + margin_xy + dx, dx)
+	x3 = np.arange(bnd_xyz[:, 2].min() - margin_z,  bnd_xyz[:, 2].max() + margin_z  + dx, dx)
+
+	x11, x12, x13 = np.meshgrid(x1, x2, x3)
+	xx = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
+	dx_v = np.array([np.diff(x1)[0], np.diff(x2)[0], np.diff(x3)[0]])
+	xx_min = xx.min(0)
+	xx_max = xx.max(0)
+
+	# hull = ConvexHull(xx)
+	# inside_hull = in_hull(reciever_proj, hull.points[hull.vertices])
+	inside_hull = np.all((reciever_proj >= xx.min(0))*(reciever_proj <= xx.max(0)), axis = 1)
+	print('Num sta inside hull %d (%d)'%(inside_hull.sum(), domain_pad_cnt))
+	print('Num total sta %d (%d)'%(len(locs_ref), domain_pad_cnt))
+
+	if (inside_hull.sum() == locs_ref.shape[0]):
+		spanned_domain = True
+	else:
+		domain_pad_cnt += 1
+
+## Assert that domain spans all stations
+assert(inside_hull.sum() == locs_ref.shape[0]) ## If failt, expand the pad
+
+## High resolution grid
+xy_span = float(np.minimum(xx_max[0] - xx_min[0], xx_max[1] - xx_min[1]))
+z_span  = float(xx_max[2] - xx_min[2])
+
+# Local box = fixed fraction of domain (application-scale free)
+frac_xy = 0.20		  # 20% of domain width on each side of station → 40% span
+frac_z  = 0.50		  # larger fraction in depth is often fine (smaller absolute size)
+
+half_xy = 0.5 * frac_xy * xy_span
+half_z  = 0.5 * frac_z  * z_span
+
 
 if vel_model_type == 1:
 	vp = np.array(config['velocity_model']['Vp'])
@@ -423,7 +559,8 @@ if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.np
 
 	## Concatenate station elevations
 	Points = np.concatenate((Points, locs), axis = 0)
-	
+	d_deg = config.get('d_deg', dx/1e5) ## Roughly convert meters to degrees
+
 	## First interpolate uniform surface over all lat-lon based on Points (fill in missing values as sea level)
 	tree = cKDTree(ftrns1(Points*np.array([1.0, 1.0, 0.0]).reshape(1,-1)))
 	x1_s, x2_s = np.arange(lat_range_extend[0], lat_range_extend[1] + d_deg/5.0, d_deg/5.0), np.arange(lon_range_extend[0], lon_range_extend[1] + d_deg/5.0, d_deg/5.0)
@@ -458,38 +595,52 @@ if (use_topography == True)*(os.path.isfile(path_to_file + 'surface_elevation.np
 	Vp[inear_surface[iabove_surface]] = 343.0 ## Assumed acoustic p wave speed
 	Vs[inear_surface[iabove_surface]] = 343.0 ## Setting to P wave speed, so that it will reflect acoustic to S wave coupling (rather than masking)
 
-## Using 3D domain, so must use actual station coordinates
-locs_ref = np.copy(locs)
-reciever_proj = ftrns1(locs_ref) # for all elevs.
+
+## Check the extrapolation behavior (can replace with nearest neighbor)
+mp_vp = RegularGridInterpolator((x1, x2, x3), Vp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear', bounds_error = False, fill_value = None)
+ms_vs = RegularGridInterpolator((x1, x2, x3), Vs.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear', bounds_error = False, fill_value = None)
 
 
-# hull = ConvexHull(xx)
-# inside_hull = in_hull(reciever_proj, hull.points[hull.vertices])
-inside_hull = np.all((reciever_proj >= xx.min(0))*(reciever_proj <= xx.max(0)), axis = 1)
-print('Num sta inside hull %d'%inside_hull.sum())
-print('Num total sta %d'%len(locs_ref))
-# assert(inside_hull.sum() == locs_ref.shape[0])
+## Setup Sobolov sampler
+earth_radius = 6378137.0
+ftrns1_abs = lambda x: lla2ecef(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((lla2ecef(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # map (lat,lon,depth) into local cartesian (x || East,y || North, z || Outward)
+ftrns2_abs = lambda x: ecef2lla(x, a = earth_radius) if x.shape[1] == 3 else np.concatenate((ecef2lla(x, a = earth_radius), x[:,3].reshape(-1,1)), axis = 1) # invert ftrns1
 
 
-mp = RegularGridInterpolator((x1, x2, x3), Vp.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-ms = RegularGridInterpolator((x1, x2, x3), Vs.reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-Vp_interp = mp(ftrns1(X))
-Vs_interp = ms(ftrns1(X))
+def optimize_r_min(lat_vals, lon_mean = np.mean(lon_range), h_min = depth_range[0]):
+	# r_surface = np.linalg.norm(ftrns1(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
+	r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
+	r_val = r_surface + h_min
+	return r_val
 
 
-argvs = sys.argv
-if len(argvs) == 1:
-	argvs.append(0)
+def optimize_r_max(lat_vals, lon_mean = np.mean(lon_range), h_max = depth_range[1]):
+	# r_surface = np.linalg.norm(ftrns1(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
+	r_surface = np.linalg.norm(ftrns1_abs(np.concatenate((lat_vals.reshape(-1,1), lon_mean*np.ones((len(lat_vals),1)), np.zeros((len(lat_vals),1))), axis = 1)), axis = 1)
+	r_val = r_surface + h_max
+	return -r_val
 
-n_jobs = config['n_jobs']
-n_batch = int(np.ceil(len(locs)/n_jobs))
-ind_use = [np.arange(n_batch) + n_batch*i for i in range(n_jobs)]
-if n_jobs > 1:
-	ind_use[-1] = np.arange(ind_use[-2][-1] + 1, len(locs))
-ind_use = ind_use[int(argvs[1])]
+
+bounds = [(lat_range_extend[0], lat_range_extend[1])]
+soln = differential_evolution(optimize_r_min, bounds, popsize = 50, maxiter = 1000, disp = True)
+r_min = optimize_r_min(np.array([soln.x]))[0]; print('\n')
+
+
+bounds = [(lat_range_extend[0], lat_range_extend[1])]
+soln = differential_evolution(optimize_r_max, bounds, popsize = 50, maxiter = 1000, disp = True)
+r_max = -1.0*optimize_r_max(np.array([soln.x]))[0]; print('\n')
+assert(r_max >= r_min)
+
+sobolov_sampler = lambda N: regular_sobolov(N, lat_range = lat_range_extend, lon_range = lon_range_extend, depth_range = depth_range, use_time = False, use_global = False, r_min = r_min, r_max = r_max)[0]
+# def regular_sobolov(N, lat_range = None, lon_range = None, depth_range = None, time_range = None, use_time = True, use_global = None, scale_time = None, depth_boost = 1.0, N_target = None, use_station_density = False, buffer_scale = 0.0, r_min = None, r_max = None, use_spherical = False, run_checks = False)
+
+
+# use_min_velocity = True
+# if use_min_velocity == True:
+
 
 # vel_model_ver = 1
-use_relative_1d_profile = False
+# use_relative_1d_profile = False
 
 compute_reference_times = True
 if compute_reference_times == True:
@@ -502,27 +653,180 @@ if compute_reference_times == True:
 
 		for j in ind_use:
 
-			if inside_hull[j] == 0:
-				print('Outside hull')
-				continue
 
-			# if use_relative_1d_profile == True: ## If True, shift the profile so that the same value occurs at each stations elevation (e.g., the profile varies with the surface)
-			# 	Vp = interp(ftrns2(xx)[:,2], depth_grid + locs_ref[j,2], Vp_profile) ## This may be locating some depths at incorrect positions, due to projection.
-			# 	Vs = interp(ftrns2(xx)[:,2], depth_grid + locs_ref[j,2], Vs_profile)
-			
 			results = compute_travel_times_parallel(xx, reciever_proj[j][None,:], Vp, Vs, dx_v, x11, x12, x13, num_cores = num_cores)
+			mp = RegularGridInterpolator((x1, x2, x3), results[0].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear', bounds_error = False, fill_value = None)
+			ms = RegularGridInterpolator((x1, x2, x3), results[1].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear', bounds_error = False, fill_value = None)
 
-			## Note: most likely, the interpolation step isn't necessary, since we fit the model later
-			mp = RegularGridInterpolator((x1, x2, x3), results[0].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-			ms = RegularGridInterpolator((x1, x2, x3), results[1].reshape(len(x2), len(x1), len(x3)).transpose([1,0,2]), method = 'linear')
-			tp = mp(ftrns1(X))
-			ts = ms(ftrns1(X))
+			# ----- local high-res box (domain fractions set once outside the loop) -----
+			sta_xyz = reciever_proj[j]
 
-			np.savez_compressed(path_to_file + '1D_Velocity_Models_Regional' + seperator + 'TravelTimeData' + seperator + '%s_1d_velocity_model_station_%d_ver_%d.npz'%(name_of_project, j, vel_model_ver), X = X, xx = xx, loc = locs_ref[j], locs_ref = locs_ref, Tp_interp = tp, Ts_interp = ts, Tp = results[0], Ts = results[1], Vp = Vp, Vs = Vs, Vp_interp = Vp_interp, Vs_interp = Vs_interp, depth_grid = depth_grid)
+			half_xy_j = min(half_xy, sta_xyz[0] - xx_min[0], xx_max[0] - sta_xyz[0])
+			half_xy_j = min(half_xy_j, sta_xyz[1] - xx_min[1], xx_max[1] - sta_xyz[1])
+			half_z_j  = min(half_z,  sta_xyz[2] - xx_min[2], xx_max[2] - sta_xyz[2])
+
+			# avoid degenerate boxes at domain edge
+			half_xy_j = max(half_xy_j, 5 * dx)
+			half_z_j  = max(half_z_j,  5 * dx)
+
+			N_target = 0.5 * len(xx)
+			V = max((2 * half_xy_j) ** 2 * (2 * half_z_j), 1.0)
+			dx_loc = float(np.clip((V / N_target) ** (1.0 / 3.0), dx / 4.0, dx))
+
+			x1_loc = np.arange(sta_xyz[0] - half_xy_j, sta_xyz[0] + half_xy_j + dx_loc, dx_loc)
+			x2_loc = np.arange(sta_xyz[1] - half_xy_j, sta_xyz[1] + half_xy_j + dx_loc, dx_loc)
+			x3_loc = np.arange(sta_xyz[2] - half_z_j,  sta_xyz[2] + half_z_j  + dx_loc, dx_loc)
+
+			x11_loc, x12_loc, x13_loc = np.meshgrid(x1_loc, x2_loc, x3_loc)  # same convention as global
+			xx_loc = np.column_stack([
+				x11_loc.ravel(), x12_loc.ravel(), x13_loc.ravel()
+			])
+			dx_v_loc = np.array([
+				np.diff(x1_loc)[0], np.diff(x2_loc)[0], np.diff(x3_loc)[0]
+			])
+
+			# Vp/Vs on local grid from global Cartesian interpolants (or KDTree NN)
+			Vp_loc = np.asarray(mp_vp(xx_loc)).ravel()
+			Vs_loc = np.asarray(ms_vs(xx_loc)).ravel()
+			Vp_loc = np.maximum(Vp_loc, 200.0)  # keep FMM stable
+			Vs_loc = np.maximum(Vs_loc, 100.0)
+
+			results_loc = compute_travel_times_parallel(
+				xx_loc,
+				sta_xyz[None, :],
+				Vp_loc,
+				Vs_loc,
+				dx_v_loc,
+				x11_loc,
+				x12_loc,
+				x13_loc,
+				num_cores=num_cores,
+			)
+			mp_loc = RegularGridInterpolator(
+				(x1_loc, x2_loc, x3_loc),
+				results_loc[0].reshape(len(x2_loc), len(x1_loc), len(x3_loc)).transpose([1, 0, 2]),
+				method="linear",
+				bounds_error=False,
+				fill_value=None,
+			)
+			ms_loc = RegularGridInterpolator(
+				(x1_loc, x2_loc, x3_loc),
+				results_loc[1].reshape(len(x2_loc), len(x1_loc), len(x3_loc)).transpose([1, 0, 2]),
+				method="linear",
+				bounds_error=False,
+				fill_value=None,
+			)
+
+			r_loc = half_xy_j  # merge radius in Cartesian horizontal sense (or use min half)
+			blend = 0.1 * r_loc
+
+			# def make_merged_travel_time_interp(mp_coarse, mp_local, sta_xyz, half_xy, half_z, blend_width=None):
+			# tp_merged = make_merged_travel_time_interp(mp, mp_loc, sta_xyz, r_loc, blend_width=blend)
+			# ts_merged = make_merged_travel_time_interp(ms, ms_loc, sta_xyz, r_loc, blend_width=blend)
+			tp_merged = make_merged_travel_time_interp(mp, mp_loc, sta_xyz, half_xy_j, half_z_j, blend_width = blend)
+			ts_merged = make_merged_travel_time_interp(ms, ms_loc, sta_xyz, half_xy_j, half_z_j, blend_width = blend)
+
+
+			train, vald = sample_stratified_queries_for_station(
+				locs_ref[j],
+				lat_range_extend,
+				lon_range_extend,
+				depth_range,
+				ftrns1,
+				ftrns2,
+				tp_interp = tp_merged,		 # callable: Cartesian (N,3) -> (N,) travel time P
+				ts_interp = ts_merged,
+				vp_interp = mp_vp,
+				vs_interp = ms_vs,
+				# counts (per station) — tune to match old totals / scale_factor
+				n_very_near=40_000,
+				n_near=50_000,
+				n_far=40_000,
+				n_uniform=40_000,
+				n_boundary=10_000,	   # station itself; increase if you want more t≈0 copies
+				n_vald=10_000,
+				n_candidates_factor=4,  # candidate pool = factor * each stratum before reweight
+				_sobol_box = sobolov_sampler,
+				xx_min = xx_min,
+				xx_max = xx_max,
+				seed=np.random.choice(10000))
+
+			np.savez_compressed(
+				path_to_file
+				+ "1D_Velocity_Models_Regional"
+				+ seperator
+				+ "TravelTimeData"
+				+ seperator
+				+ "%s_1d_velocity_model_station_%d_ver_%d.npz"
+				% (name_of_project, j, vel_model_ver),
+				
+				X=train["X"],
+				X_cart=ftrns1(train["X"]),
+				Tp_interp=train["Tp"],
+				Ts_interp=train["Ts"],
+				Vp_interp=train.get("Vp"),
+				Vs_interp=train.get("Vs"),
+
+				X_vald=vald["X"],
+				X_vald_cart=ftrns1(vald["X"]),
+				Tp_vald=vald["Tp"],
+				Ts_vald=vald["Ts"],
+				Vp_vald=vald.get("Vp"),
+				Vs_vald=vald.get("Vs"),
+
+				loc=locs_ref[j],
+				locs_ref=locs_ref,
+				xx=xx,
+				depth_grid=depth_grid,
+				# optional full FMM fields if you still want them:
+				# Tp=results[0], Ts=results[1], Vp=Vp, Vs=Vs,
+			)
+
 
 
 print("All files saved successfully!")
 print("✔ Script execution: Done")
 
 
+
+
+# def make_merged_travel_time_interp(
+#	 mp_coarse,
+#	 mp_local,
+#	 sta_xyz,
+#	 r_loc,
+#	 blend_width=None,
+# ):
+#	 """
+#	 Returns callable pts_cart (N,3) -> (N,) travel times.
+#	 Inside r_loc - blend: local; outside r_loc: coarse; shell: smooth blend.
+#	 """
+#	 sta_xyz = np.asarray(sta_xyz, dtype=float).reshape(3)
+#	 if blend_width is None:
+#		 blend_width = 0.1 * float(r_loc)  # 10% of local half-width
+#	 blend_width = max(float(blend_width), 1.0)
+#	 r0 = max(float(r_loc) - blend_width, 0.0)
+#	 r1 = float(r_loc)
+
+#	 def interp(pts_cart):
+#		 pts_cart = np.asarray(pts_cart, dtype=float).reshape(-1, 3)
+#		 d = np.linalg.norm(pts_cart - sta_xyz, axis=1)
+
+#		 t_c = np.asarray(mp_coarse(pts_cart)).ravel()
+
+#		 # local only where it can be valid (inside/near box)
+#		 use_loc = d <= r1
+#		 t = t_c.copy()
+#		 if np.any(use_loc):
+#			 t_l = np.asarray(mp_local(pts_cart[use_loc])).ravel()
+#			 # weight 0 at r0 (all local), 1 at r1 (all coarse)
+#			 w = np.clip((d[use_loc] - r0) / (r1 - r0 + 1e-12), 0.0, 1.0)
+#			 # if local returns NaN (outside local grid), fall back to coarse
+#			 bad = ~np.isfinite(t_l)
+#			 t_l = np.where(bad, t_c[use_loc], t_l)
+#			 w = np.where(bad, 1.0, w)
+#			 t[use_loc] = (1.0 - w) * t_l + w * t_c[use_loc]
+#		 return t
+
+#	 return interp
 
