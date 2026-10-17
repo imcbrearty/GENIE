@@ -536,7 +536,7 @@ if __name__ == '__main__':
             xx=xx,
             depth_grid=depth_grid,
         )
-        print(f"[SUCCESS] Saved station {j} data to {save_path}")
+        print(f"[SUCCESS] Saved station {j} data to {save_path} \n")
 
 print("All files saved successfully!")
 print("✔ Script execution: Done")
