@@ -5879,7 +5879,8 @@ class TravelTimesPN_Regional(nn.Module):
     self.fc3_2 = nn.Linear(n_hidden, n_hidden)
     self.fc3_3 = nn.Linear(n_hidden, n_hidden)
     self.fc3_4 = nn.Linear(n_hidden, n_embed)
-	self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
+    self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
+
 	  
     # 4. Independent Heuristic Output Heads for P and S Waves
     self.merge_p = nn.Sequential(
