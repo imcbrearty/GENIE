@@ -60,18 +60,22 @@ def compute_travel_times_parallel(xx_r, h, h1, dx_v, x11, x12, x13, num_cores=10
             empty = np.full(grid_shape, np.nan, dtype=np.float32)
             return empty, empty, ind
 
+
         # Use passed-in global velocity interpolators if available, else fallback to nearest index
         if vp_interp is not None and vs_interp is not None:
-            vp_source = float(vp_interp(source_coords))
-            vs_source = float(vs_interp(source_coords))
+            vp_source = float(np.asarray(vp_interp(source_coords)).ravel()[0])
+            vs_source = float(np.asarray(vs_interp(source_coords)).ravel()[0])
             if np.isnan(vp_source) or vp_source <= 0:
-                vp_source = float(v_grid[np.unravel_index(np.argmin(phi_dist), grid_shape)])
+                nearest_idx = np.unravel_index(np.argmin(phi_dist), grid_shape)
+                vp_source = float(np.asarray(v_grid[nearest_idx]).ravel()[0])
             if np.isnan(vs_source) or vs_source <= 0:
-                vs_source = float(v1_grid[np.unravel_index(np.argmin(phi_dist), grid_shape)])
+                nearest_idx = np.unravel_index(np.argmin(phi_dist), grid_shape)
+                vs_source = float(np.asarray(v1_grid[nearest_idx]).ravel()[0])
         else:
             nearest_idx = np.unravel_index(np.argmin(phi_dist), grid_shape)
-            vp_source = float(v_grid[nearest_idx])
-            vs_source = float(v1_grid[nearest_idx])
+            vp_source = float(np.asarray(v_grid[nearest_idx]).ravel()[0])
+            vs_source = float(np.asarray(v1_grid[nearest_idx]).ravel()[0])
+        
 
         # Analytical source time shift
         t += (r0 / vp_source)
@@ -171,7 +175,8 @@ def sample_stratified_queries_for_station(
 
     def domain_candidates(n):
         n = int(max(n, 1))
-        return clip_lla(np.asarray(_sobol_box(n)))
+        n_pow2 = 1 << (n - 1).bit_length()
+        return clip_lla(np.asarray(_sobol_box(n_pow2))[:n])
 
     def near_boost_candidates(n, frac):
         if n <= 0 or frac is None or frac <= 0:
