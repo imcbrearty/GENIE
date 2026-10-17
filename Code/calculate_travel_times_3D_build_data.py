@@ -439,8 +439,8 @@ while (spanned_domain == False) and (domain_pad_cnt < 20):
 		lons = np.linspace(lon0, lon1, n_edge)
 		deps = np.linspace(dep0, dep1, max(3, n_edge // 2))
 
-        x11, x12, x13 = np.meshgrid(lats, lons, deps)
-        pts = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)   
+		x11, x12, x13 = np.meshgrid(lats, lons, deps)
+		pts = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)   
 
 		return np.unique(np.asarray(pts, float), axis=0)
 
