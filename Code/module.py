@@ -5393,7 +5393,7 @@ class GCN_Detection_Network_extended(nn.Module):
 #### EXTRA
 
 
-class VModel(nn.Module):
+class VModel1(nn.Module):
 
 	def __init__(self, n_phases = 2, n_hidden = 50, n_embed = 10, device = 'cuda'): # v_mean = np.array([6500.0, 3400.0]), norm_pos = None, inorm_pos = None, inorm_time = None, norm_vel = None, conversion_factor = None, 
 		super(VModel, self).__init__()
@@ -5434,6 +5434,46 @@ class VModel(nn.Module):
 		# out[:,1] = out[:,0]*out[:,1] ## Vs is a fraction of Vp
 
 		return torch.cat(lout, dim = 1)
+
+
+class VModel(nn.Module):
+
+  def __init__(self, n_phases=2, n_hidden=50, n_embed=10, device='cuda'):
+    super(VModel, self).__init__()
+
+    self.n_phases = n_phases
+
+    # Input dim: src_pos_cart (3) + src_lla_norm (3) + src_embed (n_embed)
+    dim_in = 3 + 3 + n_embed
+
+    self.fc1_1 = nn.Linear(dim_in, n_hidden)
+    self.fc1_2 = nn.Linear(n_hidden, n_hidden)
+    self.fc1_3 = nn.Linear(n_hidden, n_hidden)
+
+    self.fc1_p = nn.Linear(n_hidden, 1)  # Vp head
+    self.fc1_s = nn.Linear(n_hidden, 1)  # Vs ratio head
+
+    self.activate = nn.Softplus()
+
+  def fc1_block(self, x):
+    x1 = torch.sin(self.fc1_1(x))
+    x = torch.sin(self.fc1_2(x1)) + x1
+    x1 = torch.sin(self.fc1_3(x)) + x
+
+    # Vp prediction (positive slowness/velocity space via Softplus)
+    vp_out = self.activate(self.fc1_p(x1))
+
+    # Vs predicted as a physically bounded fraction of Vp: Vs = Vp * (0.45 + 0.25 * Sigmoid(x))
+    # Guarantees Vp/Vs ratio remains between 1.43 and 2.22 everywhere in 3D domain
+    s_ratio_raw = self.fc1_s(x1)
+    vs_out = vp_out * (0.45 + 0.25 * torch.sigmoid(s_ratio_raw))
+
+    return torch.cat([vp_out, vs_out], dim=1)
+
+  def forward(self, src_cart, src_lla_norm, embed):
+    # Concatenate ECEF Cartesian, normalized LLA, and latent embedding
+    feat = torch.cat([src_cart, src_lla_norm, embed], dim=1)
+    return self.fc1_block(feat)
 
 
 class TravelTimesPN1(nn.Module):
@@ -5767,13 +5807,6 @@ class TravelTimesPN(nn.Module):
 				# return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
 
 
-
-
-import numpy as np
-import torch
-import torch.nn as nn
-
-
 class RFFEncoding(nn.Module):
 
   def __init__(self, in_dim=3, mapping_size=8, scale=1.0):
@@ -5846,7 +5879,8 @@ class TravelTimesPN_Regional(nn.Module):
     self.fc3_2 = nn.Linear(n_hidden, n_hidden)
     self.fc3_3 = nn.Linear(n_hidden, n_hidden)
     self.fc3_4 = nn.Linear(n_hidden, n_embed)
-
+	self.vmodel = VModel(n_phases = n_phases, n_embed = n_embed, device = device).to(device)
+	  
     # 4. Independent Heuristic Output Heads for P and S Waves
     self.merge_p = nn.Sequential(
         nn.Linear(2 * n_hidden, n_hidden),
