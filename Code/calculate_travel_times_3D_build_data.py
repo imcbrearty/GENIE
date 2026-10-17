@@ -33,14 +33,18 @@ def compute_travel_times_parallel(xx, xx_r, h, h1, dx_v, x11, x12, x13, num_core
 	print(f"[INFO] Initializing compute_travel_times_parallel", flush=True)
 	print(f"[INFO] Grid Shape: {grid_shape} | Total Nodes: {h.shape[0]:,}", flush=True)
 	print(f"[INFO] Total Sources to Process: {n_sources} across {num_cores} cores", flush=True)
-	print(f"[INFO] Grid Extents X: [{x11.min():.2f}, {x11.max():.2f}] | Y: [{x12.min():.2f}, {x12.max():.2f}] | Z: [{x13.min():.2f}, {x13.max():.2f}]", flush=True)
-
+	print(f"[INFO] Grid Extents X: [{x11.min():.2f}, {x11.max():.2f}] | Y: [{x12.min():.2f}, {x12.max():.2f}] | Z: [{x13.min():.2f}, {x13.max():.2f}] | dx: {dx_v:.2f}", flush=True)
+	
 	# Check for non-physical/corrupted velocities prior to job dispatch
 	v_min, v1_min = np.nanmin(h), np.nanmin(h1)
 	if v_min <= 0 or v1_min <= 0:
 		print(f"[WARNING] Velocity fields contain non-positive values (Vp_min={v_min:.1f}, Vs_min={v1_min:.1f})!", flush=True)
 		print(f"[WARNING] Negative/zero velocities will cause Fast Marching crashes. Ensure arrays are clipped prior to passing.", flush=True)
 
+	print('\n')
+	print(yval.shape); print(x11.shape); print(x12.shape); print(x13.shape)
+	print('\n')
+	
 	# -------------------------------------------------------------------------
 	# 1. Parallel Worker Routine
 	# -------------------------------------------------------------------------
