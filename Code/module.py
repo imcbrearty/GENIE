@@ -5767,6 +5767,286 @@ class TravelTimesPN(nn.Module):
 				# return torch.relu(self.inorm_time(base_val.reshape(len(src), len(sta), -1) + pred))
 
 
+
+
+import numpy as np
+import torch
+import torch.nn as nn
+
+
+class RFFEncoding(nn.Module):
+
+  def __init__(self, in_dim=3, mapping_size=8, scale=1.0):
+    super(RFFEncoding, self).__init__()
+    B = torch.randn(in_dim, mapping_size) * scale
+    self.register_buffer('B', B)
+    # Register pi as a persistent tensor buffer to avoid importing 'math' or NumPy CPU casting
+    self.register_buffer('pi', torch.tensor(np.pi, dtype=torch.float32))
+
+  def forward(self, x):
+    x_proj = 2.0 * self.pi * torch.matmul(x, self.B)
+    return torch.cat([torch.cos(x_proj), torch.sin(x_proj)], dim=-1)
+
+
+class TravelTimesPN_Regional(nn.Module):
+
+  def __init__(
+      self,
+      ftrns1,
+      ftrns2,
+      n_phases=2,
+      n_srcs=0,
+      n_hidden=64,
+      n_embed=10,
+      v_mean=np.array([6500.0, 3400.0]),
+      norm_pos=None,
+      inorm_pos=None,
+      inorm_time=None,
+      norm_vel=None,
+      conversion_factor=None,
+      norm_lla=None,
+      corrs=None,
+      locs_corr=None,
+      device='cuda',
+  ):
+    super(TravelTimesPN_Regional, self).__init__()
+
+    self.device = device
+    self.ftrns1 = ftrns1
+    self.ftrns2 = ftrns2
+    self.norm_pos = norm_pos
+    self.inorm_pos = inorm_pos
+    self.inorm_time = inorm_time
+    self.norm_vel = norm_vel
+    self.conversion_factor = conversion_factor
+
+    # Norm function for [lat, lon, depth] LLA coordinates
+    self.norm_lla = norm_lla if norm_lla is not None else (lambda x: x)
+
+    # 1. Fourier Encoders for Cartesian Spatial Coordinates
+    self.rff_rel = RFFEncoding(in_dim=3, mapping_size=8, scale=1.0)  # dim = 16
+    self.rff_abs = RFFEncoding(in_dim=3, mapping_size=8, scale=1.0)  # dim = 16
+    self.rff_src = RFFEncoding(in_dim=3, mapping_size=8, scale=1.0)  # dim = 16
+
+    # 2. Input Dimension Computations
+    dim_fc1 = 16 + 3 + 3 + n_phases + n_embed
+    dim_fc2 = 16 + 16 + 3 + 3 + n_phases + n_embed
+    dim_fc3 = 16 + 3
+
+    # 3. Sine Residual MLP Streams
+    self.fc1_1 = nn.Linear(dim_fc1, n_hidden)
+    self.fc1_2 = nn.Linear(n_hidden, n_hidden)
+    self.fc1_3 = nn.Linear(n_hidden, n_hidden)
+
+    self.fc2_1 = nn.Linear(dim_fc2, n_hidden)
+    self.fc2_2 = nn.Linear(n_hidden, n_hidden)
+    self.fc2_3 = nn.Linear(n_hidden, n_hidden)
+
+    self.fc3_1 = nn.Linear(dim_fc3, n_hidden)
+    self.fc3_2 = nn.Linear(n_hidden, n_hidden)
+    self.fc3_3 = nn.Linear(n_hidden, n_hidden)
+    self.fc3_4 = nn.Linear(n_hidden, n_embed)
+
+    # 4. Independent Heuristic Output Heads for P and S Waves
+    self.merge_p = nn.Sequential(
+        nn.Linear(2 * n_hidden, n_hidden),
+        nn.PReLU(),
+        nn.Linear(n_hidden, 1),
+    )
+    self.merge_s = nn.Sequential(
+        nn.Linear(2 * n_hidden, n_hidden),
+        nn.PReLU(),
+        nn.Linear(n_hidden, 1),
+    )
+
+    # Static Velocity Buffers
+    self.register_buffer(
+        'v_mean', torch.tensor(v_mean, dtype=torch.float32).to(device)
+    )
+    self.register_buffer(
+        'v_mean_norm',
+        torch.tensor(norm_vel(v_mean), dtype=torch.float32).to(device),
+    )
+
+    # GPU-Native Station Correction Lookup Table
+    if locs_corr is not None and corrs is not None:
+      self.use_corr = True
+      self.register_buffer(
+          'locs_corr_cart',
+          ftrns1(torch.tensor(locs_corr, dtype=torch.float32).to(device)),
+      )
+      self.register_buffer(
+          'corrs', torch.tensor(corrs, dtype=torch.float32).to(device)
+      )
+    else:
+      self.use_corr = False
+
+  # Sine Activation Residual Blocks
+  def fc1_block(self, x):
+    x1 = torch.sin(self.fc1_1(x))
+    x = torch.sin(self.fc1_2(x1)) + x1
+    return torch.sin(self.fc1_3(x)) + x
+
+  def fc2_block(self, x):
+    x1 = torch.sin(self.fc2_2(torch.sin(self.fc2_1(x)))) + torch.sin(
+        self.fc2_1(x)
+    )
+    return torch.sin(self.fc2_3(x1)) + x1
+
+  def fc3_block(self, x):
+    x1 = torch.sin(self.fc3_1(x))
+    x = torch.sin(self.fc3_2(x1)) + x1
+    x1 = torch.sin(self.fc3_3(x)) + x
+    return self.fc3_4(x1)
+
+  def embed_src(self, src_cart, src_lla_norm):
+    rff_src = self.rff_src(src_cart)
+    return self.fc3_block(torch.cat([rff_src, src_lla_norm], dim=1))
+
+  def forward(self, sta, src, method='direct', train=False):
+
+    if method == 'direct':
+      sta_proj = self.norm_pos(self.ftrns1(sta))
+      src_proj = self.norm_pos(self.ftrns1(src))
+
+      # FIX 1: Set requires_grad_(True) BEFORE embedding computations so autograd
+      # traces gradients through the source embedding network during backward passes
+      if train:
+        src_proj.requires_grad_(True)
+
+      sta_lla_norm = self.norm_lla(sta)
+      src_lla_norm = self.norm_lla(src)
+
+      # Source Embedding stream evaluation
+      embed_src = self.embed_src(src_proj, src_lla_norm)
+
+      # Base Physical Prior
+      dist_vec = sta_proj - src_proj
+      dist_norm = torch.norm(dist_vec, dim=1, keepdim=True)
+      base_val = (
+          self.conversion_factor
+          * dist_norm
+          / self.v_mean_norm.reshape(1, -1)
+      )
+
+      # Continuous 3D unit ray-direction vector
+      unit_dir_vec = dist_vec / (dist_norm + 1e-7)
+
+      # Fourier spatial encodings
+      rff_rel = self.rff_rel(dist_vec)
+      rff_sta = self.rff_abs(sta_proj)
+      rff_src = self.rff_abs(src_proj)
+
+      # Construct feature streams
+      dlla_norm = sta_lla_norm - src_lla_norm
+      feat1 = torch.cat(
+          [rff_rel, unit_dir_vec, dlla_norm, base_val, embed_src], dim=1
+      )
+      feat2 = torch.cat(
+          [rff_sta, rff_src, sta_lla_norm, src_lla_norm, base_val, embed_src],
+          dim=1,
+      )
+
+      pred1 = self.fc1_block(feat1)
+      pred2 = self.fc2_block(feat2)
+      merged_feats = torch.cat([pred1, pred2], dim=1)
+
+      # Evaluate separate output heads for P and S waves
+      pred_p = self.merge_p(merged_feats)
+      pred_s = self.merge_s(merged_feats)
+      pred = torch.cat([pred_p, pred_s], dim=1)
+
+      if train:
+        return base_val, pred, src_proj, embed_src
+      else:
+        pred_time = base_val + pred
+        if self.use_corr:
+          dists = torch.cdist(self.ftrns1(sta), self.locs_corr_cart)
+          imatch = torch.argmin(dists, dim=1)
+          return self.inorm_time(pred_time) + self.corrs[imatch]
+        else:
+          return self.inorm_time(pred_time)
+
+    elif method == 'pairs':
+      sta_proj = self.norm_pos(self.ftrns1(sta))
+      src_proj = self.norm_pos(self.ftrns1(src))
+
+      sta_lla_norm = self.norm_lla(sta)
+      src_lla_norm = self.norm_lla(src)
+
+      N_src, N_sta = len(src), len(sta)
+
+      src_repeat = src_proj.repeat_interleave(N_sta, dim=0)
+      sta_repeat = sta_proj.repeat(N_src, 1)
+
+      src_lla_repeat = src_lla_norm.repeat_interleave(N_sta, dim=0)
+      sta_lla_repeat = sta_lla_norm.repeat(N_src, 1)
+
+      if train:
+        src_repeat.requires_grad_(True)
+
+      embed_src = self.embed_src(src_repeat, src_lla_repeat)
+
+      dist_vec = sta_repeat - src_repeat
+      dist_norm = torch.norm(dist_vec, dim=1, keepdim=True)
+      base_val = self.conversion_factor * (
+          dist_norm / self.v_mean_norm.reshape(1, -1)
+      )
+
+      unit_dir_vec = dist_vec / (dist_norm + 1e-7)
+
+      rff_rel = self.rff_rel(dist_vec)
+      rff_sta = self.rff_abs(sta_repeat)
+      rff_src = self.rff_abs(src_repeat)
+
+      dlla_repeat = sta_lla_repeat - src_lla_repeat
+      feat1 = torch.cat(
+          [rff_rel, unit_dir_vec, dlla_repeat, base_val, embed_src], dim=1
+      )
+      feat2 = torch.cat(
+          [rff_sta, rff_src, sta_lla_repeat, src_lla_repeat, base_val, embed_src],
+          dim=1,
+      )
+
+      pred1 = self.fc1_block(feat1)
+      pred2 = self.fc2_block(feat2)
+      merged_feats = torch.cat([pred1, pred2], dim=1)
+
+      pred_p = self.merge_p(merged_feats)
+      pred_s = self.merge_s(merged_feats)
+      pred = torch.cat([pred_p, pred_s], dim=1).reshape(N_src, N_sta, -1)
+
+      base_val_out = base_val.reshape(N_src, N_sta, -1)
+
+      if train:
+        return (
+            base_val_out,
+            pred,
+            src_repeat.reshape(N_src, N_sta, -1),
+            embed_src.reshape(N_src, N_sta, -1),
+        )
+      else:
+        pred_time = base_val_out + pred
+        if self.use_corr:
+          dists = torch.cdist(self.ftrns1(sta), self.locs_corr_cart)
+          imatch = torch.argmin(dists, dim=1)
+          # FIX 2: Correct 3D tensor shape broadcasting (N_src, N_sta, 2)
+          return self.inorm_time(pred_time) + self.corrs[imatch].unsqueeze(
+              0
+          ).unsqueeze(-1)
+
+        return self.inorm_time(pred_time)
+
+
+
+
+
+
+
+
+
+
+
 ## Magnitude class
 class Magnitude(nn.Module):
 	def __init__(self, locs, grid, ftrns1_diff, ftrns2_diff, k = 1, device = 'cuda'):
