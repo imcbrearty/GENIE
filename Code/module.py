@@ -5548,9 +5548,12 @@ class TravelTimesPN1(nn.Module):
 						sta_proj = self.norm_pos(self.ftrns1(sta))
 						src_proj = self.norm_pos(self.ftrns1(src))
 
-						if train == True:
-								src_proj = Variable(src_proj, requires_grad = True)
-
+						# if train == True:
+						# 		src_proj = Variable(src_proj, requires_grad = True)
+							
+						if train:
+						    src_proj.requires_grad_(True)
+					
 						base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)
 
 						pred1 = self.fc1_block( torch.cat((sta_proj - src_proj, self.norm_pos(src[:,2].reshape(-1,1)), base_val, embed_src), dim = 1) )
@@ -5711,9 +5714,12 @@ class TravelTimesPN(nn.Module):
 			sta_proj = self.norm_pos(self.ftrns1(sta))
 			src_proj = self.norm_pos(self.ftrns1(src))
 
-			if train == True:
-				src_proj = Variable(src_proj, requires_grad = True)
+			# if train == True:
+			# 	src_proj = Variable(src_proj, requires_grad = True)
 
+			if train:
+			    src_proj.requires_grad_(True)
+			
 			base_val = self.conversion_factor*torch.norm(sta_proj - src_proj, dim = 1, keepdim = True)/self.v_mean_norm.reshape(1,-1)
 
 			pred1 = self.fc1_block( torch.cat((sta_proj - src_proj, base_val, embed_src), dim = 1) )
