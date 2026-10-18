@@ -821,6 +821,7 @@ if __name__ == "__main__":
             vs_interp=ms_vs,
             n_very_near=20_000,
             n_near=30_000,
+            n_mid=25_000,
             n_sub_cylinder=30_000,
             n_far=30_000,
             n_uniform=50_000,
