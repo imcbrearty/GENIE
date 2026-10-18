@@ -2532,7 +2532,7 @@ def load_travel_time_neural_network(path_to_file, ftrns1, ftrns2, n_ver_load, ph
 
 	mean_lla = torch.tensor(np.array([lat_mean, lon_mean, 0.0]).reshape(1,-1), dtype = torch.float32, device = device)
 	scale_lla = torch.tensor(np.array([lat_norm, lon_norm, depth_norm]).reshape(1,-1), dtype = torch.float32, device = device)
-	norm_lla = lambda x: (x - mean_lla)/scale_lla
+	norm_lla = lambda x: (x[:,0:3] - mean_lla)/scale_lla
 	
 	m = TravelTimesPN(ftrns1, ftrns2, n_phases = n_phases, v_mean = v_mean, norm_pos = norm_pos, inorm_pos = inorm_pos, inorm_time = inorm_time, norm_vel = norm_vel, conversion_factor = conversion_factor, norm_lla = norm_lla, corrs = corrs, locs_corr = locs_corr, device = device).to(device)
 	m.load_state_dict(torch.load(path_to_file + '/1D_Velocity_Models_Regional/travel_time_neural_network_physics_informed_%s_ver_%d.h5'%(phase, n_ver_load), map_location = torch.device(device)))
