@@ -105,7 +105,7 @@ if train_travel_time_neural_network == True:
 	Vp_samples_boundary_vald, Vs_samples_boundary_vald = [], []
 	X_samples_boundary_vald, Locs_samples_boundary_vald = [], []
 
-	use_diff_loss, ratio_pairs, k_diff = True, 0.5, 6
+	use_diff_loss, ratio_pairs, k_diff = True, 0.3, 6
 	X_diff_train_i, Tp_diff_train_i, Ts_diff_train_i = [], [], []
 	X_diff_train_j, Tp_diff_train_j, Ts_diff_train_j, Locs_diff_train = [], [], [], []
 
@@ -310,13 +310,13 @@ if train_travel_time_neural_network == True:
 	loss_data_func = nn.SmoothL1Loss(beta=beta_data)
 	loss_diff_func = nn.SmoothL1Loss(beta=beta_diff, reduction = 'none')
 
-	n_batch = 30000
-	n_steps = 250001
+	n_batch = 15000 # 30000
+	n_steps = 150001 # 250001
 	n_ver_save = vel_model_ver
 	use_causual_loss = True
 
 	losses, losses_vald = [], []
-	vald_steps = 10
+	vald_steps = 50 # 10
 	loss_vald = 0.0
 	n_burn_in = 1000
 
@@ -441,7 +441,7 @@ if train_travel_time_neural_network == True:
 		# 5. Double-Difference Loss
 		# --------------------------------------------------------------------------
 		if use_diff_loss and (i > n_burn_in):
-			n_batch_diff = int(0.5 * n_batch)
+			n_batch_diff = int(0.2 * n_batch) # 0.5
 			isample_diff = np.random.randint(0, high=n_dataset_diff, size=n_batch_diff)
 
 			sta_pos_dd = torch.Tensor(Locs_diff_train[isample_diff]).to(device)
@@ -590,7 +590,7 @@ if train_travel_time_neural_network == True:
 					loss_vald = 0.85 * loss_vald + 0.15 * loss_initial
 
 				if use_diff_loss and (i > n_burn_in):
-					n_batch_diff = int(0.5 * n_batch)
+					n_batch_diff = int(0.2 * n_batch) # 0.5
 					isample_diff = np.random.randint(0, high=n_dataset_diff_vald, size=n_batch_diff)
 
 					sta_pos_dd = torch.Tensor(Locs_diff_vald[isample_diff]).to(device)
