@@ -491,6 +491,7 @@ if train_travel_time_neural_network == True:
 		loss.backward()
 		optimizer.step()
 		scheduler.step()
+		losses.append(loss.item())
 
 
 		# --------------------------------------------------------------------------
