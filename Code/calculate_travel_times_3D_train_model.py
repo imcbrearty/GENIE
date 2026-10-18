@@ -514,14 +514,14 @@ if train_travel_time_neural_network == True:
 					isample_boundary = np.random.randint(0, high=n_dataset_boundary_vald, size=n_batch)
 					sta_pos_boundary = torch.Tensor(Locs_samples_boundary_vald[isample_boundary]).to(device)
 					src_pos_boundary = torch.Tensor(X_samples_boundary_vald[isample_boundary]).to(device)
-					pred_base_boundary, pred_perturb_boundary, _, _ = m(sta_pos_boundary, src_pos_boundary, method='direct', train=False)
+					pred_base_boundary, pred_perturb_boundary, _, _ = m(sta_pos_boundary, src_pos_boundary, method='direct', train = True)
 					loss_boundary = loss_pde_func(pred_perturb_boundary, torch.zeros_like(pred_perturb_boundary))
 				else:
 					loss_boundary = torch.zeros(1).to(device)
 
 				# 2. Enable gradients ONLY for travel-time pass + PDE autograd derivatives
 				with torch.set_grad_enabled(True):
-					pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method='direct', train=False)
+					pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method='direct', train = True)
 
 					if i > n_burn_in:
 						src_lla_norm = m.norm_lla(src_pos)
@@ -601,8 +601,8 @@ if train_travel_time_neural_network == True:
 					dt_s_target = norm_time(Ts_diff_vald_i[isample_diff] - Ts_diff_vald_j[isample_diff])
 					trgt_dt = torch.Tensor(np.column_stack([dt_p_target, dt_s_target])).to(device)
 
-					pred_base1, pred_pert1, src_proj1, _ = m(sta_pos_dd, src_pos_dd1, method='direct', train=False)
-					pred_base2, pred_pert2, src_proj2, _ = m(sta_pos_dd, src_pos_dd2, method='direct', train=False)
+					pred_base1, pred_pert1, src_proj1, _ = m(sta_pos_dd, src_pos_dd1, method='direct', train = True)
+					pred_base2, pred_pert2, src_proj2, _ = m(sta_pos_dd, src_pos_dd2, method='direct', train = True)
 
 					dt_pred = (pred_base1 + pred_pert1) - (pred_base2 + pred_pert2)
 
