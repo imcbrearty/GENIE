@@ -570,7 +570,7 @@ if train_travel_time_neural_network == True:
 			weight_dd = torch.exp(-dist_ij_norm / (gamma * max_dist_dd_norm))
 
 			loss_diff = loss_func1(weight_dd * dt_pred, weight_dd * trgt_dt)
-			loss = loss + 0.20 * loss_diff
+			loss = loss + 3.0 * loss_diff
 
 		if use_spatial_gradient_loss and (i > n_burn_in):
 			sta_pos_cart = m.norm_pos(m.ftrns1(sta_pos))
@@ -713,7 +713,7 @@ if train_travel_time_neural_network == True:
 				weight_dd = torch.exp(-dist_ij_norm / (gamma * max_dist_dd_norm))
 
 				loss_diff = loss_func1(weight_dd * dt_pred, weight_dd * trgt_dt)
-				loss_vald = loss_vald + 0.20 * loss_diff
+				loss_vald = loss_vald + 3.0 * loss_diff
 
 			if use_spatial_gradient_loss and (i > n_burn_in):
 				sta_pos_cart = m.norm_pos(m.ftrns1(sta_pos))
