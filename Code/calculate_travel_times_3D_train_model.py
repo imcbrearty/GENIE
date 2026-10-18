@@ -16,6 +16,7 @@ from torch.autograd import Variable
 from sklearn.metrics import r2_score
 from utils import *
 from module import VModel, TravelTimesPN, TravelTimesPN_Regional
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.autograd import Variable
 from torch_geometric.utils import get_laplacian
 from process_utils import * # differential_evolution_location
@@ -297,9 +298,17 @@ if train_travel_time_neural_network == True:
 	).to(device)
 
 	optimizer = optim.Adam(m.parameters(), lr=0.001)
-	scheduler = StepLR(optimizer, step_size=10000, gamma=0.9)
-	loss_func = nn.L1Loss()
-	loss_func1 = nn.L1Loss()
+	# scheduler = StepLR(optimizer, step_size=10000, gamma=0.9)
+
+	# loss_func = nn.L1Loss()
+	# loss_func1 = nn.L1Loss()
+
+	beta_data = 0.2 / max_time   # Smooth transition within ~50 ms absolute error
+	beta_diff = 0.05 / max_time   # Smooth transition within ~10 ms differential error
+
+	loss_pde_func = nn.L1Loss()
+	loss_data_func = nn.SmoothL1Loss(beta=beta_data)
+	loss_diff_func = nn.SmoothL1Loss(beta=beta_diff, reduction = 'none')
 
 	n_batch = 30000
 	n_steps = 250001
@@ -310,6 +319,17 @@ if train_travel_time_neural_network == True:
 	vald_steps = 10
 	loss_vald = 0.0
 	n_burn_in = 1000
+
+	# 3. Smooth Warmup + Cosine Scheduler over 250,000 steps
+	warmup_scheduler = LinearLR(
+		optimizer, start_factor=0.1, end_factor=1.0, total_iters=1000
+	)
+	cosine_scheduler = CosineAnnealingLR(optimizer, T_max= n_steps - 1001, eta_min=1e-5)
+	scheduler = SequentialLR(
+		optimizer,
+		schedulers=[warmup_scheduler, cosine_scheduler],
+		milestones=[1000],
+	)
 
 	use_spatial_gradient_loss = True
 	use_initial_model_damping = True
@@ -335,134 +355,6 @@ if train_travel_time_neural_network == True:
 			travel_times_p = Tp_samples[isample]
 			travel_times_s = Ts_samples[isample]
 
-		# pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method='direct', train=True)
-		# # vel_pred = m.vmodel(src_pos_cart, src_embed)
-
-		# src_lla_norm = m.norm_lla(src_pos)
-		# vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
-
-		# pred_total_p = pred_base[:, [0]] + pred_perturb[:, [0]]
-		# pred_total_s = pred_base[:, [1]] + pred_perturb[:, [1]]
-
-		# grad_p = torch.autograd.grad(
-		# 	inputs=src_pos_cart, 
-		# 	outputs=pred_total_p, 
-		# 	grad_outputs=torch_one_vec, 
-		# 	retain_graph=True, 
-		# 	create_graph=True
-		# )[0]
-
-		# grad_s = torch.autograd.grad(
-		# 	inputs=src_pos_cart, 
-		# 	outputs=pred_total_s, 
-		# 	grad_outputs=torch_one_vec, 
-		# 	retain_graph=False, 
-		# 	create_graph=True
-		# )[0]
-
-		# # FIX BUG B: keepdim=True prevents 1D vector broadcasting bugs
-		# eps = 1e-6
-		# grad_sq_p = (grad_p * grad_p).sum(dim=1, keepdim=True)
-		# grad_sq_s = (grad_s * grad_s).sum(dim=1, keepdim=True)
-
-		# grad_s_p = torch.sqrt(grad_sq_p + eps)
-		# grad_s_s = torch.sqrt(grad_sq_s + eps)
-
-		# target_slowness_p = 1.0 / (scale_norm_factor * vel_pred[:, [0]])
-		# target_slowness_s = 1.0 / (scale_norm_factor * vel_pred[:, [1]])
-
-		# loss_pde_unweighted_p = loss_func(grad_s_p, target_slowness_p)
-		# loss_pde_unweighted_s = loss_func(grad_s_s, target_slowness_s)
-
-		# loss_weight_norm = torch.exp(-torch.abs(inorm_time(pred_base[:, [0]])) / t_scale_val)
-		# loss_weight_norm = loss_weight_norm / (loss_weight_norm.mean() + 1e-7)
-
-		# loss_pde_weighted_p = loss_func(loss_weight_norm * grad_s_p, loss_weight_norm * target_slowness_p)
-		# loss_pde_weighted_s = loss_func(loss_weight_norm * grad_s_s, loss_weight_norm * target_slowness_s)
-
-		# loss_pde_p = 0.5 * loss_pde_unweighted_p + 0.5 * loss_pde_weighted_p
-		# loss_pde_s = 0.5 * loss_pde_unweighted_s + 0.5 * loss_pde_weighted_s
-
-		# isample_boundary = np.random.randint(0, high=n_dataset_boundary, size=n_batch)
-		# sta_pos_boundary = torch.Tensor(Locs_samples_boundary[isample_boundary]).to(device)
-		# src_pos_boundary = torch.Tensor(X_samples_boundary[isample_boundary]).to(device)
-		# pred_base_boundary, pred_perturb_boundary, src_pos_boundary_cart, src_embed_boundary = m(sta_pos_boundary, src_pos_boundary, method='direct', train=True)
-		# assert(pred_base_boundary.max().item() < 1e-2)
-		# loss_boundary = loss_func(pred_perturb_boundary, torch.zeros_like(pred_perturb_boundary))
-
-		# if i > n_burn_in:
-		# 	loss = 0.25 * loss_pde_p + 0.25 * loss_pde_s + 0.5 * loss_boundary
-		# else:
-		# 	loss = loss_boundary
-
-		# if compute_reference_times:
-		# 	trgt_data = torch.Tensor(norm_time(np.column_stack([Tp_samples[isample], Ts_samples[isample]]))).to(device)
-		# 	pred_data = pred_base + pred_perturb
-		# 	loss_data = loss_func1(pred_data, trgt_data)
-		# 	loss = 0.5 * loss + 0.5 * loss_data
-
-		# if use_causual_loss:
-		# 	sign_offset = 1.0 * (torch.sign(pred_base + pred_perturb) != 1)
-		# 	loss_causual = loss_func(torch.zeros_like(pred_base), sign_offset * (pred_base + pred_perturb))
-		# 	loss = 0.99 * loss + 0.01 * loss_causual
-
-		# if use_initial_model_damping:
-		# 	trgt_vel = norm_vel(torch.Tensor(np.column_stack([Vp_samples[isample], Vs_samples[isample]]))).to(device)
-		# 	loss_initial = loss_func(trgt_vel, vel_pred)
-		# 	loss = 0.85 * loss + 0.15 * loss_initial
-
-		# # FIX BUG A: Un-nested use_diff_loss and use_spatial_gradient_loss blocks
-		# if use_diff_loss and (i > n_burn_in):
-		# 	n_batch_diff = int(0.5 * n_batch)
-		# 	isample_diff = np.random.randint(0, high=n_dataset_diff, size=n_batch_diff)
-
-		# 	sta_pos_dd = torch.Tensor(Locs_diff_train[isample_diff]).to(device)
-		# 	src_pos_dd1 = torch.Tensor(X_diff_train_i[isample_diff]).to(device)
-		# 	src_pos_dd2 = torch.Tensor(X_diff_train_j[isample_diff]).to(device)
-
-		# 	dt_p_target = norm_time(Tp_diff_train_i[isample_diff] - Tp_diff_train_j[isample_diff])
-		# 	dt_s_target = norm_time(Ts_diff_train_i[isample_diff] - Ts_diff_train_j[isample_diff])
-		# 	trgt_dt = torch.Tensor(np.column_stack([dt_p_target, dt_s_target])).to(device)
-
-		# 	pred_base1, pred_pert1, src_proj1, _ = m(sta_pos_dd, src_pos_dd1, method='direct', train=True)
-		# 	pred_base2, pred_pert2, src_proj2, _ = m(sta_pos_dd, src_pos_dd2, method='direct', train=True)
-
-		# 	dt_pred = (pred_base1 + pred_pert1) - (pred_base2 + pred_pert2)
-
-		# 	dist_ij_norm = torch.norm(src_proj1 - src_proj2, dim=1, keepdim=True)
-		# 	gamma = 0.10
-		# 	weight_dd = torch.exp(-dist_ij_norm / (gamma * max_dist_dd_norm))
-
-		# 	loss_diff = loss_func1(weight_dd * dt_pred, weight_dd * trgt_dt)
-		# 	loss = loss + 0.20 * loss_diff
-
-		# if use_spatial_gradient_loss and (i > n_burn_in):
-		# 	sta_pos_cart = m.norm_pos(m.ftrns1(sta_pos))
-		# 	dist_vec = sta_pos_cart - src_pos_cart
-		# 	target_ray_dir = dist_vec / (torch.norm(dist_vec, dim=1, keepdim=True) + eps)
-
-		# 	grad_dir_p = grad_p / (grad_s_p + eps)
-		# 	grad_dir_s = grad_s / (grad_s_s + eps)
-
-		# 	cos_sim_p = (grad_dir_p * target_ray_dir).sum(dim=1, keepdim=True)
-		# 	cos_sim_s = (grad_dir_s * target_ray_dir).sum(dim=1, keepdim=True)
-
-		# 	loss_grad_dir_p = torch.mean(1.0 - cos_sim_p)
-		# 	loss_grad_dir_s = torch.mean(1.0 - cos_sim_s)
-
-		# 	loss_grad_dir = 0.5 * loss_grad_dir_p + 0.5 * loss_grad_dir_s
-		# 	loss = loss + 0.01 * loss_grad_dir
-
-		# loss.backward()
-		# optimizer.step()
-		# scheduler.step()
-
-		# losses.append(loss.item())
-		# losses_pde.append(loss_pde_p.item() + loss_pde_s.item())
-		# losses_data.append(loss_data.item())
-
-
-
 
 		# 1. Forward pass for base travel times and velocity model
 		pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method='direct', train=True)
@@ -472,7 +364,7 @@ if train_travel_time_neural_network == True:
 		sta_pos_boundary = torch.Tensor(Locs_samples_boundary[isample_boundary]).to(device)
 		src_pos_boundary = torch.Tensor(X_samples_boundary[isample_boundary]).to(device)
 		pred_base_boundary, pred_perturb_boundary, _, _ = m(sta_pos_boundary, src_pos_boundary, method='direct', train=True)
-		loss_boundary = loss_func(pred_perturb_boundary, torch.zeros_like(pred_perturb_boundary))
+		loss_boundary = loss_pde_func(pred_perturb_boundary, torch.zeros_like(pred_perturb_boundary))
 
 		# --------------------------------------------------------------------------
 		# 3. Compute PDE and Velocity losses ONLY after burn-in
@@ -510,14 +402,14 @@ if train_travel_time_neural_network == True:
 			target_slowness_p = 1.0 / (scale_norm_factor * vel_pred[:, [0]])
 			target_slowness_s = 1.0 / (scale_norm_factor * vel_pred[:, [1]])
 
-			loss_pde_unweighted_p = loss_func(grad_s_p, target_slowness_p)
-			loss_pde_unweighted_s = loss_func(grad_s_s, target_slowness_s)
+			loss_pde_unweighted_p = loss_pde_func(grad_s_p, target_slowness_p)
+			loss_pde_unweighted_s = loss_pde_func(grad_s_s, target_slowness_s)
 
 			loss_weight_norm = torch.exp(-torch.abs(inorm_time(pred_base[:, [0]])) / t_scale_val)
 			loss_weight_norm = loss_weight_norm / (loss_weight_norm.mean() + 1e-7)
 
-			loss_pde_weighted_p = loss_func(loss_weight_norm * grad_s_p, loss_weight_norm * target_slowness_p)
-			loss_pde_weighted_s = loss_func(loss_weight_norm * grad_s_s, loss_weight_norm * target_slowness_s)
+			loss_pde_weighted_p = loss_pde_func(loss_weight_norm * grad_s_p, loss_weight_norm * target_slowness_p)
+			loss_pde_weighted_s = loss_pde_func(loss_weight_norm * grad_s_s, loss_weight_norm * target_slowness_s)
 
 			loss_pde_p = 0.5 * loss_pde_unweighted_p + 0.5 * loss_pde_weighted_p
 			loss_pde_s = 0.5 * loss_pde_unweighted_s + 0.5 * loss_pde_weighted_s
@@ -532,17 +424,17 @@ if train_travel_time_neural_network == True:
 		if compute_reference_times:
 			trgt_data = torch.Tensor(norm_time(np.column_stack([Tp_samples[isample], Ts_samples[isample]]))).to(device)
 			pred_data = pred_base + pred_perturb
-			loss_data = loss_func1(pred_data, trgt_data)
+			loss_data = loss_data_func(pred_data, trgt_data)
 			loss = 0.5 * loss + 0.5 * loss_data
 
 		if use_causual_loss:
 			sign_offset = 1.0 * (torch.sign(pred_base + pred_perturb) != 1)
-			loss_causual = loss_func(torch.zeros_like(pred_base), sign_offset * (pred_base + pred_perturb))
+			loss_causual = loss_pde_func(torch.zeros_like(pred_base), sign_offset * (pred_base + pred_perturb))
 			loss = 0.99 * loss + 0.01 * loss_causual
 
 		if use_initial_model_damping and (i > n_burn_in):
 			trgt_vel = norm_vel(torch.Tensor(np.column_stack([Vp_samples[isample], Vs_samples[isample]]))).to(device)
-			loss_initial = loss_func(trgt_vel, vel_pred)
+			loss_initial = loss_pde_func(trgt_vel, vel_pred)
 			loss = 0.85 * loss + 0.15 * loss_initial
 
 		# --------------------------------------------------------------------------
@@ -569,7 +461,10 @@ if train_travel_time_neural_network == True:
 			gamma = 0.10
 			weight_dd = torch.exp(-dist_ij_norm / (gamma * max_dist_dd_norm))
 
-			loss_diff = loss_func1(weight_dd * dt_pred, weight_dd * trgt_dt)
+			loss_diff_raw = loss_diff_func(dt_pred, trgt_dt)
+
+			loss_diff = torch.mean(weight_dd * loss_diff_raw)
+
 			loss = loss + 3.0 * loss_diff
 
 		if use_spatial_gradient_loss and (i > n_burn_in):
@@ -598,148 +493,153 @@ if train_travel_time_neural_network == True:
 		scheduler.step()
 
 
-
 		# --------------------------------------------------------------------------
 		# 3. Validation Step
 		# --------------------------------------------------------------------------
 		if np.mod(i, vald_steps) == 0:
 
-			isample = np.random.randint(0, high=n_dataset_vald, size=n_batch)
+			# 1. Outer context prevents global memory leaks across validation iterations
+			with torch.no_grad():
 
-			sta_pos = torch.Tensor(Locs_samples_vald[isample]).to(device)
-			src_pos = torch.Tensor(X_samples_vald[isample]).to(device)
+				isample = np.random.randint(0, high=n_dataset_vald, size=n_batch)
+				sta_pos = torch.Tensor(Locs_samples_vald[isample]).to(device)
+				src_pos = torch.Tensor(X_samples_vald[isample]).to(device)
 
-			if compute_reference_times:
-				travel_times_p = Tp_samples_vald[isample]
-				travel_times_s = Ts_samples_vald[isample]
+				if compute_reference_times:
+					travel_times_p = Tp_samples_vald[isample]
+					travel_times_s = Ts_samples_vald[isample]
 
-			pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method='direct', train=True)
-			# vel_pred = m.vmodel(src_pos_cart, src_embed)
+				# Boundary evaluation (Pure forward pass)
+				if n_dataset_boundary_vald > 0:
+					isample_boundary = np.random.randint(0, high=n_dataset_boundary_vald, size=n_batch)
+					sta_pos_boundary = torch.Tensor(Locs_samples_boundary_vald[isample_boundary]).to(device)
+					src_pos_boundary = torch.Tensor(X_samples_boundary_vald[isample_boundary]).to(device)
+					pred_base_boundary, pred_perturb_boundary, _, _ = m(sta_pos_boundary, src_pos_boundary, method='direct', train=False)
+					loss_boundary = loss_pde_func(pred_perturb_boundary, torch.zeros_like(pred_perturb_boundary))
+				else:
+					loss_boundary = torch.zeros(1).to(device)
 
-			src_lla_norm = m.norm_lla(src_pos)
-			vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
+				# 2. Enable gradients ONLY for travel-time pass + PDE autograd derivatives
+				with torch.set_grad_enabled(True):
+					pred_base, pred_perturb, src_pos_cart, src_embed = m(sta_pos, src_pos, method='direct', train=False)
 
-			pred_total_p = pred_base[:, [0]] + pred_perturb[:, [0]]
-			pred_total_s = pred_base[:, [1]] + pred_perturb[:, [1]]
+					if i > n_burn_in:
+						src_lla_norm = m.norm_lla(src_pos)
+						vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
 
-			# FIX BUG C: retain_graph=True allows downstream autograd checks in validation
-			grad_p = torch.autograd.grad(
-				inputs=src_pos_cart, 
-				outputs=pred_total_p, 
-				grad_outputs=torch_one_vec, 
-				retain_graph=True, 
-				create_graph=False
-			)[0]
+						pred_total_p = pred_base[:, [0]] + pred_perturb[:, [0]]
+						pred_total_s = pred_base[:, [1]] + pred_perturb[:, [1]]
 
-			grad_s = torch.autograd.grad(
-				inputs=src_pos_cart, 
-				outputs=pred_total_s, 
-				grad_outputs=torch_one_vec, 
-				retain_graph=False, 
-				create_graph=False
-			)[0]
+						grad_p = torch.autograd.grad(
+							inputs=src_pos_cart,
+							outputs=pred_total_p,
+							grad_outputs=torch_one_vec,
+							retain_graph=True,
+							create_graph=False
+						)[0]
 
-			grad_sq_p = (grad_p * grad_p).sum(dim=1, keepdim=True)
-			grad_sq_s = (grad_s * grad_s).sum(dim=1, keepdim=True)
+						grad_s = torch.autograd.grad(
+							inputs=src_pos_cart,
+							outputs=pred_total_s,
+							grad_outputs=torch_one_vec,
+							retain_graph=False,
+							create_graph=False
+						)[0]
 
-			grad_s_p = torch.sqrt(grad_sq_p + eps)
-			grad_s_s = torch.sqrt(grad_sq_s + eps)
+						eps = 1e-6
+						grad_sq_p = (grad_p * grad_p).sum(dim=1, keepdim=True)
+						grad_sq_s = (grad_s * grad_s).sum(dim=1, keepdim=True)
 
-			target_slowness_p = 1.0 / (scale_norm_factor * vel_pred[:, [0]])
-			target_slowness_s = 1.0 / (scale_norm_factor * vel_pred[:, [1]])
+						grad_s_p = torch.sqrt(grad_sq_p + eps)
+						grad_s_s = torch.sqrt(grad_sq_s + eps)
 
-			loss_pde_unweighted_p = loss_func(grad_s_p, target_slowness_p)
-			loss_pde_unweighted_s = loss_func(grad_s_s, target_slowness_s)
+						target_slowness_p = 1.0 / (scale_norm_factor * vel_pred[:, [0]])
+						target_slowness_s = 1.0 / (scale_norm_factor * vel_pred[:, [1]])
 
-			loss_weight_norm = torch.exp(-torch.abs(inorm_time(pred_base[:, [0]])) / t_scale_val)
-			loss_weight_norm = loss_weight_norm / (loss_weight_norm.mean() + 1e-7)
+						loss_pde_unweighted_p = loss_pde_func(grad_s_p, target_slowness_p)
+						loss_pde_unweighted_s = loss_pde_func(grad_s_s, target_slowness_s)
 
-			loss_pde_weighted_p = loss_func(loss_weight_norm * grad_s_p, loss_weight_norm * target_slowness_p)
-			loss_pde_weighted_s = loss_func(loss_weight_norm * grad_s_s, loss_weight_norm * target_slowness_s)
+						loss_weight_norm = torch.exp(-torch.abs(inorm_time(pred_base[:, [0]])) / t_scale_val)
+						loss_weight_norm = loss_weight_norm / (loss_weight_norm.mean() + 1e-7)
 
-			loss_pde_p = 0.5 * loss_pde_unweighted_p + 0.5 * loss_pde_weighted_p
-			loss_pde_s = 0.5 * loss_pde_unweighted_s + 0.5 * loss_pde_weighted_s
+						loss_pde_weighted_p = loss_pde_func(loss_weight_norm * grad_s_p, loss_weight_norm * target_slowness_p)
+						loss_pde_weighted_s = loss_pde_func(loss_weight_norm * grad_s_s, loss_weight_norm * target_slowness_s)
 
-			if n_dataset_boundary_vald > 0:
-				isample_boundary = np.random.randint(0, high=n_dataset_boundary_vald, size=n_batch)
-				sta_pos_boundary = torch.Tensor(Locs_samples_boundary_vald[isample_boundary]).to(device)
-				src_pos_boundary = torch.Tensor(X_samples_boundary_vald[isample_boundary]).to(device)
-				pred_base_boundary, pred_perturb_boundary, src_pos_boundary_cart, src_embed_boundary = m(sta_pos_boundary, src_pos_boundary, method='direct', train=True)
-				assert(pred_base_boundary.max().item() < 1e-2)
-				loss_boundary = loss_func(pred_perturb_boundary, torch.zeros_like(pred_perturb_boundary))
-			else:
-				loss_boundary = torch.zeros(1).to(device)
+						loss_pde_p = 0.5 * loss_pde_unweighted_p + 0.5 * loss_pde_weighted_p
+						loss_pde_s = 0.5 * loss_pde_unweighted_s + 0.5 * loss_pde_weighted_s
 
-			if i > n_burn_in:
-				loss_vald = 0.25 * loss_pde_p + 0.25 * loss_pde_s + 0.5 * loss_boundary
-			else:
-				loss_vald = loss_boundary
+						loss_vald = 0.25 * loss_pde_p + 0.25 * loss_pde_s + 0.5 * loss_boundary
+					else:
+						loss_vald = loss_boundary
 
-			if compute_reference_times:
-				trgt_data = torch.Tensor(norm_time(np.column_stack([Tp_samples_vald[isample], Ts_samples_vald[isample]]))).to(device)
-				pred_data = pred_base + pred_perturb
-				loss_data = loss_func1(pred_data, trgt_data)
-				loss_vald = 0.5 * loss_vald + 0.5 * loss_data
+				# 3. Remaining static validation losses (in no_grad context)
+				if compute_reference_times:
+					trgt_data = torch.Tensor(norm_time(np.column_stack([Tp_samples_vald[isample], Ts_samples_vald[isample]]))).to(device)
+					pred_data = pred_base + pred_perturb
+					loss_data = loss_data_func(pred_data, trgt_data)
+					loss_vald = 0.5 * loss_vald + 0.5 * loss_data
 
-			if use_causual_loss:
-				sign_offset = 1.0 * (torch.sign(pred_base + pred_perturb) != 1)
-				loss_causual = loss_func(torch.zeros_like(pred_base), sign_offset * (pred_base + pred_perturb))
-				loss_vald = 0.99 * loss_vald + 0.01 * loss_causual
+				if use_causual_loss:
+					sign_offset = 1.0 * (torch.sign(pred_base + pred_perturb) != 1)
+					loss_causual = loss_pde_func(torch.zeros_like(pred_base), sign_offset * (pred_base + pred_perturb))
+					loss_vald = 0.99 * loss_vald + 0.01 * loss_causual
 
-			if use_initial_model_damping:
-				trgt_vel = norm_vel(torch.Tensor(np.column_stack([Vp_samples_vald[isample], Vs_samples_vald[isample]]))).to(device)
-				loss_initial = loss_func(trgt_vel, vel_pred)
-				loss_vald = 0.85 * loss_vald + 0.15 * loss_initial
+				if use_initial_model_damping and (i > n_burn_in):
+					trgt_vel = norm_vel(torch.Tensor(np.column_stack([Vp_samples_vald[isample], Vs_samples_vald[isample]]))).to(device)
+					loss_initial = loss_pde_func(trgt_vel, vel_pred)
+					loss_vald = 0.85 * loss_vald + 0.15 * loss_initial
 
-			if use_diff_loss and (i > n_burn_in):
-				n_batch_diff = int(0.5 * n_batch)
-				isample_diff = np.random.randint(0, high=n_dataset_diff_vald, size=n_batch_diff)
+				if use_diff_loss and (i > n_burn_in):
+					n_batch_diff = int(0.5 * n_batch)
+					isample_diff = np.random.randint(0, high=n_dataset_diff_vald, size=n_batch_diff)
 
-				sta_pos_dd = torch.Tensor(Locs_diff_vald[isample_diff]).to(device)
-				src_pos_dd1 = torch.Tensor(X_diff_vald_i[isample_diff]).to(device)
-				src_pos_dd2 = torch.Tensor(X_diff_vald_j[isample_diff]).to(device)
+					sta_pos_dd = torch.Tensor(Locs_diff_vald[isample_diff]).to(device)
+					src_pos_dd1 = torch.Tensor(X_diff_vald_i[isample_diff]).to(device)
+					src_pos_dd2 = torch.Tensor(X_diff_vald_j[isample_diff]).to(device)
 
-				dt_p_target = norm_time(Tp_diff_vald_i[isample_diff] - Tp_diff_vald_j[isample_diff])
-				dt_s_target = norm_time(Ts_diff_vald_i[isample_diff] - Ts_diff_vald_j[isample_diff])
-				trgt_dt = torch.Tensor(np.column_stack([dt_p_target, dt_s_target])).to(device)
+					dt_p_target = norm_time(Tp_diff_vald_i[isample_diff] - Tp_diff_vald_j[isample_diff])
+					dt_s_target = norm_time(Ts_diff_vald_i[isample_diff] - Ts_diff_vald_j[isample_diff])
+					trgt_dt = torch.Tensor(np.column_stack([dt_p_target, dt_s_target])).to(device)
 
-				pred_base1, pred_pert1, src_proj1, _ = m(sta_pos_dd, src_pos_dd1, method='direct', train=True)
-				pred_base2, pred_pert2, src_proj2, _ = m(sta_pos_dd, src_pos_dd2, method='direct', train=True)
+					pred_base1, pred_pert1, src_proj1, _ = m(sta_pos_dd, src_pos_dd1, method='direct', train=False)
+					pred_base2, pred_pert2, src_proj2, _ = m(sta_pos_dd, src_pos_dd2, method='direct', train=False)
 
-				dt_pred = (pred_base1 + pred_pert1) - (pred_base2 + pred_pert2)
+					dt_pred = (pred_base1 + pred_pert1) - (pred_base2 + pred_pert2)
 
-				dist_ij_norm = torch.norm(src_proj1 - src_proj2, dim=1, keepdim=True)
-				gamma = 0.10
-				weight_dd = torch.exp(-dist_ij_norm / (gamma * max_dist_dd_norm))
+					dist_ij_norm = torch.norm(src_proj1 - src_proj2, dim=1, keepdim=True)
+					gamma = 0.10
+					weight_dd = torch.exp(-dist_ij_norm / (gamma * max_dist_dd_norm))
 
-				loss_diff = loss_func1(weight_dd * dt_pred, weight_dd * trgt_dt)
-				loss_vald = loss_vald + 3.0 * loss_diff
+					loss_diff_raw = loss_diff_func(dt_pred, trgt_dt)
+					loss_diff = torch.mean(weight_dd * loss_diff_raw)
 
-			if use_spatial_gradient_loss and (i > n_burn_in):
-				sta_pos_cart = m.norm_pos(m.ftrns1(sta_pos))
-				
-				# FIX: Vector points FROM station TO source because derivatives are taken wrt src_pos_cart
-				dist_vec = src_pos_cart - sta_pos_cart  
-				target_ray_dir = dist_vec / (torch.norm(dist_vec, dim=1, keepdim=True) + eps)
+					loss_vald = loss_vald + 3.0 * loss_diff
 
-				grad_dir_p = grad_p / (grad_s_p + eps)
-				grad_dir_s = grad_s / (grad_s_s + eps)
+				if use_spatial_gradient_loss and (i > n_burn_in):
+					sta_pos_cart = m.norm_pos(m.ftrns1(sta_pos))
+					dist_vec = src_pos_cart - sta_pos_cart
+					target_ray_dir = dist_vec / (torch.norm(dist_vec, dim=1, keepdim=True) + eps)
 
-				cos_sim_p = (grad_dir_p * target_ray_dir).sum(dim=1, keepdim=True)
-				cos_sim_s = (grad_dir_s * target_ray_dir).sum(dim=1, keepdim=True)
+					grad_dir_p = grad_p / (grad_s_p + eps)
+					grad_dir_s = grad_s / (grad_s_s + eps)
 
-				loss_grad_dir_p = torch.mean(1.0 - cos_sim_p)
-				loss_grad_dir_s = torch.mean(1.0 - cos_sim_s)
+					cos_sim_p = (grad_dir_p * target_ray_dir).sum(dim=1, keepdim=True)
+					cos_sim_s = (grad_dir_s * target_ray_dir).sum(dim=1, keepdim=True)
 
-				loss_grad_dir = 0.5 * loss_grad_dir_p + 0.5 * loss_grad_dir_s
-				
-				# Scale appropriately (weighting by 0.01 or 0.02)
-				loss = loss + 0.01 * loss_grad_dir
+					loss_grad_dir_p = torch.mean(1.0 - cos_sim_p)
+					loss_grad_dir_s = torch.mean(1.0 - cos_sim_s)
 
-			print('%d %0.8f %0.8f' % (i, loss.item(), loss_vald.item()))
-			losses_vald.append(loss_vald.item())
-			losses_pde_vald.append(loss_pde_p.item() + loss_pde_s.item())
-			losses_data_vald.append(loss_data.item())
+					loss_grad_dir = 0.5 * loss_grad_dir_p + 0.5 * loss_grad_dir_s
+
+					loss_vald = loss_vald + 0.01 * loss_grad_dir
+
+				print('%d %0.8f %0.8f' % (i, loss.item(), loss_vald.item()))
+				losses_vald.append(loss_vald.item())
+				if i > n_burn_in:
+					losses_pde_vald.append(loss_pde_p.item() + loss_pde_s.item())
+				losses_data_vald.append(loss_data.item())
+
+
 
 
 	phase = 'p_s'
