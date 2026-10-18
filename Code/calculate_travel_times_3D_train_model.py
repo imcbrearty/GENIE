@@ -303,8 +303,8 @@ if train_travel_time_neural_network == True:
 	# loss_func = nn.L1Loss()
 	# loss_func1 = nn.L1Loss()
 
-	beta_data = 0.2 / max_time   # Smooth transition within ~50 ms absolute error
-	beta_diff = 0.05 / max_time   # Smooth transition within ~10 ms differential error
+	beta_data = 0.03 / max_time   # Smooth transition within ~50 ms absolute error
+	beta_diff = 0.008 / max_time   # Smooth transition within ~10 ms differential error
 
 	loss_pde_func = nn.L1Loss()
 	loss_data_func = nn.SmoothL1Loss(beta=beta_data)
