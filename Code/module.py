@@ -5938,7 +5938,7 @@ class TravelTimesPN_Regional(nn.Module):
     rff_src = self.rff_src(src_cart)
     return self.fc3_block(torch.cat([rff_src, src_lla_norm], dim=1))
 
-  def forward(self, sta, src, method='direct', train=False):
+  def forward(self, sta, src, method='pairs', train=False):
 
     if method == 'direct':
       sta_proj = self.norm_pos(self.ftrns1(sta))
