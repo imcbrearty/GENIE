@@ -942,7 +942,11 @@ if train_travel_time_neural_network == True:
 	xx1 = np.concatenate((x11.reshape(-1,1), x12.reshape(-1,1), x13.reshape(-1,1)), axis = 1)
 
 	pred_base, pred_perturb, src_pos_cart, src_embed = m(torch.Tensor(locs[[0],:]).to(device).repeat(len(xx1),1), torch.Tensor(xx1).to(device), method = 'direct', train = True)
-	vel_pred = inorm_vel(m.vmodel(src_pos_cart, src_embed).cpu().detach().numpy())
+
+	src_lla_norm = m.norm_lla(src_pos)
+	# vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
+	
+	vel_pred = inorm_vel(m.vmodel(src_pos_cart, src_lla_norm, src_embed).cpu().detach().numpy())
 
 	vel_pred_levels = []
 	for i in range(len(x3)):
