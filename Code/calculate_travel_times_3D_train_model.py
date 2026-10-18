@@ -943,7 +943,7 @@ if train_travel_time_neural_network == True:
 
 	pred_base, pred_perturb, src_pos_cart, src_embed = m(torch.Tensor(locs[[0],:]).to(device).repeat(len(xx1),1), torch.Tensor(xx1).to(device), method = 'direct', train = True)
 
-	src_lla_norm = m.norm_lla(src_pos)
+	src_lla_norm = m.norm_lla(torch.Tensor(xx1).to(device))
 	# vel_pred = m.vmodel(src_pos_cart, src_lla_norm, src_embed)
 	
 	vel_pred = inorm_vel(m.vmodel(src_pos_cart, src_lla_norm, src_embed).cpu().detach().numpy())
@@ -953,7 +953,9 @@ if train_travel_time_neural_network == True:
 		xv = np.copy(x_contour)
 		xv[:,2] = x3[i]
 		pred_base, pred_perturb, src_pos_cart, src_embed = m(torch.Tensor(locs[[0],:]).to(device).repeat(len(xv),1), torch.Tensor(xv).to(device), method = 'direct', train = True)
-		vel_pred_levels.append(np.expand_dims(m.vmodel(src_pos_cart, src_embed).cpu().detach().numpy(), axis = 0))
+		src_lla_norm = m.norm_lla(torch.Tensor(xv).to(device))
+		vel_pred_levels.append(np.expand_dims(m.vmodel(src_pos_cart, src_lla_norm, src_embed).cpu().detach().numpy(), axis = 0))
+
 	vel_pred_levels = inorm_vel(np.vstack(vel_pred_levels))
 
 	if make_plot == True:
