@@ -46,7 +46,7 @@ from torch_geometric.utils import (
 
 # Custom domain modules
 from graph_utils import *
-from module import *
+from module2 import *
 from process_utils import *
 from utils import *
 
@@ -133,9 +133,9 @@ use_adaptive_window = process_config.get("use_adaptive_window", True)
 n_trgt_nodes = process_config.get("n_trgt_nodes", int(200e3))
 use_variable_domain = process_config.get("use_variable_domain", True)
 # number_of_spatial_nodes = process_config.get("number_of_spatial_nodes", 3000)
-number_of_spatial_nodes = config.get("number_of_spatial_nodes", 3000)
+number_of_spatial_nodes = config.get("number_of_spatial_nodes", 5000)
 use_approximate_domain = process_config.get("use_approximate_domain", False)
-optimize_station_graphs = process_config.get("optimize_station_graphs", False)
+optimize_station_graphs = process_config.get("optimize_station_graphs", True)
 optimize_source_graphs = process_config.get("optimize_source_graphs", False)
 use_paths = process_config.get("use_paths", False)
 Vc = process_config.get("V_scale", 6500.0)  # Velocity used for estimating kernel sizes
@@ -341,7 +341,7 @@ else:
 	# # use_global = process_config.get("use_global", False)
 	# use_tuner = process_config.get("use_tuner", True)
 
-	fixed_domain = None ## Or set location range
+	fixed_domain = None # [[36.011965, 42.190995], [-124.9545695, -120.3110205]] # None ## Or set location range
 	z_dom = build_graphs_domain(
 		m_domain,
 		locs_use,
@@ -510,11 +510,31 @@ if use_only_one_grid:
 # -----------------------------------------------------------------------------
 # 6. Evaluation Network & Query Setup
 # -----------------------------------------------------------------------------
+# mz_list = []
+# for i in range(len(x_grids)):
+# 	mz_slice = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv=trv, device=device).to(device)
+# 	model_path = MODELS_DIR / f"{name_of_project}_trained_gnn_model_step_{n_step_load}_ver_{n_ver_load}.h5"
+# 	mz_slice.load_state_dict(torch.load(model_path, map_location=device))
+
+# 	# if not use_variable_domain:
+# 	mz_slice.set_scale_coefficients(
+# 		pred_params[3] * 2.0, scale_time, pred_params[1],
+# 		pred_params[1] * 3.0, pred_params[3], pred_params[2], time_shift_range
+# 	)
+
+# 	mz_slice.ArrivalEmbedding.kernel_sig_t = torch.Tensor([mz_slice.ArrivalEmbedding.kernel_sig_t]).to(device)
+# 	mz_slice.eval()
+# 	mz_list.append(mz_slice)
+
+
+model_path = MODELS_DIR / f"{name_of_project}_trained_gnn_model_step_{n_step_load}_ver_{n_ver_load}.pt"
+checkpoint = torch.load(model_path, map_location=device)
+state_dict = checkpoint['model_state_dict']
+
 mz_list = []
 for i in range(len(x_grids)):
 	mz_slice = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv=trv, device=device).to(device)
-	model_path = MODELS_DIR / f"{name_of_project}_trained_gnn_model_step_{n_step_load}_ver_{n_ver_load}.h5"
-	mz_slice.load_state_dict(torch.load(model_path, map_location=device))
+	mz_slice.load_state_dict(state_dict)
 
 	# if not use_variable_domain:
 	mz_slice.set_scale_coefficients(
@@ -522,21 +542,10 @@ for i in range(len(x_grids)):
 		pred_params[1] * 3.0, pred_params[3], pred_params[2], time_shift_range
 	)
 
+	mz_slice.ArrivalEmbedding.kernel_sig_t = torch.Tensor([mz_slice.ArrivalEmbedding.kernel_sig_t]).to(device)
 	mz_slice.eval()
+
 	mz_list.append(mz_slice)
-
-
-# model_path = MODELS_DIR / f"{name_of_project}_trained_gnn_model_step_{n_step_load}_ver_{n_ver_load}.pt"
-# checkpoint = torch.load(model_path, map_location=device)
-# state_dict = checkpoint['model_state_dict']
-
-# mz_list = []
-# for i in range(len(x_grids)):
-#     mz_slice = GCN_Detection_Network_extended(ftrns1_diff, ftrns2_diff, trv=trv, device=device).to(device)
-#     mz_slice.load_state_dict(state_dict)
-#     mz_slice.eval()
-    
-#     mz_list.append(mz_slice)
 
 
 n_batch = 1 ## Process one time step at a time (fixed)
@@ -746,7 +755,7 @@ for cnt, strs in enumerate([0]):
 				device=device,
 			)
 		else:
-			engine = TopKEmbeddingEngine(
+			engine = TopKEmbeddingEngine1(
 				P,
 				locs,
 				ind_use,
@@ -756,6 +765,8 @@ for cnt, strs in enumerate([0]):
 				dt=dt_embed_discretize, # kernel_sig_t/15.0
 				t_pad=3.0*kernel_sig_t,
 				device=device,
+				store_on_cpu = True,
+				sta_chunk = 32,
 			)
 		pick_engines.append(engine)
 
@@ -894,7 +905,7 @@ for cnt, strs in enumerate([0]):
 		for x_grid_ind in x_grid_ind_list:
 
 			# [Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = extract_input_from_data(trv_pairwise, P, tsteps_slice, ind_use, locs, x_grids[x_grid_ind], A_src_in_sta_l[x_grid_ind], trv_times = x_grids_trv[x_grid_ind], max_t = max_t, min_t = min_t, kernel_sig_t = pred_params[1], dt = dt_embed_discretize, use_sign_input = use_sign_input, device = device)
-			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = pick_engines[x_grid_ind].extract_inputs(t0 = tsteps_slice, min_t = min_t, max_t = max_t, t_win = 2.0*kernel_sig_t)
+			[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = pick_engines[x_grid_ind].extract_inputs(t0 = tsteps_slice, min_t = min_t, max_t = max_t, t_win = 2.0*kernel_sig_t, out_device = device)
 
 			if use_phase_types == False:
 				for i in range(len(Inpts)):
@@ -1156,7 +1167,7 @@ for cnt, strs in enumerate([0]):
 			
 			for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 				[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = pick_engines[x_grid_ind].extract_inputs(
-					t0=srcs[[n], 3], min_t=min_t, max_t=max_t, t_win=2.0 * kernel_sig_t
+					t0=srcs[[n], 3], min_t=min_t, max_t=max_t, t_win=2.0 * kernel_sig_t, out_device = device
 				)
 				assert len(Inpts) == 1
 
@@ -1211,7 +1222,7 @@ for cnt, strs in enumerate([0]):
 				# Final pass to compute phase association probabilities at refined location
 				for inc, x_grid_ind in enumerate(x_grid_ind_list_1):
 					[Inpts, Masks], [lp_times, lp_stations, lp_phases, lp_meta] = pick_engines[x_grid_ind].extract_inputs(
-						t0=src_max[[0], 3], min_t=min_t, max_t=max_t, t_win=2.0 * kernel_sig_t
+						t0=src_max[[0], 3], min_t=min_t, max_t=max_t, t_win=2.0 * kernel_sig_t, out_device = device
 					)
 					ipick, tpick = lp_stations[0].astype(int), lp_times[0]
 					assert len(Inpts) == 1
@@ -1852,7 +1863,7 @@ for cnt, strs in enumerate([0]):
 			MAX_BATCH_SIZE = estimate_optimal_batch_size(
 				trv_pairwise1, 
 				avg_stations_per_event=(avg_p + avg_s), 
-				de_pop_size=75, 
+				de_pop_size=300, # 75
 				target_vram_fraction=0.65
 			)
 			print(f"Dynamically configured MAX_BATCH_SIZE: {min(MAX_BATCH_SIZE, num_srcs)}")
@@ -1862,7 +1873,7 @@ for cnt, strs in enumerate([0]):
 				for start_idx in range(0, len(event_list), chunk_size):
 					chunk = event_list[start_idx : start_idx + chunk_size]
 					chunk_results = apply_batched_differential_evolution_location(
-						trv_pairwise, chunk, bounds_min, bounds_max, use_path_sigma=use_path_sigma,
+						trv_pairwise, chunk, bounds_min, bounds_max, popsize = 300, use_path_sigma=use_path_sigma,
 						surface_profile=surface_profile, device=device
 					)
 					all_de_results.extend(chunk_results)
@@ -2618,4 +2629,3 @@ for cnt, strs in enumerate([0]):
 		
 		print('Detected %d events'%(len(srcs_trv)))
 		print('Finished saving file %d %d %d'%(date[0], date[1], date[2]))
-
