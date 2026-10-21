@@ -1173,8 +1173,8 @@ for cnt, strs in enumerate([0]):
 
 				if not use_phase_types:
 					for i in range(len(Inpts)):
-						Inpts[i][:, 12:] = 0.0
-						Masks[i][:, 2:] = 0.0
+						Inpts[i][:, 12::] = 0.0
+						Masks[i][:, 2::] = 0.0
 
 				out = mz_list[x_grid_ind].forward_fixed_source(
 					Inpts[0], Masks[0], torch.Tensor(lp_times[0]).to(device),
@@ -1229,8 +1229,8 @@ for cnt, strs in enumerate([0]):
 
 					if not use_phase_types:
 						for i in range(len(Inpts)):
-							Inpts[i][:, 12:] = 0.0
-							Masks[i][:, 2:] = 0.0
+							Inpts[i][:, 12::] = 0.0
+							Masks[i][:, 2::] = 0.0
 
 					if inc == 0:
 						Out_p_save = [np.zeros(len(lp_times[j])) for j in range(len(Inpts))]
