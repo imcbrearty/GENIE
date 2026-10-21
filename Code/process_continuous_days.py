@@ -261,7 +261,7 @@ if not use_variable_domain:
 else:
 	print("--> Mode: Dynamic / Variable Domain Configuration")
 
-	pick_file = PICKS_DIR / f"{date[0]}" / f"{date[0]}_{date[1]}_{date[2]}_ver_1.npz"
+	pick_file = PICKS_DIR / f"{date[0]}" / f"{date[0]}_{date[1]}_{date[2]}_ver_{n_ver_picks}.npz"
 	with np.load(pick_file) as z_picks:
 		P = z_picks["P"]
 		if "locs_use" in z_picks:
