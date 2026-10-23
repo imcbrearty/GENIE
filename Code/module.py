@@ -6063,8 +6063,9 @@ class TravelTimesPN_Regional(nn.Module):
       else:
         pred_time = base_val_out + pred
         if self.use_corr:
+          # dists = torch.cdist(self.ftrns1(sta), self.locs_corr_cart)
           dists = torch.cdist(self.ftrns1(sta), self.locs_corr_cart)
-          imatch = torch.argmin(dists, dim=1)
+          imatch = torch.argmin(dists, dim=1).repeat(N_src)
           # FIX 2: Correct 3D tensor shape broadcasting (N_src, N_sta, 2)
           return self.inorm_time(pred_time) + self.corrs[imatch].unsqueeze(
               0
