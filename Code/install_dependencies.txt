@@ -31,6 +31,8 @@ pip install ruamel.yaml
 pip install scikit-fmm
 ## (possibly conda install -c conda-forge scikit-fmm)
 
+## Can use: from torch_geometric.utils import scatter
+## from torch_geometric.nn.pool import knn
 
 ## Old install command
 ## (may also need to install additional packages; e.g., for cuda 11.8, pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html)
