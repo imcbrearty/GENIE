@@ -5079,11 +5079,21 @@ for batch_idx, inputs in enumerate(loader):
 			out_plot = [out[0], out[1], out[2], out[3]]
 			visualize_predictions(out_plot, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
 
-		## Estimate scales
-		if init_spatial_norms == True:
-			diff_sp = input_tensors_l[i0][4].x[:, :3]
-			norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim = False)
-			dist_norms.append(norm_pos.cpu().detach().numpy())
+		# ## Estimate scales
+		# if init_spatial_norms == True:
+		# 	diff_sp = input_tensors_l[i0][4].x[:, :3]
+		# 	norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim = False)
+		# 	dist_norms.append(norm_pos.cpu().detach().numpy())
+
+		
+		if init_spatial_norms:
+		    locs_w = mz._warp_cart(locs_all_cart[sub["active_sta"]])
+		    srcs_w = mz._warp_cart(X_3d_cart[sub["active_node_3d"]])
+		    sta_idx, src_idx = sub["A_src_in_sta"][0].long(), sub["A_src_in_sta"][1].long()
+		    diff_sp = (srcs_w[src_idx] - locs_w[sta_idx]) / (30.0 * mz.src_x_kernel)
+		    norm_pos = torch.linalg.vector_norm(diff_sp, dim=1)
+		    dist_norms.append(norm_pos.cpu().numpy())
+		
 		
 		# if inc != (n_batch - 1):
 		# 	loss.backward(retain_graph = False)
@@ -5136,19 +5146,28 @@ for batch_idx, inputs in enumerate(loader):
 		quantile_in   = max(np.quantile(dist_near, 0.50), 1e-3) # .clamp(min=1e-3)
 		spatial_quantiles = torch.tensor([quantile_in, quantile_mid, quantile_far], device = device, dtype = torch.float32)
 
+		# with torch.no_grad():
+		# 	mz.Bipartite_ReadIn.log_kernel_radii.copy_(spatial_quantiles.log())
+		# 	mz.Bipartite_ReadIn.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
+		# 	mz.BipartiteGraphReadOutOperator.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
+
+		# 	# product-graph gammas (also under no_grad)
+		# 	product_gammas = 1.0 / spatial_quantiles.clamp(min=1e-3)
+		# 	mz.log_gamma_base.copy_(product_gammas.log().view(1, -1))
+
 		with torch.no_grad():
-			mz.Bipartite_ReadIn.log_kernel_radii.copy_(spatial_quantiles.log())
-			mz.Bipartite_ReadIn.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
-			mz.BipartiteGraphReadOutOperator.log_gamma_base.copy_((-2.0 * spatial_quantiles.log()).view(1, -1))
+		    mz.Bipartite_ReadIn.log_kernel_radii.copy_(spatial_quantiles.log())
+		    mz.Bipartite_ReadIn.log_gamma_base.copy_(spatial_quantiles.log().view(1, -1))
+		    mz.BipartiteGraphReadOutOperator.log_gamma_base.copy_(spatial_quantiles.log().view(1, -1))
 
 			# product-graph gammas (also under no_grad)
 			product_gammas = 1.0 / spatial_quantiles.clamp(min=1e-3)
 			mz.log_gamma_base.copy_(product_gammas.log().view(1, -1))
-
-		mz.Bipartite_ReadIn.r_min.fill_(float(spatial_quantiles[0] * 0.5))
-		mz.Bipartite_ReadIn.r_max.fill_(float(spatial_quantiles[2] * 4.0))
-		mz.BipartiteGraphReadOutOperator.r_min.fill_(float(spatial_quantiles[0] * 0.5))
-		mz.BipartiteGraphReadOutOperator.r_max.fill_(float(spatial_quantiles[2] * 4.0))
+		
+			mz.Bipartite_ReadIn.r_min.fill_(float(spatial_quantiles[0] * 0.5))
+			mz.Bipartite_ReadIn.r_max.fill_(float(spatial_quantiles[2] * 4.0))
+			mz.BipartiteGraphReadOutOperator.r_min.fill_(float(spatial_quantiles[0] * 0.5))
+			mz.BipartiteGraphReadOutOperator.r_max.fill_(float(spatial_quantiles[2] * 4.0))
 
 		# product_gammas = 1.0 / spatial_quantiles.clamp(min=1e-3)
     	# mz.log_gamma_base.copy_(product_gammas.log().view(1, -1))   # or mz.module.log_gamma_base if nested
