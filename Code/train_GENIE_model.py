@@ -5080,19 +5080,19 @@ for batch_idx, inputs in enumerate(loader):
 			visualize_predictions(out_plot, Lbls_query[i0], pick_lbls, X_query[i0], lp_times[i0], lp_stations[i0], Locs[i0], data, i0, save_plots_path, n_step = i, n_ver = n_ver)
 
 		## Estimate scales
-		if init_spatial_norms == True:
-			diff_sp = input_tensors_l[i0][4].x[:, :3]
-			norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim = False)
-			dist_norms.append(norm_pos.cpu().detach().numpy())
+		# if init_spatial_norms == True:
+		# 	diff_sp = input_tensors_l[i0][4].x[:, :3]
+		# 	norm_pos = torch.linalg.vector_norm(diff_sp, dim=1, keepdim = False)
+		# 	dist_norms.append(norm_pos.cpu().detach().numpy())
 
-		
-		# if init_spatial_norms:
-		#     locs_w = mz._warp_cart(locs_all_cart[sub["active_sta"]])
-		#     srcs_w = mz._warp_cart(X_3d_cart[sub["active_node_3d"]])
-		#     sta_idx, src_idx = sub["A_src_in_sta"][0].long(), sub["A_src_in_sta"][1].long()
-		#     diff_sp = (srcs_w[src_idx] - locs_w[sta_idx]) / (30.0 * mz.src_x_kernel)
-		#     norm_pos = torch.linalg.vector_norm(diff_sp, dim=1)
-		#     dist_norms.append(norm_pos.cpu().numpy())
+		# ab = 1
+		if init_spatial_norms:
+		    locs_w = mz._warp_cart(locs_all_cart[sub["active_sta"]])
+		    srcs_w = mz._warp_cart(X_3d_cart[sub["active_node_3d"]])
+		    sta_idx, src_idx = sub["A_src_in_sta"][0].long(), sub["A_src_in_sta"][1].long()
+		    diff_sp = (srcs_w[src_idx] - locs_w[sta_idx]) / (30.0 * mz.src_x_kernel)
+		    norm_pos = torch.linalg.vector_norm(diff_sp, dim=1)
+		    dist_norms.append(norm_pos.cpu().numpy())
 		
 		
 		# if inc != (n_batch - 1):
